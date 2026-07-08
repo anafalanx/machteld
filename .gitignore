@@ -1,0 +1,9 @@
+# build outputs (for when code arrives)
+/build/
+/dist/
+*.exe
+*.o
+*.obj
+*.res
+*.a
+*.tmp
