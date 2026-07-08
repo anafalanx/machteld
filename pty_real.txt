@@ -1,2 +1,0 @@
-pty real-terminal test  (machteld 0.1.0-m1)
-spawned pty#1
