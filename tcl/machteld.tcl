@@ -31,6 +31,13 @@ proc ::machteld::scope {body} {
     return -options $options $result
 }
 
+# Expose the palette as bare verbs: unqualified run / child / pty / wait / scope
+# / detach / store resolve to ::machteld::* -- so the REPL and scripts read like
+# a shell script, the ergonomic point of the design. This uses the global
+# namespace's command-resolution path, so Tcl's own commands (found first) are
+# never shadowed and nothing is copied.
+namespace eval :: { namespace path [concat [namespace path] ::machteld] }
+
 # Tk on demand: a static build ships no Tk DLL, so wire `package require Tk`
 # straight to the in-process, statically-linked Tk_Init via `load {} Tk`. Tk is
 # not initialized -- and no window is created -- until a script actually asks.

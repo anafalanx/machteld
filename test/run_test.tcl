@@ -24,6 +24,11 @@ proc check {name ok} {
     if {$ok} { puts "ok   $name" } else { incr ::fails; puts "FAIL $name" }
 }
 
+# 0. the palette is exposed as bare verbs (unqualified run/child/... resolve)
+set ok 0
+if {![catch {run -- cmd /c echo bare-ok} br]} { set ok [string match *bare-ok* [dict get $br out]] }
+check "bare verb 'run' resolves" $ok
+
 # 1. basic run: capture + exit + status
 set r [::machteld::run -- cmd /c echo hello]
 check "basic exit 0"        [expr {[dict get $r exit] == 0}]
