@@ -72,6 +72,11 @@ check "stdin fed to child" [string match *STDIN-MARKER-77* [dict get $rs out]]
 set re [run -env {ENVMARKER hello-env-42} -- cmd /c echo %ENVMARKER%]
 check "env var set for child" [string match *hello-env-42* [dict get $re out]]
 
+# 5d. vtstrip removes ANSI/VT escapes and keeps the text (pure Tcl, headless-safe)
+set E [format %c 27]; set B [format %c 7]
+set raw [string cat $E {[2J} $E {[0;32mgreen} $E {[0m and } $E {]0;title} $B {done}]
+check "vtstrip cleans VT" [expr {[::machteld::vtstrip $raw] eq "green and done"}]
+
 # --- child ensemble ---------------------------------------------------------
 
 # 6. child start / wait: async child, collect its dict

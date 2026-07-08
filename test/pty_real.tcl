@@ -26,6 +26,19 @@ for {set i 0} {$i < 40} {incr i} {
 }
 log "response: [string length $r] bytes, MARKER captured: [string match *REAL-MARKER-42* $r]"
 
+# --- pty expect: the Tcl interaction loop over pty read ---------------------
+if {[catch {
+    pty expect $p -timeout 5s {
+        {*>*}    { log "expect: matched cmd prompt" }
+        timeout  { log "expect: TIMEOUT waiting for prompt" }
+    }
+    pty send $p "echo EXPECT-MARKER-99\r"
+    pty expect $p -timeout 5s {
+        {*EXPECT-MARKER-99*} { log "expect: matched marker" }
+        timeout              { log "expect: TIMEOUT waiting for marker" }
+    }
+} e]} { log "expect FAILED: $e" }
+
 log "about to pty close (live cmd)"
 close $f
 pty close $p
