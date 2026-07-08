@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <wchar.h>
 
 /* ---- UTF-8 <-> UTF-16 -------------------------------------------------- */
 
@@ -97,12 +98,26 @@ static int has_extension(const char *prog) {
 static char *resolve_exe(const char *prog) {
     wchar_t *wp = u8_to_u16(prog);
     if (wp == NULL) return NULL;
+
+    /* A bare command name (no path separator) resolves from PATH ONLY -- not the
+     * current directory -- so a cwd-local "cmd.exe" can't hijack a bare name. A
+     * name containing a separator (absolute, or .\relative) is searched as given.
+     * Extension-less names resolve against the executable extensions
+     * (cmd -> cmd.exe); the bare name itself is never matched (it could hit a
+     * non-executable in the search path). */
+    int bare = (wcschr(wp, L'\\') == NULL && wcschr(wp, L'/') == NULL);
+    wchar_t *pathEnv = NULL;
+    if (bare) {
+        DWORD need = GetEnvironmentVariableW(L"PATH", NULL, 0);
+        if (need > 0) {
+            pathEnv = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
+            GetEnvironmentVariableW(L"PATH", pathEnv, need);
+        }
+    }
+
     wchar_t buf[MAX_PATH * 2];
     wchar_t *fpart = NULL;
     char *result = NULL;
-    /* Extension-less names resolve against the executable extensions
-     * (cmd -> cmd.exe); a name with an extension is searched as-is. Never search
-     * the bare name -- that can match a non-executable in the current directory. */
     const wchar_t *exts[4];
     int ne = 0;
     if (has_extension(prog)) {
@@ -114,7 +129,8 @@ static char *resolve_exe(const char *prog) {
         exts[ne++] = L".cmd";
     }
     for (int e = 0; e < ne; e++) {
-        DWORD n = SearchPathW(NULL, wp, exts[e], (DWORD)(sizeof(buf) / sizeof(buf[0])), buf, &fpart);
+        DWORD n = SearchPathW(bare ? pathEnv : NULL, wp, exts[e],
+                              (DWORD)(sizeof(buf) / sizeof(buf[0])), buf, &fpart);
         if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
             DWORD attr = GetFileAttributesW(buf);
             if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -123,6 +139,7 @@ static char *resolve_exe(const char *prog) {
             }
         }
     }
+    free(pathEnv);
     free(wp);
     return result;
 }
@@ -205,6 +222,7 @@ typedef struct {
     unsigned long long mem;
     unsigned long long cpu_100ns;
     const char        *dir;
+    const char        *stdin_text; /* NULL => child stdin is the null device */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -219,6 +237,7 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
     o->mem = 0;
     o->cpu_100ns = 0;
     o->dir = NULL;
+    o->stdin_text = NULL;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -239,6 +258,8 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
             o->cpu_100ns = (unsigned long long)d * 10000ULL;
         } else if (strcmp(a, "-dir") == 0) {
             o->dir = v;
+        } else if (strcmp(a, "-stdin") == 0) {
+            o->stdin_text = v;
         } else {
             return run_error(interp, "usage", "unknown option");
         }
@@ -259,7 +280,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
 
     child_t *c = (child_t *)calloc(1, sizeof(*c));
-    HANDLE outW = NULL, errW = NULL, nul = NULL;
+    HANDLE outW = NULL, errW = NULL, nul = NULL, stdinR = NULL, stdinW = NULL;
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;
@@ -269,8 +290,13 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         *err = "CreatePipe failed";
         goto fail;
     }
-    nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
+    /* stdin: a pipe pre-loaded with o->stdin_text if given, else the null device */
+    if (o->stdin_text != NULL) {
+        if (!CreatePipe(&stdinR, &stdinW, &sa, 0)) { *err = "CreatePipe(stdin) failed"; goto fail; }
+    } else {
+        nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
+    }
 
     c->job = wj_job_new(0, err);
     if (c->job == NULL) goto fail;
@@ -291,12 +317,19 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         jobh[1] = wj_job_handle(c->job);
         njobs = 2;
     }
-    wj_stdio io = { nul, outW, errW };
+    wj_stdio io = { (o->stdin_text != NULL) ? stdinR : nul, outW, errW };
     if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, &c->pid, &c->proc, err) != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
-    CloseHandle(nul);  nul = NULL;
+    if (nul) { CloseHandle(nul); nul = NULL; }
+    if (o->stdin_text != NULL) {
+        /* feed the child its stdin, then EOF; the child holds its own dup of stdinR */
+        size_t n = strlen(o->stdin_text);
+        if (n > 0) { DWORD wr; WriteFile(stdinW, o->stdin_text, (DWORD)n, &wr, NULL); }
+        CloseHandle(stdinW); stdinW = NULL;
+        CloseHandle(stdinR); stdinR = NULL;
+    }
 
     size_t cap = 1u << 20;
     c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
@@ -316,6 +349,8 @@ fail:
     if (outW) CloseHandle(outW);
     if (errW) CloseHandle(errW);
     if (nul) CloseHandle(nul);
+    if (stdinR) CloseHandle(stdinR);
+    if (stdinW) CloseHandle(stdinW);
     if (c->outR) CloseHandle(c->outR);
     if (c->errR) CloseHandle(c->errR);
     if (c->job) wj_job_free(c->job);

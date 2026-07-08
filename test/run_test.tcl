@@ -64,6 +64,10 @@ if {[catch {::machteld::run -- no_such_program_zzz_42} e opts]} {
 }
 check "notfound threw" $threw
 
+# 5b. -stdin feeds the child's standard input
+set rs [run -stdin "STDIN-MARKER-77\n" -- findstr STDIN]
+check "stdin fed to child" [string match *STDIN-MARKER-77* [dict get $rs out]]
+
 # --- child ensemble ---------------------------------------------------------
 
 # 6. child start / wait: async child, collect its dict
@@ -116,6 +120,28 @@ check "pty spawn token"    [string match "pty#*" $p]
 check "pty listed"         [expr {$p in [::machteld::pty list]}]
 ::machteld::pty close $p
 check "pty closed cleanly" [expr {$p ni [::machteld::pty list]}]
+
+# --- batch no-injection, end-to-end (CVE-2024-24576) ------------------------
+# Prove the mitigation through the LIVE launcher: run a real .bat with the
+# classic hostile argument and confirm the injected command never executes
+# (no canary file), while the batch itself still runs.
+set bdir   [file dirname [file normalize [info script]]]
+set bat    [file join $bdir _echo.bat]
+set canary [file join $bdir _canary.txt]
+set fb [open $bat w]
+fconfigure $fb -translation crlf
+puts $fb "@echo off"
+puts $fb "echo BATCH-RAN"
+close $fb
+file delete -force $canary
+# If the argument escaped its quoting, "& echo owned> _canary.txt &" would run
+# and create the canary in the child's cwd. With the fix it is one inert arg.
+set payload {x" & echo owned> _canary.txt & rem "}
+set br [run -dir $bdir -- $bat $payload]
+check "batch ran"                 [string match *BATCH-RAN* [dict get $br out]]
+check "batch exit 0"              [expr {[dict get $br exit] == 0}]
+check "injection inert (no canary)" [expr {![file exists $canary]}]
+file delete -force $bat $canary
 
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
