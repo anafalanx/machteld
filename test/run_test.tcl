@@ -77,6 +77,23 @@ set E [format %c 27]; set B [format %c 7]
 set raw [string cat $E {[2J} $E {[0;32mgreen} $E {[0m and } $E {]0;title} $B {done}]
 check "vtstrip cleans VT" [expr {[::machteld::vtstrip $raw] eq "green and done"}]
 
+# 5e. -onout streams stdout line-by-line to a callback (and does not also buffer)
+set ::onout_lines {}
+set r5e [run -onout {lappend ::onout_lines} -- cmd /c "echo line-1&echo line-2&echo line-3"]
+check "onout streamed 3 lines"  [expr {[llength $::onout_lines] == 3}]
+check "onout line content"      [expr {[lindex $::onout_lines 0] eq "line-1" && [lindex $::onout_lines 2] eq "line-3"}]
+check "onout leaves out empty"  [expr {[dict get $r5e out] eq ""}]
+
+# 5f. -onerr streams stderr; a pipe without a callback is still captured
+set ::onerr_lines {}
+set r5f [run -onerr {lappend ::onerr_lines} -- cmd /c "echo out-here&echo err-here 1>&2"]
+check "onerr streamed stderr"   [string match *err-here* [join $::onerr_lines]]
+check "onerr keeps out buffered" [string match *out-here* [dict get $r5f out]]
+
+# 5g. a callback error aborts the run and propagates
+set threw5g [catch {run -onout {apply {l {error "cb-boom"}}} -- cmd /c echo x} e5g]
+check "onout cb error propagates" [expr {$threw5g && [string match *cb-boom* $e5g]}]
+
 # --- child ensemble ---------------------------------------------------------
 
 # 6. child start / wait: async child, collect its dict

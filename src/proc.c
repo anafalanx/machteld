@@ -225,6 +225,8 @@ typedef struct {
     const char        *stdin_text; /* NULL => child stdin is the null device */
     Tcl_Obj           *env_obj;    /* the -env {K V ...} list, or NULL to inherit */
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
+    Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
+    Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -305,6 +307,8 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
     o->stdin_text = NULL;
     o->env_obj = NULL;
     o->env_block = NULL;
+    o->onout = NULL;
+    o->onerr = NULL;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -329,6 +333,10 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
             o->stdin_text = v;
         } else if (strcmp(a, "-env") == 0) {
             o->env_obj = objv[i + 1];
+        } else if (strcmp(a, "-onout") == 0) {
+            o->onout = objv[i + 1];
+        } else if (strcmp(a, "-onerr") == 0) {
+            o->onerr = objv[i + 1];
         } else {
             return run_error(interp, "usage", "unknown option");
         }
@@ -341,10 +349,12 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
 /* ---- launch / reap / dict / free (shared core) ------------------------- */
 
 /* Launch cargv born-in-job with captured stdout/stderr. On success returns the
- * child (readers running, not yet reaped); on failure returns NULL and sets
- * *err. `track` registers it under a token; otherwise it is a transient run. */
+ * child (reader threads running unless `stream`, not yet reaped); on failure
+ * returns NULL and sets *err. `track` registers it under a token; otherwise it
+ * is a transient run. `stream` suppresses the reader threads so the caller can
+ * pump the pipes itself (run -onout/-onerr). */
 static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
-                             int track, const char **err) {
+                             int track, int stream, const char **err) {
     char *exe = resolve_exe(cargv[0]);
     if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
 
@@ -403,8 +413,12 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     size_t cap = 1u << 20;
     c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
     c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
-    c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
-    c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
+    /* Streaming pumps the pipes on the interp thread instead of draining them on
+     * reader threads; the buffers still capture any pipe that has no callback. */
+    if (!stream) {
+        c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
+        c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
+    }
 
     free(exe);
     if (track) {
@@ -483,6 +497,149 @@ static const char **build_argv(Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     return cargv;
 }
 
+/* ---- live line streaming (run -onout / -onerr) ------------------------- *
+ *
+ * When a callback is supplied, run does NOT drain the pipe on a reader thread;
+ * it pumps both pipes on the interpreter's own thread and evaluates the callback
+ * per line -- so the Tcl callback is called from the interp's thread, never a
+ * worker (no cross-thread interp access). A pipe with no callback is buffered
+ * into its reader_t exactly as the thread would have. */
+
+typedef struct {
+    HANDLE    h;        /* pipe read end (borrowed) */
+    Tcl_Obj  *cb;       /* callback prefix; NULL => buffer into rd instead */
+    reader_t *rd;       /* capture buffer, used when cb == NULL */
+    char     *line;     /* partial-line accumulator (cb != NULL) */
+    size_t    len, cap;
+    int       eof;
+} pump_t;
+
+/* Evaluate `cb line` at global scope (the line is one appended argument, no
+ * trailing newline). Returns TCL_OK or the callback's error code. */
+static int pump_emit(Tcl_Interp *interp, Tcl_Obj *cb, const char *line, size_t len) {
+    Tcl_Obj *cmd = Tcl_DuplicateObj(cb);
+    Tcl_IncrRefCount(cmd);
+    int rc = Tcl_ListObjAppendElement(interp, cmd, Tcl_NewStringObj(line, (Tcl_Size)len));
+    if (rc == TCL_OK) rc = Tcl_EvalObjEx(interp, cmd, TCL_EVAL_GLOBAL);
+    Tcl_DecrRefCount(cmd);
+    return rc;
+}
+
+/* Append n bytes to a callback pump's line accumulator, emitting each complete
+ * line (split on \n; a trailing \r is dropped). Returns TCL_OK or a cb error. */
+static int pump_feed(Tcl_Interp *interp, pump_t *p, const char *data, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        char ch = data[i];
+        if (ch == '\n') {
+            size_t l = p->len;
+            if (l > 0 && p->line[l - 1] == '\r') l--;
+            int rc = pump_emit(interp, p->cb, p->line ? p->line : "", l);
+            p->len = 0;
+            if (rc != TCL_OK) return rc;
+        } else {
+            if (p->len + 1 > p->cap) {
+                p->cap = p->cap ? p->cap * 2 : 256;
+                p->line = (char *)realloc(p->line, p->cap);
+            }
+            p->line[p->len++] = ch;
+        }
+    }
+    return TCL_OK;
+}
+
+/* Read whatever is available on p->h once. Sets *progressed if bytes moved and
+ * p->eof at end of pipe. Returns TCL_OK or a callback error. */
+static int pump_once(Tcl_Interp *interp, pump_t *p, int *progressed) {
+    if (p->eof) return TCL_OK;
+    DWORD avail = 0;
+    if (!PeekNamedPipe(p->h, NULL, 0, NULL, &avail, NULL)) { p->eof = 1; return TCL_OK; }
+    if (avail == 0) return TCL_OK;
+    char tmp[8192];
+    DWORD want = avail < sizeof(tmp) ? avail : (DWORD)sizeof(tmp);
+    DWORD got = 0;
+    if (!ReadFile(p->h, tmp, want, &got, NULL) || got == 0) { p->eof = 1; return TCL_OK; }
+    *progressed = 1;
+    if (p->cb) return pump_feed(interp, p, tmp, (size_t)got);
+    reader_t *r = p->rd; /* no callback: buffer like reader_thread, with truncation */
+    if (r->len < r->cap) {
+        size_t space = r->cap - r->len;
+        size_t take = ((size_t)got < space) ? (size_t)got : space;
+        memcpy(r->buf + r->len, tmp, take);
+        r->len += take;
+        if (take < (size_t)got) r->truncated = 1;
+    } else {
+        r->truncated = 1;
+    }
+    return TCL_OK;
+}
+
+/* Emit a callback pump's trailing partial line (output with no final newline). */
+static int pump_flush(Tcl_Interp *interp, pump_t *p) {
+    if (p->cb && p->len > 0) {
+        size_t l = p->len;
+        if (p->line[l - 1] == '\r') l--;
+        int rc = pump_emit(interp, p->cb, p->line, l);
+        p->len = 0;
+        return rc;
+    }
+    return TCL_OK;
+}
+
+/* Pump the child's stdout/stderr on THIS (interp) thread until it exits,
+ * streaming lines to -onout/-onerr and/or buffering, honoring -timeout
+ * (tree-kill). Sets c->exit_code/killed/timeout and reaps. Returns TCL_OK, or a
+ * callback's error code (the child is tree-killed first). */
+static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
+    pump_t po = { c->outR, o->onout, &c->ro, NULL, 0, 0, 0 };
+    pump_t pe = { c->errR, o->onerr, &c->re, NULL, 0, 0, 0 };
+    ULONGLONG deadline = (o->timeout_ms < 0) ? 0 : GetTickCount64() + (ULONGLONG)o->timeout_ms;
+    int rc = TCL_OK, exited = 0;
+    long long code = 0;
+
+    for (;;) {
+        int progressed = 0;
+        rc = pump_once(interp, &po, &progressed);
+        if (rc == TCL_OK) rc = pump_once(interp, &pe, &progressed);
+        if (rc != TCL_OK) break;
+
+        const char *e = NULL;
+        int w = wj_wait_timeout(c->proc, 0, &code, &e);
+        if (w != 1) { /* 0 = exited, <0 = wait error: drain both pipes and stop */
+            int pr;
+            do { pr = 0; rc = pump_once(interp, &po, &pr); } while (rc == TCL_OK && pr);
+            if (rc == TCL_OK) do { pr = 0; rc = pump_once(interp, &pe, &pr); } while (rc == TCL_OK && pr);
+            if (w == 0) c->exit_code = code;
+            exited = 1;
+            break;
+        }
+        if (deadline && GetTickCount64() >= deadline) {
+            c->killed = 1; c->timeout = 1;
+            wj_job_terminate(c->job, 1); /* child will exit; caught on the next poll */
+            deadline = 0;                /* don't re-kill */
+        }
+        if (!progressed) Sleep(5);
+    }
+
+    if (rc != TCL_OK && !exited) { /* callback failed while the child still runs: kill it */
+        wj_job_terminate(c->job, 1);
+        const char *e = NULL;
+        wj_wait_timeout(c->proc, 2000, &c->exit_code, &e);
+        c->killed = 1;
+    }
+    if (rc == TCL_OK) {
+        rc = pump_flush(interp, &po);
+        if (rc == TCL_OK) rc = pump_flush(interp, &pe);
+    }
+
+    free(po.line);
+    free(pe.line);
+    if (c->proc) { wj_proc_close(c->proc); c->proc = NULL; }
+    if (c->outR) { CloseHandle(c->outR); c->outR = NULL; }
+    if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
+    c->reaped = 1;
+    return rc;
+}
+
 /* ---- ::machteld::run --------------------------------------------------- */
 
 static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
@@ -504,19 +661,28 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     }
 
     const char *err = NULL;
-    child_t *c = child_launch(ctx, &o, cargc, cargv, 0, &err);
+    int stream = (o.onout != NULL || o.onerr != NULL);
+    child_t *c = child_launch(ctx, &o, cargc, cargv, 0, stream, &err);
     free(cargv);
     if (c == NULL) return run_error(interp, "launch", err);
 
-    unsigned wait_ms = (o.timeout_ms < 0) ? WJ_INFINITE : (unsigned)o.timeout_ms;
-    int w = child_reap(c, wait_ms, &err);
-    if (w == 1) { /* timed out: tree-kill and reap */
-        c->killed = 1;
-        c->timeout = 1;
-        wj_job_terminate(c->job, 1);
-        w = child_reap(c, WJ_INFINITE, &err);
+    if (stream) {
+        /* live path: pump the pipes on this thread, emitting lines to the
+         * callbacks, until the child exits (or -timeout tree-kills it). A
+         * callback error aborts the run -- child_pump kills the child first, and
+         * the callback's error is already in the interp result. */
+        if (child_pump(interp, c, &o) != TCL_OK) { child_free(c); return TCL_ERROR; }
+    } else {
+        unsigned wait_ms = (o.timeout_ms < 0) ? WJ_INFINITE : (unsigned)o.timeout_ms;
+        int w = child_reap(c, wait_ms, &err);
+        if (w == 1) { /* timed out: tree-kill and reap */
+            c->killed = 1;
+            c->timeout = 1;
+            wj_job_terminate(c->job, 1);
+            w = child_reap(c, WJ_INFINITE, &err);
+        }
+        if (w < 0) { child_free(c); return run_error(interp, "oserror", err); }
     }
-    if (w < 0) { child_free(c); return run_error(interp, "oserror", err); }
 
     Tcl_SetObjResult(interp, child_dict(interp, c));
     child_free(c);
@@ -552,7 +718,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             o.env_block = envbuf;
         }
         const char *err = NULL;
-        child_t *c = child_launch(ctx, &o, cargc, cargv, 1, &err);
+        child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err);
         free(cargv);
         if (c == NULL) return run_error(interp, "launch", err);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));

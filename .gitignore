@@ -9,6 +9,4 @@
 *.tmp
 
 # generated diagnostic outputs (written by test/pty_*.tcl)
-/pty_diag.txt
-/pty_real.txt
-/pty_close.txt
+/pty_*.txt
