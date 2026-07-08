@@ -618,17 +618,29 @@ static pty_t *pty_find(proc_ctx *ctx, const char *token) {
     return NULL;
 }
 
+/* Drain a pipe to EOF, discarding -- run on a thread during ClosePseudoConsole. */
+static DWORD WINAPI pty_drain_thread(LPVOID arg) {
+    HANDLE h = (HANDLE)arg;
+    char buf[4096];
+    DWORD got;
+    while (ReadFile(h, buf, sizeof buf, &got, NULL) && got > 0) { /* discard */ }
+    return 0;
+}
+
 static void pty_free(proc_ctx *ctx, pty_t *p) {
     pty_t **pp = &ctx->ptys;
     while (*pp) { if (*pp == p) { *pp = p->next; break; } pp = &(*pp)->next; }
-    /* Kill the child, then close BOTH pipe ends BEFORE ClosePseudoConsole: with
-     * the output read end already gone, the console host can't block flushing
-     * pending output to an undrained pipe -- the classic ConPTY teardown
-     * deadlock. (Measured: ClosePseudoConsole then returns immediately.) */
+    /* Kill the child, then tear the pseudo-console down the way the ConPTY docs
+     * prescribe: DRAIN the output pipe on a thread WHILE ClosePseudoConsole runs,
+     * so the console host's final flush never blocks on an unread pipe. (Closing
+     * the read end first -- my earlier guess -- is exactly what deadlocked: the
+     * host blocks writing its shutdown output to a dead pipe.) */
     if (p->job) wj_job_terminate(p->job, 1);
-    if (p->outR) CloseHandle(p->outR);
-    if (p->inW) CloseHandle(p->inW);
-    if (p->hpc) ClosePseudoConsole(p->hpc);
+    HANDLE drain = (p->outR != NULL) ? CreateThread(NULL, 0, pty_drain_thread, p->outR, 0, NULL) : NULL;
+    if (p->inW) { CloseHandle(p->inW); p->inW = NULL; }
+    if (p->hpc) { ClosePseudoConsole(p->hpc); p->hpc = NULL; }
+    if (drain) { WaitForSingleObject(drain, 5000); CloseHandle(drain); }
+    if (p->outR) { CloseHandle(p->outR); p->outR = NULL; }
     if (p->proc) wj_proc_close(p->proc);
     if (p->job) wj_job_free(p->job);
     free(p);
@@ -817,6 +829,13 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
 /* ---- registration ------------------------------------------------------ */
 
+/* Tear down any open pseudo-consoles at exit, so a REPL user who spawns a pty
+ * and just quits doesn't leave a wedged console host behind. */
+static void proc_atexit(void *cd) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    while (ctx->ptys) pty_free(ctx, ctx->ptys);
+}
+
 int Machteldproc_Init(Tcl_Interp *interp) {
     const char *err = NULL;
     wj_job *root = wj_job_new(1, &err); /* KILL_ON_JOB_CLOSE: nothing outlives machteld */
@@ -840,6 +859,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::detach", DetachCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::pty", PtyCmd, ctx, NULL);
+    Tcl_CreateExitHandler(proc_atexit, ctx);
     Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;
 }
