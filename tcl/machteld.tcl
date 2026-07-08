@@ -7,12 +7,28 @@
 # from M1 on.
 
 namespace eval ::machteld {
-    variable version 0.0.0-m0
+    variable version 0.1.0-m1
 }
 
 proc ::machteld::version {} {
     variable version
     return $version
+}
+
+# scope { body }: run body, then close (tree-kill) any children started within
+# it that are still alive at the closing brace -- bounded lifetime by lexical
+# structure. Pure Tcl over the child registry; nests naturally (each scope
+# touches only the children born inside it). Runs the cleanup even if body
+# throws, and re-raises the body's result/error unchanged.
+proc ::machteld::scope {body} {
+    set before [::machteld::child list]
+    set code [catch {uplevel 1 $body} result options]
+    foreach c [::machteld::child list] {
+        if {$c ni $before} {
+            catch {::machteld::child close $c}
+        }
+    }
+    return -options $options $result
 }
 
 # Tk on demand: a static build ships no Tk DLL, so wire `package require Tk`

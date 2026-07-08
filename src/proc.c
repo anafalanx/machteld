@@ -1,20 +1,21 @@
 /*
- * proc.c -- machteld's process-control bridge: the ::machteld::run verb over the
- * winjob substrate.
+ * proc.c -- machteld's process-control bridge over the winjob substrate.
  *
  * Machteldproc_Init establishes the root KILL_ON_JOB_CLOSE job (nothing outlives
- * machteld) and registers ::machteld::run. Each run:
- *   - resolves the program on PATH (+ PATHEXT),
- *   - opens a nested job for tree-kill and -mem/-cpu limits,
- *   - launches born-in-job with stdout/stderr captured through pipes that are
- *     DRAINED ON THREADS (so a child filling one pipe while we block on the other
- *     cannot deadlock),
- *   - honours a wall-clock -timeout by tree-killing the job,
- *   - returns a dict {exit status out err pid truncated}.
+ * machteld) and registers the execution-core verbs:
  *
- * A process that runs and exits nonzero is a normal dict result (status error).
- * Usage mistakes and launch failures throw a Tcl error with a structured
- * -errorcode {MACHTELD RUN <code>}.
+ *   ::machteld::run   ?-timeout t -mem b -cpu t -dir d? ?--? cmd ?arg...?
+ *       blocking one-shot -> dict {exit status out err pid truncated}
+ *   ::machteld::child start|wait|kill|info|list|close ...
+ *       async supervised children, addressed by an opaque token
+ *   ::machteld::wait  ?-any? token ...
+ *       block until all (or any) of the given children exit
+ *
+ * A child is launched born-in-job into a per-command job (tree-kill + limits);
+ * stdout/stderr are captured on drain threads (no pipe-buffer deadlock). `run`
+ * and `child start` share one launch/reap core -- run just reaps immediately.
+ * Usage/launch failures throw -errorcode {MACHTELD RUN <code>}; a nonzero exit
+ * is a normal dict result.
  */
 #include "winjob.h"
 #include <tcl.h>
@@ -26,6 +27,7 @@
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ---- UTF-8 <-> UTF-16 -------------------------------------------------- */
 
@@ -49,7 +51,6 @@ static char *u16_to_u8(const wchar_t *w) {
 
 /* ---- human-unit parsing ------------------------------------------------ */
 
-/* "30s" / "500ms" / "2m" / "1h" / bare number (seconds) -> milliseconds; -1 bad. */
 static long long parse_duration_ms(const char *s) {
     char *end;
     double v = strtod(s, &end);
@@ -62,7 +63,6 @@ static long long parse_duration_ms(const char *s) {
     return -1;
 }
 
-/* "1G" / "512M" / "64K" / "1024" / "...B" -> bytes (1024-based); -1 bad. */
 static long long parse_bytes(const char *s) {
     char *end;
     double v = strtod(s, &end);
@@ -80,7 +80,6 @@ static long long parse_bytes(const char *s) {
 
 /* ---- program resolution (PATH + PATHEXT) ------------------------------- */
 
-/* True if prog's final path component contains a '.' (already has an extension). */
 static int has_extension(const char *prog) {
     const char *base = prog;
     for (const char *c = prog; *c; c++) {
@@ -95,11 +94,9 @@ static char *resolve_exe(const char *prog) {
     wchar_t buf[MAX_PATH * 2];
     wchar_t *fpart = NULL;
     char *result = NULL;
-
-    /* An extension-less name resolves against the executable extensions
-     * (cmd -> cmd.exe); a name that already has an extension is searched as-is.
-     * We never search the BARE name with no extension appended -- that can match
-     * a non-executable file in the current directory (as it did: C:\...\cmd). */
+    /* Extension-less names resolve against the executable extensions
+     * (cmd -> cmd.exe); a name with an extension is searched as-is. Never search
+     * the bare name -- that can match a non-executable in the current directory. */
     const wchar_t *exts[4];
     int ne = 0;
     if (has_extension(prog)) {
@@ -146,13 +143,62 @@ static DWORD WINAPI reader_thread(LPVOID arg) {
             r->len += take;
             if (take < (size_t)got) r->truncated = 1;
         } else {
-            r->truncated = 1; /* keep draining so the child never blocks */
+            r->truncated = 1;
         }
     }
     return 0;
 }
 
-/* ---- error helper ------------------------------------------------------ */
+/* ---- a supervised child ------------------------------------------------ */
+
+typedef struct child_s {
+    char            token[24];   /* "child#N"; empty for a run's transient child */
+    wj_job         *job;         /* per-command job (tree-kill + limits) */
+    void           *proc;        /* process handle; NULL once reaped */
+    int             pid;
+    HANDLE          outR, errR;  /* pipe read ends */
+    HANDLE          tOut, tErr;  /* reader threads */
+    reader_t        ro, re;      /* captured stdout/stderr */
+    int             reaped;      /* wait/reap already collected the exit + output */
+    int             killed;      /* was tree-killed by machteld (child kill) */
+    int             timeout;     /* specifically: killed because -timeout elapsed */
+    long long       exit_code;
+    struct child_s *next;        /* registry chain */
+} child_t;
+
+/* Client data shared by the verbs: the root job, whether machteld is a member of
+ * it (decides the born-in-job list), and the live-children registry. */
+typedef struct {
+    wj_job  *root;
+    int      in_root;
+    child_t *children;   /* singly-linked list of tracked children */
+    int      counter;    /* token sequence */
+} proc_ctx;
+
+static child_t *registry_find(proc_ctx *ctx, const char *token) {
+    for (child_t *c = ctx->children; c; c = c->next) {
+        if (strcmp(c->token, token) == 0) return c;
+    }
+    return NULL;
+}
+
+static void registry_remove(proc_ctx *ctx, child_t *c) {
+    child_t **pp = &ctx->children;
+    while (*pp) {
+        if (*pp == c) { *pp = c->next; c->next = NULL; return; }
+        pp = &(*pp)->next;
+    }
+}
+
+/* ---- option parsing (shared by run and child start) -------------------- */
+
+typedef struct {
+    long long          timeout_ms; /* -1 = none */
+    unsigned long long mem;
+    unsigned long long cpu_100ns;
+    const char        *dir;
+    int                cmd_index;  /* objv index where the command begins */
+} run_opts;
 
 static int run_error(Tcl_Interp *interp, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "run failed", -1));
@@ -160,162 +206,331 @@ static int run_error(Tcl_Interp *interp, const char *code, const char *msg) {
     return TCL_ERROR;
 }
 
-/* ---- ::machteld::run --------------------------------------------------- */
-
-/* Client data for the run command: the root job, and whether machteld itself is
- * a member of it (which decides how children are born into jobs). */
-typedef struct {
-    wj_job *root;
-    int     in_root;
-} proc_ctx;
-
-static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
-    proc_ctx *ctx = (proc_ctx *)cd;
-
-    long long timeout_ms = -1; /* -1 => no timeout */
-    unsigned long long mem = 0;
-    unsigned long long cpu_100ns = 0;
-    const char *dir = NULL;
-
-    int i = 1;
+static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i0, run_opts *o) {
+    o->timeout_ms = -1;
+    o->mem = 0;
+    o->cpu_100ns = 0;
+    o->dir = NULL;
+    int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
         if (strcmp(a, "--") == 0) { i++; break; }
-        if (a[0] != '-' || a[1] == '\0') break; /* command starts here */
+        if (a[0] != '-' || a[1] == '\0') break;
         if (i + 1 >= objc) return run_error(interp, "usage", "option needs a value");
         const char *v = Tcl_GetString(objv[i + 1]);
         if (strcmp(a, "-timeout") == 0) {
-            timeout_ms = parse_duration_ms(v);
-            if (timeout_ms < 0) return run_error(interp, "badvalue", "bad -timeout value");
+            o->timeout_ms = parse_duration_ms(v);
+            if (o->timeout_ms < 0) return run_error(interp, "badvalue", "bad -timeout value");
         } else if (strcmp(a, "-mem") == 0) {
             long long b = parse_bytes(v);
             if (b < 0) return run_error(interp, "badvalue", "bad -mem value");
-            mem = (unsigned long long)b;
+            o->mem = (unsigned long long)b;
         } else if (strcmp(a, "-cpu") == 0) {
             long long d = parse_duration_ms(v);
             if (d < 0) return run_error(interp, "badvalue", "bad -cpu value");
-            cpu_100ns = (unsigned long long)d * 10000ULL; /* ms -> 100ns ticks */
+            o->cpu_100ns = (unsigned long long)d * 10000ULL;
         } else if (strcmp(a, "-dir") == 0) {
-            dir = v;
+            o->dir = v;
         } else {
             return run_error(interp, "usage", "unknown option");
         }
         i++;
     }
+    o->cmd_index = i;
+    return TCL_OK;
+}
 
-    int cargc = objc - i;
-    if (cargc <= 0) return run_error(interp, "usage", "run ?-opt val ...? ?--? command ?arg ...?");
+/* ---- launch / reap / dict / free (shared core) ------------------------- */
 
-    const char **cargv = (const char **)malloc((size_t)cargc * sizeof(char *));
-    for (int k = 0; k < cargc; k++) cargv[k] = Tcl_GetString(objv[i + k]);
-
+/* Launch cargv born-in-job with captured stdout/stderr. On success returns the
+ * child (readers running, not yet reaped); on failure returns NULL and sets
+ * *err. `track` registers it under a token; otherwise it is a transient run. */
+static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
+                             int track, const char **err) {
     char *exe = resolve_exe(cargv[0]);
-    if (exe == NULL) { free(cargv); return run_error(interp, "notfound", "command not found on PATH"); }
+    if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
 
-    int         result = TCL_ERROR;
-    const char *err = NULL;
-    HANDLE      outR = NULL, outW = NULL, errR = NULL, errW = NULL, nul = NULL;
-    wj_job     *perjob = NULL;
-    void       *proch = NULL;
-    HANDLE      tOut = NULL, tErr = NULL;
-    reader_t    ro = { 0 }, re = { 0 };
-    int         pid = 0;
-
+    child_t *c = (child_t *)calloc(1, sizeof(*c));
+    HANDLE outW = NULL, errW = NULL, nul = NULL;
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;
-    sa.bInheritHandle = FALSE; /* the launcher makes inheritable dups of the write ends */
-    if (!CreatePipe(&outR, &outW, &sa, 0) || !CreatePipe(&errR, &errW, &sa, 0)) {
-        run_error(interp, "oserror", "CreatePipe failed");
-        goto cleanup;
+    sa.bInheritHandle = FALSE;
+
+    if (!CreatePipe(&c->outR, &outW, &sa, 0) || !CreatePipe(&c->errR, &errW, &sa, 0)) {
+        *err = "CreatePipe failed";
+        goto fail;
     }
     nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; run_error(interp, "oserror", "open NUL failed"); goto cleanup; }
+    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
 
-    perjob = wj_job_new(0, &err); /* root already gives die-with-parent */
-    if (perjob == NULL) { run_error(interp, "oserror", err); goto cleanup; }
-    if (mem || cpu_100ns) {
+    c->job = wj_job_new(0, err);
+    if (c->job == NULL) goto fail;
+    if (o->mem || o->cpu_100ns) {
         wj_limits lim = { 0 };
-        lim.process_memory_bytes = mem;
-        lim.process_cpu_100ns = cpu_100ns;
-        if (wj_job_set_limits(perjob, &lim, &err) != 0) { run_error(interp, "oserror", err); goto cleanup; }
+        lim.process_memory_bytes = o->mem;
+        lim.process_cpu_100ns = o->cpu_100ns;
+        if (wj_job_set_limits(c->job, &lim, err) != 0) goto fail;
     }
 
-    /* If machteld is itself a member of root, children inherit root
-     * automatically -- listing it again in JOB_LIST would be a double assignment
-     * (ERROR_ACCESS_DENIED), so born into the per-command job only. Otherwise
-     * born into both, root-first. */
     void *jobh[2];
     int njobs;
     if (ctx->in_root) {
-        jobh[0] = wj_job_handle(perjob);
+        jobh[0] = wj_job_handle(c->job);
         njobs = 1;
     } else {
         jobh[0] = wj_job_handle(ctx->root);
-        jobh[1] = wj_job_handle(perjob);
+        jobh[1] = wj_job_handle(c->job);
         njobs = 2;
     }
     wj_stdio io = { nul, outW, errW };
-    if (wj_launch(exe, cargc, cargv, dir, jobh, njobs, &io, &pid, &proch, &err) != 0) {
-        run_error(interp, "launch", err);
-        goto cleanup;
-    }
+    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, &c->pid, &c->proc, err) != 0) goto fail;
 
-    /* The child holds its own inherited dups now; drop our write ends + stdin so
-     * the read ends see EOF once the child exits. */
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
     CloseHandle(nul);  nul = NULL;
 
-    size_t cap = 1u << 20; /* 1 MiB per stream */
-    ro.read = outR; ro.cap = cap; ro.buf = (char *)malloc(cap);
-    re.read = errR; re.cap = cap; re.buf = (char *)malloc(cap);
-    tOut = CreateThread(NULL, 0, reader_thread, &ro, 0, NULL);
-    tErr = CreateThread(NULL, 0, reader_thread, &re, 0, NULL);
+    size_t cap = 1u << 20;
+    c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
+    c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
+    c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
+    c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
 
-    long long code = 0;
-    int status_timeout = 0;
-    unsigned wait_ms = (timeout_ms < 0) ? WJ_INFINITE : (unsigned)timeout_ms;
-    int w = wj_wait_timeout(proch, wait_ms, &code, &err);
-    if (w == 1) { /* timed out: tree-kill and reap */
-        status_timeout = 1;
-        wj_job_terminate(perjob, 1);
-        w = wj_wait_timeout(proch, WJ_INFINITE, &code, &err);
+    free(exe);
+    if (track) {
+        snprintf(c->token, sizeof c->token, "child#%d", ++ctx->counter);
+        c->next = ctx->children;
+        ctx->children = c;
     }
-    if (w < 0) { run_error(interp, "oserror", err); goto cleanup; }
+    return c;
 
-    if (tOut) WaitForSingleObject(tOut, INFINITE);
-    if (tErr) WaitForSingleObject(tErr, INFINITE);
-
-    Tcl_Obj *d = Tcl_NewDictObj();
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)code));
-    const char *st = status_timeout ? "timeout" : (code == 0 ? "ok" : "error");
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("status", -1), Tcl_NewStringObj(st, -1));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("out", -1), Tcl_NewStringObj(ro.buf ? ro.buf : "", (Tcl_Size)ro.len));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("err", -1), Tcl_NewStringObj(re.buf ? re.buf : "", (Tcl_Size)re.len));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(pid));
-    Tcl_Obj *trunc = Tcl_NewListObj(0, NULL);
-    if (ro.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("out", -1));
-    if (re.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("err", -1));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("truncated", -1), trunc);
-    Tcl_SetObjResult(interp, d);
-    result = TCL_OK;
-
-cleanup:
-    if (tOut) CloseHandle(tOut);
-    if (tErr) CloseHandle(tErr);
-    free(ro.buf);
-    free(re.buf);
-    if (proch) wj_proc_close(proch);
-    if (perjob) wj_job_free(perjob);
-    if (outR) CloseHandle(outR);
-    if (errR) CloseHandle(errR);
+fail:
     if (outW) CloseHandle(outW);
     if (errW) CloseHandle(errW);
     if (nul) CloseHandle(nul);
+    if (c->outR) CloseHandle(c->outR);
+    if (c->errR) CloseHandle(c->errR);
+    if (c->job) wj_job_free(c->job);
     free(exe);
+    free(c);
+    return NULL;
+}
+
+/* Wait up to wait_ms; 0 = reaped (exit + output collected), 1 = timeout, -1 err. */
+static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
+    if (c->reaped) return 0;
+    long long code = 0;
+    int w = wj_wait_timeout(c->proc, wait_ms, &code, err);
+    if (w == 1) return 1;
+    if (w < 0) return -1;
+    c->exit_code = code;
+    if (c->tOut) { WaitForSingleObject(c->tOut, INFINITE); CloseHandle(c->tOut); c->tOut = NULL; }
+    if (c->tErr) { WaitForSingleObject(c->tErr, INFINITE); CloseHandle(c->tErr); c->tErr = NULL; }
+    if (c->proc) { wj_proc_close(c->proc); c->proc = NULL; }
+    if (c->outR) { CloseHandle(c->outR); c->outR = NULL; }
+    if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
+    c->reaped = 1;
+    return 0;
+}
+
+static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
+    const char *st = c->timeout ? "timeout" : c->killed ? "killed" : (c->exit_code == 0 ? "ok" : "error");
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("status", -1), Tcl_NewStringObj(st, -1));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("out", -1), Tcl_NewStringObj(c->ro.buf ? c->ro.buf : "", (Tcl_Size)c->ro.len));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("err", -1), Tcl_NewStringObj(c->re.buf ? c->re.buf : "", (Tcl_Size)c->re.len));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(c->pid));
+    Tcl_Obj *trunc = Tcl_NewListObj(0, NULL);
+    if (c->ro.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("out", -1));
+    if (c->re.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("err", -1));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("truncated", -1), trunc);
+    return d;
+}
+
+static void child_free(child_t *c) {
+    if (c == NULL) return;
+    if (!c->reaped) {
+        if (c->job) wj_job_terminate(c->job, 1); /* kill so the pipes EOF and readers finish */
+        const char *e = NULL;
+        child_reap(c, WJ_INFINITE, &e);
+    }
+    free(c->ro.buf);
+    free(c->re.buf);
+    if (c->job) wj_job_free(c->job);
+    free(c);
+}
+
+/* Build the command argv (UTF-8) from objv[cmd_index..objc). Caller frees. */
+static const char **build_argv(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int cmd_index, int *cargc) {
+    int n = objc - cmd_index;
+    if (n <= 0) return NULL;
+    const char **cargv = (const char **)malloc((size_t)n * sizeof(char *));
+    for (int k = 0; k < n; k++) cargv[k] = Tcl_GetString(objv[cmd_index + k]);
+    *cargc = n;
+    return cargv;
+}
+
+/* ---- ::machteld::run --------------------------------------------------- */
+
+static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    run_opts o;
+    if (parse_opts(interp, objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    int cargc = 0;
+    const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
+    if (cargv == NULL) return run_error(interp, "usage", "run ?-opt val ...? ?--? command ?arg ...?");
+
+    const char *err = NULL;
+    child_t *c = child_launch(ctx, &o, cargc, cargv, 0, &err);
     free(cargv);
-    return result;
+    if (c == NULL) return run_error(interp, "launch", err);
+
+    unsigned wait_ms = (o.timeout_ms < 0) ? WJ_INFINITE : (unsigned)o.timeout_ms;
+    int w = child_reap(c, wait_ms, &err);
+    if (w == 1) { /* timed out: tree-kill and reap */
+        c->killed = 1;
+        c->timeout = 1;
+        wj_job_terminate(c->job, 1);
+        w = child_reap(c, WJ_INFINITE, &err);
+    }
+    if (w < 0) { child_free(c); return run_error(interp, "oserror", err); }
+
+    Tcl_SetObjResult(interp, child_dict(interp, c));
+    child_free(c);
+    return TCL_OK;
+}
+
+/* ---- ::machteld::child ------------------------------------------------- */
+
+static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    static const char *const subs[] = { "start", "wait", "kill", "info", "list", "close", NULL };
+    enum { START, WAIT, KILL, INFO, LIST, CLOSE };
+    int idx;
+    if (objc < 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
+        return TCL_ERROR;
+    }
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+
+    if (idx == START) {
+        run_opts o;
+        if (parse_opts(interp, objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        int cargc = 0;
+        const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
+        if (cargv == NULL) return run_error(interp, "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
+        const char *err = NULL;
+        child_t *c = child_launch(ctx, &o, cargc, cargv, 1, &err);
+        free(cargv);
+        if (c == NULL) return run_error(interp, "launch", err);
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));
+        return TCL_OK;
+    }
+
+    if (idx == LIST) {
+        Tcl_Obj *l = Tcl_NewListObj(0, NULL);
+        for (child_t *c = ctx->children; c; c = c->next) {
+            Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(c->token, -1));
+        }
+        Tcl_SetObjResult(interp, l);
+        return TCL_OK;
+    }
+
+    /* the rest take a token */
+    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    const char *token = Tcl_GetString(objv[2]);
+    child_t *c = registry_find(ctx, token);
+    if (c == NULL) return run_error(interp, "notfound", "no such child");
+
+    switch (idx) {
+    case WAIT: {
+        const char *err = NULL;
+        if (!c->reaped && child_reap(c, WJ_INFINITE, &err) < 0) return run_error(interp, "oserror", err);
+        Tcl_SetObjResult(interp, child_dict(interp, c));
+        return TCL_OK;
+    }
+    case KILL: {
+        unsigned code = 1;
+        if (objc >= 4) {
+            int v;
+            if (Tcl_GetIntFromObj(interp, objv[3], &v) != TCL_OK) return TCL_ERROR;
+            code = (unsigned)v;
+        }
+        if (!c->reaped) { c->killed = 1; wj_job_terminate(c->job, code); }
+        return TCL_OK;
+    }
+    case INFO: {
+        Tcl_Obj *d = Tcl_NewDictObj();
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(c->token, -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(c->pid));
+        int running = 0;
+        if (c->reaped) {
+            running = 0;
+        } else {
+            long long code = 0;
+            const char *e = NULL;
+            running = (wj_wait_timeout(c->proc, 0, &code, &e) == 1); /* 1 => still running */
+        }
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
+        if (c->reaped) {
+            Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
+        }
+        Tcl_SetObjResult(interp, d);
+        return TCL_OK;
+    }
+    case CLOSE:
+        registry_remove(ctx, c);
+        child_free(c); /* kills first if still running */
+        return TCL_OK;
+    }
+    return TCL_OK;
+}
+
+/* ---- ::machteld::wait -------------------------------------------------- */
+
+static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    int any = 0;
+    int i = 1;
+    if (i < objc && strcmp(Tcl_GetString(objv[i]), "-any") == 0) { any = 1; i++; }
+    int n = objc - i;
+    if (n <= 0) return run_error(interp, "usage", "wait ?-any? token ...");
+    if (n > MAXIMUM_WAIT_OBJECTS) return run_error(interp, "usage", "too many children to wait on (max 64)");
+
+    Tcl_Obj *done = Tcl_NewListObj(0, NULL);
+    HANDLE h[MAXIMUM_WAIT_OBJECTS];
+    child_t *cs[MAXIMUM_WAIT_OBJECTS];
+    int nh = 0;
+    for (int k = 0; k < n; k++) {
+        const char *tok = Tcl_GetString(objv[i + k]);
+        child_t *c = registry_find(ctx, tok);
+        if (c == NULL) return run_error(interp, "notfound", "no such child");
+        if (c->reaped) {
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(tok, -1));
+        } else {
+            h[nh] = (HANDLE)c->proc;
+            cs[nh] = c;
+            nh++;
+        }
+    }
+    /* -any and some are already done, or nothing left to wait on: return now. */
+    if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) {
+        Tcl_SetObjResult(interp, done);
+        return TCL_OK;
+    }
+    DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
+    if (any) {
+        if (r < WAIT_OBJECT_0 + (DWORD)nh) {
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(cs[r - WAIT_OBJECT_0]->token, -1));
+        }
+    } else {
+        for (int k = 0; k < nh; k++) {
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(cs[k]->token, -1));
+        }
+    }
+    Tcl_SetObjResult(interp, done);
+    return TCL_OK;
 }
 
 /* ---- registration ------------------------------------------------------ */
@@ -327,18 +542,17 @@ int Machteldproc_Init(Tcl_Interp *interp) {
         Tcl_SetObjResult(interp, Tcl_NewStringObj(err ? err : "root job creation failed", -1));
         return TCL_ERROR;
     }
-    /* Put machteld itself in the root job so even processes NOT launched through
-     * wj_launch inherit die-with-parent. If the OS refuses (already in a
-     * non-nestable job), children are born into root explicitly instead. */
     const char *ignore = NULL;
     int in_root = (wj_job_assign(root, (void *)GetCurrentProcess(), &ignore) == 0);
 
-    proc_ctx *ctx = (proc_ctx *)malloc(sizeof(*ctx));
+    proc_ctx *ctx = (proc_ctx *)calloc(1, sizeof(*ctx));
     ctx->root = root;
     ctx->in_root = in_root;
 
     Tcl_Eval(interp, "namespace eval ::machteld {}");
     Tcl_CreateObjCommand(interp, "::machteld::run", RunCmd, ctx, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::child", ChildCmd, ctx, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
     Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;
 }

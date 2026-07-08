@@ -59,6 +59,39 @@ if {[catch {::machteld::run -- no_such_program_zzz_42} e opts]} {
 }
 check "notfound threw" $threw
 
+# --- child ensemble ---------------------------------------------------------
+
+# 6. child start / wait: async child, collect its dict
+set c [::machteld::child start -- cmd /c echo async]
+check "child token"        [string match "child#*" $c]
+set r [::machteld::child wait $c]
+check "child wait exit 0"  [expr {[dict get $r exit] == 0}]
+check "child captured out" [string match "*async*" [dict get $r out]]
+::machteld::child close $c
+
+# 7. child info reports running; kill flips status to "killed"
+set c [::machteld::child start -- $MT $CHILD sleep 8000]
+check "child info running"  [expr {[dict get [::machteld::child info $c] running] == 1}]
+::machteld::child kill $c
+check "killed status"       [expr {[dict get [::machteld::child wait $c] status] eq "killed"}]
+::machteld::child close $c
+
+# 8. wait -any returns whichever child finishes first
+set a [::machteld::child start -- $MT $CHILD sleep 200]
+set b [::machteld::child start -- $MT $CHILD sleep 8000]
+check "wait -any first"     [expr {[::machteld::wait -any $a $b] eq $a}]
+::machteld::child kill $b
+::machteld::child close $a
+::machteld::child close $b
+
+# 9. scope tree-kills children born inside it, by the closing brace
+set outer [::machteld::child list]
+::machteld::scope {
+    ::machteld::child start -- $MT $CHILD sleep 8000
+    ::machteld::child start -- $MT $CHILD sleep 8000
+}
+check "scope killed its children" [expr {[::machteld::child list] eq $outer}]
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails
