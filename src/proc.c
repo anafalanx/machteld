@@ -23,6 +23,9 @@
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
 #endif
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000006 /* NTDDI_WIN10_RS5: exposes the ConPTY API */
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdlib.h>
@@ -171,8 +174,10 @@ typedef struct child_s {
 typedef struct {
     wj_job  *root;
     int      in_root;
-    child_t *children;   /* singly-linked list of tracked children */
-    int      counter;    /* token sequence */
+    child_t *children;    /* singly-linked list of tracked children */
+    int      counter;     /* child token sequence */
+    struct pty_s *ptys;   /* singly-linked list of open ptys */
+    int      pty_counter; /* pty token sequence */
 } proc_ctx;
 
 static child_t *registry_find(proc_ctx *ctx, const char *token) {
@@ -585,6 +590,231 @@ cleanup:
     return result;
 }
 
+/* ---- ::machteld::pty (ConPTY) ------------------------------------------ *
+ *
+ * A ConPTY-backed child: the OS gives it a real pseudo-console (so isatty() is
+ * true and it line-edits / colours / prompts as it would in a terminal), while
+ * machteld drives its keyboard (send) and reads its screen (read) over two
+ * pipes. Born-in-job like every other child, so it stays supervised. Output is
+ * the raw VT/ANSI byte stream -- the `expect` loop matches on it as text;
+ * clean-text terminal emulation is a later layer.
+ */
+
+typedef struct pty_s {
+    char    token[24];
+    HPCON   hpc;
+    wj_job *job;
+    void   *proc;
+    int     pid;
+    HANDLE  inW;  /* parent writes the child's input (keyboard) here */
+    HANDLE  outR; /* parent reads the child's output (screen) here */
+    struct pty_s *next;
+} pty_t;
+
+static pty_t *pty_find(proc_ctx *ctx, const char *token) {
+    for (pty_t *p = ctx->ptys; p; p = p->next) {
+        if (strcmp(p->token, token) == 0) return p;
+    }
+    return NULL;
+}
+
+static void pty_free(proc_ctx *ctx, pty_t *p) {
+    pty_t **pp = &ctx->ptys;
+    while (*pp) { if (*pp == p) { *pp = p->next; break; } pp = &(*pp)->next; }
+    /* Kill the child, then close BOTH pipe ends BEFORE ClosePseudoConsole: with
+     * the output read end already gone, the console host can't block flushing
+     * pending output to an undrained pipe -- the classic ConPTY teardown
+     * deadlock. (Measured: ClosePseudoConsole then returns immediately.) */
+    if (p->job) wj_job_terminate(p->job, 1);
+    if (p->outR) CloseHandle(p->outR);
+    if (p->inW) CloseHandle(p->inW);
+    if (p->hpc) ClosePseudoConsole(p->hpc);
+    if (p->proc) wj_proc_close(p->proc);
+    if (p->job) wj_job_free(p->job);
+    free(p);
+}
+
+static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
+                        int cols, int rows, const char **err) {
+    char *exe = resolve_exe(cargv[0]);
+    if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
+    char *cmdText = wj_make_cmdline(cargc, cargv);
+
+    HANDLE   inR = NULL, inW = NULL, outR = NULL, outW = NULL;
+    HPCON    hpc = NULL;
+    wj_job  *job = NULL;
+    LPPROC_THREAD_ATTRIBUTE_LIST al = NULL;
+    int      alInited = 0;
+    wchar_t *wApp = NULL, *wCmd = NULL, *wDir = NULL;
+    pty_t   *result = NULL;
+
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa); sa.lpSecurityDescriptor = NULL; sa.bInheritHandle = FALSE;
+    if (!CreatePipe(&inR, &inW, &sa, 0) || !CreatePipe(&outR, &outW, &sa, 0)) {
+        *err = "CreatePipe failed"; goto done;
+    }
+
+    COORD size;
+    size.X = (SHORT)cols; size.Y = (SHORT)rows;
+    if (FAILED(CreatePseudoConsole(size, inR, outW, 0, &hpc))) {
+        *err = "CreatePseudoConsole failed"; goto done;
+    }
+    /* the pseudoconsole owns its own refs to the child-side ends now */
+    CloseHandle(inR);  inR = NULL;
+    CloseHandle(outW); outW = NULL;
+
+    job = wj_job_new(0, err);
+    if (job == NULL) goto done;
+    if (o->mem || o->cpu_100ns) {
+        wj_limits lim = { 0 };
+        lim.process_memory_bytes = o->mem; lim.process_cpu_100ns = o->cpu_100ns;
+        if (wj_job_set_limits(job, &lim, err) != 0) goto done;
+    }
+
+    void *jobh[2];
+    int njobs;
+    if (ctx->in_root) { jobh[0] = wj_job_handle(job); njobs = 1; }
+    else { jobh[0] = wj_job_handle(ctx->root); jobh[1] = wj_job_handle(job); njobs = 2; }
+
+    SIZE_T alSize = 0;
+    InitializeProcThreadAttributeList(NULL, 2, 0, &alSize);
+    al = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(alSize);
+    if (al == NULL || !InitializeProcThreadAttributeList(al, 2, 0, &alSize)) {
+        *err = "InitializeProcThreadAttributeList failed"; goto done;
+    }
+    alInited = 1;
+    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                                   jobh, (size_t)njobs * sizeof(HANDLE), NULL, NULL)) {
+        *err = "UpdateProcThreadAttribute(JOB_LIST) failed"; goto done;
+    }
+    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                                   hpc, sizeof(hpc), NULL, NULL)) {
+        *err = "UpdateProcThreadAttribute(PSEUDOCONSOLE) failed"; goto done;
+    }
+
+    wApp = u8_to_u16(exe);
+    wCmd = u8_to_u16(cmdText);
+    if (o->dir && o->dir[0]) wDir = u8_to_u16(o->dir);
+    if (wApp == NULL || wCmd == NULL) { *err = "bad exe or command line"; goto done; }
+
+    STARTUPINFOEXW si;
+    ZeroMemory(&si, sizeof si);
+    si.StartupInfo.cb = sizeof si;
+    si.lpAttributeList = al; /* ConPTY supplies stdio; no STARTF_USESTDHANDLES */
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof pi);
+    if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
+                        NULL, wDir, &si.StartupInfo, &pi)) {
+        static char e[128];
+        snprintf(e, sizeof e, "CreateProcess failed (error %lu)", (unsigned long)GetLastError());
+        *err = e; goto done;
+    }
+    CloseHandle(pi.hThread);
+
+    result = (pty_t *)calloc(1, sizeof(*result));
+    result->hpc = hpc; result->job = job; result->proc = pi.hProcess;
+    result->pid = (int)pi.dwProcessId; result->inW = inW; result->outR = outR;
+    snprintf(result->token, sizeof result->token, "pty#%d", ++ctx->pty_counter);
+    result->next = ctx->ptys; ctx->ptys = result;
+    hpc = NULL; job = NULL; inW = NULL; outR = NULL; /* ownership moved to result */
+
+done:
+    if (alInited) DeleteProcThreadAttributeList(al);
+    free(al);
+    free(wApp); free(wCmd); free(wDir);
+    free(exe); free(cmdText);
+    if (inR) CloseHandle(inR);
+    if (outW) CloseHandle(outW);
+    if (result == NULL) { /* failure: unwind what we made */
+        if (inW) CloseHandle(inW);
+        if (outR) CloseHandle(outR);
+        if (hpc) ClosePseudoConsole(hpc);
+        if (job) wj_job_free(job);
+    }
+    return result;
+}
+
+static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    static const char *const subs[] = { "spawn", "send", "read", "close", "list", NULL };
+    enum { SPAWN, SEND, READ, CLOSE, LIST };
+    int idx;
+    if (objc < 2) { Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?"); return TCL_ERROR; }
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+
+    if (idx == SPAWN) {
+        run_opts o;
+        if (parse_opts(interp, objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        int cargc = 0;
+        const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
+        if (cargv == NULL) return run_error(interp, "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
+        const char *err = NULL;
+        pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err);
+        free(cargv);
+        if (p == NULL) return run_error(interp, "launch", err);
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(p->token, -1));
+        return TCL_OK;
+    }
+    if (idx == LIST) {
+        Tcl_Obj *l = Tcl_NewListObj(0, NULL);
+        for (pty_t *p = ctx->ptys; p; p = p->next) {
+            Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(p->token, -1));
+        }
+        Tcl_SetObjResult(interp, l);
+        return TCL_OK;
+    }
+
+    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    pty_t *p = pty_find(ctx, Tcl_GetString(objv[2]));
+    if (p == NULL) return run_error(interp, "notfound", "no such pty");
+
+    switch (idx) {
+    case SEND: {
+        if (objc != 4) { Tcl_WrongNumArgs(interp, 2, objv, "token text"); return TCL_ERROR; }
+        Tcl_Size len;
+        const char *s = Tcl_GetStringFromObj(objv[3], &len);
+        DWORD written = 0;
+        if (!WriteFile(p->inW, s, (DWORD)len, &written, NULL)) {
+            return run_error(interp, "oserror", "write to pty failed");
+        }
+        return TCL_OK;
+    }
+    case READ: {
+        int timeout_ms = 0;
+        if (objc >= 5 && strcmp(Tcl_GetString(objv[3]), "-timeout") == 0) {
+            long long t = parse_duration_ms(Tcl_GetString(objv[4]));
+            if (t < 0) return run_error(interp, "badvalue", "bad -timeout value");
+            timeout_ms = (int)t;
+        }
+        char buf[8192];
+        ULONGLONG deadline = GetTickCount64() + (ULONGLONG)(timeout_ms > 0 ? timeout_ms : 0);
+        for (;;) {
+            DWORD avail = 0;
+            if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &avail, NULL)) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("", 0)); /* EOF: output ended */
+                return TCL_OK;
+            }
+            if (avail > 0) {
+                DWORD want = avail < sizeof(buf) ? avail : (DWORD)sizeof(buf);
+                DWORD got = 0;
+                if (!ReadFile(p->outR, buf, want, &got, NULL)) got = 0;
+                Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, (Tcl_Size)got));
+                return TCL_OK;
+            }
+            if (GetTickCount64() >= deadline) break;
+            Sleep(10);
+        }
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("", 0));
+        return TCL_OK;
+    }
+    case CLOSE:
+        pty_free(ctx, p);
+        return TCL_OK;
+    }
+    return TCL_OK;
+}
+
 /* ---- registration ------------------------------------------------------ */
 
 int Machteldproc_Init(Tcl_Interp *interp) {
@@ -609,6 +839,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::child", ChildCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::detach", DetachCmd, ctx, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::pty", PtyCmd, ctx, NULL);
     Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;
 }

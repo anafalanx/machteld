@@ -98,6 +98,20 @@ set pid [::machteld::detach -- cmd /c exit 0]
 check "detach returns a pid" [expr {[string is integer -strict $pid] && $pid > 0}]
 check "detach not tracked"   [expr {[::machteld::child list] eq $before}]
 
+# --- pty (ConPTY) -----------------------------------------------------------
+# This CI sandbox is HEADLESS -- GetConsoleWindow() is NULL and stdout is a
+# redirected file -- so a spawned child cannot route through a pseudo-console
+# (its output leaks to the inherited stdio instead). Interactive capture / send
+# / expect therefore can't be exercised here: the SAME class of sandbox limit as
+# detach's breakaway. We verify the ConPTY plumbing that IS observable -- a
+# pseudo-console child spawns and the console tears down cleanly, no hang.
+# Full expect-style interaction is verified on a real Win11 terminal.
+set p [::machteld::pty spawn -- cmd /c exit 0]
+check "pty spawn token"    [string match "pty#*" $p]
+check "pty listed"         [expr {$p in [::machteld::pty list]}]
+::machteld::pty close $p
+check "pty closed cleanly" [expr {$p ni [::machteld::pty list]}]
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails
