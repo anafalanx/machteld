@@ -284,7 +284,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         njobs = 2;
     }
     wj_stdio io = { nul, outW, errW };
-    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, &c->pid, &c->proc, err) != 0) goto fail;
+    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, &c->pid, &c->proc, err) != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
@@ -533,6 +533,58 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     return TCL_OK;
 }
 
+/* ---- ::machteld::detach ------------------------------------------------ */
+
+/* Launch a fire-and-forget daemon: NUL stdio (no capture), broken away from the
+ * root job so it outlives machteld (CREATE_BREAKAWAY_FROM_JOB; where the OS
+ * forbids breakaway it falls back to a normal launch and dies with machteld).
+ * Not tracked -- returns the pid. */
+static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    (void)cd;
+    run_opts o;
+    if (parse_opts(interp, objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    int cargc = 0;
+    const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
+    if (cargv == NULL) return run_error(interp, "usage", "detach ?-opt val ...? ?--? command ?arg ...?");
+    char *exe = resolve_exe(cargv[0]);
+    if (exe == NULL) { free(cargv); return run_error(interp, "notfound", "command not found on PATH"); }
+
+    int         result = TCL_ERROR;
+    const char *err = NULL;
+    HANDLE      nul = NULL;
+    wj_job     *djob = NULL;
+    void       *proch = NULL;
+    int         pid = 0;
+
+    nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                      NULL, OPEN_EXISTING, 0, NULL);
+    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; run_error(interp, "oserror", "open NUL failed"); goto cleanup; }
+    djob = wj_job_new(0, &err); /* plain job: closing our handle later won't kill it */
+    if (djob == NULL) { run_error(interp, "oserror", err); goto cleanup; }
+    if (o.mem || o.cpu_100ns) {
+        wj_limits lim = { 0 };
+        lim.process_memory_bytes = o.mem;
+        lim.process_cpu_100ns = o.cpu_100ns;
+        if (wj_job_set_limits(djob, &lim, &err) != 0) { run_error(interp, "oserror", err); goto cleanup; }
+    }
+    void *jobh[1] = { wj_job_handle(djob) };
+    wj_stdio io = { nul, nul, nul };
+    if (wj_launch(exe, cargc, cargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, &pid, &proch, &err) != 0) {
+        run_error(interp, "launch", err);
+        goto cleanup;
+    }
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(pid));
+    result = TCL_OK;
+
+cleanup:
+    if (proch) wj_proc_close(proch); /* stop supervising; the daemon runs on */
+    if (djob) wj_job_free(djob);      /* close our handle -- plain job, no kill */
+    if (nul) CloseHandle(nul);
+    free(exe);
+    free(cargv);
+    return result;
+}
+
 /* ---- registration ------------------------------------------------------ */
 
 int Machteldproc_Init(Tcl_Interp *interp) {
@@ -544,6 +596,9 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     }
     const char *ignore = NULL;
     int in_root = (wj_job_assign(root, (void *)GetCurrentProcess(), &ignore) == 0);
+    /* Let detached daemons break away from root (so they outlive machteld).
+     * Non-fatal: where the OS refuses, detach falls back to a normal launch. */
+    (void)wj_job_allow_breakaway(root, &ignore);
 
     proc_ctx *ctx = (proc_ctx *)calloc(1, sizeof(*ctx));
     ctx->root = root;
@@ -553,6 +608,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::run", RunCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::child", ChildCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::detach", DetachCmd, ctx, NULL);
     Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;
 }

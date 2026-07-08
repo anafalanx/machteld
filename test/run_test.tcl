@@ -92,6 +92,12 @@ set outer [::machteld::child list]
 }
 check "scope killed its children" [expr {[::machteld::child list] eq $outer}]
 
+# 10. detach: fire-and-forget daemon -- returns a pid, not tracked as a child
+set before [::machteld::child list]
+set pid [::machteld::detach -- cmd /c exit 0]
+check "detach returns a pid" [expr {[string is integer -strict $pid] && $pid > 0}]
+check "detach not tracked"   [expr {[::machteld::child list] eq $before}]
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails

@@ -101,6 +101,11 @@ void wj_job_free(wj_job *j);
 /* Raw job handle (as void*), for the launcher's born-in-job attribute list. */
 void *wj_job_handle(wj_job *j);
 
+/* Allow children of this job to break away from it (CREATE_BREAKAWAY_FROM_JOB),
+ * so `detach` can hand a daemon to the OS that outlives machteld. Re-asserts the
+ * job's existing kill-on-close flag. */
+int wj_job_allow_breakaway(wj_job *j, const char **err);
+
 /* Is process a member of job? 1 yes, 0 no, -1 on error. A NULL job asks whether
  * the process is in ANY job. Used to prove born-in-job membership. */
 int wj_in_job(void *process_handle, void *job_handle);
@@ -122,10 +127,12 @@ typedef struct {
  * inherited (as private duplicates) and the caller's handles are never mutated.
  * Batch targets (.bat/.cmd) are routed through a defensively quoted cmd.exe.
  * On success sets *pid and *proc (a process HANDLE the caller waits then closes)
- * and returns 0; on failure returns -1 and sets *err. Env is inherited for now. */
+ * and returns 0; on failure returns -1 and sets *err. Env is inherited for now.
+ * want_breakaway adds CREATE_BREAKAWAY_FROM_JOB (for detach); if the enclosing
+ * job forbids it the launch retries without, so the child still starts. */
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
-              int *pid, void **proc, const char **err);
+              int want_breakaway, int *pid, void **proc, const char **err);
 
 /* Wait up to ms for the child (WJ_INFINITE = forever). Returns 0 and sets *code
  * on exit (the 32-bit exit code, untruncated), 1 on timeout (child still runs),

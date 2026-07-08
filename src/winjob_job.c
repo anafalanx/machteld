@@ -85,6 +85,21 @@ int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err) {
     return 0;
 }
 
+int wj_job_allow_breakaway(wj_job *j, const char **err) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+    ZeroMemory(&info, sizeof(info));
+    DWORD flags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    if (j->kill_on_close) {
+        flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; /* preserve die-with-parent */
+    }
+    info.BasicLimitInformation.LimitFlags = flags;
+    if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+        *err = "SetInformationJobObject(BREAKAWAY_OK) failed";
+        return -1;
+    }
+    return 0;
+}
+
 int wj_job_assign(wj_job *j, void *process_handle, const char **err) {
     if (j->closed) {
         *err = "job is closed";
