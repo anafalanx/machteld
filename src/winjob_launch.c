@@ -79,7 +79,7 @@ static char *comspec_path(const char **err) {
 
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
-              int want_breakaway, int *pid, void **proc, const char **err) {
+              int want_breakaway, void *env_block, int *pid, void **proc, const char **err) {
     if (exe == NULL || exe[0] == '\0') { *err = "empty exe"; return -1; }
     if (argc <= 0 || argv == NULL) { *err = "empty argv"; return -1; }
     if (io == NULL || io->in == NULL || io->out == NULL || io->err == NULL) {
@@ -184,14 +184,15 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
-    DWORD flags = EXTENDED_STARTUPINFO_PRESENT; /* env inherited => no CREATE_UNICODE_ENVIRONMENT yet */
+    DWORD flags = EXTENDED_STARTUPINFO_PRESENT;
     if (want_breakaway) flags |= CREATE_BREAKAWAY_FROM_JOB;
-    BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, NULL, wDir, &six.StartupInfo, &pi);
+    if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT; /* a UTF-16 env block was supplied */
+    BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, env_block, wDir, &six.StartupInfo, &pi);
     if (!ok && want_breakaway) {
         /* the enclosing job may forbid breakaway (e.g. a CI sandbox): retry
          * without it so the daemon still starts (it then dies with machteld). */
         ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags & ~(DWORD)CREATE_BREAKAWAY_FROM_JOB,
-                            NULL, wDir, &six.StartupInfo, &pi);
+                            env_block, wDir, &six.StartupInfo, &pi);
     }
     if (!ok) {
         static char cpErr[128];

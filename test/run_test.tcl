@@ -68,6 +68,10 @@ check "notfound threw" $threw
 set rs [run -stdin "STDIN-MARKER-77\n" -- findstr STDIN]
 check "stdin fed to child" [string match *STDIN-MARKER-77* [dict get $rs out]]
 
+# 5c. -env sets/overrides the child's environment
+set re [run -env {ENVMARKER hello-env-42} -- cmd /c echo %ENVMARKER%]
+check "env var set for child" [string match *hello-env-42* [dict get $re out]]
+
 # --- child ensemble ---------------------------------------------------------
 
 # 6. child start / wait: async child, collect its dict

@@ -223,6 +223,8 @@ typedef struct {
     unsigned long long cpu_100ns;
     const char        *dir;
     const char        *stdin_text; /* NULL => child stdin is the null device */
+    Tcl_Obj           *env_obj;    /* the -env {K V ...} list, or NULL to inherit */
+    void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -232,12 +234,77 @@ static int run_error(Tcl_Interp *interp, const char *code, const char *msg) {
     return TCL_ERROR;
 }
 
+/* Build a UTF-16 environment block into buf (cap wchars): the inherited
+ * environment with the given key/value overrides applied (case-insensitive key;
+ * the override wins). pairs is a Tcl list {K V K V ...}. Returns 0 (buf holds a
+ * double-NUL-terminated block) or -1 and sets *err on bad input / overflow. buf
+ * is the caller's (stack) buffer -- valid only for that frame, which suffices
+ * because CreateProcess copies the block into the child at launch. */
+static int build_env_block(Tcl_Interp *interp, Tcl_Obj *pairs, wchar_t *buf, size_t cap, const char **err) {
+    Tcl_Size np;
+    Tcl_Obj **pv;
+    if (Tcl_ListObjGetElements(interp, pairs, &np, &pv) != TCL_OK) { *err = "bad -env value"; return -1; }
+    if (np % 2 != 0) { *err = "-env needs key/value pairs"; return -1; }
+    int nover = (int)(np / 2);
+
+    wchar_t **okey = (wchar_t **)calloc((size_t)(nover ? nover : 1), sizeof(wchar_t *));
+    for (int j = 0; j < nover; j++) okey[j] = u8_to_u16(Tcl_GetString(pv[2 * j]));
+
+    size_t pos = 0;
+    int rc = 0;
+    const char *e2 = NULL;
+
+    /* inherited entries, skipping any key that is overridden */
+    LPWCH env = GetEnvironmentStringsW();
+    for (wchar_t *e = env; *e && rc == 0; ) {
+        size_t elen = wcslen(e);
+        size_t klen = 0;
+        while (e[klen] && e[klen] != L'=') klen++;
+        int overridden = 0;
+        for (int j = 0; j < nover; j++) {
+            if (okey[j] && wcslen(okey[j]) == klen && _wcsnicmp(e, okey[j], klen) == 0) { overridden = 1; break; }
+        }
+        if (!overridden) {
+            if (pos + elen + 1 > cap) { rc = -1; e2 = "environment too large"; }
+            else { memcpy(buf + pos, e, elen * sizeof(wchar_t)); pos += elen; buf[pos++] = L'\0'; }
+        }
+        e += elen + 1;
+    }
+    FreeEnvironmentStringsW(env);
+
+    /* then the overrides, as K=V */
+    for (int j = 0; j < nover && rc == 0; j++) {
+        wchar_t *wv = u8_to_u16(Tcl_GetString(pv[2 * j + 1]));
+        size_t lk = okey[j] ? wcslen(okey[j]) : 0, lv = wv ? wcslen(wv) : 0;
+        if (okey[j] == NULL || wv == NULL) { rc = -1; e2 = "bad -env entry"; }
+        else if (pos + lk + 1 + lv + 1 > cap) { rc = -1; e2 = "environment too large"; }
+        else {
+            memcpy(buf + pos, okey[j], lk * sizeof(wchar_t)); pos += lk;
+            buf[pos++] = L'=';
+            memcpy(buf + pos, wv, lv * sizeof(wchar_t)); pos += lv;
+            buf[pos++] = L'\0';
+        }
+        free(wv);
+    }
+    if (rc == 0) {
+        if (pos + 1 > cap) { rc = -1; e2 = "environment too large"; }
+        else buf[pos++] = L'\0'; /* final NUL => the double-NUL that closes the block */
+    }
+
+    for (int j = 0; j < nover; j++) free(okey[j]);
+    free(okey);
+    if (rc != 0) *err = e2;
+    return rc;
+}
+
 static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i0, run_opts *o) {
     o->timeout_ms = -1;
     o->mem = 0;
     o->cpu_100ns = 0;
     o->dir = NULL;
     o->stdin_text = NULL;
+    o->env_obj = NULL;
+    o->env_block = NULL;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -260,6 +327,8 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
             o->dir = v;
         } else if (strcmp(a, "-stdin") == 0) {
             o->stdin_text = v;
+        } else if (strcmp(a, "-env") == 0) {
+            o->env_obj = objv[i + 1];
         } else {
             return run_error(interp, "usage", "unknown option");
         }
@@ -318,7 +387,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         njobs = 2;
     }
     wj_stdio io = { (o->stdin_text != NULL) ? stdinR : nul, outW, errW };
-    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, &c->pid, &c->proc, err) != 0) goto fail;
+    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err) != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
@@ -424,6 +493,16 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
     if (cargv == NULL) return run_error(interp, "usage", "run ?-opt val ...? ?--? command ?arg ...?");
 
+    wchar_t envbuf[32768];
+    if (o.env_obj != NULL) {
+        const char *ee = NULL;
+        if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
+            free(cargv);
+            return run_error(interp, "badvalue", ee);
+        }
+        o.env_block = envbuf; /* stack buffer, valid through the launch below */
+    }
+
     const char *err = NULL;
     child_t *c = child_launch(ctx, &o, cargc, cargv, 0, &err);
     free(cargv);
@@ -463,6 +542,15 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         int cargc = 0;
         const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
         if (cargv == NULL) return run_error(interp, "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
+        wchar_t envbuf[32768];
+        if (o.env_obj != NULL) {
+            const char *ee = NULL;
+            if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
+                free(cargv);
+                return run_error(interp, "badvalue", ee);
+            }
+            o.env_block = envbuf;
+        }
         const char *err = NULL;
         child_t *c = child_launch(ctx, &o, cargc, cargv, 1, &err);
         free(cargv);
@@ -612,7 +700,7 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     }
     void *jobh[1] = { wj_job_handle(djob) };
     wj_stdio io = { nul, nul, nul };
-    if (wj_launch(exe, cargc, cargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, &pid, &proch, &err) != 0) {
+    if (wj_launch(exe, cargc, cargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, o.env_block, &pid, &proch, &err) != 0) {
         run_error(interp, "launch", err);
         goto cleanup;
     }
