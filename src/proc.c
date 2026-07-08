@@ -853,6 +853,16 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     void       *proch = NULL;
     int         pid = 0;
 
+    wchar_t envbuf[32768];
+    if (o.env_obj != NULL) {
+        const char *ee = NULL;
+        if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
+            run_error(interp, "badvalue", ee);
+            goto cleanup;
+        }
+        o.env_block = envbuf; /* stack buffer, valid through the launch below */
+    }
+
     nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                       NULL, OPEN_EXISTING, 0, NULL);
     if (nul == INVALID_HANDLE_VALUE) { nul = NULL; run_error(interp, "oserror", "open NUL failed"); goto cleanup; }
@@ -1008,8 +1018,10 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof pi);
-    if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
-                        NULL, wDir, &si.StartupInfo, &pi)) {
+    DWORD cflags = EXTENDED_STARTUPINFO_PRESENT;
+    if (o->env_block) cflags |= CREATE_UNICODE_ENVIRONMENT; /* -env supplied a UTF-16 block */
+    if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, cflags,
+                        o->env_block, wDir, &si.StartupInfo, &pi)) {
         static char e[128];
         snprintf(e, sizeof e, "CreateProcess failed (error %lu)", (unsigned long)GetLastError());
         *err = e; goto done;
@@ -1053,6 +1065,15 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         int cargc = 0;
         const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
         if (cargv == NULL) return run_error(interp, "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
+        wchar_t envbuf[32768];
+        if (o.env_obj != NULL) {
+            const char *ee = NULL;
+            if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
+                free(cargv);
+                return run_error(interp, "badvalue", ee);
+            }
+            o.env_block = envbuf;
+        }
         const char *err = NULL;
         pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err);
         free(cargv);

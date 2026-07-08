@@ -94,6 +94,28 @@ check "onerr keeps out buffered" [string match *out-here* [dict get $r5f out]]
 set threw5g [catch {run -onout {apply {l {error "cb-boom"}}} -- cmd /c echo x} e5g]
 check "onout cb error propagates" [expr {$threw5g && [string match *cb-boom* $e5g]}]
 
+# 5h. detach honors -env: the daemon writes its env to a file we then read back
+set ddir  [file dirname [info script]]
+set dfile [file join $ddir _detach_env.txt]
+file delete -force $dfile
+detach -env {DETACH_TAG dval-88} -dir $ddir -- cmd /c "echo %DETACH_TAG% > _detach_env.txt"
+set dgot ""
+for {set i 0} {$i < 50} {incr i} {
+    after 100
+    if {[file exists $dfile]} {
+        set fh [open $dfile]; set dgot [string trim [read $fh]]; close $fh
+        if {$dgot ne ""} break
+    }
+}
+check "detach -env set child env" [string match *dval-88* $dgot]
+file delete -force $dfile
+
+# 5i. pty spawn accepts -env (plumbing; env reaching the child is checked on a
+# real terminal by pty_real.tcl, since pty output can't route headless)
+set pe [pty spawn -env {PTY_TAG pval} -- cmd]
+check "pty spawn -env ok" [string match pty#* $pe]
+pty close $pe
+
 # --- child ensemble ---------------------------------------------------------
 
 # 6. child start / wait: async child, collect its dict

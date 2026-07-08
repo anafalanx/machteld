@@ -42,6 +42,17 @@ if {[catch {
     }
 } e]} { log "expect FAILED: $e" }
 
+# pty -env reaches the child: spawn a second pty with a tagged env, echo it back
+if {[catch {
+    set pe [pty spawn -env {PTY_ENV_TAG ptyval-77} -- cmd]
+    pty send $pe "echo %PTY_ENV_TAG%\r"
+    pty expect $pe -timeout 5s {
+        {*ptyval-77*} { log "pty -env: child saw the var" }
+        timeout       { log "pty -env: TIMEOUT (var not seen)" }
+    }
+    pty close $pe
+} e]} { log "pty -env FAILED: $e" }
+
 log "about to pty close"
 pty close $p
 log "pty close returned cleanly"
