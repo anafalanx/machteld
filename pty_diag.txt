@@ -1,0 +1,3 @@
+machteld 0.1.0-m1  --  ConPTY diagnostic
+CHECKPOINT: about to pty spawn
+CHECKPOINT: spawned pty#1

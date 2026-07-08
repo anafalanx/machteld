@@ -27,7 +27,7 @@ set p [pty spawn -- cmd]
 log "CHECKPOINT: spawned $p"
 
 set b ""
-for {set i 0} {$i < 25} {incr i} { append b [pty read $p -timeout 100] }
+for {set i 0} {$i < 25} {incr i} { append b [pty read $p -timeout 100ms] }
 log "CHECKPOINT: banner read ([string length $b] bytes)"
 log "--- banner (escaped) ---"
 log [esc $b]
@@ -36,7 +36,7 @@ log "CHECKPOINT: about to send 'echo DIAG-MARKER-123'"
 if {[catch {pty send $p "echo DIAG-MARKER-123\r"} e]} { log "  (pty send failed: $e -- expected in a headless sandbox)" }
 set r ""
 for {set i 0} {$i < 30} {incr i} {
-    append r [pty read $p -timeout 100]
+    append r [pty read $p -timeout 100ms]
     if {[string match *DIAG-MARKER-123* $r]} break
 }
 log "CHECKPOINT: response read ([string length $r] bytes, marker seen: [string match *DIAG-MARKER-123* $r])"

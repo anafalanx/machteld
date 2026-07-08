@@ -15,13 +15,13 @@ set p [pty spawn -- cmd]
 log "spawned $p"
 
 set b ""
-for {set i 0} {$i < 20} {incr i} { append b [pty read $p -timeout 100] }
+for {set i 0} {$i < 20} {incr i} { append b [pty read $p -timeout 100ms] }
 log "banner: [string length $b] bytes"
 
 if {[catch {pty send $p "echo REAL-MARKER-42\r"} e]} { log "send FAILED: $e" } else { log "send ok" }
 set r ""
 for {set i 0} {$i < 40} {incr i} {
-    append r [pty read $p -timeout 100]
+    append r [pty read $p -timeout 100ms]
     if {[string match *REAL-MARKER-42* $r]} break
 }
 log "response: [string length $r] bytes, MARKER captured: [string match *REAL-MARKER-42* $r]"

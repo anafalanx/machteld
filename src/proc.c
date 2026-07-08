@@ -59,10 +59,13 @@ static long long parse_duration_ms(const char *s) {
     double v = strtod(s, &end);
     if (end == s || v < 0) return -1;
     while (*end == ' ') end++;
+    /* A unit is REQUIRED. A bare number is rejected, so "100" can never be
+     * silently read as 100 SECONDS when 100 ms was meant -- exactly the footgun
+     * that made pty read -timeout 100 block for a hundred seconds. */
     if (strcmp(end, "ms") == 0) return (long long)v;
-    if (*end == '\0' || strcmp(end, "s") == 0) return (long long)(v * 1000.0);
-    if (strcmp(end, "m") == 0) return (long long)(v * 60000.0);
-    if (strcmp(end, "h") == 0) return (long long)(v * 3600000.0);
+    if (strcmp(end, "s") == 0)  return (long long)(v * 1000.0);
+    if (strcmp(end, "m") == 0)  return (long long)(v * 60000.0);
+    if (strcmp(end, "h") == 0)  return (long long)(v * 3600000.0);
     return -1;
 }
 
