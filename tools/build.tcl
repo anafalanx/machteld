@@ -73,8 +73,18 @@ puts "cc   store.c  (bridge, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 \
     -c [Rp src store.c] -o [Rp build store.o] -I$inc -I$sqliteSrc
 
+# winjob process-supervision substrate + the ::machteld::run bridge.
+puts "cc   winjob_cmdline.c  (c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src winjob_cmdline.c] -o [Rp build winjob_cmdline.o]
+puts "cc   winjob_job.c  (c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src winjob_job.c] -o [Rp build winjob_job.o]
+puts "cc   winjob_launch.c  (c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src winjob_launch.c] -o [Rp build winjob_launch.o]
+puts "cc   proc.c  (bridge, c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src proc.c] -o [Rp build proc.o] -I$inc
+
 puts "cc   machteld_main.c  (host, c23)"
-run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE \
+run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC \
     -ffunction-sections -fdata-sections \
     -c [Rp src machteld_main.c] -o [Rp build machteld_main.o] -I$inc
 
@@ -82,6 +92,7 @@ puts "ld   machteld-bare.exe  (console subsystem)"
 set bare [Rp build machteld-bare.exe]
 run $gcc -municode -static-libgcc -Wl,--gc-sections \
     [Rp build machteld_main.o] [Rp build store.o] [Rp build sqlite3.o] \
+    [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $bare
 catch {run $strip $bare}

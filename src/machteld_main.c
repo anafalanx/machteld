@@ -37,6 +37,10 @@ int _CRT_glob = 0; /* keep the mingw CRT from glob-expanding argv */
 extern int Machteldstore_Init(Tcl_Interp *interp); /* src/store.c */
 #endif
 
+#ifdef MACHTELD_PROC
+extern int Machteldproc_Init(Tcl_Interp *interp); /* src/proc.c */
+#endif
+
 static int Machteld_AppInit(Tcl_Interp *interp);
 
 /*
@@ -101,6 +105,17 @@ Machteld_AppInit(
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldstore", Machteldstore_Init, NULL);
+#endif
+
+#ifdef MACHTELD_PROC
+    /*
+     * machteld's process-control substrate: the root Job Object plus
+     * ::machteld::run (supervised exec -- born-in-job, tree-kill, limits, capture).
+     */
+    if (Machteldproc_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldproc", Machteldproc_Init, NULL);
 #endif
 
     /*
