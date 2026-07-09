@@ -53,7 +53,7 @@ pty close $p
 
 ```tcl
 store open db.sqlite ; store put k v ; store get k ; store keys ; store del k ; store version ; store close
-wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see /packaging.md)
+wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see packaging.md)
 ```
 
 ## Deferred — designed, not built
