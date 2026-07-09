@@ -119,6 +119,7 @@ catch {run $strip $baregui}
 
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
-    --tcltk $TCLTK --prelude [Rp tcl machteld.tcl] --wrapper $bare --out $out
+    --tcltk $TCLTK --prelude [Rp tcl machteld.tcl] --wrapper $bare --out $out \
+    --embed-console $bare --embed-gui $baregui
 
 puts "built [file nativename $out] ([file size $out] bytes)"

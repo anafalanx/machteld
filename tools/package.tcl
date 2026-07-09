@@ -8,7 +8,7 @@
 #
 #   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> --out <exe>
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out ""}
+array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --embed-console "" --embed-gui ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {[info exists opt($a)]} {
@@ -80,6 +80,18 @@ if {!$copiedTk} { error "tk_library not found in wish90s.exe or $TC/tcllib" }
 
 # The machteld prelude at the archive root.
 file copy -force $PREL [file join $stage machteld.tcl]
+
+# Embed the bare basekits so the packaged machteld can stamp tools self-contained
+# -- the `wrap` verb extracts the right one from //zipfs:/basekit/.
+if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
+    file mkdir [file join $stage basekit]
+    if {$opt(--embed-console) ne ""} {
+        file copy -force $opt(--embed-console) [file join $stage basekit console.exe]
+    }
+    if {$opt(--embed-gui) ne ""} {
+        file copy -force $opt(--embed-gui) [file join $stage basekit gui.exe]
+    }
+}
 
 file delete -force $OUT
 set entries [zip_entries $stage]
