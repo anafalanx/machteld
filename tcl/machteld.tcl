@@ -7,7 +7,7 @@
 # from M1 on.
 
 namespace eval ::machteld {
-    variable version 0.1.0-m1
+    variable version 0.2.0
 }
 
 proc ::machteld::version {} {
