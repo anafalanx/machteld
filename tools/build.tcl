@@ -101,6 +101,22 @@ run $gcc -municode -static-libgcc -Wl,--gc-sections \
     {*}$syslibs -o $bare
 catch {run $strip $bare}
 
+# GUI-subsystem sibling bare (WinMain, -mwindows): same objects, different entry,
+# so windowed tools packaged on it show no console window. Shares machteld_appinit.o.
+puts "cc   machteld_gui_main.c  (GUI host, c23)"
+run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
+    -ffunction-sections -fdata-sections \
+    -c [Rp src machteld_gui_main.c] -o [Rp build machteld_gui_main.o] -I$inc
+
+puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
+set baregui [Rp build machteld-bare-gui.exe]
+run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
+    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] \
+    [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
+    [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
+    {*}$syslibs -o $baregui
+catch {run $strip $baregui}
+
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
     --tcltk $TCLTK --prelude [Rp tcl machteld.tcl] --wrapper $bare --out $out
