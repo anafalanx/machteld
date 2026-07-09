@@ -83,15 +83,19 @@ run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src winjob_launch.c] -o [Rp build 
 puts "cc   proc.c  (bridge, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src proc.c] -o [Rp build proc.o] -I$inc
 
-puts "cc   machteld_main.c  (host, c23)"
-run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC \
+puts "cc   machteld_appinit.c  (shared native-lib + prelude registration, c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC \
+    -c [Rp src machteld_appinit.c] -o [Rp build machteld_appinit.o] -I$inc
+
+puts "cc   machteld_main.c  (console host, c23)"
+run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
     -ffunction-sections -fdata-sections \
     -c [Rp src machteld_main.c] -o [Rp build machteld_main.o] -I$inc
 
 puts "ld   machteld-bare.exe  (console subsystem)"
 set bare [Rp build machteld-bare.exe]
 run $gcc -municode -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_main.o] [Rp build store.o] [Rp build sqlite3.o] \
+    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $bare
