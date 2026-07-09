@@ -7,7 +7,7 @@
 # from M1 on.
 
 namespace eval ::machteld {
-    variable version 0.2.0
+    variable version 0.2.1
 }
 
 proc ::machteld::version {} {
@@ -199,6 +199,41 @@ proc ::machteld::wrap {args} {
         catch {file delete -force $work}
     }
     return $out
+}
+
+# help: machteld ships its own docs -- the OKF bundle rides in the appended zipfs
+# at //zipfs:/docs/, so the tool serves its own spec (no external lookup, and an
+# agent can load the palette straight from the binary). `help` lists topics,
+# `help <topic>` returns that concept file, `help all` returns the whole bundle.
+# Returns the text (the REPL prints it; a script can capture it).
+proc ::machteld::help {{topic ""}} {
+    set docs ""
+    foreach _m [dict keys [zipfs mount]] {
+        if {[file isdirectory $_m/docs]} { set docs $_m/docs; break }
+    }
+    if {$docs eq ""} { return -code error "help: this build carries no embedded docs" }
+    set files [lsort [glob -nocomplain -tails -directory $docs *.md]]
+    if {$topic eq ""} {
+        set out "machteld [::machteld::version] -- help <topic>:\n"
+        foreach f $files { append out "  [file rootname $f]\n" }
+        append out "  all   (the whole bundle)\n"
+        return $out
+    }
+    if {$topic eq "all"} {
+        set out ""
+        foreach f $files {
+            set ch [open [file join $docs $f] r]
+            append out [read $ch] "\n\n---\n\n"
+            close $ch
+        }
+        return $out
+    }
+    set f [file join $docs $topic.md]
+    if {![file exists $f]} { return -code error "help: no topic \"$topic\" (try: help)" }
+    set ch [open $f r]
+    set text [read $ch]
+    close $ch
+    return $text
 }
 
 # Expose the palette as bare verbs: unqualified run / child / pty / wait / scope

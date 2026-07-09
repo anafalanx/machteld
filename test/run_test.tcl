@@ -191,6 +191,24 @@ check "batch exit 0"              [expr {[dict get $br exit] == 0}]
 check "injection inert (no canary)" [expr {![file exists $canary]}]
 file delete -force $bat $canary
 
+# --- docs shipped in the exe, and accurate ----------------------------------
+# The exe carries its own OKF bundle (help), and a shipped doc must never embed a
+# lie -- so the palette's built verbs must exist, and run's dict must match the
+# shape the palette documents.
+check "help lists palette topic"   [string match *palette* [help]]
+check "help palette has content"   [expr {[string length [help palette]] > 500}]
+check "help rejects a bad topic"   [catch {help nonesuch_zzz_42}]
+set pal [help palette]
+set drift {}
+foreach v {run child wait scope detach pty store wrap} {
+    if {![llength [info commands ::machteld::$v]] || ![string match "*$v*" $pal]} { lappend drift $v }
+}
+check "palette doc matches built verbs" [expr {$drift eq ""}]
+set rdoc [run -- cmd /c echo hi]
+check "run dict matches its documented shape" [expr {
+    [dict exists $rdoc exit] && [dict exists $rdoc status] && [dict exists $rdoc out] &&
+    [dict exists $rdoc err] && [dict exists $rdoc pid] && [dict exists $rdoc truncated]}]
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails

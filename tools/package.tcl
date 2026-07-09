@@ -8,7 +8,7 @@
 #
 #   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> --out <exe>
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --embed-console "" --embed-gui ""}
+array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --embed-console "" --embed-gui "" --docs ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {[info exists opt($a)]} {
@@ -80,6 +80,11 @@ if {!$copiedTk} { error "tk_library not found in wish90s.exe or $TC/tcllib" }
 
 # The machteld prelude at the archive root.
 file copy -force $PREL [file join $stage machteld.tcl]
+
+# Ship the docs bundle inside the exe (the `help` verb reads //zipfs:/docs/).
+if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
+    copy_tree $opt(--docs) [file join $stage docs]
+}
 
 # Embed the bare basekits so the packaged machteld can stamp tools self-contained
 # -- the `wrap` verb extracts the right one from //zipfs:/basekit/.
