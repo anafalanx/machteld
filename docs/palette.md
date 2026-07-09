@@ -1,65 +1,61 @@
 ---
 type: reference
 title: The palette
-description: Surface conventions, hybrid shape, and the v1 verb set (execution core + essentials + svc/reg).
-tags: [machteld, palette, verbs, reference, v1]
-timestamp: 2026-07-07
+description: Surface conventions and the verb set — what is built (execution core, pty, store, wrap) and what is deferred.
+tags: [machteld, palette, verbs, reference]
+timestamp: 2026-07-09
 ---
 
 # The palette
 
 ## Surface conventions
 
-- **Options:** Tcl-classic `-flag value`, with a `--` guard separating our options from the external command's args.
-- **Values:** human units (`30s`, `5m`, `1G`, `256M`, `80%`) accepted and normalized to canonical typed values (the type is reported in the manifest — see [the contract](/contract.md)).
-- **Output:** captured into the result dict by default (capped); opt-in streaming via a sink (`-onout {line}` / `-out $chan`).
+- **Namespace + bare verbs:** every command is `::machteld::<verb>`; the prelude also exposes them unqualified (via `namespace path`) so scripts read like a shell — without shadowing any core Tcl command.
+- **Options:** Tcl-classic `-flag value`, with a `--` guard separating machteld's options from the external command's args.
+- **Values:** durations carry an explicit unit (`500ms`, `30s`, `5m`, `2h`) — a bare number is **rejected**, so `-timeout 100` can never silently mean 100 seconds. Byte sizes take `K`/`M`/`G`.
+- **Results:** a dict. `run` returns `{exit status out err pid truncated}` (`status` ∈ `ok` / `error` / `timeout` / `killed`).
+- **Errors:** thrown with a structured `-errorcode {MACHTELD RUN <code>}`.
 
-## Shape & organization
-
-**Hybrid:** a small set of flat top-level verbs for the hot execution path; **ensembles** (`noun verb`) for stateful handles and machine-control domains. Every ensemble is self-describing — its subcommand list is a manifest for that domain.
-
-## v1 — execution core (flat, the wedge)
+## Built — execution core
 
 ```tcl
-run -timeout 30s -mem 1G -cpu 60s -cwd $dir -- cargo build
-    → {exit 0  status ok  dur 4.21  out "…"  err ""}
-    # run IS `child start` in blocking mode: one option surface, no duplication.
+run -timeout 30s -mem 1G -cpu 60s -dir $d -stdin $text -env {K V} -- some.exe
+    → {exit 0  status ok  out "…"  err ""  pid 8123  truncated {}}
+run -onout {handle_line} -- long.exe    ;# live per-line streaming to a callback (-onerr for stderr)
 
-set c [child start -mem 256M -- server.exe]        ;# → opaque handle
-child limit $c -cpu 60s
-child info  $c        → {pid 8123 state running mem 210M cpu 3.4}
-child kill  $c                                     ;# whole-tree kill, guaranteed
-child list           → {…live handles…}
+set c [child start -mem 256M -- server.exe]  ;# opaque token "child#N"
+child info $c   → {running 1 …}
+child kill  $c                                ;# whole-tree kill, guaranteed
+child wait  $c  → {exit … status … out … err …}
+child list ;  child close $c
 
-wait $a $b -any -timeout 5m                         ;# multiplex over handles
-scope { set s [child start db.exe]; run migrate.exe }    ;# s dies at the brace
-detach [child start watchdog.exe]                        ;# opt out: survive the tool
-
-set p [pty spawn -- ssh admin@box]                  ;# interactive — linear expect
-pty send   $p "$pw\n"
-pty expect $p {                                     ;# classic pattern/action block,
-    "password:" {send $pw}                          ;#   also returns {matched … before …}
-    "denied"    {die "auth failed"}
-    timeout     {die "no prompt"}
-}
+wait -any $a $b                               ;# multiplex over children
+scope { child start db.exe ; run migrate.exe }    ;# children born inside die at the brace
+detach -- watchdog.exe   → 8140               ;# fire-and-forget daemon; returns a pid
 ```
 
 (Runtime semantics — linear + bounded lifetime — are in the [execution model](/execution-model.md).)
 
-## v1 — essentials (cross-cutting)
-
-`say` / `warn` / `die` · `store` (SQLite: `store put/get/keys/del`, `store sql …`) · `json` / `csv` · `fs` (read/write/glob/stat) · `env` · `clock`
-
-## v1 — domains (ensembles)
-
-Our own C; TWAPI is a quarry for WMI/COM only (see [ecosystem policy](/ecosystem-policy.md)).
+## Built — interactive (ConPTY)
 
 ```tcl
-svc restart nginx        ;   svc status $name   → {state running pid … start auto}
-svc list                 → {…services…}
-reg get  HKLM/Software/…/Version   → typed value
-reg set  HKCU/…/Flag 1 -type dword
-reg keys HKLM/Software/Vendor
+set p [pty spawn -- cmd]
+pty send $p "echo hi\r"
+pty expect $p -timeout 5s {
+    {*hi*}   { … }
+    timeout  { … }
+}
+pty read  $p -timeout 100ms     ;# raw read; vtstrip $text strips ANSI/VT escapes
+pty close $p
 ```
 
-**Deferred to v1.x:** `evt` (event log), `net`, `host` (os/hardware), `wmi`, `user`.
+## Built — storage & packaging
+
+```tcl
+store open db.sqlite ; store put k v ; store get k ; store keys ; store del k ; store version ; store close
+wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see /packaging.md)
+```
+
+## Deferred — designed, not built
+
+The machine-control **domains** `svc` (services) and `reg` (registry), and later `evt` / `net` / `wmi` / `host` / `user` — our own C, with TWAPI as a quarry for WMI/COM only (see [ecosystem policy](/ecosystem-policy.md)). Also deferred: the `say`/`json`/`csv`/`fs`/`clock` conveniences (Tcl's own `file` / `env` / `clock` cover much of this today), and the self-describing runtime **manifest** ([creed](/creed.md) principle 4).

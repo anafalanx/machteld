@@ -1,24 +1,28 @@
 ---
 type: roadmap
-title: Roadmap & open questions
-description: Milestones M0–M4, and the design work not yet done.
-tags: [machteld, roadmap, milestones, open]
-timestamp: 2026-07-07
+title: Roadmap
+description: What's built (M0–M2 and the tool factory) and what's next.
+tags: [machteld, roadmap, milestones]
+timestamp: 2026-07-09
 ---
 
 # Roadmap
 
-- **M0** — carve the console host from sturm/els (`Tcl_Main`, Tk on demand, UTF-8 manifest, SQLite already inside) → a tclsh-like single exe.
-- **M1** — `run` / `child` / `wait` / `scope` / `detach` in C, porting winjob's *semantics* and translating drang's adversarial tests (born-in-job, `KILL_ON_JOB_CLOSE`, BatBadBut / CVE-2024-24576, `EscapeArg`, handle-inheritance discipline).
-- **M2** — `pty` (ConPTY expect).
-- **M3** — `store` / `json` / `fs` / `svc` / `reg`, palette polish, a decent REPL, sign.
-- **M4** — the chrome console (fork tkcon: dark ttk, completion fed by the manifest, a live `child`/event sidebar).
+## Built
 
-# Open — not yet designed
+- **M0 — the host.** Console starpack carved from sturm/els (`Tcl_Main`, Tk on demand, UTF-8, SQLite inside) — a tclsh-like single exe.
+- **M1 — execution core.** `run` / `child` / `wait` / `scope` / `detach` in C over the winjob substrate: born-in-job launch, `KILL_ON_JOB_CLOSE` die-with-parent, whole-tree kill, resource caps, BatBadBut / CVE-2024-24576 mitigation, `EscapeArg` quoting; `-timeout` / `-mem` / `-cpu` / `-dir` / `-stdin` / `-env`, and `-onout` / `-onerr` live streaming. Adversarial invariants translated from drang and verified.
+- **M2 — pty.** ConPTY `spawn` / `send` / `read` / `close` / `list`, the `expect` loop, and `vtstrip`. Verified on real hardware; host reap confirmed clean.
+- **`store`** — statically-linked SQLite key-value.
+- **The tool factory.** The shared-AppInit factoring, the GUI `WinMain` bare, both bares embedded in `machteld.exe`, and the self-contained [`wrap`](/palette.md) verb — one self-contained tclkit. See [packaging](/packaging.md).
 
-- Per-domain verb signatures in full (`svc` / `reg` / `store` / `fs` detail) — propose-and-refine, no big forks left.
-- The **manifest schema** (the exact shape of the self-description dict — see [the contract](/contract.md)).
-- The **final name** (working name *machteld* is provisional).
+## Next
+
+- **The first real tool** — a live "watch the agent change the codebase" viewer: a pure-Tcl/Tk tool `wrap`'d by machteld, pulling in a `watch` primitive (a general addition to the shared AppInit) when it needs live file events.
+- **Machine-control domains** — `svc` (services), `reg` (registry); later `evt` / `net` / `wmi` / `host` / `user`. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](/ecosystem-policy.md)).
+- **The manifest** — the self-describing runtime dict ([creed](/creed.md) principle 4 / [the contract](/contract.md)).
+- **The chrome console** — a Tk cockpit (fork tkcon: dark ttk, manifest-fed completion, a live child/event sidebar).
+- **The final name** — *machteld* is provisional.
 
 ---
 
