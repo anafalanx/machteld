@@ -20,4 +20,4 @@ scope { child start db.exe; run migrate.exe }   ;# the db child dies at the brac
 detach -- watchdog.exe                          ;# opt out: a fresh daemon that survives the tool
 ```
 
-This surfaces winjob's kill-on-close guarantee as *language law*: the anti-orphan promise no stock Windows tool offers. The verbs themselves are in [the palette](/palette.md).
+This surfaces winjob's kill-on-close guarantee as *language law*: the anti-orphan promise no stock Windows tool offers. The verbs themselves are in [the palette](palette.md).

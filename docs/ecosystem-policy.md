@@ -12,7 +12,7 @@ Everything is **vendored and frozen** into the one exe, so upstream abandonment 
 
 - **TWAPI** — *quarry.* Hand-roll the easy Win32 (`svc`/`reg`/`evt`/`net`) ourselves in C; borrow TWAPI only for the brutal WMI/COM layer, and only if a verb demands it.
 - **Adopted:**
-  - **nagelfar** — a Tcl static checker; the natural **lint gate for agent-written Tcl** (catch mistakes before execution). High leverage for [the bet](/rationale.md).
+  - **nagelfar** — a Tcl static checker; the natural **lint gate for agent-written Tcl** (catch mistakes before execution). High leverage for [the bet](rationale.md).
   - **critcl** — inline-C-in-Tcl; a dev accelerant for writing our own C verbs, not shipped.
   - **Tcllib** — cherry-pick single pure-Tcl modules only; never vendor wholesale.
 - **Deferred:** tDOM (when Windows XML actually appears).

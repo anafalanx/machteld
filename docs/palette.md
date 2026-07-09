@@ -34,7 +34,7 @@ scope { child start db.exe ; run migrate.exe }    ;# children born inside die at
 detach -- watchdog.exe   → 8140               ;# fire-and-forget daemon; returns a pid
 ```
 
-(Runtime semantics — linear + bounded lifetime — are in the [execution model](/execution-model.md).)
+(Runtime semantics — linear + bounded lifetime — are in the [execution model](execution-model.md).)
 
 ## Built — interactive (ConPTY)
 
@@ -58,4 +58,4 @@ wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone e
 
 ## Deferred — designed, not built
 
-The machine-control **domains** `svc` (services) and `reg` (registry), and later `evt` / `net` / `wmi` / `host` / `user` — our own C, with TWAPI as a quarry for WMI/COM only (see [ecosystem policy](/ecosystem-policy.md)). Also deferred: the `say`/`json`/`csv`/`fs`/`clock` conveniences (Tcl's own `file` / `env` / `clock` cover much of this today), and the self-describing runtime **manifest** ([creed](/creed.md) principle 4).
+The machine-control **domains** `svc` (services) and `reg` (registry), and later `evt` / `net` / `wmi` / `host` / `user` — our own C, with TWAPI as a quarry for WMI/COM only (see [ecosystem policy](ecosystem-policy.md)). Also deferred: the `say`/`json`/`csv`/`fs`/`clock` conveniences (Tcl's own `file` / `env` / `clock` cover much of this today), and the self-describing runtime **manifest** ([creed](creed.md) principle 4).
