@@ -1,0 +1,7 @@
+runs/*
+!runs/.gitkeep
+results/*
+!results/.gitkeep
+attempts/*
+!attempts/.gitkeep
+/subject-metadata.jsonl

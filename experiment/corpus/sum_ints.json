@@ -1,0 +1,10 @@
+{
+  "id": "sum_ints",
+  "desc": "Given one string of whitespace-separated tokens, return the sum of those tokens that are valid base-10 integer numerals. A valid integer numeral is an optional leading '+' or '-' sign followed by one or more ASCII decimal digits 0-9 (for example '7', '-4', '+3', '0'). Any token that is NOT such a numeral contributes 0 to the sum: non-numeric words like 'abc', and non-integer or non-base-10 numerals such as '1.5', '3.0', '1e3', '0x1A', and '1_0' all contribute 0. Tokens are the maximal runs of non-whitespace characters; spaces, tabs, and newlines are separators, so leading, trailing, and repeated whitespace does not matter. The empty string (or a string of only whitespace) has no tokens and sums to 0. The result may be negative.",
+  "fn": "sum_ints",
+  "in": 1,
+  "out": 1,
+  "tags": ["string", "parsing"],
+  "visible": [[["1 2 3"], [6]], [["10 foo 5"], [15]], [[""], [0]]],
+  "hidden": [[[""], [0]], [["   "], [0]], [["abc"], [0]], [["1.5 2 3"], [5]], [["-4 4"], [0]], [["  7   8  "], [15]], [["100"], [100]], [["5 -5 5"], [5]], [["a 1 b 2 c 3"], [6]], [["999999 1"], [1000000]], [["+3 4"], [7]], [["0 0 0"], [0]], [["3.0 10 1e3 7"], [17]], [["1_0 2"], [2]], [["１２ 3"], [3]], [["\t1\n2\r3"], [6]], [["+ - +4 -0"], [4]]]
+}
