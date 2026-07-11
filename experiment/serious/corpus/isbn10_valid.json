@@ -1,0 +1,192 @@
+{
+  "id": "isbn10_valid",
+  "fn": "isbn10_valid",
+  "in": 2,
+  "out": 1,
+  "desc": "ISBN-10 check-digit validity, taking TWO int64 args: body (the first 9 digits as an integer, interpreted as EXACTLY 9 digits with implicit leading zeros) and check (the 10th/check digit value, 0..10 where 10 represents the literal 'X'). The full code d1..d10 is valid iff sum_{i=1..10} (11-i)*d_i is divisible by 11; equivalently 10*d1 + 9*d2 + ... + 2*d9 + 1*d10 == 0 (mod 11), with d10 = check weighted 1. Return 1 if valid else 0. Edges that bite: (1) leading-zero handling is EXPLICIT and load-bearing - body=0 means '000000000' so a code like (0,0) is valid (sum 0) -> 1, and body=19852663 means '019852663' (a leading zero) - positions/weights are assigned by digit place, leading zeros contribute 0 but you must not misalign weights; (2) only the CHECK digit may be 10 ('X'); check must be in 0..10, otherwise -> 0 (e.g. (0,11)->0); (3) body must be in 0..999999999, otherwise -> 0 (e.g. (-1,0)->0, (1000000000,0)->0); (4) the 'X'=10 case is real and tested (97522980,10)->1. Weight trap: when scanning body from the right the weights run 2,3,4,... (rightmost body digit d9 has weight 2), and check has weight 1.",
+  "difficulty": "hard",
+  "family": "validator",
+  "tags": [
+    "checksum",
+    "isbn10",
+    "mod11",
+    "check-digit-X",
+    "leading-zeros",
+    "two-arg"
+  ],
+  "visible": [
+    [
+      [
+        30640615,
+        2
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        97522980,
+        10
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        0,
+        0
+      ],
+      [
+        1
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        19852663,
+        6
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        97522980,
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        10
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        11
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        -1,
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        1000000000,
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        1,
+        9
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        123456789,
+        10
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        471958697,
+        9
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        99999999,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        1
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        50,
+        10
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        30640615,
+        3
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        19852663,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        123456789,
+        9
+      ],
+      [
+        0
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/isbn10_valid.json",
+    "source_sha256": "62173339a2388b7dc4580d3bbf07f1dd53921e8fc51f7ae33968138c77bd7a22",
+    "source_ref_python_sha256": "1565b1a57bb90dd7bfc3a57e6ca4eeb6aae99253bfcdfd75cccbf2c5011917ea",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": []
+  }
+}

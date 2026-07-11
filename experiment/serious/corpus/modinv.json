@@ -1,0 +1,211 @@
+{
+  "id": "modinv",
+  "fn": "modinv",
+  "in": 2,
+  "out": 1,
+  "desc": "modinv(a, m): the modular multiplicative inverse of a modulo m, computed via the extended Euclidean algorithm. Return the unique inverse in the range [0, m), i.e. the x with (a*x) mod m == 1 and 0 <= x < m. Return -1 when no inverse exists, which is exactly when gcd(a mod m, m) != 1 (this includes a ≡ 0). CONVENTIONS / edge cases: (1) m <= 1 always returns -1 (there is no nonzero residue to invert; m=1 and m=0 and negative m all give -1). (2) a may be any int64, including negative or >= m; reduce a modulo m first, and because the result must lie in [0,m) you must normalize the Bezout coefficient into that range (add m if negative). If the remainder is negative, add m. (3) Non-coprime inputs (e.g. modinv(6,9), modinv(2,4), modinv(46,128)) return -1. Tested |a| and m values are below ~2e9.",
+  "difficulty": "hard",
+  "family": "number-theory",
+  "tags": [
+    "modular-arithmetic",
+    "extended-euclid",
+    "sign-handling",
+    "edge-cases"
+  ],
+  "visible": [
+    [
+      [
+        2,
+        7
+      ],
+      [
+        4
+      ]
+    ],
+    [
+      [
+        6,
+        9
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        -3,
+        11
+      ],
+      [
+        7
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        3,
+        11
+      ],
+      [
+        4
+      ]
+    ],
+    [
+      [
+        10,
+        17
+      ],
+      [
+        12
+      ]
+    ],
+    [
+      [
+        0,
+        5
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        1,
+        1
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        5,
+        1
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        2,
+        4
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        123456,
+        1000003
+      ],
+      [
+        414894
+      ]
+    ],
+    [
+      [
+        40,
+        1
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        7,
+        0
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        2,
+        -7
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        17,
+        3120
+      ],
+      [
+        2753
+      ]
+    ],
+    [
+      [
+        46,
+        128
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        100,
+        1
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        35,
+        64
+      ],
+      [
+        11
+      ]
+    ],
+    [
+      [
+        48,
+        73
+      ],
+      [
+        35
+      ]
+    ],
+    [
+      [
+        0,
+        0
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        1000000006,
+        1000000007
+      ],
+      [
+        1000000006
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/modinv.json",
+    "source_sha256": "72b0144a1479881284f3d5ec779cc667de08ff9bf96e1631e9a3792945d9a087",
+    "source_ref_python_sha256": "b8d8bd959b2d5f4e57f99634595c58c1d022dafec921a8286021ffe0813a8a47",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": [
+      "tika-remainder",
+      "fixed-width-overflow-comment"
+    ]
+  }
+}

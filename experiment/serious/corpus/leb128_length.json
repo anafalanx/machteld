@@ -1,0 +1,118 @@
+{
+  "id": "leb128_length",
+  "fn": "leb128_length",
+  "in": 1,
+  "out": 1,
+  "desc": "Return the number of bytes in the unsigned LEB128 encoding of n, where n >= 0 (0 <= n < 2^63). LEB128 packs 7 payload bits per byte; the count is ceil(bitlength(n)/7) with a MINIMUM of 1 (so n=0 encodes to 1 byte, not 0). Equivalently: c=1; while n>127: n=n>>7 (logical); c+=1; return c. Watch the boundaries at multiples of 7 bits: leb128_length(127)=1, leb128_length(128)=2, leb128_length(16383)=2, leb128_length(16384)=3. For the max, leb128_length(2^63-1)=9 (63 bits -> ceil(63/7)=9). Output is in [1,9].",
+  "difficulty": "mid",
+  "family": "bit-encoding",
+  "tags": [
+    "leb128",
+    "varint",
+    "length",
+    "shift",
+    "ceil-div",
+    "boundary"
+  ],
+  "visible": [
+    [
+      [
+        0
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        127
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        128
+      ],
+      [
+        2
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        129
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        16383
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        16384
+      ],
+      [
+        3
+      ]
+    ],
+    [
+      [
+        255
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        562949953421311
+      ],
+      [
+        7
+      ]
+    ],
+    [
+      [
+        562949953421312
+      ],
+      [
+        8
+      ]
+    ],
+    [
+      [
+        2097152
+      ],
+      [
+        4
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/leb128_length.json",
+    "source_sha256": "1379729498aceffa270867c950734aea2f397098af9bfcf38bbd6098b10964e2",
+    "source_ref_python_sha256": "8fb73148663bf987e8fe07c11c22d248dcb7929e4b12e70dfd273bd7dd527241",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": []
+  }
+}

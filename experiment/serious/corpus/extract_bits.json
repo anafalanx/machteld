@@ -1,0 +1,162 @@
+{
+  "id": "extract_bits",
+  "fn": "extract_bits",
+  "in": 3,
+  "out": 1,
+  "desc": "Bitfield extraction. Arity 3 ints: (value, lo, width). Interpret value as its raw 64-bit two's-complement pattern. Extract the contiguous bit run [lo, lo+width): the width bits starting at bit position lo (bit 0 = least significant). Constraints honored by inputs: lo in 0..63, width in 0..(64-lo). Return the extracted bits as a signed int64 obtained by reinterpreting the width-bit unsigned chunk as a two's-complement int64 (so for width==64, -1 in -> -1 out; for width<64 the result is the non-negative chunk value). Edge cases that make this hard: width==0 must return 0 regardless of lo; width==64 (only possible when lo==0) returns value unchanged including negative values; the right shift must be LOGICAL (zero-fill), not arithmetic, so the high bits of a negative value do not leak in; extracting bit 63 of INT64_MIN yields 1; extracting bit 0 of -2 yields 0 while bit 1 yields 1.",
+  "difficulty": "hard",
+  "family": "bit-encoding",
+  "tags": [
+    "bitfield",
+    "bitwise",
+    "masking",
+    "twos-complement",
+    "overflow",
+    "sign"
+  ],
+  "visible": [
+    [
+      [
+        3735928559,
+        4,
+        8
+      ],
+      [
+        238
+      ]
+    ],
+    [
+      [
+        -1,
+        0,
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        5,
+        1,
+        2
+      ],
+      [
+        2
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        0,
+        64
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        -1,
+        0,
+        64
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        -1,
+        63,
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        -1,
+        0,
+        63
+      ],
+      [
+        9223372036854775807
+      ]
+    ],
+    [
+      [
+        -2,
+        0,
+        1
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        -2,
+        1,
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        123456789,
+        0,
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        255,
+        0,
+        8
+      ],
+      [
+        255
+      ]
+    ],
+    [
+      [
+        256,
+        8,
+        1
+      ],
+      [
+        1
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/extract_bits.json",
+    "source_sha256": "8f52bd08b390e27c847b989958b3f821e36755392f65500d7ae6c93d8d68af38",
+    "source_ref_python_sha256": "fe013f2696327e14d492b52638cbcc7d14a6ade4ea192586954ff399c88723de",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": [
+      "fixed-width-mask-advice"
+    ]
+  }
+}
