@@ -10,11 +10,13 @@ prospectively frozen experiments, all 102 fresh subjects in each arm produced
 final solutions that passed every hidden case. The confirmatory 30-task panel
 met its preregistered practical-equivalence rule.
 
-The measurable disadvantage is source footprint, not correctness or repair:
-on conventional algorithmic and stateful parsing work, agent-written Tcl was
-typically about 40-65% larger than Python. That is not universal. On the
-machteld-specific structured process wrapper, Tcl was 35% smaller because the
-runtime API removed Python's subprocess glue and exception branch.
+The measurable disadvantage is source footprint, not correctness or repair.
+In the serious panel and stateful `kvstore` anchor, agent-written Tcl medians
+were about 40-65% larger than Python. The strict micro-pilot parser was a larger
+exception (about 186% more bytes and 200% more lines). The ordering is not
+universal: on the machteld-specific structured process wrapper, Tcl was 35%
+smaller because the runtime API removed Python's subprocess glue and exception
+branch.
 
 This supports the central machteld thesis in a bounded but nontrivial form:
 agents supplied with a compact, relevant reference can reliably write core Tcl
@@ -24,7 +26,7 @@ whole machteld runtime.
 
 ## Combined evidence
 
-| Experiment | Scope | Fresh subjects | Final hidden result | First-check hidden solves | Median source observation |
+| Experiment | Scope | Fresh subjects | Final hidden result | Final solves after one official check | Median source observation |
 |---|---|---:|---:|---:|---|
 | Micro-pilot | `gcd`, strict `sum_ints` | 12 | 75/75 per arm | 6/6 per arm | GCD bytes nearly equal; strict parser Tcl 717 B vs Python 251 B |
 | Structured process probe | safe argv/capture/exit/timeout | 6 | 18/18 per arm | 3/3 per arm | Tcl 359 B/12 lines vs Python 556 B/17 lines |
@@ -35,8 +37,11 @@ whole machteld runtime.
 The total is an audit summary, not a post-hoc pooled hypothesis test. It
 contains 102 fresh `fork_turns="none"` subjects per arm and 3,324 successful
 final hidden executions overall. Exactly one subject per arm needed a second
-official visible check, both in the serious panel; every other final solution
-was hidden-correct at the first snapshot.
+official visible check, both in the serious panel; every other subject used one
+official check and finished hidden-correct. The serious and `kvstore` apparatus
+directly hidden-replayed every check-time snapshot. The older pilot and process
+probe preserved the one-check audit trail and final hidden grade, but not a
+separately hidden-graded check-time snapshot.
 
 ## Confirmatory result
 
@@ -87,8 +92,8 @@ because concurrency and scheduling are product-level effects. Accordingly:
 
 - **Correctness:** no observed difference; the serious panel supports practical
   equivalence within its fixed margin.
-- **Repair through provided feedback:** no observed difference; 101/102
-  first-check hidden solves in each arm.
+- **Repair through provided feedback:** no observed difference; 101/102 final
+  hidden solves after one official visible check in each arm.
 - **Code footprint:** Python is usually shorter for conventional parsing and
   algorithms; machteld can be shorter where it provides a higher-level runtime
   primitive.
