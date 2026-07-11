@@ -1,0 +1,730 @@
+{
+  "id": "kvstore",
+  "fn": "run",
+  "in": 1,
+  "out": 1,
+  "desc": "An in-memory integer key-value store with NESTED transactions, driven by a list of command strings. Given one argument cmds (an array of command strings), process each command IN ORDER against an initially-empty store, and return a SINGLE string: the outputs of all output-producing commands joined by a newline (\"\n\"). If no command produces output, return the empty string \"\". Keys are non-empty tokens; values are decimal integers (possibly negative). Each command is a single line split on spaces (runs of spaces and leading/trailing spaces collapse; empty tokens are dropped). The commands are: SET k v -- set key k to integer v (no output); GET k -- output the current value of k as a decimal string, or \"NULL\" if k is not set; UNSET k -- remove key k (no-op if absent; no output); COUNT v -- output (as a decimal string) how many keys are currently set to the integer value v; BEGIN -- open a new transaction block (transactions NEST; no output); ROLLBACK -- undo ALL changes made since the most recent still-open BEGIN and close that one transaction; if there is NO open transaction, output \"NO TRANSACTION\"; COMMIT -- permanently apply ALL currently-open transactions, closing them all (no output; a no-op with no output if no transaction is open). Transaction semantics (the crux): changes (SET/UNSET) made while transactions are open are provisional; ROLLBACK undoes the most recent transaction's changes, restoring each touched key to the value it had when that BEGIN executed -- this includes restoring a key that was UNSET, and removing a key that was newly SET. COMMIT closes all open transactions at once, keeping their changes. GET and COUNT always read the CURRENT (provisional) state. Nested example: SET a 1; BEGIN; SET a 2; BEGIN; SET a 3; ROLLBACK (a back to 2); GET a => \"2\"; ROLLBACK (a back to 1); GET a => \"1\". MALFORMED commands make the WHOLE run FAIL: an unrecognized command word; the wrong number of tokens for a command (e.g. GET with 0 or 2+ args, \"SET a\" missing the value, \"BEGIN x\" with an arg); or a value token (SET's v, COUNT's v) that is not a valid decimal integer. A valid value is a base-10 numeral consisting of an optional +/- sign followed by one or more ASCII digits (0-9) and NOTHING ELSE -- so floats like \"1.5\", hex like \"0x1A\", junk like \"abc\", and any token containing embedded whitespace (e.g. a tab or newline that survived tokenizing, since tokens split only on the space character) are all rejected. Values are bounded to the signed 64-bit range [-2^63, 2^63-1] = [-9223372036854775808, 9223372036854775807]; a numeral whose magnitude lies outside that range (e.g. \"9223372036854775808\" or \"99999999999999999999\") is MALFORMED and fails the run. Command words are case-sensitive (\"set\" is unknown). This is a fallible operation: a malformed command must make the call raise an error. A failure test case expects the call to fail, written as the marker \"FAIL\" in place of the expected-outputs list. Examples: [\"SET a 10\",\"GET a\",\"GET b\"] => \"10\nNULL\"; [\"SET a 1\",\"BEGIN\",\"SET a 2\",\"GET a\",\"ROLLBACK\",\"GET a\"] => \"2\n1\"; [\"SET a 5\",\"COUNT 5\",\"SET b 5\",\"COUNT 5\",\"UNSET a\",\"COUNT 5\"] => \"1\n2\n1\"; the empty command list [] => \"\".",
+  "difficulty": "hard",
+  "family": "stateful-scripting",
+  "tags": [
+    "stateful",
+    "transactions",
+    "parsing",
+    "fallible",
+    "string",
+    "hard"
+  ],
+  "visible": [
+    [
+      [
+        [
+          "SET a 10",
+          "GET a",
+          "GET b"
+        ]
+      ],
+      [
+        "10\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "GET a",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "2\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 5",
+          "COUNT 5",
+          "SET b 5",
+          "COUNT 5",
+          "UNSET a",
+          "COUNT 5"
+        ]
+      ],
+      [
+        "1\n2\n1"
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        [
+          "SET a 10",
+          "GET a",
+          "GET b"
+        ]
+      ],
+      [
+        "10\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET x 0",
+          "GET x"
+        ]
+      ],
+      [
+        "0"
+      ]
+    ],
+    [
+      [
+        [
+          "SET k -7",
+          "GET k"
+        ]
+      ],
+      [
+        "-7"
+      ]
+    ],
+    [
+      [
+        [
+          "GET nope"
+        ]
+      ],
+      [
+        "NULL"
+      ]
+    ],
+    [
+      [
+        [
+          "GET a",
+          "SET a 1",
+          "GET a"
+        ]
+      ],
+      [
+        "NULL\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 3",
+          "UNSET a",
+          "GET a"
+        ]
+      ],
+      [
+        "NULL"
+      ]
+    ],
+    [
+      [
+        [
+          "UNSET ghost",
+          "GET ghost"
+        ]
+      ],
+      [
+        "NULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 5",
+          "COUNT 5",
+          "SET b 5",
+          "COUNT 5",
+          "UNSET a",
+          "COUNT 5"
+        ]
+      ],
+      [
+        "1\n2\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "COUNT 0"
+        ]
+      ],
+      [
+        "0"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 2",
+          "SET b 2",
+          "SET c 3",
+          "COUNT 2",
+          "COUNT 3",
+          "COUNT 9"
+        ]
+      ],
+      [
+        "2\n1\n0"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 4",
+          "SET a 4",
+          "COUNT 4"
+        ]
+      ],
+      [
+        "1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "SET a 2",
+          "COUNT 1",
+          "COUNT 2"
+        ]
+      ],
+      [
+        "0\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "GET a",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "2\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "BEGIN",
+          "SET a 3",
+          "ROLLBACK",
+          "GET a",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "2\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET k 5",
+          "BEGIN",
+          "UNSET k",
+          "GET k",
+          "ROLLBACK",
+          "GET k"
+        ]
+      ],
+      [
+        "NULL\n5"
+      ]
+    ],
+    [
+      [
+        [
+          "BEGIN",
+          "SET fresh 9",
+          "GET fresh",
+          "ROLLBACK",
+          "GET fresh"
+        ]
+      ],
+      [
+        "9\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "SET b 2",
+          "BEGIN",
+          "UNSET a",
+          "SET b 20",
+          "SET c 30",
+          "ROLLBACK",
+          "GET a",
+          "GET b",
+          "GET c"
+        ]
+      ],
+      [
+        "1\n2\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "ROLLBACK"
+        ]
+      ],
+      [
+        "NO TRANSACTION"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "NO TRANSACTION\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "BEGIN",
+          "SET a 1",
+          "ROLLBACK",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "NO TRANSACTION\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "BEGIN",
+          "SET a 3",
+          "COMMIT",
+          "GET a"
+        ]
+      ],
+      [
+        "3"
+      ]
+    ],
+    [
+      [
+        [
+          "BEGIN",
+          "SET a 1",
+          "BEGIN",
+          "SET b 2",
+          "COMMIT",
+          "GET a",
+          "GET b"
+        ]
+      ],
+      [
+        "1\n2"
+      ]
+    ],
+    [
+      [
+        [
+          "COMMIT",
+          "GET a"
+        ]
+      ],
+      [
+        "NULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "COMMIT",
+          "GET a"
+        ]
+      ],
+      [
+        "1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 5",
+          "BEGIN",
+          "SET b 5",
+          "COUNT 5",
+          "ROLLBACK",
+          "COUNT 5"
+        ]
+      ],
+      [
+        "2\n1"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "SET b 2",
+          "BEGIN",
+          "SET a 3",
+          "UNSET b",
+          "ROLLBACK",
+          "GET a",
+          "GET b",
+          "ROLLBACK",
+          "GET a",
+          "GET b"
+        ]
+      ],
+      [
+        "2\n2\n1\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "BEGIN",
+          "SET a 2",
+          "SET a 3",
+          "SET a 4",
+          "ROLLBACK",
+          "GET a"
+        ]
+      ],
+      [
+        "1"
+      ]
+    ],
+    [
+      [
+        [
+          "BEGIN",
+          "BEGIN",
+          "BEGIN",
+          "SET a 7",
+          "COMMIT",
+          "GET a"
+        ]
+      ],
+      [
+        "7"
+      ]
+    ],
+    [
+      [
+        []
+      ],
+      [
+        ""
+      ]
+    ],
+    [
+      [
+        [
+          "SET a 1",
+          "SET b 1",
+          "GET a",
+          "COUNT 1",
+          "GET c",
+          "UNSET b",
+          "COUNT 1",
+          "GET b"
+        ]
+      ],
+      [
+        "1\n2\nNULL\n1\nNULL"
+      ]
+    ],
+    [
+      [
+        [
+          "BEGIN",
+          "SET a 5",
+          "COUNT 5",
+          "ROLLBACK",
+          "COUNT 5"
+        ]
+      ],
+      [
+        "1\n0"
+      ]
+    ],
+    [
+      [
+        [
+          "GET"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "GET a b"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a 1 2"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "BEGIN x"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "ROLLBACK x"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COMMIT x"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "UNSET"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COUNT"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "FOO a"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a 10",
+          "GET a",
+          "BOGUS"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a x"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COUNT abc"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a 1.5"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COUNT 2.0"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET a 0x1F"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "set a 1"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k 9223372036854775807",
+          "GET k"
+        ]
+      ],
+      [
+        "9223372036854775807"
+      ]
+    ],
+    [
+      [
+        [
+          "SET k -9223372036854775808",
+          "GET k"
+        ]
+      ],
+      [
+        "-9223372036854775808"
+      ]
+    ],
+    [
+      [
+        [
+          "SET k 9223372036854775808"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k -9223372036854775809"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k 99999999999999999999"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COUNT 9223372036854775808"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k \t5"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k 5\t"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k \n5"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "COUNT \t5"
+        ]
+      ],
+      "FAIL"
+    ],
+    [
+      [
+        [
+          "SET k +5",
+          "GET k"
+        ]
+      ],
+      [
+        "5"
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_luax",
+    "source_path": "experiment/tasks/kvstore.json",
+    "source_sha256": "8ce81dca7f2b7aff2ad3f0b7d149f7ba381bb2700b8a7a282faa7c8fa6171631",
+    "source_visible_value_sha256": "decd9295a4ad1928e26519891710701111f7135a8380221c4727604adfa3c35a",
+    "source_hidden_value_sha256": "318598ef10bf9ae72e536b5e8d65eba14171a114fbf3cda3b4fa090104316d45",
+    "description_edit": "neutral-error-signalling-wording-only",
+    "case_transform": "none"
+  }
+}
