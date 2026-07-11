@@ -1,0 +1,614 @@
+{
+  "format": "machteld-serious-reference-verification-v1",
+  "python": {
+    "path": "C:\\dev\\.z\\r\\python\\cpython-3.14.6-windows-x86_64-none\\python.exe",
+    "sha256": "478201058e5eeca3725ce3a6cd115413f67eab4827c82409b87f3b85a632d610"
+  },
+  "machteld": {
+    "path": "C:\\dev\\_machteld\\experiment\\run_probe\\runtime\\machteld.exe",
+    "sha256": "9f222f33b257849ad9ae11a9a4b97752cac4e8d5d6b7ccc9820563d31380ce51"
+  },
+  "rows": [
+    {
+      "task": "bracket_balanced",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\bracket_balanced.tcl",
+      "reference_sha256": "8dc81dcd75d6a9197f7b922f21b3bdac6330202ee70bacc94f33578440ff6cb5",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "bracket_balanced",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\bracket_balanced.py",
+      "reference_sha256": "dd4264b47c81e546c22dbc8aed51a0f47707bfe5442dba2fcaa070b39611b810",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "collatz_max",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\collatz_max.tcl",
+      "reference_sha256": "e633e28d9a031b9c7b790510cc9062f7993cb241f6430779667b937f34e1e32c",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "collatz_max",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\collatz_max.py",
+      "reference_sha256": "7898e621982389da7b3c29c345f3e8a4cf93c8e3fcc393eea503dba6bfda2b89",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "crt2",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\crt2.tcl",
+      "reference_sha256": "b5212e2bd776fac40d96ddd9a499732922ca9016439ca79cb853ca34bd895869",
+      "passed": 24,
+      "total": 24,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "crt2",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\crt2.py",
+      "reference_sha256": "b5e2bb25bc930ed2d85072eb218482605a6bd82a25b0bed2e4a4fd0743bd7b07",
+      "passed": 24,
+      "total": 24,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "damm_check",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\damm_check.tcl",
+      "reference_sha256": "35a4c1b5dbd0277abbf8de8f03dfe0b56b0def25035f22beae6aa21450ee2632",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "damm_check",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\damm_check.py",
+      "reference_sha256": "dce541a82412c19ae2229c92c71b437494ddca895bfd39760c2816b12eec72ce",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "damm_valid",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\damm_valid.tcl",
+      "reference_sha256": "66d3de0361f3fd26233ce1318af0e1fee014d00dfaaa9e3b3221ce133d9efa06",
+      "passed": 15,
+      "total": 15,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "damm_valid",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\damm_valid.py",
+      "reference_sha256": "5ccd21bcc220d084aa5886a697d93f507aa69168f2a0d5155ff6200e180ac712",
+      "passed": 15,
+      "total": 15,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "date_valid",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\date_valid.tcl",
+      "reference_sha256": "c193104ffc8c98d5ecb68bb837020c58e15bf3ba3aabb219b9b7801488573b02",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "date_valid",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\date_valid.py",
+      "reference_sha256": "ade44de93b3c568176eca8d9b543a121afef362dced82ac1457b2747d0f2b6d2",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "extract_bits",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\extract_bits.tcl",
+      "reference_sha256": "e3999e84316a9e447c9694b0cf4074257165683bf403ef829566bae72442f24d",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "extract_bits",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\extract_bits.py",
+      "reference_sha256": "942c367972eb9634b3d77ed3be26e77b1d979f10982d48e5f3e8dae0a91d3554",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "fnv1a32",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\fnv1a32.tcl",
+      "reference_sha256": "bd8f687a005722564f5c3f4ad274c6b1182a674159d238e435c401b23668d14f",
+      "passed": 9,
+      "total": 9,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "fnv1a32",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\fnv1a32.py",
+      "reference_sha256": "641ba37c5e06ad723d25e2825995062a3d82331f7583bdc53f83f1960e921ac2",
+      "passed": 9,
+      "total": 9,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "gray_decode",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\gray_decode.tcl",
+      "reference_sha256": "6121480a566db15e9f1b652af7287bfcbd199d957dfca931bb8e56cf2cf38619",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "gray_decode",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\gray_decode.py",
+      "reference_sha256": "ec0ad2a618550d8312e79cfada20356e5d3ee55947a4f8446167eeba968ec37b",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "iban_check",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\iban_check.tcl",
+      "reference_sha256": "8eb59a92365b92b2f7a7d858e62663e4a7f4b231e13ecc2032c7941a208d527c",
+      "passed": 9,
+      "total": 9,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "iban_check",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\iban_check.py",
+      "reference_sha256": "951b52393f45f30fc05ba282b8fbaf58341592385db6e49b96406be2ee093d34",
+      "passed": 9,
+      "total": 9,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "isbn10_valid",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\isbn10_valid.tcl",
+      "reference_sha256": "32a81e66186ce4145fa520355ae5b21bb6a5cd9ad36b22136a5a6cd0a0ca12a6",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "isbn10_valid",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\isbn10_valid.py",
+      "reference_sha256": "8fdaedfa0f0592f520a680b1220b462401b5d1fead01dcd47cd6bc86e6bb2e93",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "isbn13_valid",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\isbn13_valid.tcl",
+      "reference_sha256": "e433495fcddfc53e22735daf22d665f4c51c04ebd2a2a8165d57034215b2dae8",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "isbn13_valid",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\isbn13_valid.py",
+      "reference_sha256": "581139a47b24315bacef4991b54b83eb64c20650b6c3c74c01a49aa669a4c85d",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "jacobi",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\jacobi.tcl",
+      "reference_sha256": "ae110a49180bc7a47c7fc2c65bf28ae74aa037f0118cd61f19cfefa69882e9af",
+      "passed": 20,
+      "total": 20,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "jacobi",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\jacobi.py",
+      "reference_sha256": "ae9c7580739e39ecba29a36841e72e07ed2ae3cd094c4b289e3e5ebae56b10a5",
+      "passed": 20,
+      "total": 20,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "leb128_length",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\leb128_length.tcl",
+      "reference_sha256": "da0ef75c84c0384395b7ce913239cb66987e397a4dd79df99f34680e0d796866",
+      "passed": 11,
+      "total": 11,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "leb128_length",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\leb128_length.py",
+      "reference_sha256": "91f6bae1fed4c216a04dbed9faf6c2445fb17b57be329aac4da3ab61e4548ac2",
+      "passed": 11,
+      "total": 11,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "luhn_valid",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\luhn_valid.tcl",
+      "reference_sha256": "ce5c09f62147dac0a68e39ab748ea8ba99547a930e5ce3804e751a4a97402fc0",
+      "passed": 17,
+      "total": 17,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "luhn_valid",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\luhn_valid.py",
+      "reference_sha256": "6759af12e4e312ddaefc7653279f8000f72b7162918f1a279082980449e1f489",
+      "passed": 17,
+      "total": 17,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "miller_rabin",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\miller_rabin.tcl",
+      "reference_sha256": "9ebc26ea33e5c0dc72abc10e1ced6244c3147e9b20472a9c7124d4aa27fab655",
+      "passed": 37,
+      "total": 37,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "miller_rabin",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\miller_rabin.py",
+      "reference_sha256": "917f2494e1ecdc20fc106dea066c46f780f1263d4ff6233d03687a717101768f",
+      "passed": 37,
+      "total": 37,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "mod97_checkdigits",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\mod97_checkdigits.tcl",
+      "reference_sha256": "bdf3b5cfe7f9df9572c54c7c1d5bef523a5a8c0484b479d8d937d24583c299fa",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "mod97_checkdigits",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\mod97_checkdigits.py",
+      "reference_sha256": "82d514f1160e4cde7f44c3c25a65cd9e9738675523d724f6c178366de475d28b",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "modinv",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\modinv.tcl",
+      "reference_sha256": "e3023cc1c25c8d973fcc8ba4ff3c036bb1793427795604e7e2376779cd4aed2e",
+      "passed": 20,
+      "total": 20,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "modinv",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\modinv.py",
+      "reference_sha256": "78faa8c71a4318721f2fa05d06e2f628894c78338aabeaf96beb44b7a5e72978",
+      "passed": 20,
+      "total": 20,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "multiorder",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\multiorder.tcl",
+      "reference_sha256": "795e23196b8105cadc6b4f7b821328bef346427cfba59e467d7516661c4bb9ff",
+      "passed": 30,
+      "total": 30,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "multiorder",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\multiorder.py",
+      "reference_sha256": "ea0c17987cf845d3d8bae1acc79bffb9eed769f1d7864064089642e010c2c348",
+      "passed": 30,
+      "total": 30,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "popcount",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\popcount.tcl",
+      "reference_sha256": "0ae957f0da7d5051bb9c7a0b22db3f259e08837939f2d39379a9ffec881a10e4",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "popcount",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\popcount.py",
+      "reference_sha256": "42debd17481b7a21abda6209eabd34eee52b583d7fd9588110b30f14763c67b1",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "regmachine",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\regmachine.tcl",
+      "reference_sha256": "be5cb458dd9a778f1a53900f70cac0046148fa9e98a7a6588c5d30c4fa7b7207",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "regmachine",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\regmachine.py",
+      "reference_sha256": "48cb0dcece9f212ddded4176519fd2e885d43f8575050c048e40e3af88a80ba1",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "reverse_bits",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\reverse_bits.tcl",
+      "reference_sha256": "2b4c44828e8a0f48e0f2f24eccf122706d1a42c02c79dc0ca8e0189284ce8268",
+      "passed": 16,
+      "total": 16,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "reverse_bits",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\reverse_bits.py",
+      "reference_sha256": "67306d6d3256b2894eaa67c4f5b8f85726e868b1fdb32e41922cb9ab89e5c9b4",
+      "passed": 16,
+      "total": 16,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "roman_value",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\roman_value.tcl",
+      "reference_sha256": "1bf8d2f9ed558f4bfeb5ed465ae41ad5fe4178e08d896bdc4163bf51adeff7b3",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "roman_value",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\roman_value.py",
+      "reference_sha256": "0eec22e0af37d51fdf1287e52d2353f870da38157e9ad9f22e55b72e34a3acae",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "rpn_eval",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\rpn_eval.tcl",
+      "reference_sha256": "bc1624a6be1d3ed79ef31828fdd214546ca302aad29a53a7ec3cf16323dfa87e",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "rpn_eval",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\rpn_eval.py",
+      "reference_sha256": "dcbbdd5710eec754b9597e2b710e73ced8c4de0a867b8340ba1bd9c78bcc2061",
+      "passed": 19,
+      "total": 19,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "semver_cmp",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\semver_cmp.tcl",
+      "reference_sha256": "7e46ff539ce3c00b72590b79728413349279b324826b5fedd64f18ecc650f9ae",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "semver_cmp",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\semver_cmp.py",
+      "reference_sha256": "6cd98ceaabd2c580295a8366f554d39ba8afdb6688b6f2bfc529f7a9a0bf9d0c",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "sum_of_two_squares",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\sum_of_two_squares.tcl",
+      "reference_sha256": "5e24dded2e78e9fb39a5ab9e95c439cb1792fe7cd754d531071ef11b22be8f5e",
+      "passed": 33,
+      "total": 33,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "sum_of_two_squares",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\sum_of_two_squares.py",
+      "reference_sha256": "5da75bc71daddf3edadc0be3b85faed43cea9829e5d6ffabcf618c970941b3dd",
+      "passed": 33,
+      "total": 33,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "totient",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\totient.tcl",
+      "reference_sha256": "35bdcbdddc920a2e5ec3bb5ebf2716b10eb6b8b33a7bc38a3ae4603bf02c3035",
+      "passed": 27,
+      "total": 27,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "totient",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\totient.py",
+      "reference_sha256": "5064254009cc2886c221523a8c1f1b408f106b46af4bf02f8e09840e6554414c",
+      "passed": 27,
+      "total": 27,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "upca_check",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\upca_check.tcl",
+      "reference_sha256": "4500bd97038a1700b8c5c08e61127e8fd6a59445c7c2e8610f5fff092accf30c",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "upca_check",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\upca_check.py",
+      "reference_sha256": "f48a4ef2c6ef5be5afad33d8c7eee04a89f58287e10e9789dcf5ae0a65b615fe",
+      "passed": 18,
+      "total": 18,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "zigzag_decode",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\zigzag_decode.tcl",
+      "reference_sha256": "1194283bd25fc9e9b84068482b60dccefef4032fd86bbfe2a1d3b12fbc8b133f",
+      "passed": 12,
+      "total": 12,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "zigzag_decode",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\zigzag_decode.py",
+      "reference_sha256": "2f65f8e2974bd82ae57899c8154e46e2022c695547a68c2dbcf45eeafda7e9f8",
+      "passed": 12,
+      "total": 12,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "zigzag_encode",
+      "arm": "machteld",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\machteld\\zigzag_encode.tcl",
+      "reference_sha256": "1ee6b09bde39fe7b48245b5602c67a455f7745f327088daa2f9264a96a4902b9",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    },
+    {
+      "task": "zigzag_encode",
+      "arm": "python",
+      "reference": "C:\\dev\\_machteld\\experiment\\serious\\refs\\python\\zigzag_encode.py",
+      "reference_sha256": "7a3554a094c09cf94a96e0d4c7a9343490596f8f8b3e4c6e61d57b832df29bb9",
+      "passed": 13,
+      "total": 13,
+      "all": true,
+      "failures": []
+    }
+  ],
+  "all": true
+}

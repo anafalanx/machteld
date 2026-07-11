@@ -1,0 +1,133 @@
+{
+  "id": "gray_decode",
+  "fn": "gray_decode",
+  "in": 1,
+  "out": 1,
+  "desc": "Decode a reflected binary Gray code: given g (0 <= g < 2^63), return the n such that gray_encode(n) = n xor (n>>1) = g. The decode is the prefix-xor: n = g xor (g>>1) xor (g>>2) xor ... down to 0. Implement by accumulating: n=g; s=g>>1; while s!=0: n^=s; s>>=1 (all shifts LOGICAL/zero-fill since g>=0). This is a genuine fixed-point loop, NOT a single xor — gray_decode(7)=5 (not 7), gray_decode(8)=15, gray_decode(255)=170. Edge: gray_decode(0)=0, gray_decode(1)=1, gray_decode(2^63-1)=6148914691236517205. Output is in [0, 2^63-1] and is itself non-negative.",
+  "difficulty": "hard",
+  "family": "interpreter",
+  "tags": [
+    "gray-code",
+    "decode",
+    "prefix-xor",
+    "loop",
+    "shift"
+  ],
+  "visible": [
+    [
+      [
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        7
+      ],
+      [
+        5
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        2
+      ],
+      [
+        3
+      ]
+    ],
+    [
+      [
+        3
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        8
+      ],
+      [
+        15
+      ]
+    ],
+    [
+      [
+        255
+      ],
+      [
+        170
+      ]
+    ],
+    [
+      [
+        256
+      ],
+      [
+        511
+      ]
+    ],
+    [
+      [
+        11
+      ],
+      [
+        13
+      ]
+    ],
+    [
+      [
+        1023
+      ],
+      [
+        682
+      ]
+    ],
+    [
+      [
+        4294967295
+      ],
+      [
+        2863311530
+      ]
+    ],
+    [
+      [
+        170
+      ],
+      [
+        204
+      ]
+    ],
+    [
+      [
+        85
+      ],
+      [
+        102
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/gray_decode.json",
+    "source_sha256": "caaf8a9416be5fc2bc1bd06af35062a0224b86c832a3260cf178007e175c683e",
+    "source_ref_python_sha256": "fa5640ce66252a768da018b46d3e4c079593dff0e4831b1077ffb144e97a3368",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": []
+  }
+}

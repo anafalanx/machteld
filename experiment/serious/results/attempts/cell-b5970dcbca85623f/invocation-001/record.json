@@ -1,0 +1,51 @@
+{
+  "attempt": 1,
+  "cell": "cell-b5970dcbca85623f",
+  "snapshot": "solution.tcl",
+  "snapshot_sha256": "4b6bce36499e492b0eb16af3158a270a775868a07d3e3de6710df6917cd6bb46",
+  "snapshot_bytes": 397,
+  "started_unix_ns": 1783765026974623800,
+  "executed": true,
+  "over_limit": false,
+  "summary": {
+    "passed": 3,
+    "total": 3,
+    "all": true,
+    "cases": [
+      {
+        "id": "case-001",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 44,
+        "status": "ok",
+        "got": [
+          1
+        ],
+        "error": null
+      },
+      {
+        "id": "case-002",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 53,
+        "status": "ok",
+        "got": [
+          52
+        ],
+        "error": null
+      },
+      {
+        "id": "case-003",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 47,
+        "status": "ok",
+        "got": [
+          9232
+        ],
+        "error": null
+      }
+    ]
+  },
+  "ended_unix_ns": 1783765027133872100
+}

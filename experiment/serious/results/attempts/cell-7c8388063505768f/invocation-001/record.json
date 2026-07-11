@@ -1,0 +1,51 @@
+{
+  "attempt": 1,
+  "cell": "cell-7c8388063505768f",
+  "snapshot": "solution.py",
+  "snapshot_sha256": "120acfdbe1396a998d67c86d71cd7baf067388bf9aaf3567b07446e34e9e3d9a",
+  "snapshot_bytes": 53,
+  "started_unix_ns": 1783766342411020100,
+  "executed": true,
+  "over_limit": false,
+  "summary": {
+    "passed": 3,
+    "total": 3,
+    "all": true,
+    "cases": [
+      {
+        "id": "case-001",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 318,
+        "status": "ok",
+        "got": [
+          0
+        ],
+        "error": null
+      },
+      {
+        "id": "case-002",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 337,
+        "status": "ok",
+        "got": [
+          -1
+        ],
+        "error": null
+      },
+      {
+        "id": "case-003",
+        "dimension": null,
+        "passed": true,
+        "elapsed_ms": 403,
+        "status": "ok",
+        "got": [
+          1
+        ],
+        "error": null
+      }
+    ]
+  },
+  "ended_unix_ns": 1783766343488247900
+}

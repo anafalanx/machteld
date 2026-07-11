@@ -1,0 +1,183 @@
+{
+  "id": "collatz_max",
+  "fn": "collatz_max",
+  "in": 1,
+  "out": 1,
+  "desc": "Maximum value reached during the Collatz trajectory of n. Starting from n, repeatedly apply the Collatz step until you reach 1: if the current value is even, divide by 2; if odd, compute 3*value + 1. Return the LARGEST value seen anywhere in the trajectory, INCLUDING the starting value n itself (so for n already a power-relevant small value the answer may be n). Conventions/edge cases: (1) the maximum includes the start, so collatz_max(1) = 1 and collatz_max(2) = 2 (the start is the max, never less); (2) odd n produces 3n+1 which can briefly exceed n, and these peaks are what you track (e.g. n=3 -> 3,10,5,16,8,4,2,1 -> max 16; n=7 -> max 52); (3) n <= 0 is invalid -> return 0 (do not attempt the iteration); (4) the trajectory always terminates at 1 for the tested inputs. The tested positive inputs are at most 1,000,000; use the exact Collatz recurrence. Inputs: any int64 (negatives/zero return 0); positive inputs up to 1e6 in tests. Output is the int64 max value reached.",
+  "difficulty": "hard",
+  "family": "interpreter",
+  "tags": [
+    "state-machine",
+    "loops",
+    "overflow-aware",
+    "edge-cases",
+    "number-theory"
+  ],
+  "visible": [
+    [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        7
+      ],
+      [
+        52
+      ]
+    ],
+    [
+      [
+        27
+      ],
+      [
+        9232
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        2
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        3
+      ],
+      [
+        16
+      ]
+    ],
+    [
+      [
+        4
+      ],
+      [
+        4
+      ]
+    ],
+    [
+      [
+        0
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        -5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        6
+      ],
+      [
+        16
+      ]
+    ],
+    [
+      [
+        7
+      ],
+      [
+        52
+      ]
+    ],
+    [
+      [
+        27
+      ],
+      [
+        9232
+      ]
+    ],
+    [
+      [
+        97
+      ],
+      [
+        9232
+      ]
+    ],
+    [
+      [
+        703
+      ],
+      [
+        250504
+      ]
+    ],
+    [
+      [
+        871
+      ],
+      [
+        190996
+      ]
+    ],
+    [
+      [
+        6171
+      ],
+      [
+        975400
+      ]
+    ],
+    [
+      [
+        77031
+      ],
+      [
+        21933016
+      ]
+    ],
+    [
+      [
+        9
+      ],
+      [
+        52
+      ]
+    ],
+    [
+      [
+        1000000
+      ],
+      [
+        1000000
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/collatz_max.json",
+    "source_sha256": "a34c7444042d7e7d3e6947d8a2d2cfe96e07380bbb54b05d91495a8038e0ec6c",
+    "source_ref_python_sha256": "11629fd03c2dcf54844f6291b2bd5e94fbb8750477eac9e41b890c2bfa9e9959",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": [
+      "fixed-width-overflow-advice"
+    ]
+  }
+}

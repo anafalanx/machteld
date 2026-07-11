@@ -1,0 +1,176 @@
+{
+  "id": "reverse_bits",
+  "fn": "reverse_bits",
+  "in": 2,
+  "out": 1,
+  "desc": "Given (n, w), reverse the low w bits of n and return the result as a non-negative integer. w is in [1,63]. Only the low w bits of n participate: bit i (for i in [0,w-1]) of n becomes bit (w-1-i) of the result; all bits of n at position >= w are IGNORED (not just zeroed afterward — they must never leak into the answer). n may be negative; use its low w two's-complement bits (extract each bit with a logical right shift then mask with 1). Examples: reverse_bits(178,8): 178=0b10110010 reverses to 0b01001101=77. reverse_bits(1,8)=128 (bit0 -> bit7). reverse_bits(1,1)=1. reverse_bits(-1,8)=255 (low 8 bits all 1). reverse_bits(1,63)=2^62. Output is in [0, 2^w - 1].",
+  "difficulty": "hard",
+  "family": "bit-encoding",
+  "tags": [
+    "bits",
+    "reverse",
+    "width",
+    "mask",
+    "negative",
+    "off-by-one"
+  ],
+  "visible": [
+    [
+      [
+        178,
+        8
+      ],
+      [
+        77
+      ]
+    ],
+    [
+      [
+        1,
+        8
+      ],
+      [
+        128
+      ]
+    ],
+    [
+      [
+        1,
+        1
+      ],
+      [
+        1
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        0,
+        8
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        255,
+        8
+      ],
+      [
+        255
+      ]
+    ],
+    [
+      [
+        0,
+        1
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        1,
+        63
+      ],
+      [
+        4611686018427387904
+      ]
+    ],
+    [
+      [
+        11,
+        4
+      ],
+      [
+        13
+      ]
+    ],
+    [
+      [
+        240,
+        8
+      ],
+      [
+        15
+      ]
+    ],
+    [
+      [
+        255,
+        4
+      ],
+      [
+        15
+      ]
+    ],
+    [
+      [
+        170,
+        8
+      ],
+      [
+        85
+      ]
+    ],
+    [
+      [
+        1,
+        32
+      ],
+      [
+        2147483648
+      ]
+    ],
+    [
+      [
+        2147483648,
+        32
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        4294967295,
+        32
+      ],
+      [
+        4294967295
+      ]
+    ],
+    [
+      [
+        -1,
+        8
+      ],
+      [
+        255
+      ]
+    ],
+    [
+      [
+        -1,
+        63
+      ],
+      [
+        9223372036854775807
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/reverse_bits.json",
+    "source_sha256": "66038c25eeeae3588ae2e03daa10550b5f5ee40724c0a10ee574cd71123f3f6b",
+    "source_ref_python_sha256": "5aaa0b171ecd4cbd5bc17db6e7a8d1286954e90f70455761d69a2df9f60efa15",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": [
+      "tika-shift-name"
+    ]
+  }
+}

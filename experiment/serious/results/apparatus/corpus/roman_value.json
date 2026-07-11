@@ -1,0 +1,182 @@
+{
+  "id": "roman_value",
+  "fn": "roman_value",
+  "in": 1,
+  "out": 1,
+  "desc": "Roman-numeral value with strict validity. Arity 1 int: n encodes a roman numeral as its base-10 digits, most-significant digit = leftmost symbol, where each digit is a symbol code: 1=I(1), 2=V(5), 3=X(10), 4=L(50), 5=C(100), 6=D(500), 7=M(1000). Example: XIV = X,I,V = codes 3,1,2 => n=312. Return the integer value if n is a WELL-FORMED standard roman numeral in 1..3999, else return -1. n<=0 returns -1; any digit 0 or 8 or 9 (not a valid symbol code) makes it invalid (-1). Validity is strict canonical subtractive form: compute the value by the standard right-to-left rule (a symbol with value less than the running maximum seen to its right is subtracted, otherwise added and becomes the new max), then accept ONLY if the canonical roman representation of that value re-encodes to exactly the same code sequence n. This rejects non-canonical forms like IIII (1111->-1), VV (22->-1), XM (37->-1), IL (14->-1), MMMM (7777->-1) and forms outside 1..3999, while accepting IV(12->4), IX(13->9), XIV(312->14), MCMXCIV(7573512->1994), MMMCMXCIX(777573513->3999), XL(34->40), XCIX(3513->99), CD(56->400). The canonical-roundtrip is the crux: subtractive parse value alone is not enough - you must regenerate the canonical packed code sequence (greedy over M,CM,D,CD,C,XC,L,XL,X,IX,V,IV,I, building pack = pack*10 + each emitted code) and compare it to n.",
+  "difficulty": "very-hard",
+  "family": "validator",
+  "tags": [
+    "roman-numerals",
+    "validation",
+    "canonical-form",
+    "subtractive",
+    "digit-encoding",
+    "grammar"
+  ],
+  "visible": [
+    [
+      [
+        312
+      ],
+      [
+        14
+      ]
+    ],
+    [
+      [
+        7573512
+      ],
+      [
+        1994
+      ]
+    ],
+    [
+      [
+        14
+      ],
+      [
+        -1
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        12
+      ],
+      [
+        4
+      ]
+    ],
+    [
+      [
+        13
+      ],
+      [
+        9
+      ]
+    ],
+    [
+      [
+        312
+      ],
+      [
+        14
+      ]
+    ],
+    [
+      [
+        777573513
+      ],
+      [
+        3999
+      ]
+    ],
+    [
+      [
+        111
+      ],
+      [
+        3
+      ]
+    ],
+    [
+      [
+        34
+      ],
+      [
+        40
+      ]
+    ],
+    [
+      [
+        14
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        1111
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        22
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        7777
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        0
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        -1
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        313
+      ],
+      [
+        19
+      ]
+    ],
+    [
+      [
+        56
+      ],
+      [
+        400
+      ]
+    ],
+    [
+      [
+        8
+      ],
+      [
+        -1
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/roman_value.json",
+    "source_sha256": "fb389e0af672f1562b09e15c4f14b1386836275d50a923c26f3ceab78e3806c1",
+    "source_ref_python_sha256": "4f3f7b96b7def3b7b774533b745effe1fc10378871a9de2a8d4de57ab8cbe69d",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": []
+  }
+}

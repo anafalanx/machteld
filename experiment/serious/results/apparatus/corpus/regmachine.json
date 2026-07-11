@@ -1,0 +1,203 @@
+{
+  "id": "regmachine",
+  "fn": "regmachine",
+  "in": 2,
+  "out": 1,
+  "desc": "Decode and run a packed tiny register machine. Args: prog (a program packed as 4-bit instructions, read LSB-nibble first) and k (a step budget). The machine has a single accumulator acc that starts at 0 and a program counter pc that starts at 0 (counting in nibbles). There are 16 nibble slots (so pc ranges 0..15). Execute up to k steps: each step reads the opcode = (prog >> (4*pc)) & 0xF, executes it, and (unless it was a conditional skip) advances pc by 1. Halt when k steps have been taken OR pc reaches 16 OR a HALT opcode is hit; then return acc. Opcodes: 0=HALT (stop immediately, return current acc), 1=acc+1, 2=acc-1, 3=acc*2, 4=acc=-acc, 5=acc=acc/2 (integer division truncating TOWARD ZERO, C-style: -3/2 = -1, not -2), 6=acc+3, 7=acc-5, 8=SKIPZ (if acc==0, advance pc by 2 -- skipping the next instruction -- otherwise pc+1; either way it costs one step), 9=SKIPNZ (if acc!=0, advance pc by 2, else pc+1), 10=acc*3, 11=acc=acc mod 2 (C-style remainder with the SIGN OF acc: -3 mod 2 = -1, not 1), 12=acc=abs(acc), 13=acc=0, 14=acc+2, 15=acc-2. Tricky points: (1) a SKIP at the last reachable nibble simply runs out of program (pc>=16) and halts; (2) HALT does NOT consume a normal step-advance, it just stops; (3) k < 0 is invalid -> return 0; (4) k can be larger than 16 (the pc>=16 bound stops execution); (5) opcodes 5 and 11 use the specified truncation and signed-remainder semantics for negative values. Test inputs keep acc within int64 throughout. Output is the final accumulator.",
+  "difficulty": "very-hard",
+  "family": "interpreter",
+  "tags": [
+    "interpreter",
+    "decode",
+    "register-machine",
+    "c-division",
+    "control-flow",
+    "edge-cases"
+  ],
+  "visible": [
+    [
+      [
+        801,
+        3
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        136,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        45602,
+        4
+      ],
+      [
+        -1
+      ]
+    ]
+  ],
+  "hidden": [
+    [
+      [
+        0,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        1,
+        5
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        801,
+        3
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        0,
+        -1
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        136,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        153,
+        5
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        24,
+        3
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        40,
+        3
+      ],
+      [
+        0
+      ]
+    ],
+    [
+      [
+        45602,
+        4
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        21026,
+        4
+      ],
+      [
+        -1
+      ]
+    ],
+    [
+      [
+        49698,
+        4
+      ],
+      [
+        3
+      ]
+    ],
+    [
+      [
+        66,
+        2
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        280,
+        5
+      ],
+      [
+        1
+      ]
+    ],
+    [
+      [
+        4497,
+        5
+      ],
+      [
+        2
+      ]
+    ],
+    [
+      [
+        8747,
+        4
+      ],
+      [
+        -3
+      ]
+    ],
+    [
+      [
+        6,
+        1
+      ],
+      [
+        3
+      ]
+    ]
+  ],
+  "provenance": {
+    "source_repository": "_tika",
+    "source_path": "experiment/tasks_serious/regmachine.json",
+    "source_sha256": "9cb5b155a868879bb04a7a487ad8f153f2e206e371379313f9946e6f0dc66471",
+    "source_ref_python_sha256": "dcf043926e5ab7c83dee2b2b3e8f17d6256ba3fe0e8a213e4ead68a038c24aeb",
+    "import_script": "experiment/serious/import_corpus.py",
+    "transformation": "word renamed to fn; description-only language neutralization; cases unchanged",
+    "description_edits": [
+      "language-division-comparison"
+    ]
+  }
+}
