@@ -1,0 +1,36 @@
+{
+  "python": {
+    "frozen_executable": "runs/_frozen/python/python.exe",
+    "frozen_root": "runs/_frozen/python",
+    "sha256": "478201058e5eeca3725ce3a6cd115413f67eab4827c82409b87f3b85a632d610",
+    "version": "3.14.6 (main, Jun 11 2026, 04:05:02) [MSC v.1944 64 bit (AMD64)]",
+    "semantic_tree": {
+      "sha256": "4f834ca1eb4f7e0b631a7a041201467a13ee2975ece72f1359c00712cd94c1ff",
+      "files": 752,
+      "bytes": 39952749,
+      "root": "C:\\dev\\_machteld\\experiment\\kvstore_probe\\runs\\_frozen\\python",
+      "policy": "top runtime files + DLLs + Lib; excludes __pycache__, site-packages, pyc/pyo"
+    },
+    "complete_tree": {
+      "sha256": "4f834ca1eb4f7e0b631a7a041201467a13ee2975ece72f1359c00712cd94c1ff",
+      "files": 752,
+      "bytes": 39952749,
+      "root": "C:\\dev\\_machteld\\experiment\\kvstore_probe\\runs\\_frozen\\python",
+      "policy": "all regular files recursively; no exclusions"
+    },
+    "flags": [
+      "-I",
+      "-S",
+      "-B"
+    ]
+  },
+  "machteld": {
+    "frozen_executable": "runs/_frozen/machteld.exe",
+    "sha256": "9f222f33b257849ad9ae11a9a4b97752cac4e8d5d6b7ccc9820563d31380ce51",
+    "version": "0.2.1"
+  },
+  "provenance": {
+    "source_experiment": "serious/results",
+    "source_lock_sha256": "cc4075768b16afe03ba9aed9c97550d988c9bb2d7c52a9f40d2d9002a567858f"
+  }
+}

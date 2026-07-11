@@ -1,0 +1,3572 @@
+[
+  {
+    "cell": "cell-23b6dab7f27d75e1",
+    "arm": "python",
+    "trial": 3,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "3caa013564073f88cd00498ae620ca140855b5d33eda46055a2d97c1df9cd36f",
+    "snapshot_bytes": 3305,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 483,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 305,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 336,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 385,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 341,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 335,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 343,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 386,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 411,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 424,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 460,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 385,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 401,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 321,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 317,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 339,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 343,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 354,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 375,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 476,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 362,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 318,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 326,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 343,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 377,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 338,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 346,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 437,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 379,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 441,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 402,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 405,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 408,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 394,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 346,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 73, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 395,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 73, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 421,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 65, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 325,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 65, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 306,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 92, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 318,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 97, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 356,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 107, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 334,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 79, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 372,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 86, in run\n    raise ValueError(\"wrong number of arguments\")\nValueError: wrong number of arguments\n"
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 344,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 111, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 308,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 111, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 331,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 325,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 87, in run\n    value = _parse_value(tokens[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 350,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 401,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 87, in run\n    value = _parse_value(tokens[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 319,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 314,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 111, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 375,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 315,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 333,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 24, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 413,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 24, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 398,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 24, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 354,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 87, in run\n    value = _parse_value(tokens[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 24, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 269,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 343,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 384,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 67, in run\n    value = _parse_value(tokens[2])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 324,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 87, in run\n    value = _parse_value(tokens[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-23b6dab7f27d75e1\\invocation-001\\solution.py\", line 11, in _parse_value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 355,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "cell": "cell-8578d6769c3f4491",
+    "arm": "python",
+    "trial": 1,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "3c0912aab4f5c14e7442f6e08227172d5743ac983c2163c8b0c991b5cae50765",
+    "snapshot_bytes": 2556,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 430,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 453,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 457,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 354,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 316,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 322,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 338,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 343,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 406,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 340,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 287,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 317,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 350,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 383,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 341,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 408,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 302,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 267,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 345,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 338,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 338,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 308,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 308,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 380,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 323,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 334,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 372,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 355,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 335,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 325,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 318,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 369,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 421,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 331,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 285,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 52, in run\n    raise ValueError(\"GET expects one argument\")\nValueError: GET expects one argument\n"
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 325,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 52, in run\n    raise ValueError(\"GET expects one argument\")\nValueError: GET expects one argument\n"
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 322,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 48, in run\n    raise ValueError(\"SET expects two arguments\")\nValueError: SET expects two arguments\n"
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 365,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 48, in run\n    raise ValueError(\"SET expects two arguments\")\nValueError: SET expects two arguments\n"
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 482,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 64, in run\n    raise ValueError(\"BEGIN expects no arguments\")\nValueError: BEGIN expects no arguments\n"
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 380,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 68, in run\n    raise ValueError(\"ROLLBACK expects no arguments\")\nValueError: ROLLBACK expects no arguments\n"
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 413,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 75, in run\n    raise ValueError(\"COMMIT expects no arguments\")\nValueError: COMMIT expects no arguments\n"
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 334,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 56, in run\n    raise ValueError(\"UNSET expects one argument\")\nValueError: UNSET expects one argument\n"
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 313,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 60, in run\n    raise ValueError(\"COUNT expects one argument\")\nValueError: COUNT expects one argument\n"
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 333,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 78, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 408,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 78, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 302,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 319,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 61, in run\n    output.append(str(counts.get(_value(fields[1]), 0)))\n                                 ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 401,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 288,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 61, in run\n    output.append(str(counts.get(_value(fields[1]), 0)))\n                                 ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 331,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 353,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 78, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 338,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 394,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 328,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 14, in _value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 348,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 14, in _value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 351,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 14, in _value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 363,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 61, in run\n    output.append(str(counts.get(_value(fields[1]), 0)))\n                                 ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 14, in _value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 356,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 304,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 344,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 49, in run\n    set_key(fields[1], _value(fields[2]))\n                       ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 332,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 61, in run\n    output.append(str(counts.get(_value(fields[1]), 0)))\n                                 ~~~~~~^^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-8578d6769c3f4491\\invocation-001\\solution.py\", line 11, in _value\n    raise ValueError(\"invalid integer\")\nValueError: invalid integer\n"
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 348,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "cell": "cell-fccb7384fbd917c2",
+    "arm": "machteld",
+    "trial": 2,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "18713c9b78226a04562f4ca0bb88174289eeadad4baeaf1a37a0688b3a7b334e",
+    "snapshot_bytes": 4810,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 59,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 69,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 60,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 60,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 59,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 43,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 42,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 41,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 43,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 31)\n    invoked from within\n\"::run GET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 31)\n    invoked from within\n\"::run {{GET a b}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a 1 2}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "error",
+          "got": null,
+          "error": "malformed BEGIN\n    while executing\n\"error \"malformed BEGIN\"\"\n    (procedure \"::run\" line 65)\n    invoked from within\n\"::run {{BEGIN x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "malformed ROLLBACK\n    while executing\n\"error \"malformed ROLLBACK\"\"\n    (procedure \"::run\" line 71)\n    invoked from within\n\"::run {{ROLLBACK x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "malformed COMMIT\n    while executing\n\"error \"malformed COMMIT\"\"\n    (procedure \"::run\" line 89)\n    invoked from within\n\"::run {{COMMIT x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "malformed UNSET\n    while executing\n\"error \"malformed UNSET\"\"\n    (procedure \"::run\" line 42)\n    invoked from within\n\"::run UNSET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed COUNT\n    while executing\n\"error \"malformed COUNT\"\"\n    (procedure \"::run\" line 52)\n    invoked from within\n\"::run COUNT\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "unrecognized command\n    while executing\n\"error \"unrecognized command\"\"\n    (procedure \"::run\" line 94)\n    invoked from within\n\"::run {{FOO a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "unrecognized command\n    while executing\n\"error \"unrecognized command\"\"\n    (procedure \"::run\" line 94)\n    invoked from within\n\"::run {{SET a 10} {GET a} BOGUS}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 3)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 3)\n    invoked from within\n\"kvstore_integer [lindex $fields 1]\"\n    (procedure \"::run\" line 54)\n    invoked from within\n\"::run {{COUNT abc}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 8)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a 1.5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 8)\n    invoked from within\n\"kvstore_integer [lindex $fields 1]\"\n    (procedure \"::run\" line 54)\n    invoked from within\n\"::run {{COUNT 2.0}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 8)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a 0x1F}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "unrecognized command\n    while executing\n\"error \"unrecognized command\"\"\n    (procedure \"::run\" line 94)\n    invoked from within\n\"::run {{set a 1}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstore_integer\" line 32)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstore_integer\" line 32)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k -9223372036854775809}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstore_integer\" line 32)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 99999999999999999999}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstore_integer\" line 32)\n    invoked from within\n\"kvstore_integer [lindex $fields 1]\"\n    (procedure \"::run\" line 54)\n    invoked from within\n\"::run {{COUNT 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 3)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 8)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 5\t}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 3)\n    invoked from within\n\"kvstore_integer [lindex $fields 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k \n5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"kvstore_integer\" line 3)\n    invoked from within\n\"kvstore_integer [lindex $fields 1]\"\n    (procedure \"::run\" line 54)\n    invoked from within\n\"::run {{COUNT \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "cell": "cell-1eef67ab9408948b",
+    "arm": "machteld",
+    "trial": 3,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "6630ca9444c5b0a8b15887883f641a02ff32ecf86ed6b8e219ed64efb8c79d01",
+    "snapshot_bytes": 6886,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 42,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 42,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 59,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 43,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 79)\n    invoked from within\n\"::run GET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 79)\n    invoked from within\n\"::run {{GET a b}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a 1 2}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed BEGIN\n    while executing\n\"error \"malformed BEGIN\"\"\n    (procedure \"::run\" line 161)\n    invoked from within\n\"::run {{BEGIN x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "error",
+          "got": null,
+          "error": "malformed ROLLBACK\n    while executing\n\"error \"malformed ROLLBACK\"\"\n    (procedure \"::run\" line 167)\n    invoked from within\n\"::run {{ROLLBACK x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "malformed COMMIT\n    while executing\n\"error \"malformed COMMIT\"\"\n    (procedure \"::run\" line 185)\n    invoked from within\n\"::run {{COMMIT x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "error",
+          "got": null,
+          "error": "malformed UNSET\n    while executing\n\"error \"malformed UNSET\"\"\n    (procedure \"::run\" line 90)\n    invoked from within\n\"::run UNSET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "error",
+          "got": null,
+          "error": "malformed COUNT\n    while executing\n\"error \"malformed COUNT\"\"\n    (procedure \"::run\" line 110)\n    invoked from within\n\"::run COUNT\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 190)\n    invoked from within\n\"::run {{FOO a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 190)\n    invoked from within\n\"::run {{SET a 10} {GET a} BOGUS}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET a x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 122)\n    invoked from within\n\"::run {{COUNT abc}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET a 1.5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 122)\n    invoked from within\n\"::run {{COUNT 2.0}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET a 0x1F}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 190)\n    invoked from within\n\"::run {{set a 1}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 60,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"::run\" line 59)\n    invoked from within\n\"::run {{SET k 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"::run\" line 54)\n    invoked from within\n\"::run {{SET k -9223372036854775809}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"::run\" line 59)\n    invoked from within\n\"::run {{SET k 99999999999999999999}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"::run\" line 146)\n    invoked from within\n\"::run {{COUNT 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET k \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET k 5\t}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 35)\n    invoked from within\n\"::run {{SET k \n5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 41,
+          "status": "error",
+          "got": null,
+          "error": "malformed integer\n    while executing\n\"error \"malformed integer\"\"\n    (procedure \"::run\" line 122)\n    invoked from within\n\"::run {{COUNT \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "cell": "cell-bf004c39426d018e",
+    "arm": "machteld",
+    "trial": 1,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "f8faeda0ca95fb523a4e51d5066432bb539e0a9b0b4afb33fee0bcd5cb3d625e",
+    "snapshot_bytes": 4202,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 40,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 40,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 37,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 45,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 44,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 52,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 30)\n    invoked from within\n\"::run GET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed GET\n    while executing\n\"error \"malformed GET\"\"\n    (procedure \"::run\" line 30)\n    invoked from within\n\"::run {{GET a b}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "error",
+          "got": null,
+          "error": "malformed SET\n    while executing\n\"error \"malformed SET\"\"\n    (procedure \"::run\" line 22)\n    invoked from within\n\"::run {{SET a 1 2}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "malformed BEGIN\n    while executing\n\"error \"malformed BEGIN\"\"\n    (procedure \"::run\" line 63)\n    invoked from within\n\"::run {{BEGIN x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "error",
+          "got": null,
+          "error": "malformed ROLLBACK\n    while executing\n\"error \"malformed ROLLBACK\"\"\n    (procedure \"::run\" line 69)\n    invoked from within\n\"::run {{ROLLBACK x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 47,
+          "status": "error",
+          "got": null,
+          "error": "malformed COMMIT\n    while executing\n\"error \"malformed COMMIT\"\"\n    (procedure \"::run\" line 80)\n    invoked from within\n\"::run {{COMMIT x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 53,
+          "status": "error",
+          "got": null,
+          "error": "malformed UNSET\n    while executing\n\"error \"malformed UNSET\"\"\n    (procedure \"::run\" line 41)\n    invoked from within\n\"::run UNSET\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "malformed COUNT\n    while executing\n\"error \"malformed COUNT\"\"\n    (procedure \"::run\" line 50)\n    invoked from within\n\"::run COUNT\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 85)\n    invoked from within\n\"::run {{FOO a}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 85)\n    invoked from within\n\"::run {{SET a 10} {GET a} BOGUS}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 49,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a x}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 1]\"\n    (procedure \"::run\" line 52)\n    invoked from within\n\"::run {{COUNT abc}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a 1.5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 1]\"\n    (procedure \"::run\" line 52)\n    invoked from within\n\"::run {{COUNT 2.0}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET a 0x1F}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 46,
+          "status": "error",
+          "got": null,
+          "error": "unknown command\n    while executing\n\"error \"unknown command\"\"\n    (procedure \"::run\" line 85)\n    invoked from within\n\"::run {{set a 1}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 55,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 54,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 59,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 49)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 49)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k -9223372036854775809}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 58,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 40)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 99999999999999999999}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 56,
+          "status": "error",
+          "got": null,
+          "error": "integer out of range\n    while executing\n\"error \"integer out of range\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 49)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 1]\"\n    (procedure \"::run\" line 52)\n    invoked from within\n\"::run {{COUNT 9223372036854775808}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 57,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 48,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k 5\t}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 50,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 2]\"\n    (procedure \"::run\" line 25)\n    invoked from within\n\"::run {{SET k \n5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 51,
+          "status": "error",
+          "got": null,
+          "error": "invalid integer\n    while executing\n\"error \"invalid integer\"\"\n    (procedure \"kvstoreCanonicalInteger\" line 21)\n    invoked from within\n\"kvstoreCanonicalInteger [lindex $tokens 1]\"\n    (procedure \"::run\" line 52)\n    invoked from within\n\"::run {{COUNT \t5}}\"\n    (\"uplevel\" body line 1)\n    invoked from within\n\"uplevel #0 [list ::run {*}$::__mkv::args]\""
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 59,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  },
+  {
+    "cell": "cell-faabd16dd6b240a0",
+    "arm": "python",
+    "trial": 2,
+    "attempt": 1,
+    "executed": true,
+    "over_limit": false,
+    "infrastructure_error": null,
+    "snapshot_sha256": "3d342969fed2792d3f5745e8e770802185fa74eb657c36159f8ad51b19d0aa16",
+    "snapshot_bytes": 3301,
+    "visible": {
+      "passed": 3,
+      "total": 3,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 395,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 326,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 317,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        }
+      ]
+    },
+    "hidden": {
+      "passed": 59,
+      "total": 59,
+      "all": true,
+      "cases": [
+        {
+          "id": "case-001",
+          "passed": true,
+          "elapsed_ms": 280,
+          "status": "ok",
+          "got": [
+            "10\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-002",
+          "passed": true,
+          "elapsed_ms": 326,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-003",
+          "passed": true,
+          "elapsed_ms": 356,
+          "status": "ok",
+          "got": [
+            "-7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-004",
+          "passed": true,
+          "elapsed_ms": 374,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-005",
+          "passed": true,
+          "elapsed_ms": 341,
+          "status": "ok",
+          "got": [
+            "NULL\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-006",
+          "passed": true,
+          "elapsed_ms": 334,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-007",
+          "passed": true,
+          "elapsed_ms": 371,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-008",
+          "passed": true,
+          "elapsed_ms": 339,
+          "status": "ok",
+          "got": [
+            "1\n2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-009",
+          "passed": true,
+          "elapsed_ms": 324,
+          "status": "ok",
+          "got": [
+            "0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-010",
+          "passed": true,
+          "elapsed_ms": 361,
+          "status": "ok",
+          "got": [
+            "2\n1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-011",
+          "passed": true,
+          "elapsed_ms": 354,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-012",
+          "passed": true,
+          "elapsed_ms": 385,
+          "status": "ok",
+          "got": [
+            "0\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-013",
+          "passed": true,
+          "elapsed_ms": 334,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-014",
+          "passed": true,
+          "elapsed_ms": 330,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-015",
+          "passed": true,
+          "elapsed_ms": 344,
+          "status": "ok",
+          "got": [
+            "NULL\n5"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-016",
+          "passed": true,
+          "elapsed_ms": 345,
+          "status": "ok",
+          "got": [
+            "9\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-017",
+          "passed": true,
+          "elapsed_ms": 347,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-018",
+          "passed": true,
+          "elapsed_ms": 298,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-019",
+          "passed": true,
+          "elapsed_ms": 318,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-020",
+          "passed": true,
+          "elapsed_ms": 345,
+          "status": "ok",
+          "got": [
+            "NO TRANSACTION\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-021",
+          "passed": true,
+          "elapsed_ms": 400,
+          "status": "ok",
+          "got": [
+            "3"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-022",
+          "passed": true,
+          "elapsed_ms": 470,
+          "status": "ok",
+          "got": [
+            "1\n2"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-023",
+          "passed": true,
+          "elapsed_ms": 383,
+          "status": "ok",
+          "got": [
+            "NULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-024",
+          "passed": true,
+          "elapsed_ms": 301,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-025",
+          "passed": true,
+          "elapsed_ms": 272,
+          "status": "ok",
+          "got": [
+            "2\n1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-026",
+          "passed": true,
+          "elapsed_ms": 292,
+          "status": "ok",
+          "got": [
+            "2\n2\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-027",
+          "passed": true,
+          "elapsed_ms": 327,
+          "status": "ok",
+          "got": [
+            "1"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-028",
+          "passed": true,
+          "elapsed_ms": 383,
+          "status": "ok",
+          "got": [
+            "7"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-029",
+          "passed": true,
+          "elapsed_ms": 350,
+          "status": "ok",
+          "got": [
+            ""
+          ],
+          "error": null
+        },
+        {
+          "id": "case-030",
+          "passed": true,
+          "elapsed_ms": 323,
+          "status": "ok",
+          "got": [
+            "1\n2\nNULL\n1\nNULL"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-031",
+          "passed": true,
+          "elapsed_ms": 346,
+          "status": "ok",
+          "got": [
+            "1\n0"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-032",
+          "passed": true,
+          "elapsed_ms": 365,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 70, in run\n    raise ValueError(\"malformed GET\")\nValueError: malformed GET\n"
+        },
+        {
+          "id": "case-033",
+          "passed": true,
+          "elapsed_ms": 332,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 70, in run\n    raise ValueError(\"malformed GET\")\nValueError: malformed GET\n"
+        },
+        {
+          "id": "case-034",
+          "passed": true,
+          "elapsed_ms": 376,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 65, in run\n    raise ValueError(\"malformed SET\")\nValueError: malformed SET\n"
+        },
+        {
+          "id": "case-035",
+          "passed": true,
+          "elapsed_ms": 331,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 65, in run\n    raise ValueError(\"malformed SET\")\nValueError: malformed SET\n"
+        },
+        {
+          "id": "case-036",
+          "passed": true,
+          "elapsed_ms": 352,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 89, in run\n    raise ValueError(\"malformed BEGIN\")\nValueError: malformed BEGIN\n"
+        },
+        {
+          "id": "case-037",
+          "passed": true,
+          "elapsed_ms": 351,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 94, in run\n    raise ValueError(\"malformed ROLLBACK\")\nValueError: malformed ROLLBACK\n"
+        },
+        {
+          "id": "case-038",
+          "passed": true,
+          "elapsed_ms": 315,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 111, in run\n    raise ValueError(\"malformed COMMIT\")\nValueError: malformed COMMIT\n"
+        },
+        {
+          "id": "case-039",
+          "passed": true,
+          "elapsed_ms": 352,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 78, in run\n    raise ValueError(\"malformed UNSET\")\nValueError: malformed UNSET\n"
+        },
+        {
+          "id": "case-040",
+          "passed": true,
+          "elapsed_ms": 310,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 83, in run\n    raise ValueError(\"malformed COUNT\")\nValueError: malformed COUNT\n"
+        },
+        {
+          "id": "case-041",
+          "passed": true,
+          "elapsed_ms": 374,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 115, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-042",
+          "passed": true,
+          "elapsed_ms": 319,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 115, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-043",
+          "passed": true,
+          "elapsed_ms": 282,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-044",
+          "passed": true,
+          "elapsed_ms": 297,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 84, in run\n    value = _parse_value(parts[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-045",
+          "passed": true,
+          "elapsed_ms": 349,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-046",
+          "passed": true,
+          "elapsed_ms": 344,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 84, in run\n    value = _parse_value(parts[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-047",
+          "passed": true,
+          "elapsed_ms": 353,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-048",
+          "passed": true,
+          "elapsed_ms": 304,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 115, in run\n    raise ValueError(\"unknown command\")\nValueError: unknown command\n"
+        },
+        {
+          "id": "case-049",
+          "passed": true,
+          "elapsed_ms": 352,
+          "status": "ok",
+          "got": [
+            "9223372036854775807"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-050",
+          "passed": true,
+          "elapsed_ms": 291,
+          "status": "ok",
+          "got": [
+            "-9223372036854775808"
+          ],
+          "error": null
+        },
+        {
+          "id": "case-051",
+          "passed": true,
+          "elapsed_ms": 250,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 16, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-052",
+          "passed": true,
+          "elapsed_ms": 362,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 16, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-053",
+          "passed": true,
+          "elapsed_ms": 375,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 16, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-054",
+          "passed": true,
+          "elapsed_ms": 371,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 84, in run\n    value = _parse_value(parts[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 16, in _parse_value\n    raise ValueError(\"integer out of range\")\nValueError: integer out of range\n"
+        },
+        {
+          "id": "case-055",
+          "passed": true,
+          "elapsed_ms": 404,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-056",
+          "passed": true,
+          "elapsed_ms": 404,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-057",
+          "passed": true,
+          "elapsed_ms": 407,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 66, in run\n    set_key(parts[1], _parse_value(parts[2]))\n                      ~~~~~~~~~~~~^^^^^^^^^^\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-058",
+          "passed": true,
+          "elapsed_ms": 357,
+          "status": "error",
+          "got": null,
+          "error": "Traceback (most recent call last):\n  File \"<string>\", line 14, in <module>\n    value = target(*args)\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 84, in run\n    value = _parse_value(parts[1])\n  File \"C:\\dev\\_machteld\\experiment\\kvstore_probe\\.results.staging-4152\\attempts\\cell-faabd16dd6b240a0\\invocation-001\\solution.py\", line 12, in _parse_value\n    raise ValueError(\"malformed integer\")\nValueError: malformed integer\n"
+        },
+        {
+          "id": "case-059",
+          "passed": true,
+          "elapsed_ms": 405,
+          "status": "ok",
+          "got": [
+            "5"
+          ],
+          "error": null
+        }
+      ]
+    }
+  }
+]
