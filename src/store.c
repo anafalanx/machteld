@@ -27,15 +27,23 @@ typedef struct {
     sqlite3 *db;
 } StoreCtx;
 
-static int fail(Tcl_Interp *interp, const char *msg) {
+/* Every store failure carries {MACHTELD STORE <code>}, so it can be trapped by
+ * code like the rest of the palette -- creed 5. `sqlite` is the passthrough for
+ * anything the engine itself reports: the MESSAGE is SQLite's wording and is not
+ * ours to freeze, which is exactly why the CODE has to be ours. */
+static int fail_code(Tcl_Interp *interp, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "error", -1));
+    Tcl_SetErrorCode(interp, "MACHTELD", "STORE", code, (char *)NULL);
     return TCL_ERROR;
+}
+
+static int fail(Tcl_Interp *interp, const char *msg) {
+    return fail_code(interp, "sqlite", msg);
 }
 
 static int needDb(Tcl_Interp *interp, StoreCtx *ctx) {
     if (ctx->db == NULL) {
-        Tcl_SetObjResult(interp,
-            Tcl_NewStringObj("store not open (::machteld::store open ?path?)", -1));
+        fail_code(interp, "notopen", "store not open (::machteld::store open ?path?)");
         return 0;
     }
     return 1;

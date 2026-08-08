@@ -106,6 +106,16 @@ past this stretch, not refused; TclOO is there when a tool wants it.
 The whole surface was put back on the table and taken decision by decision. What follows is
 the contract; **it is frozen from here** and grows only by addition (rule 7, now literal).
 
+**One hole in "additive-only", found by measurement and recorded rather than papered over.**
+`Tcl_GetIndexFromObj` runs with `flags = 0` at proc.c:709, proc.c:1068 and store.c:56, so
+subcommands accept unique prefixes: `store k` resolves to `keys` and `child st` to `start`
+today. Adding a subcommand that shares a prefix with an existing one therefore *breaks a
+spelling that works* — an addition that is not additive. Two honest ways out (switch those
+three sites to `TCL_EXACT` and declare abbreviation unsupported, or keep it and treat the
+prefix space as part of the frozen surface), and the choice belongs with the manifest work,
+which is what will make the consequences visible. Until then: **new subcommands must not
+shorten an existing one's unique prefix.**
+
 ### The built palette — ratified as-is
 
 `run` / `child` / `wait` / `scope` / `detach` · `pty` / `expect` / `vtstrip` · `store` ·
@@ -113,9 +123,18 @@ the contract; **it is frozen from here** and grows only by addition (rule 7, now
 
 ### The conventions — ratified as-is
 
-- **`run`'s failure split stands.** Structural problems throw (`{MACHTELD RUN notfound}`); the
-  child's own outcome — exit code, timeout, kill — is data in the result dict. Bad shape
-  aborts, bad data is a value.
+- **`run`'s failure split stands.** Structural problems throw; the child's own outcome — exit
+  code, timeout, kill — is data in the result dict. Bad shape aborts, bad data is a value. The
+  codes are enumerated in [the contract](contract.md)'s registry, which a test holds to the C.
+
+  *Corrected 2026-08-08, hours after this section was written:* the first draft cited
+  `{MACHTELD RUN notfound}` for a missing program, taken from the docs without checking the
+  source. The code actually threw `launch` from `run`, `child start` and `pty spawn`, and
+  `notfound` only from `detach` — the same condition, the same message, two codes. Ratifying a
+  documented claim without executing it is exactly the failure creed 4 exists to prevent, and
+  it happened inside the act of freezing the surface. The C is fixed and the split is now
+  uniform; `notfound` means an unresolvable program everywhere, and a dead handle — a genuinely
+  different failure that used to share the code — is `nohandle`.
 - **Durations keep rejecting bare numbers.** `-timeout 100` is an error, forever. One or two
   characters per call site buys a whole class of thousand-fold mistakes never happening.
 - **Bare verbs stay on the global namespace path.** Scripts read like shell, which is the
