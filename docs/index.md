@@ -23,6 +23,7 @@ This is an **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog) v0.
 - [The palette](palette.md) — surface conventions and the verb set (what's built, what's deferred).
 - [Ecosystem policy](ecosystem-policy.md) — vendor-and-freeze; TWAPI as a quarry.
 - [The bet](rationale.md) — why a machine takes to Tcl.
+- [Direction](direction.md) — the goal and the eight rules for the current stretch.
 - [Roadmap](roadmap.md) — what's built, and what's next.
 
 Change history: [the log](log.md).
