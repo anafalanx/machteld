@@ -248,7 +248,7 @@ namespace eval :: { namespace path [concat [namespace path] ::machteld] }
 # not initialized -- and no window is created -- until a script actually asks.
 # (The version label tracks the pinned Tcl/Tk payload; `load {} Tk` itself is
 # version-agnostic and always loads whatever Tk is linked in.)
-package ifneeded Tk 9.0.3 {load {} Tk}
+package ifneeded Tk 9.0.4 {load {} Tk}
 
 # One-line banner on the first interactive prompt, then a plain branded prompt.
 # (tcl_prompt1 is never invoked in non-interactive/script mode, so scripts stay
