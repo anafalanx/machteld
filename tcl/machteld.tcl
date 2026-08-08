@@ -8,11 +8,66 @@
 
 namespace eval ::machteld {
     variable version 0.2.1
+    # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl,
+    # which derives it from src/*.c. Declared empty here so the verb answers
+    # something honest in a build where generation was skipped.
+    variable MANIFEST {}
 }
 
 proc ::machteld::version {} {
     variable version
     return $version
+}
+
+# manifest: the palette describing itself ([creed] 4). One dict, no arguments,
+# no subcommand vocabulary -- navigate it with `dict get`, which is Tcl the
+# reader already knows and which reserves no words this surface would then be
+# frozen around.
+#
+#   dict keys [manifest]                     -> the C verbs
+#   dict get [manifest] run options          -> {-cpu -dir -env -mem ...}
+#   dict get [manifest] pty subcommands read options   -> -timeout
+#   dict get [manifest] child codes          -> what `child` can throw
+#
+# Every field is DERIVED from the C at build time, so it cannot drift from the
+# code it describes -- which is the difference between self-description and a
+# second copy of the truth. Prose belongs to `help`, deliberately: a summary is
+# authored, and mixing authored text into a generated file is how a generated
+# file starts being hand-edited.
+# The two halves are derived by two different means, for one reason: C cannot be
+# asked about itself at runtime and Tcl can. So the C facts are extracted from
+# the source at build time, and the Tcl facts are read out of the live
+# interpreter here -- `namespace ensemble configure -map` for a verb the prelude
+# extends (pty gains `expect`), `info args` for a plain proc. Neither half is
+# hand-maintained, which is the whole point: a hand-kept list is a second copy
+# of the truth, and second copies drift.
+#
+# Internal helpers are excluded by the naming convention this prelude already
+# follows: a leading underscore or capital (_dur2ms, PtyCore) means "not
+# palette".
+proc ::machteld::manifest {} {
+    variable MANIFEST
+    set m $MANIFEST
+    foreach cmd [lsort [info commands ::machteld::*]] {
+        set v [namespace tail $cmd]
+        if {[string match {[A-Z_]*} $v]} continue
+        if {[dict exists $m $v]} {
+            # A C verb the prelude re-presents as an ensemble: take the union,
+            # so a subcommand added in Tcl is as visible as one written in C.
+            if {[namespace ensemble exists $cmd]} {
+                set subs [dict get $m $v subcommands]
+                foreach {s _} [namespace ensemble configure $cmd -map] {
+                    if {![dict exists $subs $s]} { dict set subs $s [dict create options {}] }
+                }
+                dict set m $v subcommands $subs
+            }
+            continue
+        }
+        set entry [dict create kind tcl]
+        if {[llength [info procs $cmd]]} { dict set entry args [info args $cmd] }
+        dict set m $v $entry
+    }
+    return $m
 }
 
 # scope { body }: run body, then close (tree-kill) any children started within

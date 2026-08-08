@@ -261,6 +261,53 @@ if {![file isdirectory $SRC]} {
     check "registry is non-trivial" [expr {[dict size $thrown] >= 8 && [dict size $domains] >= 6}]
 }
 
+# --- the manifest describes the RUNNING binary -------------------------------
+# The generator derives the manifest from the C source; these check it against
+# the interpreter that actually shipped, which is the half a source scan cannot
+# prove. Tcl_GetIndexFromObj's own error message enumerates the real subcommand
+# table, so the binary is asked rather than trusted.
+set M [manifest]
+# Every palette verb, C-written and Tcl-written alike -- a manifest that
+# described only half the palette would be a partial truth.
+check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
+    {child detach help manifest pty run scope store version vtstrip wait wrap}}]
+foreach v [dict keys $M] {
+    check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
+}
+check "manifest marks C and Tcl verbs" [expr {
+    [dict get $M run kind] eq "c" && [dict get $M wrap kind] eq "tcl"}]
+# The manifest describes itself, which is the cheapest possible proof that
+# self-description is not special-cased.
+check "manifest describes itself" [expr {[dict get $M manifest kind] eq "tcl"}]
+# subcommands: ask the binary by provoking the index error, then compare.
+foreach v {child pty store} {
+    catch {::machteld::$v __nosuch__} m
+    set live {}
+    if {[regexp {must be (.*)$} $m -> tail]} {
+        foreach w [split [string map {" or " " " "," " "} $tail] " "] {
+            if {$w ne ""} { lappend live $w }
+        }
+    }
+    set declared [dict keys [dict get $M $v subcommands]]
+    check "manifest subcommands match the binary ($v)" \
+        [expr {[lsort $live] eq [lsort $declared]}]
+    if {[lsort $live] ne [lsort $declared]} { puts "     live=[lsort $live] declared=[lsort $declared]" }
+}
+# result keys: run the verb and compare the dict it really answers with.
+check "manifest run returns matches reality" [expr {
+    [lsort [dict keys [run -- cmd /c echo x]]] eq [lsort [dict get $M run returns]]}]
+# options: every option the manifest declares must be ACCEPTED (not "unknown
+# option"), and an invented one must be rejected -- otherwise "declared" and
+# "accepted" could drift apart in either direction.
+check "declared option accepted"  [expr {[errcode_of {run -dir . -- cmd /c echo x}] eq ""}]
+check "undeclared option refused" [expr {[errcode_of {run -nosuch v -- cmd /c echo x}] eq {MACHTELD RUN usage}}]
+set mcodes {}
+foreach v [dict keys $M] {
+    if {[dict exists $M $v codes]} { lappend mcodes {*}[dict get $M $v codes] }
+}
+check "manifest codes cover the registry" [expr {
+    [lsort -unique $mcodes] eq [lsort [dict keys $documented]]}]
+
 # The domain is the VERB the caller invoked, not the helper that failed: all
 # five process verbs share one option parser and one launch core, and used to
 # answer MACHTELD RUN whatever you called.
