@@ -93,6 +93,34 @@ store open db.sqlite ; store put k v ; store get k ; store keys ; store del k ; 
 wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see packaging.md)
 ```
 
+## Built — JSON
+
+```tcl
+json decode {{"name":"x","tags":["a","b"],"n":42}}
+    → {name x tags {a b} n 42}                ;# a dict, whose values are dicts/lists/scalars
+json encode [dict create a 1 b [list x y]]
+    → {"a":1,"b":["x","y"]}
+json encode -dict $d ;  json encode -list $l  ;# force the reading of an untyped value
+```
+
+Hand-rolled in C straight into `Tcl_Obj` — no intermediate document, and no vendored parser. The
+**conformance suite** is vendored instead ([`test/jsontestsuite`](../test/jsontestsuite),
+nst/JSONTestSuite, 318 cases): all 95 `y_` cases parse, all 188 `n_` cases are rejected. Of the
+35 implementation-defined `i_` cases we accept 31 and reject 4 — the UTF-16 and BOM inputs, since
+this decodes UTF-8 and a byte-order mark is not JSON.
+
+**Decode** maps `null` → `""`, `true` → `1`, `false` → `0`, and keeps a number's **literal text**,
+so nothing is lost to a double and Tcl 9's bignums keep a 30-digit integer exact.
+
+**Encode reads structure from what the value IS, never from what its text looks like.** A dict
+object becomes an object, a list object an array, anything else a scalar — so a decoded document
+round-trips byte-for-byte, and `dict create` / `list` do the right thing for one built by hand.
+Guessing from the text would make every string containing a space an array; `-dict` and `-list`
+force the reading when a value has no type of its own. Two consequences worth stating: a value
+is emitted as a JSON *number* only if it is already a valid JSON number literal — so `01234`
+stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
+round-trip, because Tcl has neither. See [the contract](contract.md).
+
 ## Built — self-description
 
 ```tcl

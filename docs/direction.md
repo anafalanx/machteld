@@ -166,10 +166,20 @@ The mapping is the hard part, not the parsing, because Tcl has no type tags:
 - **Lossy by default, exact with a shape.** `null` → `""`, `true` → `1`, `false` → `0`,
   documented precisely. Pass a shape and decode/encode become exact — which is why `json` and
   **shapes** are one design, not two.
-- **On encode, ambiguity resolves to array.** A Tcl value that is both a valid list and a valid
-  dict — `{}` above all — emits `[]`; `-dict` or a shape forces an object. The ambiguity is
-  real and unavoidable (a two-element list *is* a one-key dict), so it is answered once, in the
-  open, rather than guessed per call.
+- ~~**On encode, ambiguity resolves to array.**~~ **Superseded at implementation, 2026-08-09,
+  and the reason matters more than the change.** That rule assumed encode would decide structure
+  by asking whether the *text* parses as a list. Building it showed what that costs: in Tcl every
+  string containing a space parses as a list, so `hello world` would have encoded as
+  `["hello","world"]` — the postcode rule one level up, and worse, because it corrupts ordinary
+  prose rather than an unusual number. The first test to fail was exactly this.
+
+  Encode now reads structure from **what the value is** — a dict object is an object, a list
+  object is an array, anything else is a scalar — with `-dict` and `-list` to force an untyped
+  value. The ambiguity the ratified rule was answering mostly *disappears*: `json decode` builds
+  real dict and list objects, so a document round-trips byte-for-byte with no hint at all, and
+  `dict create` / `list` do the same for one built by hand. The honest cost, documented in the
+  contract: Tcl converts representations on demand, so calling `llength` on a plain string can
+  leave it a list object and change how it encodes. Say `-dict` or `-list` when it matters.
 - **Surface is `encode` / `decode`.** Two operations, whole documents; Tcl's own `dict get`
   walks the result.
 

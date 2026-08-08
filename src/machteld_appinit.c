@@ -17,6 +17,9 @@ extern int Machteldstore_Init(Tcl_Interp *interp); /* src/store.c */
 #ifdef MACHTELD_PROC
 extern int Machteldproc_Init(Tcl_Interp *interp); /* src/proc.c */
 #endif
+#ifdef MACHTELD_JSON
+extern int Machteldjson_Init(Tcl_Interp *interp); /* src/json.c */
+#endif
 
 int
 Machteld_RegisterLibs(Tcl_Interp *interp)
@@ -37,6 +40,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldproc", Machteldproc_Init, NULL);
+#endif
+
+#ifdef MACHTELD_JSON
+    /* JSON, hand-rolled straight into Tcl_Obj: the contract says dicts are
+     * JSON-isomorphic, and Tcl 9 core ships no parser. */
+    if (Machteldjson_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldjson", Machteldjson_Init, NULL);
 #endif
 
     /*
