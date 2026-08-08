@@ -1,6 +1,6 @@
 # machteld
 
-*A single-exe personal Tcl/Tk toolkit for Windows 11. You write Tcl; the power — and the packaging — is in C. Working name (provisional).*
+*A single-exe personal Tcl/Tk toolkit for Windows 11. You write Tcl; the power — and the packaging — is in C.*
 
 machteld is one signed Windows executable (Win 11 23H2+) that does two things:
 

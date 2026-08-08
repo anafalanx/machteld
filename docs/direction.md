@@ -49,10 +49,12 @@ expressible in Tcl stays in Tcl, where it is readable, patchable and testable in
 exe. A power that works in the prelude does not get rewritten in C for speed without a
 measurement that says so.
 
-**5. Domains build out in this order: `watch`, `svc`, `reg`, then `evt`/`net`.** Our own C for
-each; **TWAPI stays a quarry** and is opened only for WMI/COM, only when a verb demands it
+**5. `watch` first; every domain after it is built on demand.** Our own C for each; **TWAPI
+stays a quarry** and is opened only for WMI/COM, only when a verb demands it
 ([ecosystem policy](ecosystem-policy.md)). `watch` comes first because the first real tool
-needs it and because file events are the smallest of the four.
+needs it and because file events are the smallest of the set. `reg`, `svc`, `evt` and the
+`net`/`host`/`user`/`wmi` group are all wanted and none are scheduled — each gets built when a
+tool reaches for it, which is also when its dict shape stops being a guess.
 
 **6. Everything answers as a dict, fails with an errorcode, and describes itself.** The
 [contract](contract.md) holds for every new verb without exception — and **the manifest gets
@@ -68,8 +70,7 @@ therefore part of the work, not a later pass — see rule 8.
 lands with cases in the suite and its entry in [the palette](palette.md); the doc-accuracy test
 must cover it. Adversarial cases are part of "tested" for anything touching processes,
 handles or the filesystem — the execution core's invariants were established that way and the
-standard does not drop for later domains. `nagelfar` becomes the lint gate for tool Tcl when
-the first tool exists to gate.
+standard does not drop for later domains.
 
 **Cross-project rule.** X and drang are paused. **Findings cross over; code does not.** Their
 measured facts about this substrate are free to use — and cost nothing to check — but machteld
@@ -100,14 +101,91 @@ machteld and nowhere else, which is rule 1's failure mode wearing a library's cl
 positions are Tcl's answer and they are a fine one. *An object layer over TclOO* — deferred
 past this stretch, not refused; TclOO is there when a tool wants it.
 
-## Decided, 2026-08-08
+## Ratified, 2026-08-08
 
-- **Tcl/Tk pinned at 9.0.4.** Was 9.0.3 by inertia; the workspace carries both. The build and
-  the prelude's `package ifneeded Tk` line move together — a mismatch there fails
-  `package require Tk` on the version check, so they are one decision, not two.
-- **`watch` is first**, per rule 5 and because the first real tool needs it.
-- **The object layer is later.** Not this stretch.
+The whole surface was put back on the table and taken decision by decision. What follows is
+the contract; **it is frozen from here** and grows only by addition (rule 7, now literal).
 
-## Still open
+### The built palette — ratified as-is
 
-- **The name.** *machteld* is still marked provisional in [the roadmap](roadmap.md).
+`run` / `child` / `wait` / `scope` / `detach` · `pty` / `expect` / `vtstrip` · `store` ·
+`wrap` / `help` / `version`. No changes; the shapes they have today are the shapes they keep.
+
+### The conventions — ratified as-is
+
+- **`run`'s failure split stands.** Structural problems throw (`{MACHTELD RUN notfound}`); the
+  child's own outcome — exit code, timeout, kill — is data in the result dict. Bad shape
+  aborts, bad data is a value.
+- **Durations keep rejecting bare numbers.** `-timeout 100` is an error, forever. One or two
+  characters per call site buys a whole class of thousand-fold mistakes never happening.
+- **Bare verbs stay on the global namespace path.** Scripts read like shell, which is the
+  ergonomic point; Tcl's own commands still resolve first.
+
+### The self-description machinery
+
+- **The manifest is built first, before `watch`** — the mechanism before the instances, so
+  every new verb declares itself once instead of being retrofitted N times later.
+- **Error codes become a closed, documented, tested registry.** Every `{MACHTELD DOMAIN code}`
+  is enumerated in one place and a test fails if C can throw a code the registry does not
+  name. This is what makes trap-by-code safe to rely on, which is the entire point of
+  structured errors.
+- These two converge on one mechanism: a verb declares its options **and** its error codes in
+  the manifest, and the completeness test walks the manifest rather than a hand-kept list.
+  Creed 4 and creed 5, satisfied by the same machinery.
+
+### `json` — the one real gap in the contract
+
+The contract says everything is a dict and dicts are JSON-isomorphic; Tcl 9 core has no JSON;
+agents speak JSON. So it is built — **in C, hand-rolled straight into `Tcl_Obj`**, no
+intermediate DOM. yyjson is read as a *teacher* for the edges it gets right (surrogate pairs,
+number precision, escapes) but not vendored: the ecosystem policy's gate is "can I own this
+snapshot", and the guarantee comes from vendoring **[JSONTestSuite](https://github.com/nst/JSONTestSuite)**
+as a gate rather than trusting someone else's parser. A depth limit is explicit, not implied.
+
+The mapping is the hard part, not the parsing, because Tcl has no type tags:
+
+- **Lossy by default, exact with a shape.** `null` → `""`, `true` → `1`, `false` → `0`,
+  documented precisely. Pass a shape and decode/encode become exact — which is why `json` and
+  **shapes** are one design, not two.
+- **On encode, ambiguity resolves to array.** A Tcl value that is both a valid list and a valid
+  dict — `{}` above all — emits `[]`; `-dict` or a shape forces an object. The ambiguity is
+  real and unavoidable (a two-element list *is* a one-key dict), so it is answered once, in the
+  open, rather than guessed per call.
+- **Surface is `encode` / `decode`.** Two operations, whole documents; Tcl's own `dict get`
+  walks the result.
+
+### `watch` — the shape
+
+- **Handle + blocking read**: `set w [watch start $dir]`, `watch read $w -timeout 5s`. Mirrors
+  `child start` / `wait` exactly, so the palette has one lifetime model and needs no event loop.
+- **One multiplexer.** A watch handle is waitable by the existing `wait`, so
+  `wait -any $child $watch` works — creed 6's orthogonality actually cashed in, and a tool can
+  block on "either the build finishes or a file changed" without polling.
+- **Coalesced by default, `-raw` on request.** One editor save is one event; the unfiltered
+  stream stays reachable for anything that needs it.
+
+### Prelude powers — in, when the tool reaches them
+
+**Signature-derived CLI** and **shapes** are both admitted. They land at the moment the viewer
+wants them, not before — powers stay tied to a use, which is what rule 5 protects.
+
+### The name
+
+**machteld, ratified.** No longer provisional. *Drang in toom houden* — the meaning fits, the
+docs are written around it, and the cost of the question only rises.
+
+## The stretch, and what 0.3.0 is
+
+**Manifest → `watch` (+ `wait` multiplexing) → the change-viewer**, pulling in `json`,
+signature-CLI and shapes at the moment the tool reaches for them.
+
+The first tool is the **live change-viewer**: a running list of paths as they change, click one
+to see its current contents — the roadmap's own choice, needing only `watch` plus file reads,
+so it proves the verb without dragging in a diff engine.
+
+**0.3.0 ships when the tool ships.** Rule 5, made literal: a version is cut when the palette
+has reached a tool, not when the palette merely grew.
+
+The remaining domains — `reg`, `svc`, `evt`, and the `net`/`host`/`user`/`wmi` group — are all
+wanted and none are scheduled. They get built **after the first tool, on demand**: that is also
+when you learn what each one's dict should look like.
