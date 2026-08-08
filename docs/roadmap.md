@@ -16,13 +16,25 @@ timestamp: 2026-07-09
 - **`store`** — statically-linked SQLite key-value.
 - **The tool factory.** The shared-AppInit factoring, the GUI `WinMain` bare, both bares embedded in `machteld.exe`, and the self-contained [`wrap`](palette.md) verb — one self-contained tclkit. See [packaging](packaging.md).
 
-## Next
+## Next — 0.3.0, in order
 
-- **The first real tool** — a live "watch the agent change the codebase" viewer: a pure-Tcl/Tk tool `wrap`'d by machteld, pulling in a `watch` primitive (a general addition to the shared AppInit) when it needs live file events.
-- **Machine-control domains** — `svc` (services), `reg` (registry); later `evt` / `net` / `wmi` / `host` / `user`. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
-- **The manifest** — the self-describing runtime dict ([creed](creed.md) principle 4 / [the contract](contract.md)).
-- **The chrome console** — a Tk cockpit (fork tkcon: dark ttk, manifest-fed completion, a live child/event sidebar).
-- **The final name** — *machteld* is provisional.
+Ratified 2026-08-08; the reasoning is in [direction](direction.md).
+
+1. **The manifest** — the self-describing runtime dict ([creed](creed.md) 4 / [the contract](contract.md)), built *first* so every new verb declares itself into it rather than being retrofitted. Carries each verb's error codes too, which is how creed 5's closed registry gets its completeness test.
+2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
+3. **The change-viewer** — the first real tool: a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d by machteld. **0.3.0 ships when it does.**
+
+`json` (hand-rolled C, gated on JSONTestSuite), the signature-derived CLI and shapes land inside that sequence, at the moment the tool reaches for them.
+
+## Later
+
+- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled: each is built when a tool reaches for it. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
+- **An object layer over TclOO** — deferred, not refused.
+- **The chrome console** — a Tk cockpit (fork tkcon: dark ttk, manifest-fed completion, a live child/event sidebar). Now a natural *consumer* of the manifest rather than a reason to build it.
+
+## Settled
+
+**The name is machteld** — ratified 2026-08-08, no longer provisional.
 
 ---
 

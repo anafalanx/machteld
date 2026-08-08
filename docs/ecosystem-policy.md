@@ -12,9 +12,10 @@ Everything is **vendored and frozen** into the one exe, so upstream abandonment 
 
 - **TWAPI** — *quarry.* Hand-roll the easy Win32 (`svc`/`reg`/`evt`/`net`) ourselves in C; borrow TWAPI only for the brutal WMI/COM layer, and only if a verb demands it.
 - **Adopted:**
-  - **nagelfar** — a Tcl static checker; the natural **lint gate for agent-written Tcl** (catch mistakes before execution). High leverage for [the bet](rationale.md).
   - **critcl** — inline-C-in-Tcl; a dev accelerant for writing our own C verbs, not shipped.
   - **Tcllib** — cherry-pick single pure-Tcl modules only; never vendor wholesale.
+  - **JSONTestSuite** — vendored as a *test corpus*, not a library: ~300 conformance cases the hand-rolled `json` verb is gated on. The pattern to prefer generally — when correctness is the worry, vendor the suite, not the implementation.
 - **Deferred:** tDOM (when Windows XML actually appears).
+- **Dropped (2026-08-08):** **nagelfar**. Adopted on paper as a lint gate for agent-written Tcl and never wired to anything; the agent study found models write correct Tcl unaided, so the gate was buying little against a real ongoing cost — another snapshot to own, and a way for `wrap` to say no. Reconsiderable if tool code ever starts failing in ways a checker would have caught.
 - **Parked as models:** tkcon (→ the M4 chrome console), Wapp (if the cockpit ever goes web).
 - **Rejected:** Expect (Unix-tty — we build our own on ConPTY), TclTLS (prefer a WinHTTP wrapper, no OpenSSL).
