@@ -261,6 +261,76 @@ if {![file isdirectory $SRC]} {
     check "registry is non-trivial" [expr {[dict size $thrown] >= 8 && [dict size $domains] >= 6}]
 }
 
+# --- watch: live directory events --------------------------------------------
+set WD [file join $env(TEMP) mt_watch_suite]
+file delete -force $WD ; file mkdir $WD ; file mkdir [file join $WD sub]
+set w [watch start $WD -recursive]
+check "watch start returns a token" [string match "watch#*" $w]
+check "watch list shows it"         [expr {$w in [watch list]}]
+
+proc mkfile {path text} { set f [open $path w] ; puts $f $text ; close $f }
+proc settle {} { after 300 }
+
+mkfile [file join $WD a.txt] one ; settle
+set e [watch read $w]
+# creation emits added THEN modified; coalescing must keep the informative one
+check "watch sees a creation as added" [expr {
+    [llength $e] == 1 && [dict get [lindex $e 0] path] eq "a.txt" &&
+    [dict get [lindex $e 0] action] eq "added"}]
+
+mkfile [file join $WD a.txt] two ; settle
+set e [watch read $w]
+check "watch sees a write as modified" [expr {
+    [llength $e] == 1 && [dict get [lindex $e 0] action] eq "modified"}]
+
+file rename [file join $WD a.txt] [file join $WD b.txt] ; settle
+set e [watch read $w]
+check "watch joins a rename pair" [expr {
+    [llength $e] == 1 && [dict get [lindex $e 0] action] eq "renamed" &&
+    [dict get [lindex $e 0] path] eq "b.txt" && [dict get [lindex $e 0] from] eq "a.txt"}]
+
+file delete [file join $WD b.txt] ; settle
+set e [watch read $w]
+check "watch sees a delete as removed" [expr {
+    [llength $e] == 1 && [dict get [lindex $e 0] action] eq "removed"}]
+
+mkfile [file join $WD sub deep.txt] y ; settle
+set e [watch read $w]
+check "watch -recursive reaches a subdirectory" [expr {
+    [llength $e] == 1 && [dict get [lindex $e 0] path] eq "sub/deep.txt"}]
+
+mkfile [file join $WD raw.txt] r ; settle
+check "watch -raw leaves the stream unmerged" [expr {[llength [watch read $w -raw]] > 1}]
+check "an empty read is empty, not a block" [expr {[watch read $w] eq ""}]
+
+# A read with -timeout and nothing coming returns empty, promptly rather than never.
+set t0 [clock milliseconds]
+watch read $w -timeout 300ms
+set waited [expr {[clock milliseconds] - $t0}]
+check "watch read -timeout returns on time" [expr {$waited >= 250 && $waited < 3000}]
+
+# The multiplexer: `wait` blocks on a child OR a watch, without polling either.
+# The change is made by an external process because a blocking read is in C and
+# does not pump Tcl's event loop -- the same rule `child wait` follows.
+set slow [child start -- cmd /c "ping -n 4 127.0.0.1 >nul"]
+set poke [child start -- cmd /c "ping -n 2 127.0.0.1 >nul & echo q > [file nativename [file join $WD m.txt]]"]
+set t0 [clock milliseconds]
+set done [wait -any $slow $w]
+check "wait -any wakes on the watch, not the slower child" [expr {$done eq $w}]
+check "wait -any returned before the slow child exited" [expr {[clock milliseconds] - $t0 < 3500}]
+check "the event is there to read" [expr {[llength [watch read $w]] >= 1}]
+catch {child kill $slow} ; child close $slow ; child close $poke
+
+check "wait rejects an unknown token" [expr {
+    [errcode_of {wait nosuch#1}] eq {MACHTELD WAIT nohandle}}]
+watch close $w
+check "watch close removes it" [expr {$w ni [watch list]}]
+check "reading a closed watch => nohandle" [expr {
+    [errcode_of {watch read $w}] eq {MACHTELD WATCH nohandle}}]
+check "watching a missing dir => notfound" [expr {
+    [errcode_of {watch start [file join $WD nope_zzz]}] eq {MACHTELD WATCH notfound}}]
+file delete -force $WD
+
 # --- the manifest describes the RUNNING binary -------------------------------
 # The generator derives the manifest from the C source; these check it against
 # the interpreter that actually shipped, which is the half a source scan cannot
@@ -270,7 +340,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help manifest pty run scope store version vtstrip wait wrap}}]
+    {child detach help manifest pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -280,7 +350,7 @@ check "manifest marks C and Tcl verbs" [expr {
 # self-description is not special-cased.
 check "manifest describes itself" [expr {[dict get $M manifest kind] eq "tcl"}]
 # subcommands: ask the binary by provoking the index error, then compare.
-foreach v {child pty store} {
+foreach v {child pty store watch} {
     catch {::machteld::$v __nosuch__} m
     set live {}
     if {[regexp {must be (.*)$} $m -> tail]} {

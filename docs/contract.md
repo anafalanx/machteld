@@ -64,6 +64,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `WAIT` | `wait` |
 | `DETACH` | `detach` |
 | `PTY` | `pty` (all subcommands) |
+| `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
@@ -83,7 +84,9 @@ errors.
 | `sqlite` | SQLite reported an error; the *message* is SQLite's wording, the *code* is ours |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
-comes from `child`, `wait` and `pty`. The pairs that matter are pinned by behavioural tests.
+comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
+tests. `watch start` on a directory it cannot open raises `notfound`, the same code a missing
+program gets — in both cases the thing you named is not there.
 
 ```tcl
 try { pty spawn -- missing.exe } trap {MACHTELD PTY notfound} {m opts} { … }
