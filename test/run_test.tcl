@@ -203,9 +203,17 @@ set pal [help palette]
 # knows every verb, so a new one is documented-or-caught automatically instead
 # of quietly missing from a list nobody remembered to extend. That list had
 # already gone stale -- it never learned about watch or manifest.
+# Matched as a WHOLE WORD, not a substring. `*$v*` let `ps` pass on the strength
+# of "steps", "helps" and "maps" -- a two-letter verb walks through a substring
+# test unnoticed, which is the same vacuous-gate failure the registry scan had.
+# A verb counts as documented when the doc uses it as a command: at the start of
+# a line in a code block, or in backticks.
 set drift {}
 foreach v [dict keys [manifest]] {
-    if {![llength [info commands ::machteld::$v]] || ![string match "*$v*" $pal]} { lappend drift $v }
+    set used [expr {
+        [regexp -line "^\\s*$v\\M" $pal] || [string match "*`$v`*" $pal] ||
+        [string match "*`$v *" $pal]}]
+    if {![llength [info commands ::machteld::$v]] || !$used} { lappend drift $v }
 }
 check "palette doc documents every verb the manifest knows" [expr {$drift eq ""}]
 if {$drift ne ""} { puts "     undocumented: $drift" }
@@ -233,7 +241,7 @@ if {![file isdirectory $SRC]} {
     # scan would otherwise miss entirely.
     set thrown {}
     set domains {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c]] {
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c] [file join $SRC ps.c]] {
         set fh [open $f r]; set text [read $fh]; close $fh
         foreach {_ d c} [regexp -all -inline {mt_error\(interp,\s*"([A-Z]+)",\s*"([a-z]+)"} $text] {
             dict set thrown $c 1 ; dict set domains $d 1
@@ -246,6 +254,19 @@ if {![file isdirectory $SRC]} {
         set rawpat {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"([A-Z]+)",\s*"(\w+)"}
         foreach {_ d c} [regexp -all -inline $rawpat $text] {
             dict set thrown $c 1 ; dict set domains $d 1
+        }
+        # A single-domain file names its domain once, inside its own raiser, and
+        # passes only the code: ps_error(interp, "denied", msg). Neither pattern
+        # above sees either half of that -- the domain because the code beside it
+        # is a variable, the code because the call is not spelled mt_error. When
+        # ps.c landed, this scan therefore found nothing in it and all four
+        # closure checks passed VACUOUSLY; the manifest cross-check is what
+        # actually caught the two undocumented names. A gate that can be silently
+        # emptied is worse than no gate, so both halves are read here.
+        foreach {_ d} [regexp -all -inline \
+            {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"([A-Z]+)"} $text] { dict set domains $d 1 }
+        foreach {_ c} [regexp -all -inline {\w+_error\(interp,\s*"([a-z]+)"} $text] {
+            dict set thrown $c 1
         }
     }
     # The documented sets, parsed out of the shipped doc's own tables -- so the
@@ -351,6 +372,96 @@ check "watching a missing dir => notfound" [expr {
     [errcode_of {watch start [file join $WD nope_zzz]}] eq {MACHTELD WATCH notfound}}]
 file delete -force $WD
 
+# --- ps: the machine's processes, not just our own children ------------------
+# `child list` enumerates what machteld launched; ps enumerates what the machine
+# is running. That distinction is the whole reason the verb exists, so it is the
+# first thing checked: processes we did NOT start have to be visible.
+
+set PROCS [ps list]
+check "ps list returns many processes" [expr {[llength $PROCS] > 20}]
+check "ps list dwarfs our own child list" [expr {[llength $PROCS] > [llength [child list]] + 20}]
+
+set self {}
+foreach p $PROCS { if {[dict get $p pid] == [pid]} { set self $p ; break } }
+check "ps list contains our own pid" [expr {$self ne ""}]
+check "ps row carries the full shape" [expr {[lsort [dict keys $self]] eq
+    {access cpu exe mem name pid ppid private started threads}}]
+check "our own row is readable" [expr {[dict get $self access] == 1}]
+check "our own exe is this binary" [expr {
+    [file normalize [dict get $self exe]] eq [file normalize [info nameofexecutable]]}]
+check "our own start time is sane" [expr {
+    [dict get $self started] > 1700000000 && [dict get $self started] <= [clock seconds] + 2}]
+
+# info and list must agree about the same process: two code paths, one answer.
+set inf [ps info [pid]]
+check "ps info agrees with ps list" [expr {
+    [dict get $inf pid]  == [dict get $self pid] &&
+    [dict get $inf name] eq [dict get $self name] &&
+    [dict get $inf exe]  eq [dict get $self exe]}]
+
+# A process we cannot open still appears, and its unreadable fields are EMPTY
+# rather than 0 -- "we were denied" and "genuinely zero" must not look alike, or
+# a task manager silently reports system processes as using no memory. Under an
+# elevated token there may be no such row, so the shape is asserted only if one is.
+set unread {}
+foreach p $PROCS { if {[dict get $p access] == 0} { set unread $p ; break } }
+if {$unread ne ""} {
+    check "denied row still has its snapshot fields" [expr {
+        [dict get $unread pid] ne "" && [dict get $unread name] ne ""}]
+    check "denied row leaves details empty, not zero" [expr {
+        [dict get $unread mem] eq "" && [dict get $unread cpu] eq "" &&
+        [dict get $unread exe] eq ""}]
+} else {
+    puts "skip ps denied-row shape (elevated: every process was readable)"
+}
+
+check "cpu reads as an integer ms count" [string is integer -strict [dict get $self cpu]]
+
+# ps kills by pid. The only process a test may safely kill is one it started
+# itself -- which is also the sharpest check, since child can confirm the death.
+set victim [child start -- $MT $CHILD sleep 8000]
+set vpid   [dict get [child info $victim] pid]
+check "ps sees a process we launched" [expr {[dict get [ps info $vpid] pid] == $vpid}]
+check "ps kill reports one killed" [expr {[ps kill $vpid] == 1}]
+check "ps kill actually ended it" [expr {
+    [dict get [child wait $victim] status] in {killed error}}]
+child close $victim
+
+# -tree reaches past the root: cmd /c spawns the sleeper as its own child, so the
+# tree is two deep and a flat kill would leave the leaf running.
+set root [child start -- cmd /c "$MT $CHILD sleep 8000"]
+after 400
+set rpid [dict get [child info $root] pid]
+set n [ps kill $rpid -tree]
+check "ps kill -tree killed the root and its child" [expr {$n >= 2}]
+catch {child kill $root} ; catch {child wait $root} ; child close $root
+
+# A process that exited on its own, whose pid we still hold a handle to, must
+# report `notfound` -- not `denied`. TerminateProcess fails with
+# ERROR_ACCESS_DENIED for a corpse exactly as it does for a protected process, so
+# a naive reading tells the user to re-run elevated over something that simply
+# finished. The tasks tool showed that advice until the exit code was consulted.
+set gone [child start -- $MT $CHILD exitcode 0]
+set gpid [dict get [child info $gone] pid]
+child wait $gone
+check "ps kill of an exited process => notfound, not denied" [expr {
+    [errcode_of {ps kill $gpid}] eq {MACHTELD PS notfound}}]
+child close $gone
+
+# the error contract
+check "ps info on a missing pid => notfound" [expr {
+    [errcode_of {ps info 4000000}] eq {MACHTELD PS notfound}}]
+check "ps kill on a missing pid => notfound" [expr {
+    [errcode_of {ps kill 4000000}] eq {MACHTELD PS notfound}}]
+check "ps on a non-integer pid => badvalue" [expr {
+    [errcode_of {ps info notanumber}] eq {MACHTELD PS badvalue}}]
+check "ps on an out-of-range pid => badvalue" [expr {
+    [errcode_of {ps info 99999999999}] eq {MACHTELD PS badvalue}}]
+check "ps kill of the system process => denied" [expr {
+    [errcode_of {ps kill 4}] eq {MACHTELD PS denied}}]
+check "ps kill with an unknown option => usage" [expr {
+    [errcode_of {ps kill [pid] -nope}] eq {MACHTELD PS usage}}]
+
 # --- the manifest describes the RUNNING binary -------------------------------
 # The generator derives the manifest from the C source; these check it against
 # the interpreter that actually shipped, which is the half a source scan cannot
@@ -360,7 +471,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help json manifest pty run scope store version vtstrip wait watch wrap}}]
+    {child detach help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -405,7 +516,7 @@ if {[file isdirectory $SRC]} {
         }
     }
     set inC {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c]] {
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c] [file join $SRC ps.c]] {
         set fh [open $f r] ; set text [read $fh] ; close $fh
         foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $text] { lappend inC $o }
     }

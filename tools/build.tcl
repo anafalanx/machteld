@@ -70,7 +70,7 @@ proc run {args} {
 set syslibs {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
-    -loleaut32 -lwinspool
+    -loleaut32 -lwinspool -lpsapi
 }
 
 # SQLite: statically compile the amalgamation (shared payload) into the host.
@@ -100,8 +100,11 @@ run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src proc.c] -o [Rp build proc.o] -
 puts "cc   json.c  (hand-rolled into Tcl_Obj, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src json.c] -o [Rp build json.o] -I$inc
 
+puts "cc   ps.c  (machine-wide process view, c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src ps.c] -o [Rp build ps.o] -I$inc
+
 puts "cc   machteld_appinit.c  (shared native-lib + prelude registration, c23)"
-run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON \
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON -DMACHTELD_PS \
     -c [Rp src machteld_appinit.c] -o [Rp build machteld_appinit.o] -I$inc
 
 puts "cc   machteld_main.c  (console host, c23)"
@@ -112,7 +115,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare.exe  (console subsystem)"
 set bare [Rp build machteld-bare.exe]
 run $gcc -municode -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] \
+    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $bare
@@ -128,7 +131,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
 set baregui [Rp build machteld-bare-gui.exe]
 run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] \
+    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $baregui
@@ -163,7 +166,9 @@ puts "built [file nativename $out] ([file size $out] bytes)"
 # The tools machteld ships are built by machteld, with the exe just produced --
 # which is also the standing proof that `wrap` works on the artefact we are
 # about to release, not on the one from last time.
-foreach {tooldir toolexe subsystem} [list [Rp tool changes] [Rp build changes.exe] --gui] {
+foreach {tooldir toolexe subsystem} [list \
+        [Rp tool changes] [Rp build changes.exe] --gui \
+        [Rp tool tasks]   [Rp build tasks.exe]   --gui] {
     if {![file isdirectory $tooldir]} continue
     set script [Rp build .wrap.tcl]
     set fh [open $script w]
