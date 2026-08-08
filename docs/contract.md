@@ -67,6 +67,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
 | `JSON` | `json` (all subcommands) |
+| `PS` | `ps` (all subcommands) |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
@@ -85,11 +86,18 @@ errors.
 | `sqlite` | SQLite reported an error; the *message* is SQLite's wording, the *code* is ours |
 | `parse` | the text is not valid JSON; the message says what was wrong and where it stopped |
 | `depth` | nesting past the 512 limit, on the way in or out — refused rather than crashing the stack |
+| `denied` | the OS refused the operation on a process you do not have the rights to touch |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
 comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
 tests. `watch start` on a directory it cannot open raises `notfound`, the same code a missing
 program gets — in both cases the thing you named is not there.
+
+`denied` is the one code that reports a *permission*, and it is confined to `ps`, because `ps`
+is the one verb that reaches processes machteld did not start. Note what it does **not** cover:
+a process `ps list` cannot open is not an error at all — it comes back as a row with
+`access 0` and its unreadable fields empty. Failing the whole listing over a process you may
+not inspect would make the verb useless on exactly the machines it is for.
 
 ```tcl
 try { pty spawn -- missing.exe } trap {MACHTELD PTY notfound} {m opts} { … }

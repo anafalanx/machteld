@@ -20,6 +20,9 @@ extern int Machteldproc_Init(Tcl_Interp *interp); /* src/proc.c */
 #ifdef MACHTELD_JSON
 extern int Machteldjson_Init(Tcl_Interp *interp); /* src/json.c */
 #endif
+#ifdef MACHTELD_PS
+extern int Machteldps_Init(Tcl_Interp *interp); /* src/ps.c */
+#endif
 
 int
 Machteld_RegisterLibs(Tcl_Interp *interp)
@@ -49,6 +52,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldjson", Machteldjson_Init, NULL);
+#endif
+
+#ifdef MACHTELD_PS
+    /* the machine's processes, as distinct from the children we started:
+     * enumerate, inspect, terminate by pid. */
+    if (Machteldps_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldps", Machteldps_Init, NULL);
 #endif
 
     /*

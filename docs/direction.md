@@ -218,3 +218,27 @@ has reached a tool, not when the palette merely grew.
 The remaining domains — `reg`, `svc`, `evt`, and the `net`/`host`/`user`/`wmi` group — are all
 wanted and none are scheduled. They get built **after the first tool, on demand**: that is also
 when you learn what each one's dict should look like.
+
+## After 0.3.0 — `ps`, on demand (2026-08-09)
+
+The second tool was a **task manager**, and it did exactly what rule 5 predicts a tool should do:
+it named a capability that was missing. machteld could supervise processes it *started* and had
+no view of one it had not — `child list` returns its own tokens and nothing else. So **`ps`**
+(`list` / `info` / `kill ?-tree?`) was built to fit the tool, not speculated first.
+
+Three shape decisions, each following an existing precedent rather than inventing one:
+
+1. **`cpu` is cumulative milliseconds, not a percentage.** A rate needs two samples and a clock;
+   putting it in the verb means hidden state and an answer that depends on when you last asked.
+   The verb reports, the caller divides — the same reasoning that made `watch` coalesce per read
+   rather than on a timer (creed 3).
+2. **A process you cannot open is a row, not an error.** It keeps its snapshot fields, gets
+   `access 0`, and every unreadable field is the **empty string** rather than `0` — so "denied"
+   never reads as "using no memory". Half the processes on a non-elevated desktop are in this
+   state; failing the listing over them would make the verb useless where it is needed.
+3. **`ps kill -tree` is best-effort and says so.** It walks one snapshot. For a tree machteld
+   started, `child kill` remains exact, because the job object holds the tree by identity rather
+   than by pid. The palette documents the difference instead of blurring it.
+
+`denied` joins the registry as the one code that reports a permission, confined to `ps` because
+`ps` is the one verb that reaches outside machteld's own children.

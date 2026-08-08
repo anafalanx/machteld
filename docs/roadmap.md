@@ -24,11 +24,17 @@ Ratified 2026-08-08; the reasoning is in [direction](direction.md).
 2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
 3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d into its own 6.1 MB exe. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
 
+✅ **`ps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
+(`ps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
+`tasks.exe`). This is rule 5 working as intended: the tool was written, it named a capability
+machteld did not have — it could supervise processes it *started* but could not see one it did
+not — and that capability was built to fit.
+
 ✅ **`json`** landed 2026-08-09 — hand-rolled C into `Tcl_Obj`, gated on the vendored nst/JSONTestSuite (95/95 `y_`, 188/188 `n_`). The signature-derived CLI and shapes remain, to land at the moment a tool reaches for them.
 
 ## Later
 
-- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled: each is built when a tool reaches for it. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
+- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled: each is built when a tool reaches for it, as `watch` and `ps` were. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
 - **An object layer over TclOO** — deferred, not refused.
 - **The chrome console** — a Tk cockpit (fork tkcon: dark ttk, manifest-fed completion, a live child/event sidebar). Now a natural *consumer* of the manifest rather than a reason to build it.
 

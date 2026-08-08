@@ -41,6 +41,7 @@ set IMPL {
     WatchCmd  watch
     StoreCmd  store
     JsonCmd   json
+    PsCmd     ps
 }
 
 # NOTE ON TCL REGEXPS HERE: Tcl's ARE takes its greediness for the WHOLE
@@ -76,12 +77,14 @@ proc functions {text} {
 set proc_c  [slurp [file join $SRC proc.c]]
 set store_c [slurp [file join $SRC store.c]]
 set json_c  [slurp [file join $SRC json.c]]
+set ps_c    [slurp [file join $SRC ps.c]]
 set fns     [functions $proc_c]
 # store.c and json.c implement exactly one verb each, so the whole file is that
 # verb's body -- otherwise `notopen`, raised in the needDb helper rather than in
 # StoreCmd, would be invisible to a per-function scan.
 dict set fns StoreCmd $store_c
 dict set fns JsonCmd  $json_c
+dict set fns PsCmd    $ps_c
 
 # ---- verbs the C actually registers ---------------------------------------
 set verbs {}
@@ -165,6 +168,14 @@ foreach {fn verb} $IMPL {
     foreach {_ c} [regexp -all -inline {fail_code\(interp,\s*"(\w+)"} $body] { lappend codes $c }
     foreach {_ c} [regexp -all -inline \
         {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"[A-Z]+",\s*"(\w+)"} $body] { lappend codes $c }
+    # A file with a single domain spells that domain once, inside its own
+    # raiser, and passes only the code: ps_error(interp, "denied", msg). A
+    # multi-domain file's raiser takes the domain first: mt_error(interp, "RUN",
+    # "notfound", msg). Case tells the two apart -- a domain is uppercase, a code
+    # never is -- so both idioms are read without naming either helper here.
+    # Without this, ps declared zero codes while raising five, and the registry
+    # closure test in run_test.tcl had nothing to check those five against.
+    foreach {_ c} [regexp -all -inline {\w+_error\(interp,\s*"([a-z]\w*)"} $body] { lappend codes $c }
     if {[regexp {\Wfail\(interp,} $body]} { lappend codes sqlite }
     if {[regexp {mt_error\(interp,\s*"[A-Z]+",\s*code,} $body]} { lappend codes {*}$var_codes }
     if {$domain ne "" && $domain in $shared_domains} {

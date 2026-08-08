@@ -86,6 +86,51 @@ Ask for them once and the rest reads like a script:
 namespace eval ::mytool { namespace path ::machteld }
 ```
 
+## Built — the machine's processes
+
+```tcl
+ps list                            ;# every process on the box: a list of dicts
+ps info 4796                       ;# one of them
+ps kill 4796                       ;# terminate it
+ps kill 4796 -tree                 ;# and everything it started
+```
+
+A row is `{pid ppid name exe mem private cpu threads started access}`. `mem` is the working set
+and `private` the private commit, both in bytes; `started` is Unix epoch seconds, so
+`clock format` reads it directly; `threads` is the thread count.
+
+**This is the half `child` is not.** `child list` enumerates the processes *machteld started* and
+holds them in a job object, so `child kill` is exact. `ps` reaches everything else — and pays for
+it in precision: `ps kill -tree` walks a single snapshot, so a tree that is still forking can
+outrun it. Use `child`/`scope` for anything you launched yourself.
+
+**`cpu` is cumulative milliseconds, not a percentage.** A percentage is a rate, and a rate needs
+two samples and a clock — computing it inside the verb would mean hidden state and an answer that
+depended on when you last asked ([creed](creed.md) 3). Take two readings and divide; divide again
+by `$env(NUMBER_OF_PROCESSORS)` if you want 100% to mean the whole machine.
+
+**A process you cannot open is not an error.** Without elevation, roughly half the processes on a
+normal desktop refuse inspection. They still appear — with `pid`, `ppid`, `name` and `threads`
+from the snapshot, `access 0`, and every other field the **empty string** rather than `0`, so
+"we were denied" never reads as "it is using no memory". Failing the whole listing over a process
+you may not inspect would make the verb useless on exactly the machines it is for.
+
+`ps kill` raises `denied` for a process you lack the rights to end, and `notfound` both for a pid
+that never existed and for one that has already exited — Windows reports `ERROR_ACCESS_DENIED`
+for a corpse, and reporting that as `denied` would advise elevation over a process that simply
+finished.
+
+## Built — text and identity
+
+```tcl
+version                            ;# "0.3.0"
+vtstrip $text                      ;# remove ANSI/VT escape sequences, keep the text
+```
+
+`vtstrip` is pure Tcl and needs no terminal, so it is safe to use on captured `pty read` output
+in a headless test. Note `version` is the *palette's* version; `store version` is a different
+command reporting SQLite's.
+
 ## Built — storage & packaging
 
 ```tcl
@@ -135,8 +180,11 @@ live interpreter. See [the contract](contract.md).
 
 ## Deferred — designed, not built
 
-`watch` (live file events) is next, then the machine-control **domains** `reg` / `svc` / `evt`
-and later `net` / `wmi` / `host` / `user` — our own C, with TWAPI as a quarry for WMI/COM only
-(see [ecosystem policy](ecosystem-policy.md)). Also deferred: the `say`/`json`/`csv`/`fs`/`clock`
-conveniences, of which **`json`** is scheduled ([direction](direction.md)) — Tcl's own `file` /
-`env` / `clock` cover much of the rest today.
+The machine-control **domains** `reg` / `svc` / `evt`, and later `net` / `wmi` / `host` / `user`
+— our own C, with TWAPI as a quarry for WMI/COM only (see
+[ecosystem policy](ecosystem-policy.md)). Also deferred: the `say` / `csv` / `fs` / `clock`
+conveniences — Tcl's own `file` / `env` / `clock` cover much of that today.
+
+None of these is scheduled. Each lands when a tool reaches for it, which is how `watch` and then
+`ps` arrived: the change-viewer needed live file events, and the task manager needed a view of
+processes machteld did not start.

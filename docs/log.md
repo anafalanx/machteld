@@ -8,6 +8,59 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — `ps` and `tasks`: seeing processes we did not start
+
+A task manager was asked for. Writing it named the gap immediately: machteld could **supervise**
+processes it launched — born-in-job, tree-kill, caps — and could not **see** one it had not.
+`child list` returns machteld's own tokens; there was no `CreateToolhelp32Snapshot`, no
+`EnumProcesses`, nothing machine-wide anywhere in `src/`. So `ps` was built to fit the tool,
+which is rule 5 running the right way round.
+
+- **`ps`** ([the palette](palette.md)) — `list` / `info` / `kill ?-tree?`. A row carries
+  `pid ppid name exe mem private cpu threads started access`. 257 processes in 11 ms; the
+  numbers agree with `Get-Process` (63.937 s of CPU against its 63.97).
+- **`cpu` is cumulative, not a percentage.** A rate needs two samples and a clock, so computing
+  one inside the verb would mean hidden state and an answer that depended on when you last
+  asked. The tool divides; the verb reports. Same reasoning as `watch`'s per-read coalescing.
+- **Denied is not zero.** Without elevation about 150 of 257 processes refuse inspection. They
+  stay in the listing — with their snapshot fields, `access 0`, and every unreadable field the
+  **empty string**, never `0`. Failing the whole listing over a process you may not inspect
+  would make the verb useless on exactly the machines it is for.
+- **`tasks`** (`tool/tasks`, wrapped to `tasks.exe`, 6.1 MB) — flat sortable list, filter, live
+  refresh, End Task and End Tree. Deliberately smaller than Windows' own: no grouping, no
+  graphs, no services tab. Rows reconcile rather than rebuild, so a selection survives a refresh
+  — which matters because the next button is End Task.
+
+### Three gates were passing vacuously
+
+Worth recording, because all three were *green* while the thing they check was absent.
+
+- The **error-code registry** scan knew `mt_error(interp, DOMAIN, code)` and literal
+  `Tcl_SetErrorCode`. `ps.c` names its domain once inside its own raiser and passes only the
+  code — so the scan found nothing in it, and all four closure checks passed on an empty set.
+  The manifest cross-check is what actually caught `PS` and `denied` going undocumented.
+- The **palette-doc** check matched `*$v*`. A two-letter verb passes that on the strength of
+  "steps", "helps" or "maps". Tightened to a whole-word match, it immediately found that
+  `vtstrip` and `version` had never been documented either — `vtstrip` appeared only inside a
+  comment, `version` only as the unrelated `store version`.
+- The **manifest generator** attributed `-tree` to `info`, because `kill` was an implicit
+  fallthrough with no `idx ==` marker for the branch scanner to see. Same failure as `watch
+  read` last release.
+
+A gate that can be silently emptied is worse than no gate. Each was repaired at the scanner
+rather than at the symptom, and the registry gate was then broken on purpose to confirm it bites.
+
+### And one real bug, found only by driving the window
+
+`TerminateProcess` on a process that has **already exited** fails with `ERROR_ACCESS_DENIED` —
+the same error a genuinely protected process gives. Read at face value, `ps kill` told the user
+to re-run as administrator about a process that had simply finished, which in a task manager is
+the likeliest case of all: you click End Task on the row that was already on its way out.
+`ps_kill_one` now consults the exit code before reporting, and answers `notfound`.
+
+The model selftest could not have found this; `test/tasks_ui.tcl` drives the real mapped window
+— selection, sorting, reconciliation, and End Task through the button's own callback — and did.
+
 ## 2026-08-08 — 0.3.0: the palette describes itself, watches files, and reaches a tool
 
 The release rule was ratified before the work: **0.3.0 ships when a tool ships**, because a
