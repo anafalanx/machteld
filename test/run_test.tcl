@@ -222,44 +222,71 @@ set SRC [file join $HERE .. src]
 if {![file isdirectory $SRC]} {
     puts "skip registry closure (no src/ beside the test)"
 } else {
+    # Codes the C can raise. Three shapes carry one: an mt_error/fail_code call
+    # with a literal, and the two places a code travels in a VARIABLE -- the
+    # caller's seed and child_launch/pty_spawn's override -- which a literal
+    # scan would otherwise miss entirely.
     set thrown {}
-    foreach {f pat dom} [list \
-            [file join $SRC proc.c]  {run_error\(interp,\s*"([a-z]+)"}  RUN \
-            [file join $SRC store.c] {fail_code\(interp,\s*"([a-z]+)"}  STORE] {
+    set domains {}
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c]] {
         set fh [open $f r]; set text [read $fh]; close $fh
-        foreach m [regexp -all -inline $pat $text] {
-            if {[string match {*"*} $m]} continue   ;# skip the whole-match element
-            dict set thrown "$dom $m" 1
+        foreach {_ d c} [regexp -all -inline {mt_error\(interp,\s*"([A-Z]+)",\s*"([a-z]+)"} $text] {
+            dict set thrown $c 1 ; dict set domains $d 1
         }
+        foreach {_ c} [regexp -all -inline {fail_code\(interp,\s*"([a-z]+)"} $text] {
+            dict set thrown $c 1 ; dict set domains STORE 1
+        }
+        foreach {_ c} [regexp -all -inline {code = "([a-z]+)"} $text] { dict set thrown $c 1 }
     }
-    # The documented set, parsed out of the shipped doc's table -- so the DOC is
-    # the registry, and this test is what stops it from becoming a lie.
+    # The documented sets, parsed out of the shipped doc's own tables -- so the
+    # DOC is the registry, and this test is what stops it becoming a lie.
     set documented {}
+    set docdomains {}
     foreach line [split [help contract] \n] {
-        if {[regexp {^\|\s*`MACHTELD ([A-Z]+) ([a-z]+)`} $line -> d c]} {
-            dict set documented "$d $c" 1
-        }
+        if {[regexp {^\|\s*`([a-z]+)`\s*\|} $line -> c]}  { dict set documented $c 1 }
+        if {[regexp {^\|\s*`([A-Z]+)`\s*\|} $line -> d]}  { dict set docdomains $d 1 }
     }
-    set undocumented [lsort [lmap k [dict keys $thrown] {expr {[dict exists $documented $k] ? [continue] : $k}}]]
+    set undocumented [lsort [lmap k [dict keys $thrown]  {expr {[dict exists $documented $k] ? [continue] : $k}}]]
     set unthrown     [lsort [lmap k [dict keys $documented] {expr {[dict exists $thrown $k] ? [continue] : $k}}]]
-    check "every code the C throws is documented"  [expr {$undocumented eq ""}]
-    check "every documented code exists in the C"  [expr {$unthrown eq ""}]
+    set undocdom     [lsort [lmap k [dict keys $domains]  {expr {[dict exists $docdomains $k] ? [continue] : $k}}]]
+    set unuseddom    [lsort [lmap k [dict keys $docdomains] {expr {[dict exists $domains $k] ? [continue] : $k}}]]
+    check "every code the C throws is documented"    [expr {$undocumented eq ""}]
+    check "every documented code exists in the C"    [expr {$unthrown eq ""}]
+    check "every domain the C raises is documented"  [expr {$undocdom eq ""}]
+    check "every documented domain exists in the C"  [expr {$unuseddom eq ""}]
     if {$undocumented ne ""} { puts "     undocumented: $undocumented" }
     if {$unthrown ne ""}     { puts "     documented but unthrown: $unthrown" }
-    check "registry is non-trivial" [expr {[dict size $thrown] >= 8}]
+    if {$undocdom ne ""}     { puts "     undocumented domains: $undocdom" }
+    if {$unuseddom ne ""}    { puts "     documented but unraised domains: $unuseddom" }
+    check "registry is non-trivial" [expr {[dict size $thrown] >= 8 && [dict size $domains] >= 6}]
 }
+
+# The domain is the VERB the caller invoked, not the helper that failed: all
+# five process verbs share one option parser and one launch core, and used to
+# answer MACHTELD RUN whatever you called.
+check "run domain"     [expr {[lindex [errcode_of {run -nosuchopt v -- cmd /c echo x}] 1] eq "RUN"}]
+check "child domain"   [expr {[lindex [errcode_of {child start -nosuchopt v -- cmd /c echo x}] 1] eq "CHILD"}]
+check "wait domain"    [expr {[lindex [errcode_of {wait child#99999}] 1] eq "WAIT"}]
+check "detach domain"  [expr {[lindex [errcode_of {detach -nosuchopt v -- cmd /c echo x}] 1] eq "DETACH"}]
+check "pty domain"     [expr {[lindex [errcode_of {pty spawn -nosuchopt v -- cmd}] 1] eq "PTY"}]
+check "store domain"   [expr {[lindex [errcode_of {store get k}] 1] eq "STORE"}]
+# ...including through the SHARED parser and the SHARED launch core.
+check "shared parser keeps the caller's domain" [expr {
+    [errcode_of {pty spawn -timeout 100 -- cmd}] eq {MACHTELD PTY badvalue}}]
+check "shared launcher keeps the caller's domain" [expr {
+    [errcode_of {child start -- no_such_program_zzz_42}] eq {MACHTELD CHILD notfound}}]
 
 # The launch/notfound split, which was the defect this registry exposed: the
 # SAME condition (a program that is not on PATH) used to answer `launch` from
 # run/child/pty and `notfound` from detach.
 set missing no_such_program_zzz_42
 check "run missing => notfound"         [expr {[errcode_of {run -- $missing}] eq {MACHTELD RUN notfound}}]
-check "child start missing => notfound" [expr {[errcode_of {child start -- $missing}] eq {MACHTELD RUN notfound}}]
-check "detach missing => notfound"      [expr {[errcode_of {detach -- $missing}] eq {MACHTELD RUN notfound}}]
-check "pty spawn missing => notfound"   [expr {[errcode_of {pty spawn -- $missing}] eq {MACHTELD RUN notfound}}]
+check "child start missing => notfound" [expr {[errcode_of {child start -- $missing}] eq {MACHTELD CHILD notfound}}]
+check "detach missing => notfound"      [expr {[errcode_of {detach -- $missing}] eq {MACHTELD DETACH notfound}}]
+check "pty spawn missing => notfound"   [expr {[errcode_of {pty spawn -- $missing}] eq {MACHTELD PTY notfound}}]
 # ...and a dead token is a DIFFERENT failure, so it gets a different code.
-check "bad child token => nohandle"     [expr {[errcode_of {child info child#99999}] eq {MACHTELD RUN nohandle}}]
-check "bad pty token => nohandle"       [expr {[errcode_of {pty send pty#99999 x}] eq {MACHTELD RUN nohandle}}]
+check "bad child token => nohandle"     [expr {[errcode_of {child info child#99999}] eq {MACHTELD CHILD nohandle}}]
+check "bad pty token => nohandle"       [expr {[errcode_of {pty send pty#99999 x}] eq {MACHTELD PTY nohandle}}]
 check "bad duration => badvalue"        [expr {[errcode_of {run -timeout 100 -- cmd /c echo x}] eq {MACHTELD RUN badvalue}}]
 check "unknown option => usage"         [expr {[errcode_of {run -nosuchopt v -- cmd /c echo x}] eq {MACHTELD RUN usage}}]
 
