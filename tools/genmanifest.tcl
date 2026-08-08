@@ -38,6 +38,7 @@ set IMPL {
     WaitCmd   wait
     DetachCmd detach
     PtyCmd    pty
+    WatchCmd  watch
     StoreCmd  store
 }
 

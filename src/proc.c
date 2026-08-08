@@ -201,7 +201,24 @@ typedef struct {
     int      counter;     /* child token sequence */
     struct pty_s *ptys;   /* singly-linked list of open ptys */
     int      pty_counter; /* pty token sequence */
+    struct watch_s *watches; /* singly-linked list of open directory watches */
+    int      watch_counter;  /* watch token sequence */
 } proc_ctx;
+
+/* `wait` multiplexes over EVERY handle kind, not just children, so it resolves a
+ * token through this seam instead of reaching into child_t. A waitable is: the
+ * OS handle to block on, and whether the token is already satisfied and needs no
+ * wait at all. What "ready" means is the handle kind's business -- a child is
+ * ready when it has exited, a watch when it has events pending -- and `wait`
+ * does not need to know which. Defined here, ahead of WaitCmd; the watch half is
+ * implemented further down with the rest of that verb. */
+typedef struct {
+    const char *token;
+    HANDLE      h;
+    int         ready;    /* already satisfied: do not wait on it */
+} waitable;
+
+static int watch_waitable(proc_ctx *ctx, const char *token, waitable *w);
 
 static child_t *registry_find(proc_ctx *ctx, const char *token) {
     for (child_t *c = ctx->children; c; c = c->next) {
@@ -812,17 +829,27 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 
     Tcl_Obj *done = Tcl_NewListObj(0, NULL);
     HANDLE h[MAXIMUM_WAIT_OBJECTS];
-    child_t *cs[MAXIMUM_WAIT_OBJECTS];
+    waitable ws[MAXIMUM_WAIT_OBJECTS];
     int nh = 0;
     for (int k = 0; k < n; k++) {
         const char *tok = Tcl_GetString(objv[i + k]);
+        waitable w;
+        /* A token names a child or a watch; both are waitable, and `wait` is the
+         * one multiplexer over all of them -- so a tool can block on "either the
+         * build finished or a file changed" without polling either. */
         child_t *c = registry_find(ctx, tok);
-        if (c == NULL) return mt_error(interp, "WAIT", "nohandle", "no such child");
-        if (c->reaped) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(tok, -1));
+        if (c != NULL) {
+            w.token = c->token;
+            w.h     = (HANDLE)c->proc;
+            w.ready = c->reaped;
+        } else if (!watch_waitable(ctx, tok, &w)) {
+            return mt_error(interp, "WAIT", "nohandle", "no such child or watch");
+        }
+        if (w.ready) {
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(w.token, -1));
         } else {
-            h[nh] = (HANDLE)c->proc;
-            cs[nh] = c;
+            h[nh]  = w.h;
+            ws[nh] = w;
             nh++;
         }
     }
@@ -834,11 +861,11 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
     if (any) {
         if (r < WAIT_OBJECT_0 + (DWORD)nh) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(cs[r - WAIT_OBJECT_0]->token, -1));
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[r - WAIT_OBJECT_0].token, -1));
         }
     } else {
         for (int k = 0; k < nh; k++) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(cs[k]->token, -1));
+            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[k].token, -1));
         }
     }
     Tcl_SetObjResult(interp, done);
@@ -1157,13 +1184,364 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     return TCL_OK;
 }
 
+/* ---- ::machteld::watch (ReadDirectoryChangesW) -------------------------- *
+ *
+ * A directory watch: the OS reports changes, a reader thread queues them, and
+ * `watch read` drains the queue. Handle + blocking read, exactly like a child --
+ * one lifetime model for the whole palette, and no event loop is required, so a
+ * watch works the same in a script, in the REPL, and inside a Tk tool.
+ *
+ * Overlapped I/O with a stop event, rather than a synchronous read cancelled
+ * from outside: teardown then needs no CancelSynchronousIo race, the thread
+ * simply observes the stop event and leaves. (The ConPTY teardown further up is
+ * the cautionary tale about guessing at shutdown order.)
+ *
+ * The reader thread never touches a Tcl_Obj -- Tcl values belong to the
+ * interpreter's thread. It queues plain UTF-8, and `watch read` builds the dicts.
+ */
+
+typedef struct {
+    int   action;   /* FILE_ACTION_* */
+    char *path;     /* UTF-8, relative to the watched directory */
+    char *from;     /* the old name, once a rename pair has been joined */
+    int   done;     /* consumed by coalescing */
+} wevent;
+
+#define WATCH_QUEUE_MAX 8192
+
+typedef struct watch_s {
+    char    token[24];
+    HANDLE  dir;        /* the directory, opened FILE_LIST_DIRECTORY */
+    HANDLE  thread;
+    HANDLE  stopEv;     /* manual-reset: tells the reader thread to leave */
+    HANDLE  dataEv;     /* manual-reset: events are queued (what `wait` blocks on) */
+    CRITICAL_SECTION lock;
+    wevent *ev;
+    size_t  n, cap;
+    int     dropped;    /* events lost to the queue cap or an OS buffer overflow */
+    int     recursive;
+    char   *dir_path;   /* for diagnostics */
+    struct watch_s *next;
+} watch_t;
+
+static watch_t *watch_find(proc_ctx *ctx, const char *token) {
+    for (watch_t *w = ctx->watches; w; w = w->next) {
+        if (strcmp(w->token, token) == 0) return w;
+    }
+    return NULL;
+}
+
+/* Queue one event. Caller holds the lock. Over the cap we count rather than
+ * grow without bound: a watch on a busy tree must not be able to exhaust memory,
+ * and a caller that fell behind is told so rather than quietly given less. */
+static void watch_push(watch_t *w, int action, const char *path) {
+    if (w->n >= WATCH_QUEUE_MAX) { w->dropped++; return; }
+    if (w->n == w->cap) {
+        size_t cap = w->cap ? w->cap * 2 : 64;
+        wevent *ev = (wevent *)realloc(w->ev, cap * sizeof(*ev));
+        if (ev == NULL) { w->dropped++; return; }
+        w->ev = ev;
+        w->cap = cap;
+    }
+    char *dup = _strdup(path);
+    if (dup == NULL) { w->dropped++; return; }
+    /* Every field, explicitly: the array comes from realloc, so anything left
+     * unset is whatever was in that memory -- and a garbage `done` silently
+     * swallows the event during coalescing. */
+    w->ev[w->n].action = action;
+    w->ev[w->n].path   = dup;
+    w->ev[w->n].from   = NULL;
+    w->ev[w->n].done   = 0;
+    w->n++;
+}
+
+static DWORD WINAPI watch_thread(LPVOID arg) {
+    watch_t *w = (watch_t *)arg;
+    /* DWORD-aligned, and large enough that ordinary bursts do not overflow it. */
+    char *buf = (char *)malloc(64 * 1024);
+    if (buf == NULL) return 0;
+    OVERLAPPED ov;
+    HANDLE ioEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (ioEv == NULL) { free(buf); return 0; }
+
+    const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
+                         FILE_NOTIFY_CHANGE_CREATION;
+    for (;;) {
+        memset(&ov, 0, sizeof ov);
+        ov.hEvent = ioEv;
+        ResetEvent(ioEv);
+        if (!ReadDirectoryChangesW(w->dir, buf, 64 * 1024, w->recursive,
+                                   filter, NULL, &ov, NULL)) {
+            break;
+        }
+        HANDLE hs[2] = { ioEv, w->stopEv };
+        DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
+        if (r != WAIT_OBJECT_0) {
+            /* Stop requested: withdraw the read and reap it before leaving, so
+             * the buffer is not written after this thread frees it. */
+            CancelIoEx(w->dir, &ov);
+            DWORD got = 0;
+            GetOverlappedResult(w->dir, &ov, &got, TRUE);
+            break;
+        }
+        DWORD got = 0;
+        if (!GetOverlappedResult(w->dir, &ov, &got, FALSE)) break;
+
+        EnterCriticalSection(&w->lock);
+        if (got == 0) {
+            /* The OS buffer overflowed: changes happened that it could not
+             * describe. Say so rather than pretending nothing did. */
+            w->dropped++;
+        } else {
+            char *p = buf;
+            for (;;) {
+                FILE_NOTIFY_INFORMATION *fni = (FILE_NOTIFY_INFORMATION *)p;
+                int wlen = (int)(fni->FileNameLength / sizeof(WCHAR));
+                int need = WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, NULL, 0, NULL, NULL);
+                if (need > 0) {
+                    char *u8 = (char *)malloc((size_t)need + 1);
+                    if (u8 != NULL) {
+                        WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, u8, need, NULL, NULL);
+                        u8[need] = '\0';
+                        for (char *c = u8; *c; c++) { if (*c == '\\') *c = '/'; }
+                        watch_push(w, (int)fni->Action, u8);
+                        free(u8);
+                    }
+                }
+                if (fni->NextEntryOffset == 0) break;
+                p += fni->NextEntryOffset;
+            }
+        }
+        if (w->n > 0 || w->dropped > 0) SetEvent(w->dataEv);
+        LeaveCriticalSection(&w->lock);
+    }
+    CloseHandle(ioEv);
+    free(buf);
+    return 0;
+}
+
+static void watch_free(proc_ctx *ctx, watch_t *w) {
+    watch_t **pp = &ctx->watches;
+    while (*pp) { if (*pp == w) { *pp = w->next; break; } pp = &(*pp)->next; }
+    if (w->stopEv) SetEvent(w->stopEv);
+    if (w->thread) {
+        WaitForSingleObject(w->thread, 5000);
+        CloseHandle(w->thread);
+    }
+    if (w->dir && w->dir != INVALID_HANDLE_VALUE) CloseHandle(w->dir);
+    if (w->stopEv) CloseHandle(w->stopEv);
+    if (w->dataEv) CloseHandle(w->dataEv);
+    DeleteCriticalSection(&w->lock);
+    for (size_t i = 0; i < w->n; i++) free(w->ev[i].path);
+    free(w->ev);
+    free(w->dir_path);
+    free(w);
+}
+
+/* The `wait` seam: a watch is ready when it has something queued. */
+static int watch_waitable(proc_ctx *ctx, const char *token, waitable *out) {
+    watch_t *w = watch_find(ctx, token);
+    if (w == NULL) return 0;
+    EnterCriticalSection(&w->lock);
+    int ready = (w->n > 0 || w->dropped > 0);
+    LeaveCriticalSection(&w->lock);
+    out->token = w->token;
+    out->h     = w->dataEv;
+    out->ready = ready;
+    return 1;
+}
+
+static const char *watch_action_name(int action) {
+    switch (action) {
+        case FILE_ACTION_ADDED:            return "added";
+        case FILE_ACTION_REMOVED:          return "removed";
+        case FILE_ACTION_MODIFIED:         return "modified";
+        case FILE_ACTION_RENAMED_OLD_NAME: return "renamed-old";
+        case FILE_ACTION_RENAMED_NEW_NAME: return "renamed-new";
+    }
+    return "unknown";
+}
+
+static Tcl_Obj *watch_event_obj(const char *path, const char *action, const char *from) {
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("path", -1), Tcl_NewStringObj(path, -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("action", -1), Tcl_NewStringObj(action, -1));
+    if (from != NULL) {
+        Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("from", -1), Tcl_NewStringObj(from, -1));
+    }
+    return d;
+}
+
+static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    proc_ctx *ctx = (proc_ctx *)cd;
+    static const char *const subs[] = { "start", "read", "close", "list", NULL };
+    enum { START, READ, CLOSE, LIST };
+    int idx;
+    if (objc < 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
+        return TCL_ERROR;
+    }
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+
+    if (idx == START) {
+        if (objc < 3) return mt_error(interp, "WATCH", "usage", "watch start dir ?-recursive?");
+        const char *dir = Tcl_GetString(objv[2]);
+        int recursive = 0;
+        for (int i = 3; i < objc; i++) {
+            const char *a = Tcl_GetString(objv[i]);
+            if (strcmp(a, "-recursive") == 0) { recursive = 1; }
+            else return mt_error(interp, "WATCH", "usage", "unknown option");
+        }
+        wchar_t *wdir = u8_to_u16(dir);
+        if (wdir == NULL) return mt_error(interp, "WATCH", "badvalue", "bad directory name");
+        HANDLE h = CreateFileW(wdir, FILE_LIST_DIRECTORY,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING,
+                               FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
+        free(wdir);
+        if (h == INVALID_HANDLE_VALUE) {
+            return mt_error(interp, "WATCH", "notfound", "cannot open directory to watch");
+        }
+        watch_t *w = (watch_t *)calloc(1, sizeof(*w));
+        if (w == NULL) { CloseHandle(h); return mt_error(interp, "WATCH", "oserror", "out of memory"); }
+        w->dir = h;
+        w->recursive = recursive;
+        w->dir_path = _strdup(dir);
+        InitializeCriticalSection(&w->lock);
+        w->stopEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+        w->dataEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+        snprintf(w->token, sizeof w->token, "watch#%d", ++ctx->watch_counter);
+        w->next = ctx->watches;
+        ctx->watches = w;
+        w->thread = CreateThread(NULL, 0, watch_thread, w, 0, NULL);
+        if (w->thread == NULL) {
+            watch_free(ctx, w);
+            return mt_error(interp, "WATCH", "oserror", "cannot start watch thread");
+        }
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(w->token, -1));
+        return TCL_OK;
+    }
+
+    if (idx == LIST) {
+        Tcl_Obj *l = Tcl_NewListObj(0, NULL);
+        for (watch_t *w = ctx->watches; w; w = w->next) {
+            Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(w->token, -1));
+        }
+        Tcl_SetObjResult(interp, l);
+        return TCL_OK;
+    }
+
+    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    watch_t *w = watch_find(ctx, Tcl_GetString(objv[2]));
+    if (w == NULL) return mt_error(interp, "WATCH", "nohandle", "no such watch");
+
+    if (idx == CLOSE) {
+        watch_free(ctx, w);
+        return TCL_OK;
+    }
+
+    /* READ. -timeout blocks for up to that long for the FIRST event; without it
+     * the read returns whatever is queued right now, which is what `pty read`
+     * does -- one habit for both. -raw returns the OS's stream unmerged. */
+    long long tmo = 0;
+    int raw = 0;
+    for (int i = 3; i < objc; i++) {
+        const char *a = Tcl_GetString(objv[i]);
+        if (strcmp(a, "-raw") == 0) { raw = 1; continue; }
+        if (strcmp(a, "-timeout") == 0) {
+            if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
+            tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
+            if (tmo < 0) return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
+            continue;
+        }
+        return mt_error(interp, "WATCH", "usage", "unknown option");
+    }
+    if (tmo > 0) {
+        EnterCriticalSection(&w->lock);
+        int have = (w->n > 0 || w->dropped > 0);
+        LeaveCriticalSection(&w->lock);
+        if (!have) WaitForSingleObject(w->dataEv, (DWORD)tmo);
+    }
+
+    EnterCriticalSection(&w->lock);
+    size_t n = w->n;
+    wevent *ev = w->ev;
+    int dropped = w->dropped;
+    w->ev = NULL; w->n = 0; w->cap = 0; w->dropped = 0;
+    ResetEvent(w->dataEv);
+    LeaveCriticalSection(&w->lock);
+
+    Tcl_Obj *out = Tcl_NewListObj(0, NULL);
+    if (dropped > 0) {
+        Tcl_Obj *d = watch_event_obj("", "overflow", NULL);
+        Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("count", -1), Tcl_NewIntObj(dropped));
+        Tcl_ListObjAppendElement(interp, out, d);
+    }
+    if (raw) {
+        for (size_t i = 0; i < n; i++) {
+            Tcl_ListObjAppendElement(interp, out,
+                watch_event_obj(ev[i].path, watch_action_name(ev[i].action), NULL));
+        }
+    } else {
+        /* Coalesce to ONE event per path. The batch is "everything since your
+         * last read", so the merge is a function of the event sequence and the
+         * read points, with no hidden timer -- same reads, same answer (creed
+         * 3). A debounce window would have made the result depend on the clock.
+         *
+         * Which action survives is a precedence, not "the last one": saving a
+         * new file emits added THEN modified, and reporting `modified` would
+         * throw away the more informative half. So: gone beats new beats moved
+         * beats touched.
+         *   removed  -- the last thing that happened was its removal
+         *   added    -- it appeared in this batch and is still there
+         *   renamed  -- it moved (and `from` names where it came from)
+         *   modified -- it was only written to
+         */
+        for (size_t i = 0; i < n; i++) {
+            if (ev[i].action != FILE_ACTION_RENAMED_OLD_NAME || ev[i].done) continue;
+            for (size_t j = i + 1; j < n; j++) {
+                if (!ev[j].done && ev[j].action == FILE_ACTION_RENAMED_NEW_NAME) {
+                    ev[j].from = ev[i].path;   /* borrowed; freed with ev[i] */
+                    ev[i].done = 1;
+                    break;
+                }
+            }
+        }
+        for (size_t i = 0; i < n; i++) {
+            if (ev[i].done || ev[i].path == NULL) continue;
+            const char *path = ev[i].path;
+            int removed = 0, added = 0, renamed = 0;
+            const char *from = NULL;
+            for (size_t j = i; j < n; j++) {
+                if (ev[j].done || ev[j].path == NULL || strcmp(ev[j].path, path) != 0) continue;
+                switch (ev[j].action) {
+                    case FILE_ACTION_REMOVED:          removed = 1; added = 0; break;
+                    case FILE_ACTION_ADDED:            added = 1; removed = 0; break;
+                    case FILE_ACTION_RENAMED_NEW_NAME: renamed = 1; if (ev[j].from) from = ev[j].from; break;
+                    default: break;
+                }
+                if (j != i) ev[j].done = 1;
+            }
+            const char *act = removed ? "removed" : added ? "added"
+                            : renamed ? "renamed" : watch_action_name(ev[i].action);
+            Tcl_ListObjAppendElement(interp, out, watch_event_obj(path, act, from));
+        }
+    }
+    for (size_t i = 0; i < n; i++) free(ev[i].path);
+    free(ev);
+    Tcl_SetObjResult(interp, out);
+    return TCL_OK;
+}
+
 /* ---- registration ------------------------------------------------------ */
 
-/* Tear down any open pseudo-consoles at exit, so a REPL user who spawns a pty
- * and just quits doesn't leave a wedged console host behind. */
+/* Tear down any open pseudo-consoles and watches at exit, so a REPL user who
+ * spawns one and just quits leaves no wedged console host or reader thread. */
 static void proc_atexit(void *cd) {
     proc_ctx *ctx = (proc_ctx *)cd;
     while (ctx->ptys) pty_free(ctx, ctx->ptys);
+    while (ctx->watches) watch_free(ctx, ctx->watches);
 }
 
 int Machteldproc_Init(Tcl_Interp *interp) {
@@ -1189,6 +1567,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::detach", DetachCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::pty", PtyCmd, ctx, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::watch", WatchCmd, ctx, NULL);
     Tcl_CreateExitHandler(proc_atexit, ctx);
     Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;

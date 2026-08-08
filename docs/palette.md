@@ -49,6 +49,34 @@ pty read  $p -timeout 100ms     ;# raw read; vtstrip $text strips ANSI/VT escape
 pty close $p
 ```
 
+## Built — live file events
+
+```tcl
+set w [watch start $dir -recursive]      ;# opaque token "watch#N"
+watch read $w                            ;# what changed since the last read; empty if nothing
+watch read $w -timeout 5s                ;# block up to 5s for the first event
+watch read $w -raw                       ;# the OS stream, unmerged
+wait -any $child $w                      ;# "the build finished, OR a file changed"
+watch close $w ;  watch list
+```
+
+An event is `{path <relative> action <added|modified|removed|renamed> ?from <old>?}`. Paths are
+relative to the watched directory and always use forward slashes.
+
+**Coalesced by default: one event per path per read.** A batch is everything since your last
+read, so the merge depends on the event sequence and your read points — never on a hidden
+timer, which is what keeps the same reads giving the same answer ([creed](creed.md) 3). Saving a
+new file emits *added* then *modified*; the surviving action is decided by precedence —
+**removed** beats **added** beats **renamed** beats **modified** — so a creation reads as
+`added` rather than losing its more informative half. A rename pair is joined into one event
+naming both ends. `-raw` gives the unmerged stream when you want exactly what the OS said.
+
+If events are lost — the queue cap, or the OS's own buffer overflowing — the read leads with
+`{path {} action overflow count N}` rather than silently returning less.
+
+A blocking `watch read` does not pump Tcl's event loop (nor does `child wait`), so a Tk tool
+polls with a short `-timeout` from an `after` handler instead of blocking its UI thread.
+
 ## Built — storage & packaging
 
 ```tcl
