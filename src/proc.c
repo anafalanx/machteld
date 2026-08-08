@@ -14,8 +14,11 @@
  * A child is launched born-in-job into a per-command job (tree-kill + limits);
  * stdout/stderr are captured on drain threads (no pipe-buffer deadlock). `run`
  * and `child start` share one launch/reap core -- run just reaps immediately.
- * Usage/launch failures throw -errorcode {MACHTELD RUN <code>}; a nonzero exit
- * is a normal dict result.
+ * Usage/launch failures throw -errorcode {MACHTELD <DOMAIN> <code>}, where the
+ * DOMAIN is the verb invoked -- RUN, CHILD, WAIT, DETACH, PTY -- so a caller
+ * traps on the command it typed rather than on which internal helper failed. A
+ * nonzero exit is a normal dict result, not a failure. Every domain and code is
+ * registered in docs/contract.md, held to this file by a test in both directions.
  */
 #include "winjob.h"
 #include <tcl.h>
@@ -230,9 +233,15 @@ typedef struct {
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
-static int run_error(Tcl_Interp *interp, const char *code, const char *msg) {
-    Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "run failed", -1));
-    Tcl_SetErrorCode(interp, "MACHTELD", "RUN", code, (char *)NULL);
+/* Every palette failure is {MACHTELD <DOMAIN> <code>}, and the DOMAIN is the
+ * verb the caller invoked -- `pty` raises MACHTELD PTY, `wait` raises
+ * MACHTELD WAIT. Domain-by-verb rather than domain-by-helper: a caller traps on
+ * the command it typed, without having to know which internal function failed.
+ * The registry of every domain and code is in docs/contract.md, held to this
+ * source by a test. */
+static int mt_error(Tcl_Interp *interp, const char *domain, const char *code, const char *msg) {
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "command failed", -1));
+    Tcl_SetErrorCode(interp, "MACHTELD", domain, code, (char *)NULL);
     return TCL_ERROR;
 }
 
@@ -299,7 +308,7 @@ static int build_env_block(Tcl_Interp *interp, Tcl_Obj *pairs, wchar_t *buf, siz
     return rc;
 }
 
-static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i0, run_opts *o) {
+static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *const objv[], int i0, run_opts *o) {
     o->timeout_ms = -1;
     o->mem = 0;
     o->cpu_100ns = 0;
@@ -314,18 +323,18 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
         const char *a = Tcl_GetString(objv[i]);
         if (strcmp(a, "--") == 0) { i++; break; }
         if (a[0] != '-' || a[1] == '\0') break;
-        if (i + 1 >= objc) return run_error(interp, "usage", "option needs a value");
+        if (i + 1 >= objc) return mt_error(interp, dom, "usage", "option needs a value");
         const char *v = Tcl_GetString(objv[i + 1]);
         if (strcmp(a, "-timeout") == 0) {
             o->timeout_ms = parse_duration_ms(v);
-            if (o->timeout_ms < 0) return run_error(interp, "badvalue", "bad -timeout value");
+            if (o->timeout_ms < 0) return mt_error(interp, dom, "badvalue", "bad -timeout value");
         } else if (strcmp(a, "-mem") == 0) {
             long long b = parse_bytes(v);
-            if (b < 0) return run_error(interp, "badvalue", "bad -mem value");
+            if (b < 0) return mt_error(interp, dom, "badvalue", "bad -mem value");
             o->mem = (unsigned long long)b;
         } else if (strcmp(a, "-cpu") == 0) {
             long long d = parse_duration_ms(v);
-            if (d < 0) return run_error(interp, "badvalue", "bad -cpu value");
+            if (d < 0) return mt_error(interp, dom, "badvalue", "bad -cpu value");
             o->cpu_100ns = (unsigned long long)d * 10000ULL;
         } else if (strcmp(a, "-dir") == 0) {
             o->dir = v;
@@ -338,7 +347,7 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
         } else if (strcmp(a, "-onerr") == 0) {
             o->onerr = objv[i + 1];
         } else {
-            return run_error(interp, "usage", "unknown option");
+            return mt_error(interp, dom, "usage", "unknown option");
         }
         i++;
     }
@@ -651,17 +660,17 @@ static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
 static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
     run_opts o;
-    if (parse_opts(interp, objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    if (parse_opts(interp, "RUN", objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
     int cargc = 0;
     const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-    if (cargv == NULL) return run_error(interp, "usage", "run ?-opt val ...? ?--? command ?arg ...?");
+    if (cargv == NULL) return mt_error(interp, "RUN", "usage", "run ?-opt val ...? ?--? command ?arg ...?");
 
     wchar_t envbuf[32768];
     if (o.env_obj != NULL) {
         const char *ee = NULL;
         if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
             free(cargv);
-            return run_error(interp, "badvalue", ee);
+            return mt_error(interp, "RUN", "badvalue", ee);
         }
         o.env_block = envbuf; /* stack buffer, valid through the launch below */
     }
@@ -670,7 +679,7 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     int stream = (o.onout != NULL || o.onerr != NULL);
     child_t *c = child_launch(ctx, &o, cargc, cargv, 0, stream, &err, &code);
     free(cargv);
-    if (c == NULL) return run_error(interp, code, err);
+    if (c == NULL) return mt_error(interp, "RUN", code, err);
 
     if (stream) {
         /* live path: pump the pipes on this thread, emitting lines to the
@@ -687,7 +696,7 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
             wj_job_terminate(c->job, 1);
             w = child_reap(c, WJ_INFINITE, &err);
         }
-        if (w < 0) { child_free(c); return run_error(interp, "oserror", err); }
+        if (w < 0) { child_free(c); return mt_error(interp, "RUN", "oserror", err); }
     }
 
     Tcl_SetObjResult(interp, child_dict(interp, c));
@@ -710,23 +719,23 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
     if (idx == START) {
         run_opts o;
-        if (parse_opts(interp, objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        if (parse_opts(interp, "CHILD", objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
         int cargc = 0;
         const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-        if (cargv == NULL) return run_error(interp, "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
+        if (cargv == NULL) return mt_error(interp, "CHILD", "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
         wchar_t envbuf[32768];
         if (o.env_obj != NULL) {
             const char *ee = NULL;
             if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
                 free(cargv);
-                return run_error(interp, "badvalue", ee);
+                return mt_error(interp, "CHILD", "badvalue", ee);
             }
             o.env_block = envbuf;
         }
         const char *err = NULL, *code = "launch";
         child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err, &code);
         free(cargv);
-        if (c == NULL) return run_error(interp, code, err);
+        if (c == NULL) return mt_error(interp, "CHILD", code, err);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));
         return TCL_OK;
     }
@@ -744,12 +753,12 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
     const char *token = Tcl_GetString(objv[2]);
     child_t *c = registry_find(ctx, token);
-    if (c == NULL) return run_error(interp, "nohandle", "no such child");
+    if (c == NULL) return mt_error(interp, "CHILD", "nohandle", "no such child");
 
     switch (idx) {
     case WAIT: {
         const char *err = NULL;
-        if (!c->reaped && child_reap(c, WJ_INFINITE, &err) < 0) return run_error(interp, "oserror", err);
+        if (!c->reaped && child_reap(c, WJ_INFINITE, &err) < 0) return mt_error(interp, "CHILD", "oserror", err);
         Tcl_SetObjResult(interp, child_dict(interp, c));
         return TCL_OK;
     }
@@ -798,8 +807,8 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     int i = 1;
     if (i < objc && strcmp(Tcl_GetString(objv[i]), "-any") == 0) { any = 1; i++; }
     int n = objc - i;
-    if (n <= 0) return run_error(interp, "usage", "wait ?-any? token ...");
-    if (n > MAXIMUM_WAIT_OBJECTS) return run_error(interp, "usage", "too many children to wait on (max 64)");
+    if (n <= 0) return mt_error(interp, "WAIT", "usage", "wait ?-any? token ...");
+    if (n > MAXIMUM_WAIT_OBJECTS) return mt_error(interp, "WAIT", "usage", "too many children to wait on (max 64)");
 
     Tcl_Obj *done = Tcl_NewListObj(0, NULL);
     HANDLE h[MAXIMUM_WAIT_OBJECTS];
@@ -808,7 +817,7 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     for (int k = 0; k < n; k++) {
         const char *tok = Tcl_GetString(objv[i + k]);
         child_t *c = registry_find(ctx, tok);
-        if (c == NULL) return run_error(interp, "nohandle", "no such child");
+        if (c == NULL) return mt_error(interp, "WAIT", "nohandle", "no such child");
         if (c->reaped) {
             Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(tok, -1));
         } else {
@@ -845,12 +854,12 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     run_opts o;
-    if (parse_opts(interp, objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    if (parse_opts(interp, "DETACH", objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
     int cargc = 0;
     const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-    if (cargv == NULL) return run_error(interp, "usage", "detach ?-opt val ...? ?--? command ?arg ...?");
+    if (cargv == NULL) return mt_error(interp, "DETACH", "usage", "detach ?-opt val ...? ?--? command ?arg ...?");
     char *exe = resolve_exe(cargv[0]);
-    if (exe == NULL) { free(cargv); return run_error(interp, "notfound", "command not found on PATH"); }
+    if (exe == NULL) { free(cargv); return mt_error(interp, "DETACH", "notfound", "command not found on PATH"); }
 
     int         result = TCL_ERROR;
     const char *err = NULL;
@@ -863,7 +872,7 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     if (o.env_obj != NULL) {
         const char *ee = NULL;
         if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
-            run_error(interp, "badvalue", ee);
+            mt_error(interp, "DETACH", "badvalue", ee);
             goto cleanup;
         }
         o.env_block = envbuf; /* stack buffer, valid through the launch below */
@@ -871,19 +880,19 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
 
     nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                       NULL, OPEN_EXISTING, 0, NULL);
-    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; run_error(interp, "oserror", "open NUL failed"); goto cleanup; }
+    if (nul == INVALID_HANDLE_VALUE) { nul = NULL; mt_error(interp, "DETACH", "oserror", "open NUL failed"); goto cleanup; }
     djob = wj_job_new(0, &err); /* plain job: closing our handle later won't kill it */
-    if (djob == NULL) { run_error(interp, "oserror", err); goto cleanup; }
+    if (djob == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     if (o.mem || o.cpu_100ns) {
         wj_limits lim = { 0 };
         lim.process_memory_bytes = o.mem;
         lim.process_cpu_100ns = o.cpu_100ns;
-        if (wj_job_set_limits(djob, &lim, &err) != 0) { run_error(interp, "oserror", err); goto cleanup; }
+        if (wj_job_set_limits(djob, &lim, &err) != 0) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     }
     void *jobh[1] = { wj_job_handle(djob) };
     wj_stdio io = { nul, nul, nul };
     if (wj_launch(exe, cargc, cargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, o.env_block, &pid, &proch, &err) != 0) {
-        run_error(interp, "launch", err);
+        mt_error(interp, "DETACH", "launch", err);
         goto cleanup;
     }
     Tcl_SetObjResult(interp, Tcl_NewIntObj(pid));
@@ -1069,23 +1078,23 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
     if (idx == SPAWN) {
         run_opts o;
-        if (parse_opts(interp, objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        if (parse_opts(interp, "PTY", objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
         int cargc = 0;
         const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-        if (cargv == NULL) return run_error(interp, "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
+        if (cargv == NULL) return mt_error(interp, "PTY", "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
         wchar_t envbuf[32768];
         if (o.env_obj != NULL) {
             const char *ee = NULL;
             if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
                 free(cargv);
-                return run_error(interp, "badvalue", ee);
+                return mt_error(interp, "PTY", "badvalue", ee);
             }
             o.env_block = envbuf;
         }
         const char *err = NULL, *code = "launch";
         pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err, &code);
         free(cargv);
-        if (p == NULL) return run_error(interp, code, err);
+        if (p == NULL) return mt_error(interp, "PTY", code, err);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(p->token, -1));
         return TCL_OK;
     }
@@ -1100,7 +1109,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
     if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
     pty_t *p = pty_find(ctx, Tcl_GetString(objv[2]));
-    if (p == NULL) return run_error(interp, "nohandle", "no such pty");
+    if (p == NULL) return mt_error(interp, "PTY", "nohandle", "no such pty");
 
     switch (idx) {
     case SEND: {
@@ -1109,7 +1118,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         const char *s = Tcl_GetStringFromObj(objv[3], &len);
         DWORD written = 0;
         if (!WriteFile(p->inW, s, (DWORD)len, &written, NULL)) {
-            return run_error(interp, "oserror", "write to pty failed");
+            return mt_error(interp, "PTY", "oserror", "write to pty failed");
         }
         return TCL_OK;
     }
@@ -1117,7 +1126,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         int timeout_ms = 0;
         if (objc >= 5 && strcmp(Tcl_GetString(objv[3]), "-timeout") == 0) {
             long long t = parse_duration_ms(Tcl_GetString(objv[4]));
-            if (t < 0) return run_error(interp, "badvalue", "bad -timeout value");
+            if (t < 0) return mt_error(interp, "PTY", "badvalue", "bad -timeout value");
             timeout_ms = (int)t;
         }
         char buf[8192];
