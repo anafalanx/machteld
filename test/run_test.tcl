@@ -209,6 +209,67 @@ check "run dict matches its documented shape" [expr {
     [dict exists $rdoc exit] && [dict exists $rdoc status] && [dict exists $rdoc out] &&
     [dict exists $rdoc err] && [dict exists $rdoc pid] && [dict exists $rdoc truncated]}]
 
+# --- the error-code registry is closed ---------------------------------------
+# Creed 5: errors are part of the contract. A code you can trap must be a code
+# that is documented, and a code that is documented must be one the C can throw.
+# Both directions are checked against the SOURCE, so a new run_error() literal
+# added in a hurry fails this test until contract.md names it.
+proc errcode_of {script} {
+    if {[catch {uplevel 1 $script} m opts] == 0} { return "" }
+    return [dict get $opts -errorcode]
+}
+set SRC [file join $HERE .. src]
+if {![file isdirectory $SRC]} {
+    puts "skip registry closure (no src/ beside the test)"
+} else {
+    set thrown {}
+    foreach {f pat dom} [list \
+            [file join $SRC proc.c]  {run_error\(interp,\s*"([a-z]+)"}  RUN \
+            [file join $SRC store.c] {fail_code\(interp,\s*"([a-z]+)"}  STORE] {
+        set fh [open $f r]; set text [read $fh]; close $fh
+        foreach m [regexp -all -inline $pat $text] {
+            if {[string match {*"*} $m]} continue   ;# skip the whole-match element
+            dict set thrown "$dom $m" 1
+        }
+    }
+    # The documented set, parsed out of the shipped doc's table -- so the DOC is
+    # the registry, and this test is what stops it from becoming a lie.
+    set documented {}
+    foreach line [split [help contract] \n] {
+        if {[regexp {^\|\s*`MACHTELD ([A-Z]+) ([a-z]+)`} $line -> d c]} {
+            dict set documented "$d $c" 1
+        }
+    }
+    set undocumented [lsort [lmap k [dict keys $thrown] {expr {[dict exists $documented $k] ? [continue] : $k}}]]
+    set unthrown     [lsort [lmap k [dict keys $documented] {expr {[dict exists $thrown $k] ? [continue] : $k}}]]
+    check "every code the C throws is documented"  [expr {$undocumented eq ""}]
+    check "every documented code exists in the C"  [expr {$unthrown eq ""}]
+    if {$undocumented ne ""} { puts "     undocumented: $undocumented" }
+    if {$unthrown ne ""}     { puts "     documented but unthrown: $unthrown" }
+    check "registry is non-trivial" [expr {[dict size $thrown] >= 8}]
+}
+
+# The launch/notfound split, which was the defect this registry exposed: the
+# SAME condition (a program that is not on PATH) used to answer `launch` from
+# run/child/pty and `notfound` from detach.
+set missing no_such_program_zzz_42
+check "run missing => notfound"         [expr {[errcode_of {run -- $missing}] eq {MACHTELD RUN notfound}}]
+check "child start missing => notfound" [expr {[errcode_of {child start -- $missing}] eq {MACHTELD RUN notfound}}]
+check "detach missing => notfound"      [expr {[errcode_of {detach -- $missing}] eq {MACHTELD RUN notfound}}]
+check "pty spawn missing => notfound"   [expr {[errcode_of {pty spawn -- $missing}] eq {MACHTELD RUN notfound}}]
+# ...and a dead token is a DIFFERENT failure, so it gets a different code.
+check "bad child token => nohandle"     [expr {[errcode_of {child info child#99999}] eq {MACHTELD RUN nohandle}}]
+check "bad pty token => nohandle"       [expr {[errcode_of {pty send pty#99999 x}] eq {MACHTELD RUN nohandle}}]
+check "bad duration => badvalue"        [expr {[errcode_of {run -timeout 100 -- cmd /c echo x}] eq {MACHTELD RUN badvalue}}]
+check "unknown option => usage"         [expr {[errcode_of {run -nosuchopt v -- cmd /c echo x}] eq {MACHTELD RUN usage}}]
+
+# store now carries codes at all (it set none before).
+check "store before open => notopen" [expr {[errcode_of {store get k}] eq {MACHTELD STORE notopen}}]
+store open [file join $env(TEMP) mt_regtest.sqlite]
+check "store put/get round-trips"    [expr {[store put a b] eq "" && [store get a] eq "b"}]
+store close
+file delete -force [file join $env(TEMP) mt_regtest.sqlite]
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails

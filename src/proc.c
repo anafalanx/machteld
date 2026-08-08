@@ -352,11 +352,17 @@ static int parse_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int i
  * child (reader threads running unless `stream`, not yet reaped); on failure
  * returns NULL and sets *err. `track` registers it under a token; otherwise it
  * is a transient run. `stream` suppresses the reader threads so the caller can
- * pump the pipes itself (run -onout/-onerr). */
+ * pump the pipes itself (run -onout/-onerr).
+ *
+ * *code carries WHICH failure, because the caller cannot tell from the message
+ * alone: an unresolvable program is `notfound` -- the code the contract has
+ * always documented for it -- and every failure after that point is `launch`.
+ * The caller seeds it with "launch", so a new failure path here defaults to the
+ * general code rather than silently inheriting a specific one. */
 static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
-                             int track, int stream, const char **err) {
+                             int track, int stream, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
-    if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
+    if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
 
     child_t *c = (child_t *)calloc(1, sizeof(*c));
     HANDLE outW = NULL, errW = NULL, nul = NULL, stdinR = NULL, stdinW = NULL;
@@ -660,11 +666,11 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         o.env_block = envbuf; /* stack buffer, valid through the launch below */
     }
 
-    const char *err = NULL;
+    const char *err = NULL, *code = "launch";
     int stream = (o.onout != NULL || o.onerr != NULL);
-    child_t *c = child_launch(ctx, &o, cargc, cargv, 0, stream, &err);
+    child_t *c = child_launch(ctx, &o, cargc, cargv, 0, stream, &err, &code);
     free(cargv);
-    if (c == NULL) return run_error(interp, "launch", err);
+    if (c == NULL) return run_error(interp, code, err);
 
     if (stream) {
         /* live path: pump the pipes on this thread, emitting lines to the
@@ -717,10 +723,10 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             }
             o.env_block = envbuf;
         }
-        const char *err = NULL;
-        child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err);
+        const char *err = NULL, *code = "launch";
+        child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err, &code);
         free(cargv);
-        if (c == NULL) return run_error(interp, "launch", err);
+        if (c == NULL) return run_error(interp, code, err);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));
         return TCL_OK;
     }
@@ -738,7 +744,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
     const char *token = Tcl_GetString(objv[2]);
     child_t *c = registry_find(ctx, token);
-    if (c == NULL) return run_error(interp, "notfound", "no such child");
+    if (c == NULL) return run_error(interp, "nohandle", "no such child");
 
     switch (idx) {
     case WAIT: {
@@ -802,7 +808,7 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     for (int k = 0; k < n; k++) {
         const char *tok = Tcl_GetString(objv[i + k]);
         child_t *c = registry_find(ctx, tok);
-        if (c == NULL) return run_error(interp, "notfound", "no such child");
+        if (c == NULL) return run_error(interp, "nohandle", "no such child");
         if (c->reaped) {
             Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(tok, -1));
         } else {
@@ -948,10 +954,12 @@ static void pty_free(proc_ctx *ctx, pty_t *p) {
     free(p);
 }
 
+/* *code as in child_launch: `notfound` for an unresolvable program, `launch`
+ * for anything that fails once the program has been found. */
 static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
-                        int cols, int rows, const char **err) {
+                        int cols, int rows, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
-    if (exe == NULL) { *err = "command not found on PATH"; return NULL; }
+    if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
     char *cmdText = wj_make_cmdline(cargc, cargv);
 
     HANDLE   inR = NULL, inW = NULL, outR = NULL, outW = NULL;
@@ -1074,10 +1082,10 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
             }
             o.env_block = envbuf;
         }
-        const char *err = NULL;
-        pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err);
+        const char *err = NULL, *code = "launch";
+        pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err, &code);
         free(cargv);
-        if (p == NULL) return run_error(interp, "launch", err);
+        if (p == NULL) return run_error(interp, code, err);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(p->token, -1));
         return TCL_OK;
     }
@@ -1092,7 +1100,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
     if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
     pty_t *p = pty_find(ctx, Tcl_GetString(objv[2]));
-    if (p == NULL) return run_error(interp, "notfound", "no such pty");
+    if (p == NULL) return run_error(interp, "nohandle", "no such pty");
 
     switch (idx) {
     case SEND: {
