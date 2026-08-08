@@ -414,6 +414,17 @@ check "store put/get round-trips"    [expr {[store put a b] eq "" && [store get 
 store close
 file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 
+# --- the first real tool, wrapped and self-testing -----------------------------
+# `changes` is a pure Tcl/Tk tool stamped by wrap. Its own --selftest exercises
+# the event model with no window, because a hidden Tk window drops events and
+# would be testing something other than the program.
+set TOOL [file join $HERE .. tool changes]
+if {[file isdirectory $TOOL]} {
+    check "the change-viewer's model passes its own selftest" [expr {
+        ![catch {run -timeout 60s -- $MT [file join $TOOL main.tcl] --selftest} tr]
+        && [dict get $tr exit] == 0}]
+}
+
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails

@@ -22,7 +22,7 @@ Ratified 2026-08-08; the reasoning is in [direction](direction.md).
 
 1. **The manifest** — the self-describing runtime dict ([creed](creed.md) 4 / [the contract](contract.md)), built *first* so every new verb declares itself into it rather than being retrofitted. Carries each verb's error codes too, which is how creed 5's closed registry gets its completeness test.
 2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
-3. **The change-viewer** — the first real tool: a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d by machteld. **0.3.0 ships when it does.**
+3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d into its own 6.1 MB exe. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
 
 `json` (hand-rolled C, gated on JSONTestSuite), the signature-derived CLI and shapes land inside that sequence, at the moment the tool reaches for them.
 
