@@ -386,6 +386,28 @@ check "manifest run returns matches reality" [expr {
 # "accepted" could drift apart in either direction.
 check "declared option accepted"  [expr {[errcode_of {run -dir . -- cmd /c echo x}] eq ""}]
 check "undeclared option refused" [expr {[errcode_of {run -nosuch v -- cmd /c echo x}] eq {MACHTELD RUN usage}}]
+# Every option the C compares against must appear SOMEWHERE in the manifest.
+# Without this, an option parsed by an idiom the generator does not recognise is
+# simply absent from the self-description -- which is how `watch` came to claim
+# it had no options while accepting three.
+if {[file isdirectory $SRC]} {
+    set declared {}
+    foreach v [dict keys $M] {
+        set d [dict get $M $v]
+        if {[dict exists $d options]} { lappend declared {*}[dict get $d options] }
+        if {[dict exists $d subcommands]} {
+            dict for {_s sd} [dict get $d subcommands] { lappend declared {*}[dict get $sd options] }
+        }
+    }
+    set inC {}
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c]] {
+        set fh [open $f r] ; set text [read $fh] ; close $fh
+        foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $text] { lappend inC $o }
+    }
+    set missing [lsort -unique [lmap o $inC {expr {$o in $declared ? [continue] : $o}}]]
+    check "every option the C parses is in the manifest" [expr {$missing eq ""}]
+    if {$missing ne ""} { puts "     undeclared options: $missing" }
+}
 set mcodes {}
 foreach v [dict keys $M] {
     if {[dict exists $M $v codes]} { lappend mcodes {*}[dict get $M $v codes] }

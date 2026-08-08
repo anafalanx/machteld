@@ -1460,22 +1460,31 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         watch_free(ctx, w);
         return TCL_OK;
     }
+    if (idx != READ) return TCL_OK;
 
     /* READ. -timeout blocks for up to that long for the FIRST event; without it
      * the read returns whatever is queued right now, which is what `pty read`
-     * does -- one habit for both. -raw returns the OS's stream unmerged. */
+     * does -- one habit for both. -raw returns the OS's stream unmerged.
+     *
+     * The `idx != READ` guard above is not dead code: this branch used to be an
+     * implicit fallthrough, and the manifest generator -- which attributes an
+     * option to the subcommand branch it sits in -- read these as belonging to
+     * `close`. Saying which subcommand this is makes the self-description right
+     * and the code plainer at once. */
     long long tmo = 0;
     int raw = 0;
-    for (int i = 3; i < objc; i++) {
-        const char *a = Tcl_GetString(objv[i]);
-        if (strcmp(a, "-raw") == 0) { raw = 1; continue; }
-        if (strcmp(a, "-timeout") == 0) {
-            if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
-            tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
-            if (tmo < 0) return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
-            continue;
+    if (idx == READ) {
+        for (int i = 3; i < objc; i++) {
+            const char *a = Tcl_GetString(objv[i]);
+            if (strcmp(a, "-raw") == 0) { raw = 1; continue; }
+            if (strcmp(a, "-timeout") == 0) {
+                if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
+                tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
+                if (tmo < 0) return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
+                continue;
+            }
+            return mt_error(interp, "WATCH", "usage", "unknown option");
         }
-        return mt_error(interp, "WATCH", "usage", "unknown option");
     }
     if (tmo > 0) {
         EnterCriticalSection(&w->lock);

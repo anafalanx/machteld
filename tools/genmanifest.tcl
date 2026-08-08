@@ -115,7 +115,13 @@ set var_codes [lsort -unique $var_codes]
 proc opts_in {region shared} {
     set out {}
     if {[regexp {parse_opts\(interp,} $region]} { set out $shared }
-    foreach {_ o} [regexp -all -inline {strcmp\(Tcl_GetString\(objv\[[^\]]*\]\),\s*"(-\w+)"\)} $region] {
+    # Any strcmp against a "-something" literal is an option check, whichever
+    # way the argument got there: some sites compare Tcl_GetString(objv[i])
+    # directly, others hoist it into a local first. Matching only the first
+    # idiom made the manifest under-report watch's options as none -- a
+    # manifest that omits a real option is the exact lie it exists to prevent,
+    # so the match is on the literal, not on how the argument is spelled.
+    foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $region] {
         lappend out $o
     }
     return [lsort -unique $out]
