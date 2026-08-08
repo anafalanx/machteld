@@ -77,6 +77,15 @@ If events are lost — the queue cap, or the OS's own buffer overflowing — the
 A blocking `watch read` does not pump Tcl's event loop (nor does `child wait`), so a Tk tool
 polls with a short `-timeout` from an `after` handler instead of blocking its UI thread.
 
+**Writing a tool with its own namespace?** The prelude puts the palette on the *global*
+namespace path, and Tcl does not consult the global path for a lookup that begins inside
+another namespace — so bare `watch` and `run` will not resolve in `namespace eval ::mytool`.
+Ask for them once and the rest reads like a script:
+
+```tcl
+namespace eval ::mytool { namespace path ::machteld }
+```
+
 ## Built — storage & packaging
 
 ```tcl
