@@ -1215,6 +1215,8 @@ typedef struct watch_s {
     HANDLE  thread;
     HANDLE  stopEv;     /* manual-reset: tells the reader thread to leave */
     HANDLE  dataEv;     /* manual-reset: events are queued (what `wait` blocks on) */
+    HANDLE  readyEv;    /* manual-reset: the first read is ISSUED, so nothing is missed */
+    int     armed;      /* did that first read actually take? */
     CRITICAL_SECTION lock;
     wevent *ev;
     size_t  n, cap;
@@ -1267,14 +1269,25 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
     const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
                          FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
                          FILE_NOTIFY_CHANGE_CREATION;
+    int first = 1;
     for (;;) {
         memset(&ov, 0, sizeof ov);
         ov.hEvent = ioEv;
         ResetEvent(ioEv);
-        if (!ReadDirectoryChangesW(w->dir, buf, 64 * 1024, w->recursive,
-                                   filter, NULL, &ov, NULL)) {
-            break;
+        BOOL ok = ReadDirectoryChangesW(w->dir, buf, 64 * 1024, w->recursive,
+                                        filter, NULL, &ov, NULL);
+        if (first) {
+            /* `watch start` blocks until this point. Returning as soon as the
+             * THREAD exists is not enough: until the first read is actually
+             * issued the OS is not recording anything, so a change made
+             * immediately after start would be missed -- silently, which is the
+             * worst way to miss it. Signal armed-or-failed either way, so a
+             * failure surfaces at start instead of as permanent silence. */
+            first = 0;
+            w->armed = ok ? 1 : 0;
+            SetEvent(w->readyEv);
         }
+        if (!ok) break;
         HANDLE hs[2] = { ioEv, w->stopEv };
         DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
         if (r != WAIT_OBJECT_0) {
@@ -1332,6 +1345,7 @@ static void watch_free(proc_ctx *ctx, watch_t *w) {
     if (w->dir && w->dir != INVALID_HANDLE_VALUE) CloseHandle(w->dir);
     if (w->stopEv) CloseHandle(w->stopEv);
     if (w->dataEv) CloseHandle(w->dataEv);
+    if (w->readyEv) CloseHandle(w->readyEv);
     DeleteCriticalSection(&w->lock);
     for (size_t i = 0; i < w->n; i++) free(w->ev[i].path);
     free(w->ev);
@@ -1409,8 +1423,9 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         w->recursive = recursive;
         w->dir_path = _strdup(dir);
         InitializeCriticalSection(&w->lock);
-        w->stopEv = CreateEventW(NULL, TRUE, FALSE, NULL);
-        w->dataEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+        w->stopEv  = CreateEventW(NULL, TRUE, FALSE, NULL);
+        w->dataEv  = CreateEventW(NULL, TRUE, FALSE, NULL);
+        w->readyEv = CreateEventW(NULL, TRUE, FALSE, NULL);
         snprintf(w->token, sizeof w->token, "watch#%d", ++ctx->watch_counter);
         w->next = ctx->watches;
         ctx->watches = w;
@@ -1418,6 +1433,11 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         if (w->thread == NULL) {
             watch_free(ctx, w);
             return mt_error(interp, "WATCH", "oserror", "cannot start watch thread");
+        }
+        /* Do not hand back a token until the watch is actually recording. */
+        if (WaitForSingleObject(w->readyEv, 5000) != WAIT_OBJECT_0 || !w->armed) {
+            watch_free(ctx, w);
+            return mt_error(interp, "WATCH", "oserror", "cannot arm directory watch");
         }
         Tcl_SetObjResult(interp, Tcl_NewStringObj(w->token, -1));
         return TCL_OK;

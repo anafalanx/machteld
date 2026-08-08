@@ -199,11 +199,16 @@ check "help lists palette topic"   [string match *palette* [help]]
 check "help palette has content"   [expr {[string length [help palette]] > 500}]
 check "help rejects a bad topic"   [catch {help nonesuch_zzz_42}]
 set pal [help palette]
+# Driven by the MANIFEST rather than a hand-kept list: the manifest already
+# knows every verb, so a new one is documented-or-caught automatically instead
+# of quietly missing from a list nobody remembered to extend. That list had
+# already gone stale -- it never learned about watch or manifest.
 set drift {}
-foreach v {run child wait scope detach pty store wrap} {
+foreach v [dict keys [manifest]] {
     if {![llength [info commands ::machteld::$v]] || ![string match "*$v*" $pal]} { lappend drift $v }
 }
-check "palette doc matches built verbs" [expr {$drift eq ""}]
+check "palette doc documents every verb the manifest knows" [expr {$drift eq ""}]
+if {$drift ne ""} { puts "     undocumented: $drift" }
 set rdoc [run -- cmd /c echo hi]
 check "run dict matches its documented shape" [expr {
     [dict exists $rdoc exit] && [dict exists $rdoc status] && [dict exists $rdoc out] &&
@@ -267,6 +272,16 @@ file delete -force $WD ; file mkdir $WD ; file mkdir [file join $WD sub]
 set w [watch start $WD -recursive]
 check "watch start returns a token" [string match "watch#*" $w]
 check "watch list shows it"         [expr {$w in [watch list]}]
+
+# A watch must be RECORDING by the time start returns, not merely have a thread.
+# Creating a file with no pause at all is the only way to see the difference:
+# before this was fixed the event was missed outright, roughly two runs in five,
+# and the failure mode was silence rather than an error.
+set immediate [file join $WD immediate.txt]
+set f [open $immediate w] ; puts $f now ; close $f
+after 400
+check "a change made immediately after start is not missed" [expr {
+    [llength [watch read $w]] >= 1}]
 
 proc mkfile {path text} { set f [open $path w] ; puts $f $text ; close $f }
 proc settle {} { after 300 }

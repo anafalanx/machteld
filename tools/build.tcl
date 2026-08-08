@@ -156,3 +156,18 @@ run $tclshs [Rp tools package.tcl] \
     --embed-console $bare --embed-gui $baregui --docs [Rp docs]
 
 puts "built [file nativename $out] ([file size $out] bytes)"
+
+# The tools machteld ships are built by machteld, with the exe just produced --
+# which is also the standing proof that `wrap` works on the artefact we are
+# about to release, not on the one from last time.
+foreach {tooldir toolexe subsystem} [list [Rp tool changes] [Rp build changes.exe] --gui] {
+    if {![file isdirectory $tooldir]} continue
+    set script [Rp build .wrap.tcl]
+    set fh [open $script w]
+    puts $fh [list ::machteld::wrap $tooldir -o $toolexe $subsystem]
+    puts $fh "exit 0"
+    close $fh
+    run $out $script
+    file delete $script
+    puts "built [file nativename $toolexe] ([file size $toolexe] bytes)"
+}
