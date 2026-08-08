@@ -131,9 +131,28 @@ run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
     {*}$syslibs -o $baregui
 catch {run $strip $baregui}
 
+# The manifest is DERIVED from the C, then appended to the prelude, so the exe
+# ships a self-description that cannot disagree with the code it describes
+# (creed 4). Generating into build/ rather than tcl/ keeps a generated file out
+# of the hand-edited source tree; the staged prelude is what gets packaged.
+puts "gen  manifest  (from src/*.c)"
+set genman [Rp build manifest.tcl]
+run $tclshs [Rp tools genmanifest.tcl] [Rp src] $genman
+
+set staged [Rp build prelude.tcl]
+set fo [open $staged w]
+fconfigure $fo -translation lf
+foreach part [list [Rp tcl machteld.tcl] $genman] {
+    set fi [open $part r]
+    fconfigure $fi -translation lf
+    puts $fo [read $fi]
+    close $fi
+}
+close $fo
+
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
-    --tcltk $TCLTK --prelude [Rp tcl machteld.tcl] --wrapper $bare --out $out \
+    --tcltk $TCLTK --prelude $staged --wrapper $bare --out $out \
     --embed-console $bare --embed-gui $baregui --docs [Rp docs]
 
 puts "built [file nativename $out] ([file size $out] bytes)"
