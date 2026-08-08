@@ -66,6 +66,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `PTY` | `pty` (all subcommands) |
 | `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
+| `JSON` | `json` (all subcommands) |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
@@ -82,6 +83,8 @@ errors.
 | `oserror` | a Win32 call failed after launch — reading, writing, killing, waiting |
 | `notopen` | a `store` operation was attempted before `store open` |
 | `sqlite` | SQLite reported an error; the *message* is SQLite's wording, the *code* is ours |
+| `parse` | the text is not valid JSON; the message says what was wrong and where it stopped |
+| `depth` | nesting past the 512 limit, on the way in or out — refused rather than crashing the stack |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
 comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural

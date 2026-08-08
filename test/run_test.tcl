@@ -233,7 +233,7 @@ if {![file isdirectory $SRC]} {
     # scan would otherwise miss entirely.
     set thrown {}
     set domains {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c]] {
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c]] {
         set fh [open $f r]; set text [read $fh]; close $fh
         foreach {_ d c} [regexp -all -inline {mt_error\(interp,\s*"([A-Z]+)",\s*"([a-z]+)"} $text] {
             dict set thrown $c 1 ; dict set domains $d 1
@@ -242,6 +242,11 @@ if {![file isdirectory $SRC]} {
             dict set thrown $c 1 ; dict set domains STORE 1
         }
         foreach {_ c} [regexp -all -inline {code = "([a-z]+)"} $text] { dict set thrown $c 1 }
+        # the raw form, used by a file with no error helper of its own (json.c)
+        set rawpat {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"([A-Z]+)",\s*"(\w+)"}
+        foreach {_ d c} [regexp -all -inline $rawpat $text] {
+            dict set thrown $c 1 ; dict set domains $d 1
+        }
     }
     # The documented sets, parsed out of the shipped doc's own tables -- so the
     # DOC is the registry, and this test is what stops it becoming a lie.
@@ -355,7 +360,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help manifest pty run scope store version vtstrip wait watch wrap}}]
+    {child detach help json manifest pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -400,7 +405,7 @@ if {[file isdirectory $SRC]} {
         }
     }
     set inC {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c]] {
+    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c]] {
         set fh [open $f r] ; set text [read $fh] ; close $fh
         foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $text] { lappend inC $o }
     }

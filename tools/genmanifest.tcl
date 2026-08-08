@@ -40,6 +40,7 @@ set IMPL {
     PtyCmd    pty
     WatchCmd  watch
     StoreCmd  store
+    JsonCmd   json
 }
 
 # NOTE ON TCL REGEXPS HERE: Tcl's ARE takes its greediness for the WHOLE
@@ -74,11 +75,13 @@ proc functions {text} {
 
 set proc_c  [slurp [file join $SRC proc.c]]
 set store_c [slurp [file join $SRC store.c]]
+set json_c  [slurp [file join $SRC json.c]]
 set fns     [functions $proc_c]
-# store.c implements exactly one verb, so the whole file is that verb's body --
-# otherwise `notopen`, which is raised in the needDb helper rather than in
+# store.c and json.c implement exactly one verb each, so the whole file is that
+# verb's body -- otherwise `notopen`, raised in the needDb helper rather than in
 # StoreCmd, would be invisible to a per-function scan.
 dict set fns StoreCmd $store_c
+dict set fns JsonCmd  $json_c
 
 # ---- verbs the C actually registers ---------------------------------------
 set verbs {}
@@ -135,6 +138,9 @@ foreach {fn verb} $IMPL {
     # domain: whatever this body passes to mt_error / fail_code / fail
     set domain ""
     if {[regexp {mt_error\(interp,\s*"([A-Z]+)"} $body -> d]} { set domain $d }
+    # The raw form, for a file with no error helper of its own.
+    if {$domain eq "" &&
+        [regexp {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"([A-Z]+)"} $body -> d]} { set domain $d }
     if {$domain eq "" && [regexp {fail(_code)?\(interp,} $body]} { set domain STORE }
 
     # subcommands: the Tcl_GetIndexFromObj table. A negated class, not `.*?` --
@@ -157,6 +163,8 @@ foreach {fn verb} $IMPL {
     set codes {}
     foreach {_ c} [regexp -all -inline {mt_error\(interp,\s*"[A-Z]+",\s*"(\w+)"} $body] { lappend codes $c }
     foreach {_ c} [regexp -all -inline {fail_code\(interp,\s*"(\w+)"} $body] { lappend codes $c }
+    foreach {_ c} [regexp -all -inline \
+        {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"[A-Z]+",\s*"(\w+)"} $body] { lappend codes $c }
     if {[regexp {\Wfail\(interp,} $body]} { lappend codes sqlite }
     if {[regexp {mt_error\(interp,\s*"[A-Z]+",\s*code,} $body]} { lappend codes {*}$var_codes }
     if {$domain ne "" && $domain in $shared_domains} {
