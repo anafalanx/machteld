@@ -7,7 +7,7 @@
 # from M1 on.
 
 namespace eval ::machteld {
-    variable version 0.2.1
+    variable version 0.3.0
     # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl,
     # which derives it from src/*.c. Declared empty here so the verb answers
     # something honest in a build where generation was skipped.
