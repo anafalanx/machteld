@@ -1,6 +1,6 @@
-# pty_reap.tcl -- does `pty close` reap the ConPTY host? Run from C:\z\_machteld:
+# pty_reap.tcl -- does `pty close` reap the ConPTY host? Run from C:\dev\_machteld:
 #     build\machteld.exe test\pty_reap.tcl
-# Then tell Claude; it reads C:\z\_machteld\pty_reap.txt.
+# Then tell Claude; it reads C:\dev\_machteld\pty_reap.txt.
 #
 # On this machine the pty host is the inbox conhost.exe (OpenConsole.exe is
 # Windows Terminal's own host, unrelated). We watch BOTH: the DELTA around each

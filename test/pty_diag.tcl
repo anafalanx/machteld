@@ -1,9 +1,9 @@
 # pty_diag.tcl -- capture a ConPTY child's output to a FILE with flushed
 # checkpoints, so even if teardown hangs the file has the VT stream AND shows
 # exactly where it wedged. The file is closed BEFORE the risky pty close, so a
-# hang there can't lose data. Run from C:\z\_machteld:
+# hang there can't lose data. Run from C:\dev\_machteld:
 #     build\machteld.exe test\pty_diag.tcl
-# Writes C:\z\_machteld\pty_diag.txt. If it hangs: Ctrl-C / close the window;
+# Writes C:\dev\_machteld\pty_diag.txt. If it hangs: Ctrl-C / close the window;
 # the file is already complete.
 
 set OUT [file normalize [file join [file dirname [info script]] .. pty_diag.txt]]

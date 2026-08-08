@@ -18,15 +18,26 @@ proc script_root {} {
 set ROOT [script_root]
 proc Rp {args} { return [file join $::ROOT {*}$args] }
 
-# Payload root: the shared z-workspace r/ tree.
+# Payload root: the shared z-workspace .z/r tree.
 set R ""
-foreach cand {C:/z/r C:/zmal/r} {
+set candidates {}
+if {[info exists ::env(Z_HOME)] && $::env(Z_HOME) ne ""} {
+    lappend candidates [file join $::env(Z_HOME) r]
+}
+lappend candidates [file join [file dirname $ROOT] .z r]
+foreach cand $candidates {
     if {[file isdirectory [file join $cand tcltk]]} { set R $cand; break }
 }
-if {$R eq ""} { error "build.tcl: z-workspace payloads not found (C:/z/r, C:/zmal/r)" }
+if {$R eq ""} { error "build.tcl: z-workspace payloads not found under Z_HOME/r" }
 
 set TCLTK     [file join $R tcltk 9.0.3]
 set gcc       [file join $R msys2 ucrt64 bin gcc.exe]
+
+# gcc needs its own bin directory on PATH to find cc1 and its DLLs; invoked by
+# absolute path from a clean shell it exits 1 with no output at all. The old
+# C:\z environment arranged this ambiently; after the .z migration, arrange it
+# here so the build works from any shell.
+set ::env(PATH) "[file nativename [file join $R msys2 ucrt64 bin]];$::env(PATH)"
 set strip     [file join $R msys2 ucrt64 bin strip.exe]
 set tclshs    [file join $TCLTK tcl9s bin tclsh90s.exe]
 set inc       [file join $TCLTK tcl9 include]
