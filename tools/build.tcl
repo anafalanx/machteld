@@ -30,7 +30,10 @@ foreach cand $candidates {
 }
 if {$R eq ""} { error "build.tcl: z-workspace payloads not found under Z_HOME/r" }
 
-set TCLTK     [file join $R tcltk 9.0.3]
+# The pinned Tcl/Tk payload. Chosen deliberately, not by inertia (docs/direction.md).
+# Coupled to the `package ifneeded Tk` line in tcl/machteld.tcl: the version claimed
+# there must match what is linked in, or `package require Tk` fails the version check.
+set TCLTK     [file join $R tcltk 9.0.4]
 set gcc       [file join $R msys2 ucrt64 bin gcc.exe]
 
 # gcc needs its own bin directory on PATH to find cc1 and its DLLs; invoked by

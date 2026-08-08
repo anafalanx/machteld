@@ -18,8 +18,10 @@ without becoming a language project. The machine-control domains build out proac
 than on demand, and powers from other languages (Raku, Moose, and their kin) are fair game
 where they can be had for a page of Tcl or a small C verb.
 
-The brake, stated as plainly as the goal: **machteld is a toolkit that ends in shipped tools.**
-A stretch that adds ten powers and no tool has failed, however elegant the powers.
+The brake, stated as plainly as the goal: **don't go overboard on capability.** A power may be
+added because you *know* a tool will want it — foresight is allowed, and waiting for the tool
+to exist first would be its own kind of waste — but the palette is a means, and a stretch that
+never reaches a tool has drifted. Judgement, not a gate.
 
 ## The rules
 
@@ -38,7 +40,8 @@ refused outright. Where a name collides with Tcl's, rename — spelling is cheap
 
 **3. One page, or it is out.** A borrowed power must pay for itself in roughly one page of
 prelude Tcl or one small C verb. If it needs a subsystem, a second evaluation phase, or a type
-system, it belongs to a different project — and this workspace has two of those already.
+system, it belongs to a different project — and this workspace has two of those already. This
+is the rule that keeps "superset" from becoming a second language.
 
 **4. Prelude first; C only for what Tcl cannot reach.** The existing split is the rule:
 supervision, ConPTY and SQLite are C because they are kernel and library surface; everything
@@ -82,19 +85,29 @@ options correctly.
 |---|---|---|
 | **Phasers** (`LEAVE` / `KEEP` / `UNDO`) | prelude | Generalizes `scope`, which is already this idea for one resource. The orchestration case wants it constantly: start a child and you must kill it. Shape verified. |
 | **Lazy sequences** (`gather`/`take`) | prelude | Tcl coroutines make this natural; bounds memory over a long child's output and makes "stop early" cheap. |
-| **Named-capture matches → dict** | prelude | ARE lacks named groups, so a pattern rewriter extracts names, runs plain `regexp -inline`, and zips the result. Deletes group-position counting when parsing tool output. |
 | **Signature-derived CLI** | prelude | A wrapped tool's entry declares its parameters once and gets argv parsing *and* `--help` from them. Fits the [tool factory](packaging.md) exactly. |
 | **Shapes** (`where`-constrained validation) | prelude | Declare a dict's shape once, check it at every boundary; composes with the manifest. |
-| **An object layer over TclOO** (roles, attribute defaults, `before`/`after`/`around`) | prelude | The Moose idea, on the object system Tcl already ships. Admitted only if a tool wants it — rule 3 applies hardest here. |
 
 **Refused, on rule 2**, so they are not relitigated: junctions and any autothreading operator;
 implicit-lambda stars; user-defined operators (every program becomes its own dialect); multiple
 dispatch (turns a wrong call into "no candidate matched"); anything requiring a second
 evaluation phase or mutable grammar.
 
-## Open, needing a decision
+**Settled out, 2026-08-08.** *Named-capture matches* — **we settle for Tcl's regexes as they
+are.** ARE has no named groups, and a rewriter that translates `(?<name>…)` into numbered
+groups would be a private regex dialect living inside the palette: patterns that work in
+machteld and nowhere else, which is rule 1's failure mode wearing a library's clothes. Group
+positions are Tcl's answer and they are a fine one. *An object layer over TclOO* — deferred
+past this stretch, not refused; TclOO is there when a tool wants it.
 
-- **Tcl version pin.** The build targets **9.0.3**; the workspace also carries 9.0.4. One
-  should be chosen deliberately rather than by inertia.
-- **Which candidate first**, and whether the object layer is in scope at all this stretch.
+## Decided, 2026-08-08
+
+- **Tcl/Tk pinned at 9.0.4.** Was 9.0.3 by inertia; the workspace carries both. The build and
+  the prelude's `package ifneeded Tk` line move together — a mismatch there fails
+  `package require Tk` on the version check, so they are one decision, not two.
+- **`watch` is first**, per rule 5 and because the first real tool needs it.
+- **The object layer is later.** Not this stretch.
+
+## Still open
+
 - **The name.** *machteld* is still marked provisional in [the roadmap](roadmap.md).
