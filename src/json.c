@@ -484,7 +484,14 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         return TCL_OK;
     }
 
-    /* ENCODE */
+    /* ENCODE. Spelled as a test on idx rather than left as the fall-through it
+     * used to be, because the manifest is DERIVED from this structure: with only
+     * a `/* ENCODE *​/` comment to go on, the scanner ran DECODE's region to the
+     * end of the function and attributed `-dict` and `-list` to **decode** --
+     * false in both directions, since decode takes neither and encode takes
+     * both. The fix belongs here rather than in a scanner taught to read
+     * comments: if the code says which branch it is, both readers can tell. */
+    if (idx == ENCODE) {
     int as_dict = 0, as_list = 0;
     Tcl_Obj *val = NULL;
     for (int i = 2; i < objc; i++) {
@@ -520,6 +527,8 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     Tcl_SetObjResult(interp, Tcl_NewStringObj(Tcl_DStringValue(&out), Tcl_DStringLength(&out)));
     Tcl_DStringFree(&out);
     return TCL_OK;
+    }
+    return TCL_OK;   /* unreachable: Tcl_GetIndexFromObj admits only the two */
 }
 
 int Machteldjson_Init(Tcl_Interp *interp) {
