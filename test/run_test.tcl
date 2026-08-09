@@ -819,6 +819,96 @@ check "a level with no message => usage" [expr {
     [errcode_of {log info}] eq {MACHTELD LOG usage}}]
 file delete -force $LGF [file join $env(TEMP) mt_log_dead.txt]
 
+# --- worker: the far side of a channel-mode child -----------------------------
+# Registration and introspection run in THIS process; dispatch is exercised for
+# real, over a channel-mode child, because a worker that only works when called
+# directly has not been tested as a worker at all.
+worker on wt_double {n}                     { expr {$n * 2} }
+worker on wt_greet  {name {greeting Hello}} { return "$greeting, $name!" }
+
+set wops [worker ops]
+check "worker ops lists what was registered" [expr {
+    [dict exists $wops wt_double] && [dict exists $wops wt_greet]}]
+check "worker ops reports a plain parameter" [expr {[dict get $wops wt_double] eq "n"}]
+# `info args` returns parameter NAMES only -- for {name {greeting Hello}} it says
+# `name greeting`, with the default nowhere in sight. The first version of the
+# dispatcher checked the length of that and so treated every optional parameter
+# as required; `info default` is the only way to ask. This asserts the defaults
+# survive into the reported schema.
+check "worker ops reports a default too"     [expr {
+    [dict get $wops wt_greet] eq {name {greeting Hello}}}]
+check "worker on rejects a bad call"  [expr {
+    [errcode_of {worker on onlyone}] eq {MACHTELD WORKER usage}}]
+check "worker on rejects an empty op" [expr {
+    [errcode_of {worker on {} {} {}}] eq {MACHTELD WORKER badvalue}}]
+check "worker rejects an unknown subcommand" [expr {
+    [errcode_of {worker nosuch}] eq {MACHTELD WORKER usage}}]
+
+# Dispatch, over a real channel-mode child.
+set WSRC [file join $HERE _worker_fixture.tcl]
+set f [open $WSRC w]
+puts $f {worker on double {n}                     { expr {$n * 2} }
+worker on greet  {name {greeting Hello}} { return "$greeting, $name!" }
+worker on digest {path {alg sha256}}     { hash file $alg $path }
+worker on boom   {}                      { error "handler exploded" }
+worker on coded  {}                      { hash sum nosuchalg x }
+worker serve}
+close $f
+
+set wc [child start -channels -- $MT $WSRC]
+set wi [child info $wc]
+set win [dict get $wi stdin] ; set wout [dict get $wi stdout]
+proc wask {req} { puts $::win [json encode $req] ; flush $::win ; return [json decode [gets $::wout]] }
+# A reply is either {ok 1 result ...} or {ok 0 code ... msg ...}. Reaching for
+# `result` on a failure reply raises "key not known in dictionary", which ABORTS
+# the run instead of failing a check -- so a regression that flips a reply to
+# failure reports as a crash mid-block and every later check silently never runs.
+# Every assertion below goes through this instead.
+proc wres {r} { expr {[dict exists $r result] ? [dict get $r result] : ""} }
+
+set wr [wask {id 1 op double n 21}]
+check "a request gets its answer"      [expr {[dict get $wr ok] == 1 && [wres $wr] == 42}]
+check "the reply carries the id back"  [expr {[dict get $wr id] == 1}]
+check "an omitted parameter defaults"  [expr {
+    [wres [wask {id 2 op greet name World}]] eq "Hello, World!"}]
+check "a supplied parameter wins"      [expr {
+    [wres [wask {id 3 op greet name World greeting Hi}]] eq "Hi, World!"}]
+set wr [wask {id 4 op greet}]
+check "a missing required parameter is named" [expr {
+    [dict get $wr ok] == 0 && [dict get $wr code] eq {MACHTELD WORKER usage} &&
+    [string match "*name*" [dict get $wr msg]]}]
+set wr [wask {id 5 op nosuch}]
+check "an unknown op is reported, not fatal" [expr {
+    [dict get $wr ok] == 0 && [dict get $wr code] eq {MACHTELD WORKER notfound}}]
+
+# THE ERROR CONTRACT CROSSES THE PROCESS BOUNDARY. A code that arrives as prose
+# has stopped being part of the contract, so this checks the code itself, not the
+# message.
+set wr [wask {id 6 op coded}]
+check "a coded failure keeps its errorcode" [expr {
+    [dict get $wr code] eq {MACHTELD HASH badvalue}}]
+set wr [wask {id 7 op boom}]
+check "a plain error still reports failure" [expr {[dict get $wr ok] == 0}]
+
+# The worker must really do the work, so compare against this process computing
+# the same thing -- a dispatcher that echoed a plausible value would pass every
+# check above.
+set wpath [file join $HERE .. README.md]
+set wr [wask [dict create id 8 op digest path $wpath]]
+check "the worker's result matches in-process" [expr {
+    [wres $wr] eq [hash file sha256 $wpath]}]
+
+# A malformed line must not kill the worker: dying on a typo costs the director a
+# death, a requeue and a respawn to report it.
+puts $win "this is not json" ; flush $win
+set wr [json decode [gets $wout]]
+check "a garbage line is answered, not fatal" [expr {
+    [dict get $wr ok] == 0 && [dict get $wr code] eq {MACHTELD WORKER parse}}]
+check "the worker survives garbage"           [expr {
+    [wres [wask {id 9 op double n 5}]] == 10}]
+child close $wc
+file delete -force $WSRC
+
 # --- cli: declare a tool's arguments once ------------------------------------
 set CSPEC {
     --interval {type int    default 2000 min 100 max 60000 help "refresh interval, ms"}
@@ -1086,7 +1176,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach hash help json log manifest ps pty run scope store version vtstrip wait watch wrap}}]
+    {child cli detach hash help json log manifest ps pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
