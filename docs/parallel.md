@@ -22,7 +22,8 @@ to outlive the caller.
 | 8 CPU-bound children, overlap factor | **7.46×** |
 | 12 items × 92 ms, end-to-end speedup | **2.98×** |
 | 12 items × 429 ms, end-to-end speedup | **3.19×** |
-| Worker boot cost | **~26 ms** |
+| Worker boot cost | **17.1 ms** external program / **44.5 ms** machteld child |
+| Concurrent start rate, width 12 | **~90 a second** — spawning does not parallelise |
 | Job-object CPU or affinity cap | none — only `KILL_ON_JOB_CLOSE` |
 
 The gap between 7.46× overlap and ~3× end-to-end is boot cost plus hyperthreading: twelve
@@ -61,8 +62,9 @@ Windows schedules them fine, so a pool bounds memory and handles rather than buy
 
 ## What this is good for
 
-One number decides most cases: **a worker costs 26 ms to start**, so an item must be worth far
-more than that. Measured on the two shapes that matter:
+One number decides most cases: **a fresh worker costs 17–45 ms to start** depending on whether it
+is an external program or a machteld child, so an item must be worth far more than that. Measured
+on the two shapes that matter:
 
 | shape | per item | speedup |
 |---|---|---|
@@ -71,8 +73,13 @@ more than that. Measured on the two shapes that matter:
 | the same 14 files hashed **in-process** by `hash file` | 0.4 ms | **do not** — 6 ms total |
 
 External programs parallelise best because they are partly latency-bound and overlap rather than
-saturating cores. Pure CPU work saturates twelve logical cores at about 3.5×, which is roughly
-what six physical ones can give.
+saturating cores. Pure CPU work saturates twelve logical cores at **about 3.2×** — measured later
+over jobs long enough for startup to amortise, which is where a figure like this has to come from;
+the 3.48× above is the same wall seen through a shorter run. Roughly what six physical cores give.
+
+*(All of this describes `child start` per item, which is what existed when it was written. The
+[worker pool](#built-and-measured-in-a-shipped-tool) changes the arithmetic and is measured against
+these same alternatives further down.)*
 
 **The work it suits, then:**
 
@@ -169,9 +176,12 @@ queue at the storage layer.
 
 Those two results are not in conflict; they bound each other. **The fsync ceiling is roughly 400
 writes/sec on this disk, and it only bites when an item's own work is smaller than 2.4 ms.**
-machteld cannot profitably run items that small anyway — a worker costs 26 ms to start. So at the
-grain machteld actually works, per-item durability is free; at finer grain, nothing about file
-layout saves it and only **batched commits** would.
+machteld could not profitably run items that small when this was written — a fresh worker costs
+17–45 ms to start. So at the grain machteld actually worked, per-item durability was free; at finer
+grain, nothing about file layout saves it and only **batched commits** would. **The pool moves that
+boundary**: a persistent worker takes an item for 159 µs, so items *below* 2.4 ms are now reachable
+— and for those, per-item durability would no longer be free. Nothing here depends on it today,
+because the durable half was refused, but a future ledger would have to batch.
 
 ### The refinement worth taking
 
@@ -294,9 +304,11 @@ puts $ch $request ; set answer [gets $ch]
 ```
 
 Measured: **159 µs per round trip, against 26,000 µs to spawn a fresh worker — a 164× improvement
-in granularity.** And it drives the event loop natively: a pool built on `chan event` and `vwait`,
-with no polling anywhere, ran 300 items of 13 ms each at **3.23× on 12 workers** — work that is
-*below* the spawn crossover and that `child start` cannot parallelise at all.
+in granularity.** (Re-measured later, a machteld child costs **44,500 µs** to start, which makes the
+ratio ~280× rather than 164×. The spike's figure came from a lighter child; the argument only got
+stronger.) And it drives the event loop natively: a pool built on `chan event` and `vwait`, with no
+polling anywhere, ran 300 items of 13 ms each at **3.23× on 12 workers** — work that is *below* the
+spawn crossover and that `child start` cannot parallelise at all.
 
 So the missing piece was never the transport. Tcl has it. **What Tcl's pipe lacks is
 supervision**: a child opened that way is not born in a job object, cannot be tree-killed, does
@@ -366,14 +378,24 @@ The hard parts, named rather than glossed:
 - **A worker dying mid-item.** The channel reaches EOF with an item outstanding: the pool must
   detect it, requeue, and decide when a repeatedly-fatal item poisons the run.
 - **The line format becomes a compatibility surface** the moment a wrapped tool ships a worker.
-- **Amortisation only pays if workers are reused.** The 26 ms is now paid once per worker rather
-  than once per item — but a pool created per call throws that straight back.
+- **Amortisation only pays if workers are reused.** The start cost is now paid once per worker
+  rather than once per item — but a pool created per call throws that straight back. **Measured
+  afterwards this is the sharpest constraint of the five**: twelve workers cost a few hundred
+  milliseconds to raise, so a job under a second gets barely two thirds of the available speedup
+  and a job under ~4 s has not finished paying for its own pool.
 
 ### What it buys
 
 Granularity, which is the thing machteld cannot have today. The crossover moves from ~26 ms of
 work per item to roughly **1 ms** — the difference between *parallelism is for spawning programs*
 and *parallelism is for anything worth a millisecond*.
+
+> **Measured afterwards, this is right about the item and wrong about the job.** Per *item* the
+> claim holds and then some: 41× the throughput of spawn-per-item at half-millisecond items. But
+> granularity was only half the story — the pool has a fixed start cost of a few hundred
+> milliseconds, so the *job* has to be worth about four seconds before any of the gain arrives.
+> Small items, yes; small jobs, no. And against a hand-written static partition the pool buys no
+> throughput at all — it matches it. See below.
 
 ## Built, and measured in a shipped tool
 

@@ -191,8 +191,12 @@ The quoting rules are exactly what hand-rolled CSV gets wrong.
 ## Deliberately not planned
 
 - **Threads.** `Thread` does not load and should stay that way. machteld's parallelism is
-  process-level — `child start` plus `wait -any` — which suits machine control better than
-  shared memory, and threads underneath Tk are a known source of pain.
+  process-level — `child start` plus `wait -any`, and now `worker` / `pool` / `pmap` for items too
+  small to spawn for — which suits machine control better than shared memory, and threads
+  underneath Tk are a known source of pain. The measured cost of that choice is on the record: a
+  process-level pool tops out at **~3.2×** on this 12-logical-core box and needs about **four
+  seconds** of work before its startup is paid off ([parallelism](parallel.md)). Threads would
+  lower both, and would still not be worth what they cost here.
 - **A config format.** TOML/YAML/INI are all defensible and none is obviously right here; `json`
   plus Tcl dicts cover most of it. Revisit when something concrete is being configured.
 - **XML / HTML parsing.** Out of domain.
