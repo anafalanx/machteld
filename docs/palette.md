@@ -166,6 +166,42 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
+## Built — the session watching itself
+
+```tcl
+mt                                 ;# open the cockpit: what THIS session is controlling
+mt -interval 500                   ;# refresh faster than the 1s default
+watch info $w                      ;# {token dir recursive armed pending dropped}
+pty info $p                        ;# {token pid running pending}
+```
+
+`manifest` says what machteld *can* do; **`mt` says what it is doing** — the children it
+launched, the terminals it is steering, the directories it is watching, and the processes it
+started and deliberately let go. Each row joins machteld's own token to what [`ps`](#) knows
+about that pid, so a `child#3` is shown with its name, memory and CPU.
+
+**It is a palette verb rather than a wrapped exe, and that is architecture, not preference.**
+Every handle machteld hands out is a pointer in one interpreter's heap — `proc_ctx` is allocated
+per interpreter and passed to each command as its client data, with no global registry. A
+separate `monitor.exe` would enumerate its *own* children, which is nothing, and could not see
+another machteld's tokens at all. The tool has to run inside the session it reports on.
+
+**Read-only, and non-destructive by construction.** `watch read` drains the event queue and
+`pty read` consumes the child's output, so a monitor built on either would steal from the
+program it is monitoring. `mt` calls neither. `watch info` and `pty info` exist for exactly this
+reason: they report queue depth and pending bytes where a read would have emptied them, and the
+suite checks that repeated calls leave both untouched.
+
+The **Detached** section is the one that earns its place: `detach` is fire-and-forget on purpose
+and tracks nothing, so those processes are invisible to `child list` by design. `mt` finds them
+through `ps` by parent pid. The distinction it draws is between what machteld *controls* and
+what it is merely *responsible for*, and a monitor that quietly omitted them would be
+flattering itself.
+
+Because `child wait` and a blocking `watch read` do not pump the event loop, the window is live
+at the REPL and in event-driven scripts, but a script that blocks in `child wait` freezes it
+until the wait returns.
+
 ## Built — self-description
 
 ```tcl

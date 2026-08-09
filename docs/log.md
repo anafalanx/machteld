@@ -8,6 +8,67 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — `mt`: the session watching itself
+
+The question was whether to ship GUI tools inside `machteld.exe`. Three positions were argued
+and nine adversarial critics attacked them; every affirmative case died, mostly on dispatch
+mechanics. The framing was wrong. **machteld already ships Tcl — the prelude — and a third of the
+palette is already written in it** (`help`, `manifest`, `scope`, `version`, `vtstrip`, `wrap`).
+The argument had been about packaging *programs* when the question was about shipping *code*.
+
+And the tool worth shipping was neither of the ones being argued over. `manifest` says what
+machteld can do; nothing said what it is *doing*.
+
+- **`mt`** ([the palette](palette.md)) — a live window over the current session: children
+  launched, terminals steered, directories watched, and processes started and deliberately let
+  go. Each row joins machteld's own token to what `ps` knows about that pid, so `child#3` shows
+  with its name, memory and CPU.
+- **`watch info` and `pty info`** — additive subcommands the cockpit demanded. `child` had
+  `info`; the other two handle verbs returned bare tokens, so a watch could not be attributed to
+  a directory. Rule 5 again, and read-only.
+
+### Why it is a verb and not an exe — architecture, not preference
+
+`proc_ctx` is allocated **per interpreter** and passed to every command as its client data.
+There is no global registry, no shared section, no file. A separate `monitor.exe` would
+enumerate its *own* children, which is nothing, and could not see another machteld's tokens at
+all. The tool has to run inside the session it reports on. That settled a question that had been
+framed as taste: this one tool ships as Tcl because it cannot ship as anything else.
+
+### Non-destructive by construction
+
+The sharper constraint, and the reason `watch info` / `pty info` exist. `watch read` **drains**
+the event queue; `pty read` **consumes** the child's output. A monitor built on either would
+steal from the program it is monitoring — an observer that changes what it observes is worse than
+no observer. `mt` calls neither, and the suite proves it: six snapshots leave `pending` at 2 and
+16, and the owner can still read every event afterwards.
+
+The **Detached** section is the one that earns its place. `detach` is fire-and-forget on purpose
+and tracks nothing, so those processes are invisible to `child list` by design; `mt` finds them
+through `ps` by parent pid. The distinction drawn is between what machteld *controls* and what
+it is merely *responsible for*, and a monitor that quietly omitted them would be flattering
+itself.
+
+### Gates repaired, and one break-tested
+
+- The **registry scan** read four hardcoded `.c` files and nothing else. It now globs `src/*.c`
+  — so a new source is inside the gate on arrival rather than when someone remembers — **and**
+  reads the prelude, because `mt` raises `{MACHTELD MT badvalue}` and creed 5 does not say "the
+  errors written in C". One hole is left open and named in [the contract](contract.md) rather
+  than hidden: `wrap` and `help` still raise 11 bare `return -code error` with no code at all.
+  The suite prints that count every run.
+- The **pty ensemble map** in the prelude is hand-maintained, and `pty info` existed in the
+  binary while being uncallable because the map still had five entries. The count stayed at six
+  either way — five core plus `expect` — so only a set comparison finds it. Break-tested: with
+  the entry removed the manifest reports seven subcommands and the binary six, and the gate
+  fails on its own.
+- **The window tests were files nobody ran.** `tasks_ui.tcl` and now `mt_ui.tcl` are driven from
+  the suite by glob, so a new `*_ui.tcl` is picked up without being remembered — the same fix as
+  the tool selftests, for the same reason.
+
+Measured: `mt.tcl` costs **1.3 ms** to parse at startup, and Tk stays unloaded until the window
+is opened, so a machteld that never calls `mt` pays nothing for it.
+
 ## 2026-08-09 — `ps` and `tasks`: seeing processes we did not start
 
 A task manager was asked for. Writing it named the gap immediately: machteld could **supervise**
