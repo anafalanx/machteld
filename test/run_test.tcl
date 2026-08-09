@@ -1039,6 +1039,73 @@ check "pool submit needs an op per item"   [expr {
         return -options $o $m}] eq {MACHTELD POOL badvalue}}]
 file delete -force $PW
 
+# --- pmap: a pool in one call, with the error contract intact -----------------
+set PMW [file join $HERE _pmapworker.tcl]
+set f [open $PMW w]
+puts $f {worker on digest {path {alg sha256}} { hash file $alg $path }
+worker on echo   {text}              { return $text }
+worker on boom   {}                  { hash sum nosuchalg x }
+worker on plain  {}                  { error "just an error" }
+worker serve}
+close $f
+
+# The real work, checked against this process computing the same thing -- a pmap
+# that returned plausible strings would pass every structural check below.
+set pmpaths [lsort [glob -nocomplain [file join $HERE .. src *.c]]]
+set pmreqs [lmap pp $pmpaths {list op digest path $pp}]
+set pmgot [pmap $pmreqs -width 6 -timeout 120s -- $MT $PMW]
+check "pmap returns one result per request" [expr {[llength $pmgot] == [llength $pmpaths]}]
+check "pmap results match in-process"       [expr {
+    $pmgot eq [lmap pp $pmpaths {hash file sha256 $pp}]}]
+check "pmap returns plain results"          [expr {
+    [string length [lindex $pmgot 0]] == 64}]
+
+# ORDER. Results follow submission, not completion, so which answer is which does
+# not depend on which worker happened to finish first.
+set pmr [pmap [lmap i {0 1 2 3 4 5 6 7} {list op echo text "v$i"}] -width 4 -timeout 60s -- $MT $PMW]
+check "pmap preserves submission order" [expr {$pmr eq {v0 v1 v2 v3 v4 v5 v6 v7}}]
+
+# THE POINT OF THE VERB: a worker's failure is re-raised carrying THE WORKER'S
+# OWN errorcode. Raised in one process, trappable in another, unflattened -- if
+# this were relabelled {MACHTELD PMAP ...} the only useful thing about it would
+# be gone.
+set pmc [errcode_of {pmap [list {op echo text a} {op boom} {op echo text c}] \
+                        -width 2 -timeout 60s -- $MT $PMW}]
+check "a worker failure keeps its own errorcode" [expr {$pmc eq {MACHTELD HASH badvalue}}]
+
+# A handler raising a plain `error` has errorcode NONE, which is not something a
+# caller can trap on; it becomes a pmap failure rather than being passed through
+# as a code that means nothing.
+set pmc [errcode_of {pmap [list {op plain}] -width 1 -timeout 60s -- $MT $PMW}]
+check "an uncoded worker error becomes a pmap failure" [expr {$pmc eq {MACHTELD PMAP failed}}]
+
+# -raw opts out of raising, for a caller that wants partial success.
+set pmraw [pmap [list {op echo text ok} {op boom}] -raw -width 2 -timeout 60s -- $MT $PMW]
+check "-raw returns replies rather than raising" [expr {[llength $pmraw] == 2}]
+check "-raw shows which item failed"             [expr {
+    [dict get [lindex $pmraw 0] ok] == 1 && [dict get [lindex $pmraw 1] ok] == 0}]
+
+# THE POOL IS ALWAYS CLOSED, including on the raising path. Four calls with three
+# chances to leak a pool of live processes is the reason this verb exists at all.
+set pmbefore [llength [child list]]
+catch {pmap [list {op boom}] -width 4 -timeout 60s -- $MT $PMW}
+check "pmap closes its pool even when it raises" [expr {[llength [child list]] == $pmbefore}]
+set pmgot [pmap [list {op echo text x}] -width 3 -timeout 60s -- $MT $PMW]
+check "and on the happy path"                    [expr {[llength [child list]] == $pmbefore}]
+
+check "an empty request list does no work" [expr {[pmap {} -width 2 -- $MT $PMW] eq ""}]
+
+# pmap's OWN failures are PMAP, because the domain is the verb you called.
+check "pmap rejects a missing command"  [expr {
+    [errcode_of {pmap {{op echo text a}} -width 2 --}] eq {MACHTELD PMAP usage}}]
+check "pmap rejects an unknown option"  [expr {
+    [errcode_of {pmap {{op echo text a}} -nope 1 -- $MT $PMW}] eq {MACHTELD PMAP usage}}]
+check "pmap rejects a dangling option"  [expr {
+    [errcode_of {pmap {{op echo text a}} -width}] eq {MACHTELD PMAP usage}}]
+check "a bad width surfaces as a pmap failure" [expr {
+    [lrange [errcode_of {pmap {{op echo text a}} -width 0 -- $MT $PMW}] 0 1] eq {MACHTELD PMAP}}]
+file delete -force $PMW
+
 # --- cli: declare a tool's arguments once ------------------------------------
 set CSPEC {
     --interval {type int    default 2000 min 100 max 60000 help "refresh interval, ms"}
@@ -1306,7 +1373,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach hash help json log manifest pool ps pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach hash help json log manifest pmap pool ps pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
