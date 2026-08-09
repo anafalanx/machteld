@@ -329,12 +329,20 @@ proc ::tm::kill_selected {tree} {
     tick
 }
 
+# The reschedule happens whatever the body did. A tick that throws takes the
+# refresh loop with it and leaves a window showing a frozen list that still LOOKS
+# live -- the worst failure this program has, because the next button is End Task
+# and the pid under the cursor may by then belong to something else entirely. A
+# transient failure must cost one sample, never the loop.
 proc ::tm::tick {} {
     variable rows
     variable paused
     variable interval
     if {!$paused} {
-        if {![catch {sample} s]} { set rows $s ; render }
+        if {![catch {sample} s]} {
+            set rows $s
+            catch {render}
+        }
     }
     after $interval ::tm::tick
 }
@@ -407,10 +415,49 @@ proc ::tm::selftest {} {
 }
 
 # --- entry ------------------------------------------------------------------
-set args $argv
-if {[lsearch -exact $args --selftest] >= 0} { ::tm::selftest }
-set i [lsearch -exact $args --interval]
-if {$i >= 0} { set ::tm::interval [lindex $args [expr {$i+1}]] }
 
+# STDERR FIRST, DIALOG ONLY IF THERE IS NO STDERR. A wrapped GUI exe is started
+# with no standard channels at all, so `puts stderr` throws there and the dialog
+# is the only way to be heard. Run from a console -- which is how the tool is
+# tested and how it is launched during development -- stderr exists and a modal
+# dialog is exactly wrong: it blocks a non-interactive caller until something
+# times out and kills it. Trying the dialog first did that to the test suite.
+proc ::tm::die {msg} {
+    if {[catch {puts stderr "tasks: $msg"}]} {
+        catch {tk_messageBox -icon error -title tasks -message $msg}
+    }
+    exit 2
+}
+
+set args $argv
+
+# EVERY argument is validated before anything acts on one, including --selftest's.
+# Dispatching on --selftest first meant `tasks --interval bogus --selftest` passed
+# cleanly, so the test that claimed to accept a valid interval never reached the
+# parser at all. Validation is not something a mode gets to skip.
+set selftest [expr {[lsearch -exact $args --selftest] >= 0}]
+set args [lsearch -all -inline -not -exact $args --selftest]
+
+# `set interval [lindex $args $i+1]` accepted the empty string when --interval was
+# passed with nothing after it, and `after ""` then threw out of tick -- so the
+# tool died at startup, or, if it was already running, stopped refreshing while
+# still showing a list that looked live. An option that is wrong says so once and
+# stops; it does not poison a timer several frames later.
+set i [lsearch -exact $args --interval]
+if {$i >= 0} {
+    set v [lindex $args [expr {$i+1}]]
+    if {![string is integer -strict $v] || $v < 100} {
+        ::tm::die "--interval takes a whole number of milliseconds, at least 100.\
+                   \nGot: [expr {$v eq {} ? {(nothing)} : $v}]"
+    }
+    set ::tm::interval $v
+    set args [lreplace $args $i [expr {$i+1}]]
+}
+if {[llength $args]} {
+    ::tm::die "Unknown argument: [lindex $args 0]\
+               \n\nUsage: tasks ?--interval ms? ?--selftest?"
+}
+
+if {$selftest} { ::tm::selftest }
 ::tm::build_ui
 ::tm::tick
