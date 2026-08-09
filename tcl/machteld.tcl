@@ -56,18 +56,100 @@ proc ::machteld::manifest {} {
             # so a subcommand added in Tcl is as visible as one written in C.
             if {[namespace ensemble exists $cmd]} {
                 set subs [dict get $m $v subcommands]
-                foreach {s _} [namespace ensemble configure $cmd -map] {
+                set vcodes [dict get $m $v codes]
+                foreach {s target} [namespace ensemble configure $cmd -map] {
                     if {![dict exists $subs $s]} { dict set subs $s [dict create options {}] }
+                    # A subcommand implemented in Tcl behind a C verb -- `pty
+                    # expect` is the case -- carries codes and options of its own.
+                    # Reading only the C left the manifest silent about
+                    # {MACHTELD PTY timeout}, which `pty expect` genuinely raises:
+                    # a subcommand written in the prelude was less visible than
+                    # one written in C, in the dict that exists to describe them
+                    # both.
+                    set t [lindex $target 0]
+                    if {![llength [info procs $t]]} continue
+                    set f [MtclFacts $t]
+                    if {[dict exists $f codes]} { lappend vcodes {*}[dict get $f codes] }
+                    if {[dict exists $f options]} {
+                        dict set subs $s options [lsort -unique [concat \
+                            [dict get $subs $s options] [dict get $f options]]]
+                    }
                 }
                 dict set m $v subcommands $subs
+                dict set m $v codes [lsort -unique $vcodes]
             }
             continue
         }
         set entry [dict create kind tcl]
-        if {[llength [info procs $cmd]]} { dict set entry args [info args $cmd] }
+        if {[llength [info procs $cmd]]} {
+            dict set entry args [info args $cmd]
+            set entry [dict merge $entry [MtclFacts $cmd]]
+        }
         dict set m $v $entry
     }
     return $m
+}
+
+# What a Tcl verb declares about itself, read out of its own body.
+#
+# The C half of the manifest is derived from src/*.c at build time; this is the
+# same trick applied to the prelude, and until Phase 0 it did not exist -- a Tcl
+# verb reported `kind tcl` plus `info args` and nothing else, so `wrap` and
+# `help` had no domain, no codes and no options in the very dict whose purpose is
+# describing the palette. Tolerable for two verbs; not tolerable for the standard
+# library ([stdlib](stdlib.md)), which lands here and would have left creed 4
+# covering barely half the palette.
+#
+# `info body` is the source rather than a table, so this cannot drift: it reads
+# the body of the actual command in the actual interpreter, wrapped tools
+# included.
+proc ::machteld::MtclFacts {cmd} {
+    set body [info body $cmd]
+    set domain ""
+    set codes {}
+
+    # The ordinary raiser.
+    foreach {_ d c} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} $body] {
+        set domain $d ; lappend codes $c
+    }
+    # A script literal carrying its own errorcode, evaluated later by uplevel:
+    # `pty expect`'s timeout body is built as text and run in the caller's frame,
+    # so it cannot call Fail and states its code inline instead. `--` before the
+    # pattern because it begins with a dash, and regexp would read it as a switch.
+    foreach {_ d c} [regexp -all -inline -- \
+            {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $body] {
+        set domain $d ; lappend codes $c
+    }
+    # A shared helper told which domain to raise in: `_dur2ms PTY $v` fails with
+    # badvalue, but that literal lives in _dur2ms, not here. The C generator has
+    # the same problem with parse_opts and solves it the same way -- follow the
+    # call, and attribute what it raises to the verb that made it.
+    foreach {_ helper d} [regexp -all -inline -- \
+            {(?:::machteld::)?(_[a-z]\w*)\s+([A-Z]+)[\s\]]} $body] {
+        set h ::machteld::$helper
+        if {![llength [info procs $h]]} continue
+        if {$domain eq ""} { set domain $d }
+        foreach {_ c} [regexp -all -inline -- {Fail\s+\$\w+\s+([a-z]+)\s} [info body $h]] {
+            lappend codes $c
+        }
+    }
+
+    # Options, in the two idioms the prelude actually uses: a switch arm, and an
+    # equality test against a literal. Matching only one of them is exactly how
+    # the C side once under-reported `watch`'s options as none.
+    set options {}
+    foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $body] {
+        lappend options $o
+    }
+    foreach {_ o} [regexp -all -inline -- {eq\s+"(--?[a-z][-a-z0-9]*)"} $body] {
+        lappend options $o
+    }
+
+    set out [dict create]
+    if {$domain ne ""}      { dict set out domain $domain }
+    if {[llength $codes]}   { dict set out codes [lsort -unique $codes] }
+    if {[llength $options]} { dict set out options [lsort -unique $options] }
+    return $out
 }
 
 # scope { body }: run body, then close (tree-kill) any children started within
@@ -104,12 +186,31 @@ proc ::machteld::vtstrip {s} {
     return $s
 }
 
+# Fail: the prelude's raiser, mirroring src/proc.c's mt_error(interp, DOMAIN,
+# code, msg). Every Tcl verb fails through it, so `{MACHTELD <DOMAIN> <code>}`
+# means the same thing whether the verb was written in C or here.
+#
+# The prelude used to raise eleven bare `return -code error` with no code at all,
+# which put `wrap` and `help` outside the error registry entirely -- nothing to
+# document, and nothing a scan could find. That was survivable while the prelude
+# held two verbs. It stops being survivable as the standard library lands here,
+# which is why this is Phase 0 of [the standard library](stdlib.md) rather than
+# a cleanup to get to later.
+#
+# An error raised inside Fail propagates out through its caller unchanged, so no
+# -level games are needed; the only cost is Fail appearing in a stack trace.
+proc ::machteld::Fail {domain code msg} {
+    return -code error -errorcode [list MACHTELD $domain $code] $msg
+}
+
 # _dur2ms: parse a duration with an explicit unit (500ms, 30s, 5m, 2h) to
 # milliseconds. Bare numbers are rejected -- the same rule the C option parser
 # enforces, so a stray `-timeout 100` can never silently mean "100 seconds".
-proc ::machteld::_dur2ms {d} {
+# Takes the caller's domain, the same way the C option parser does: the domain
+# is the verb you invoked, never the helper that happened to fail.
+proc ::machteld::_dur2ms {dom d} {
     if {![regexp {^([0-9]+)(ms|s|m|h)$} $d -> n u]} {
-        return -code error "bad duration \"$d\": use an explicit unit (500ms, 30s, 5m, 2h)"
+        Fail $dom badvalue "bad duration \"$d\": use an explicit unit (500ms, 30s, 5m, 2h)"
     }
     return [expr {$n * [dict get {ms 1 s 1000 m 60000 h 3600000} $u]}]
 }
@@ -130,17 +231,17 @@ if {[info commands ::machteld::pty] ne ""} {
         while {[llength $args] > 1 && [string index [lindex $args 0] 0] eq "-"} {
             set opt [lindex $args 0]
             if {$opt eq "-timeout"} {
-                set timeout_ms [::machteld::_dur2ms [lindex $args 1]]
+                set timeout_ms [::machteld::_dur2ms PTY [lindex $args 1]]
                 set args [lrange $args 2 end]
             } else {
-                return -code error "pty expect: unknown option \"$opt\""
+                Fail PTY usage "pty expect: unknown option \"$opt\""
             }
         }
         if {[llength $args] != 1} {
-            return -code error "usage: pty expect tok ?-timeout dur? {pattern body ...}"
+            Fail PTY usage "usage: pty expect tok ?-timeout dur? {pattern body ...}"
         }
         set pats {}
-        set tbody {return -code error "pty expect: timed out"}
+        set tbody {return -code error -errorcode {MACHTELD PTY timeout} "pty expect: timed out"}
         foreach {pat body} [lindex $args 0] {
             if {$pat eq "timeout"} { set tbody $body } else { lappend pats $pat $body }
         }
@@ -219,16 +320,16 @@ proc ::machteld::wrap {args} {
                 if {$tool eq ""} {
                     set tool $a
                 } else {
-                    return -code error "wrap: unexpected argument \"$a\""
+                    Fail WRAP usage "wrap: unexpected argument \"$a\""
                 }
             }
         }
     }
     if {$tool eq "" || $out eq ""} {
-        return -code error "usage: wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?"
+        Fail WRAP usage "usage: wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?"
     }
     if {![file exists [file join $tool main.tcl]]} {
-        return -code error "wrap: \"$tool\" has no main.tcl (the tool's entry point)"
+        Fail WRAP notfound "wrap: \"$tool\" has no main.tcl (the tool's entry point)"
     }
     # Locate our own mounted payload (the Tcl/Tk libs + the embedded basekits).
     set root ""
@@ -238,10 +339,10 @@ proc ::machteld::wrap {args} {
         }
     }
     if {$root eq ""} {
-        return -code error "wrap: this machteld carries no embedded payload (run the packaged machteld.exe)"
+        Fail WRAP unsupported "wrap: this machteld carries no embedded payload (run the packaged machteld.exe)"
     }
     set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
-    if {![file exists $bare]} { return -code error "wrap: basekit not embedded: $bare" }
+    if {![file exists $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
 
     set work [file tempdir]
     try {
@@ -273,7 +374,7 @@ proc ::machteld::help {{topic ""}} {
     foreach _m [dict keys [zipfs mount]] {
         if {[file isdirectory $_m/docs]} { set docs $_m/docs; break }
     }
-    if {$docs eq ""} { return -code error "help: this build carries no embedded docs" }
+    if {$docs eq ""} { Fail HELP unsupported "help: this build carries no embedded docs" }
     set files [lsort [glob -nocomplain -tails -directory $docs *.md]]
     if {$topic eq ""} {
         set out "machteld [::machteld::version] -- help <topic>:\n"
@@ -291,7 +392,7 @@ proc ::machteld::help {{topic ""}} {
         return $out
     }
     set f [file join $docs $topic.md]
-    if {![file exists $f]} { return -code error "help: no topic \"$topic\" (try: help)" }
+    if {![file exists $f]} { Fail HELP notfound "help: no topic \"$topic\" (try: help)" }
     set ch [open $f r]
     set text [read $ch]
     close $ch

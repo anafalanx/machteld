@@ -41,9 +41,21 @@ about itself at runtime and Tcl can:
 - **The C half** is extracted from `src/*.c` at build time by `tools/genmanifest.tcl`: the
   `Tcl_GetIndexFromObj` subcommand tables, the option literals the parser compares against, the
   result-dict keys, and every domain and code reaching `Tcl_SetErrorCode`.
-- **The Tcl half** is read out of the live interpreter by `manifest` itself — the prelude's own
-  verbs, and `namespace ensemble configure -map` for a C verb the prelude extends, which is how
-  `pty expect` appears beside the five subcommands written in C.
+- **The Tcl half** is read out of the live interpreter by `manifest` itself, from `info args`
+  and **`info body`** — the verb's actual body in the actual interpreter, so it cannot drift and
+  it works inside a wrapped tool. A prelude verb's `domain` and `codes` come from its `Fail`
+  calls, its `options` from the two idioms the prelude uses to test them (a `switch` arm and an
+  equality against a literal), and a shared helper told its caller's domain (`_dur2ms PTY $v`)
+  has what it raises attributed to the verb that called it — the same problem `parse_opts` poses
+  on the C side, solved the same way.
+  `namespace ensemble configure -map` covers a C verb the prelude extends, which is how
+  `pty expect` appears beside the five subcommands written in C **with its own `-timeout` and its
+  own `timeout` code**: a subcommand written in Tcl is exactly as visible as one written in C.
+
+  Until 2026-08-09 this half stopped at `kind tcl` plus `args`, so `wrap` and `help` had no
+  domain, no codes and no options at all. That was survivable for two verbs and would not have
+  been for [the standard library](stdlib.md), which lands in the prelude — creed 4 would have
+  decayed in exact proportion to how much library got added.
 
 The suite holds the result to the *running binary*: subcommands are compared against what
 `Tcl_GetIndexFromObj` actually enumerates in its error message, `returns` against the dict `run`
@@ -68,6 +80,8 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `STORE` | `store` (all subcommands) |
 | `JSON` | `json` (all subcommands) |
 | `PS` | `ps` (all subcommands) |
+| `WRAP` | `wrap` |
+| `HELP` | `help` |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
@@ -87,6 +101,8 @@ errors.
 | `parse` | the text is not valid JSON; the message says what was wrong and where it stopped |
 | `depth` | nesting past the 512 limit, on the way in or out — refused rather than crashing the stack |
 | `denied` | the OS refused the operation on a process you do not have the rights to touch |
+| `timeout` | a bounded wait ran out — `pty expect` with no pattern matched in time |
+| `unsupported` | this build cannot do it — `wrap` or `help` on a bare host with no embedded payload |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
 comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
@@ -94,11 +110,15 @@ tests. `watch start` on a directory it cannot open raises `notfound`, the same c
 program gets — in both cases the thing you named is not there.
 
 The registry scan reads the prelude as well as `src/*.c`, because creed 5 says errors are part
-of the contract without saying "the errors written in C". No prelude verb currently raises a
-coded error — `mt` did, and was removed — but the scan stays, so the first one that does is
-covered on arrival rather than whenever somebody remembers. One hole is named here rather than
-hidden: `wrap` and `help` raise bare `return -code error` with no code at all, so they are
-outside the registry entirely. The suite counts them every run; coding them is its own change.
+of the contract without saying "the errors written in C". **Every** prelude error now carries a
+code: `wrap` and `help` used to raise eleven bare `return -code error` with none, which put them
+outside the registry entirely, and the suite now *fails* if an uncoded one reappears rather than
+merely counting them.
+
+Two domains are raised from Tcl rather than C — `WRAP` and `HELP` — and the prelude has its own
+raiser, `Fail domain code msg`, mirroring the C's `mt_error`. A shared helper is told which
+domain to raise in (`_dur2ms PTY $v`), for the same reason the C option parser is: **the domain
+is the verb you called**, never the helper that happened to fail.
 
 `denied` is the one code that reports a *permission*, and it is confined to `ps`, because `ps`
 is the one verb that reaches processes machteld did not start. Note what it does **not** cover:
