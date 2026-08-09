@@ -909,6 +909,136 @@ check "the worker survives garbage"           [expr {
 child close $wc
 file delete -force $WSRC
 
+# --- pool: persistent workers over the event loop -----------------------------
+# The spike (spike/pool) attacked this design on stock Tcl; these are the same
+# hazards against the real verb, where workers are supervised children rather
+# than bare pipes.
+set PW [file join $HERE _poolworker.tcl]
+set f [open $PW w]
+puts $f {worker on echo  {text}        { return $text }
+worker on big   {bytes}       { return [string repeat x $bytes] }
+worker on noise {lines}       { puts stderr [string repeat "diagnostic " $lines] ; return ok }
+worker on boom  {}            { hash sum nosuchalg x }
+worker on die   {}            { exit 9 }
+worker serve}
+close $f
+
+proc pres {r} { expr {[dict exists $r result] ? [dict get $r result] : ""} }
+# `pool wait` RAISES {MACHTELD POOL timeout} when a pool wedges, and an uncaught
+# raise aborts the run: the check that would have named the regression never
+# reports, and every check after it silently never runs. Removing the stderr
+# drain does exactly that -- workers block mid-write on a full pipe and the wait
+# times out -- so a regression there used to stop the suite dead instead of
+# failing a line. Every wait below goes through this and yields {} on timeout,
+# which fails the result-count check cleanly and lets the rest of the suite run.
+proc pwait {args} {
+    if {[catch {pool wait {*}$args} r]} { return {} }
+    return $r
+}
+
+# Correctness, and the ordering guarantee.
+set pp [pool create -width 6 -- $MT $PW]
+set pitems {}
+for {set i 0} {$i < 40} {incr i} { lappend pitems [dict create op echo text "item-$i"] }
+pool submit $pp $pitems
+set pr [pwait $pp -timeout 90s]
+check "pool returns every result"    [expr {[llength $pr] == 40}]
+set ordered 1
+for {set i 0} {$i < 40} {incr i} {
+    if {[pres [lindex $pr $i]] ne "item-$i"} { set ordered 0 }
+}
+# Replies arrive in whatever order workers finish, which is not an order anyone
+# asked for. The id is the item's index, so the answer comes back aligned.
+check "results come back in submission order" $ordered
+check "no worker died in the happy path" [expr {[dict get [pool info $pp] dead] == 0}]
+pool close $pp
+
+# THE PIPE-BUFFER HAZARD. A Windows pipe holds a few KB; replies far larger than
+# that must not wedge either end. This was the risk named as most likely to sink
+# the design, so it is checked against the real verb and not only in the spike.
+set pp [pool create -width 4 -- $MT $PW]
+set pitems {}
+foreach n {1 2 3 4} { lappend pitems [dict create op big bytes [expr {$n * 1048576}]] }
+pool submit $pp $pitems
+set pr [pwait $pp -timeout 90s]
+check "multi-megabyte replies arrive"  [expr {[llength $pr] == 4}]
+check "and arrive intact"              [expr {
+    [lsort -integer [lmap x $pr {string length [pres $x]}]] eq
+    {1048576 2097152 3145728 4194304}}]
+pool close $pp
+
+# STDERR. This hazard is NEW relative to the spike: stock Tcl let a subprocess
+# inherit stderr to the console, but a channel-mode child's stderr is a real
+# pipe, and a pipe nobody reads fills and blocks the worker mid-write -- a hang,
+# not an error. The pool drains it and keeps the tail.
+set pp [pool create -width 3 -- $MT $PW]
+set pitems {}
+for {set i 0} {$i < 12} {incr i} { lappend pitems [dict create op noise lines 3000] }
+pool submit $pp $pitems
+set pr [pwait $pp -timeout 90s]
+check "a worker spewing stderr does not wedge the pool" [expr {[llength $pr] == 12}]
+check "and its diagnostics are kept for inspection"     [expr {
+    [string match "*diagnostic*" [dict get [pool info $pp] stderr]]}]
+pool close $pp
+
+# Errors cross the process boundary with their code, and the pool passes them
+# through rather than flattening them to prose.
+set pp [pool create -width 2 -- $MT $PW]
+pool submit $pp [list [dict create op boom] [dict create op echo text fine]]
+set pr [pwait $pp -timeout 60s]
+check "a failing item reports failure"  [expr {[dict get [lindex $pr 0] ok] == 0}]
+check "with the worker's own errorcode" [expr {
+    [dict get [lindex $pr 0] code] eq {MACHTELD HASH badvalue}}]
+check "a healthy item beside it still succeeds" [expr {[pres [lindex $pr 1]] eq "fine"}]
+pool close $pp
+
+# A worker dying mid-item: detected, its item requeued, and a poison item capped
+# rather than looping forever.
+set pp [pool create -width 3 -maxtries 2 -- $MT $PW]
+set pitems {}
+for {set i 0} {$i < 10} {incr i} { lappend pitems [dict create op echo text "e$i"] }
+lappend pitems [dict create op die]
+pool submit $pp $pitems
+set pr [pwait $pp -timeout 90s]
+set pinfo [pool info $pp]
+check "the pool survives a worker dying"  [expr {[llength $pr] >= 10}]
+check "it noticed the death"              [expr {[dict get $pinfo dead] >= 1}]
+check "and requeued the item"             [expr {[dict get $pinfo requeued] >= 1}]
+check "a poison item does not loop"       [expr {[dict get $pinfo dead] <= 30}]
+check "the healthy items all came back"   [expr {
+    [llength [lsearch -all -inline -not -exact [lmap x $pr {pres $x}] ""]] >= 10}]
+pool close $pp
+
+# SUPERVISION -- the reason this is over `child start -channels` and not `open
+# |cmd r+`. Pool workers are ordinary children, so scope reaps them.
+set outer4 [child list]
+scope { pool create -width 3 -- $MT $PW }
+check "scope reaps a pool's workers" [expr {[child list] eq $outer4}]
+
+# No orphans after an explicit close.
+set before4 [llength [child list]]
+set pp [pool create -width 5 -- $MT $PW]
+check "workers are tracked children"  [expr {[llength [child list]] == $before4 + 5}]
+pool close $pp
+check "close leaves no workers behind" [expr {[llength [child list]] == $before4}]
+
+# the error contract
+check "pool rejects an unknown subcommand" [expr {
+    [errcode_of {pool nosuch}] eq {MACHTELD POOL usage}}]
+check "pool rejects a bad token"           [expr {
+    [errcode_of {pool info nosuch#9}] eq {MACHTELD POOL nohandle}}]
+check "pool create rejects a bad width"    [expr {
+    [errcode_of {pool create -width 0 -- $MT $PW}] eq {MACHTELD POOL badvalue}}]
+check "pool create needs a command"        [expr {
+    [errcode_of {pool create -width 2 --}] eq {MACHTELD POOL usage}}]
+check "pool submit needs an op per item"   [expr {
+    [errcode_of {
+        set q [pool create -width 1 -- $MT $PW]
+        catch {pool submit $q [list [dict create noop 1]]} m o
+        pool close $q
+        return -options $o $m}] eq {MACHTELD POOL badvalue}}]
+file delete -force $PW
+
 # --- cli: declare a tool's arguments once ------------------------------------
 set CSPEC {
     --interval {type int    default 2000 min 100 max 60000 help "refresh interval, ms"}
@@ -1176,7 +1306,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach hash help json log manifest ps pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach hash help json log manifest pool ps pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }

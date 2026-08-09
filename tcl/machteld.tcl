@@ -120,21 +120,37 @@ proc ::machteld::MtclFacts {cmd} {
             {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $body] {
         set domain $d ; lappend codes $c
     }
-    # An internal helper that raises on the verb's behalf. `cli` delegates its
-    # spec checking to CliNorm and CliCheck, and every `badvalue` it can produce
-    # lives in those -- so a scan of `cli`'s own body declared `usage` and nothing
-    # else, while the verb could plainly raise `badvalue`. Any internal proc named
-    # in the body is followed one level.
+    # Internal helpers that raise on the verb's behalf, followed TRANSITIVELY.
+    # `cli` delegates spec checking to CliNorm, so a scan of `cli`'s own body
+    # declared `usage` and nothing else while the verb could plainly raise
+    # `badvalue`. One level fixed that case and was still not enough: `pool` names
+    # PoolCreate, which names PoolSpawn, which is where `launch` is raised -- two
+    # hops away and therefore invisible, so the manifest under-declared a code the
+    # verb really throws. Depth is not a property anyone should have to guess, so
+    # this walks to closure with a visited set rather than to a fixed number.
+    set helpers {}
     foreach hcmd [info procs ::machteld::*] {
-        set hname [namespace tail $hcmd]
-        if {![string match {[A-Z_]*} $hname]} continue
-        # `\\y` doubled on purpose: inside a quoted "\y$hname\y" Tcl collapses the
-        # unknown escape to a bare y before the regex engine sees it, so the
-        # pattern silently becomes yCliNormy and matches nothing at all.
-        if {![regexp \\y$hname\\y $body]} continue
-        foreach {_ hd hc} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} [info body $hcmd]] {
-            if {$domain eq ""} { set domain $hd }
-            if {$hd eq $domain} { lappend codes $hc }
+        if {[string match {[A-Z_]*} [namespace tail $hcmd]]} { lappend helpers $hcmd }
+    }
+    set seen {}
+    set frontier [list $body]
+    while {[llength $frontier]} {
+        set text [lindex $frontier 0]
+        set frontier [lrange $frontier 1 end]
+        foreach hcmd $helpers {
+            set hname [namespace tail $hcmd]
+            if {[dict exists $seen $hname]} continue
+            # `\\y` doubled on purpose: inside a quoted "\y$hname\y" Tcl collapses
+            # the unknown escape to a bare y before the regex engine sees it, so
+            # the pattern silently becomes yCliNormy and matches nothing at all.
+            if {![regexp \\y$hname\\y $text]} continue
+            dict set seen $hname 1
+            set hbody [info body $hcmd]
+            lappend frontier $hbody
+            foreach {_ hd hc} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} $hbody] {
+                if {$domain eq ""} { set domain $hd }
+                if {$hd eq $domain} { lappend codes $hc }
+            }
         }
     }
 
