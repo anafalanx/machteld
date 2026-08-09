@@ -50,7 +50,21 @@ proc ::machteld::worker {args} {
         if {$op eq ""} { Fail WORKER badvalue "worker: an operation needs a name" }
         # Defined as a real proc rather than kept as a script to eval: a proc body
         # is compiled once, an evaled script is re-parsed on every request.
-        set pname ::machteld::WorkerOp_$op
+        #
+        # In the CALLER'S namespace, not machteld's. A handler body has to read
+        # like the code around it: a tool written inside `namespace eval ::mytool`
+        # calls its own helpers by bare name everywhere else, and a body compiled
+        # somewhere else fails on them -- not at definition time but at REQUEST
+        # time, arriving as a per-item failure reply from another process, which
+        # is the latest and least legible place to learn about a typo'd scope.
+        # Defining it here means the ordinary namespace rule applies to handlers
+        # exactly as it applies to every other line in that file: bare palette
+        # verbs need `namespace path ::machteld`, which such a namespace needs
+        # anyway. At global scope -- what a small worker script uses -- both the
+        # palette and the script's own procs resolve with nothing declared.
+        set ns [uplevel 1 {namespace current}]
+        if {$ns eq "::"} { set ns "" }
+        set pname ${ns}::WorkerOp_$op
         proc $pname $arglist $body
         dict set WORKER_OPS $op $pname
         return

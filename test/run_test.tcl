@@ -32,6 +32,16 @@ proc errcode_of {script} {
     return [dict get $opts -errorcode]
 }
 
+# The value of a script, or "" if it raised. For a check whose SUBJECT may stop
+# existing when the thing under test regresses: calling a command that is now
+# missing aborts the whole run at that line, so the gate reports as a crash and
+# every check after it silently never runs. This suite has learned that three
+# times (`wres`, `pres`, `pwait`); this is the general form.
+proc valof {script} {
+    if {[catch {uplevel 1 $script} r]} { return "" }
+    return $r
+}
+
 # 0. the palette is exposed as bare verbs (unqualified run/child/... resolve)
 set ok 0
 if {![catch {run -- cmd /c echo bare-ok} br]} { set ok [string match *bare-ok* [dict get $br out]] }
@@ -384,6 +394,20 @@ foreach v [dict keys [manifest]] {
 }
 check "palette doc documents every verb the manifest knows" [expr {$drift eq ""}]
 if {$drift ne ""} { puts "     undocumented: $drift" }
+# EVERY VERB IS REACHABLE BY ITS BARE NAME. The palette is exposed by putting
+# ::machteld on the GLOBAL namespace path, and a path is consulted only after a
+# namespace's own commands -- so a verb sharing a name with a core Tcl command
+# would not shadow it, it would be shadowed BY it: silently unreachable
+# unqualified while Tcl's command answers to that name instead. The palette doc
+# claims no verb shadows a core command; this puts the claim under test rather
+# than under review, so the day someone adds `close` or `format` the suite says
+# so instead of a script quietly calling the wrong command.
+set unreachable {}
+foreach v [dict keys [manifest]] {
+    if {[namespace which -command $v] ne "::machteld::$v"} { lappend unreachable $v }
+}
+check "every palette verb is reachable by its bare name" [expr {$unreachable eq ""}]
+if {$unreachable ne ""} { puts "     shadowed: $unreachable" }
 set rdoc [run -- cmd /c echo hi]
 check "run dict matches its documented shape" [expr {
     [dict exists $rdoc exit] && [dict exists $rdoc status] && [dict exists $rdoc out] &&
@@ -843,6 +867,28 @@ check "worker on rejects an empty op" [expr {
     [errcode_of {worker on {} {} {}}] eq {MACHTELD WORKER badvalue}}]
 check "worker rejects an unknown subcommand" [expr {
     [errcode_of {worker nosuch}] eq {MACHTELD WORKER usage}}]
+
+# WHERE A HANDLER BODY LIVES. In the namespace it was written in, so it calls
+# that namespace's procs by bare name like every other line in the file. It used
+# to be compiled into ::machteld regardless of where `worker on` was called,
+# which meant a tool with a namespace of its own got `invalid command name` for
+# its OWN helper -- and not at definition time but at request time, arriving as a
+# failure reply from another process, which is the latest and least legible place
+# to learn about a scope mistake.
+namespace eval ::wtns {
+    namespace path ::machteld
+    proc helper {x} { return "helped:$x" }
+    worker on wt_ns  {v} { helper $v }
+    worker on wt_pal {v} { hash sum sha256 $v }
+}
+# Through `valof`, because if this regresses the handler is not there to call:
+# a bare call would abort the run at this line rather than fail this check.
+check "a handler is defined where it was written" [expr {
+    [info procs ::wtns::WorkerOp_wt_ns] eq "::wtns::WorkerOp_wt_ns"}]
+check "a handler resolves its own namespace's procs" [expr {
+    [valof {::wtns::WorkerOp_wt_ns zz}] eq "helped:zz"}]
+check "a handler still resolves palette verbs" [expr {
+    [valof {::wtns::WorkerOp_wt_pal zz}] eq [hash sum sha256 zz]}]
 
 # Dispatch, over a real channel-mode child.
 set WSRC [file join $HERE _worker_fixture.tcl]
