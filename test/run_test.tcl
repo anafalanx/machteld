@@ -553,6 +553,118 @@ check "pty info on a dead token"    [expr {
     [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
 pty close $p2
 
+# --- cli: declare a tool's arguments once ------------------------------------
+set CSPEC {
+    --interval {type int    default 2000 min 100 max 60000 help "refresh interval, ms"}
+    --format   {type string default text choices {text json} help "output format"}
+    --all      {type flag                help "show everything"}
+    --name     {type string              help "a name"}
+    dir        {type string default .    help "directory"}
+}
+
+# Defaults come from the spec, and `help` is always present so a tool can check
+# it without declaring it.
+set c0 [cli parse {} $CSPEC]
+check "cli applies defaults"        [expr {[dict get $c0 interval] == 2000}]
+check "cli defaults a flag to 0"    [expr {[dict get $c0 all] == 0}]
+check "cli defaults a positional"   [expr {[dict get $c0 dir] eq "."}]
+check "cli always supplies help"    [expr {[dict get $c0 help] == 0}]
+check "an undeclared option has no key" [expr {![dict exists $c0 nosuch]}]
+
+set c1 [cli parse {--interval 500 --all --format json somewhere} $CSPEC]
+check "cli reads an option value"   [expr {[dict get $c1 interval] == 500}]
+check "cli sets a flag"             [expr {[dict get $c1 all] == 1}]
+check "cli checks choices"          [expr {[dict get $c1 format] eq "json"}]
+check "cli takes a positional"      [expr {[dict get $c1 dir] eq "somewhere"}]
+
+check "cli reports --help as a value" [expr {[dict get [cli parse {--help} $CSPEC] help] == 1}]
+check "--help does not consume a positional" [expr {
+    [dict get [cli parse {--help x} $CSPEC] dir] eq "x"}]
+
+# `--` ends options, so a positional may look like one.
+set c2 [cli parse {-- --interval} $CSPEC]
+check "-- ends option parsing" [expr {[dict get $c2 dir] eq "--interval"}]
+
+# THE BUG THIS VERB EXISTS TO PREVENT. `tasks --interval` with nothing after it
+# set the interval to the empty string; `after ""` then threw out of the refresh
+# timer and the tool died at startup. A missing value is refused here, at the
+# point it is missing, not discovered three frames later.
+check "an option with no value is refused" [expr {
+    [errcode_of {cli parse {--interval} $CSPEC}] eq {MACHTELD CLI usage}}]
+# A STRING option is the case that matters, and the one this suite first missed.
+# For --interval the type check catches an empty value anyway, so removing the
+# missing-value guard entirely still produced {MACHTELD CLI usage} and every test
+# here passed -- the gate was vacuous. Nothing downstream checks a string, so
+# without the guard `--name` at the end of argv silently binds the empty string:
+# exactly the shape of the bug that killed `tasks` at startup.
+check "a string option with no value is refused" [expr {
+    [errcode_of {cli parse {--name} $CSPEC}] eq {MACHTELD CLI usage}}]
+check "a string option does not silently bind empty" [expr {
+    [catch {cli parse {--name} $CSPEC}] == 1}]
+check "the missing-value message says so" [expr {
+    [catch {cli parse {--name} $CSPEC} m] && [string match "*needs a value*" $m]}]
+check "a string option followed by an option is refused" [expr {
+    [errcode_of {cli parse {--name --all} $CSPEC}] eq {MACHTELD CLI usage}}]
+check "but a value that looks like nothing is still taken" [expr {
+    [dict get [cli parse {--name -- x} $CSPEC] name] eq "" ||
+    [dict get [cli parse {--name zz} $CSPEC] name] eq "zz"}]
+check "an option followed by another option is refused" [expr {
+    [errcode_of {cli parse {--interval --all} $CSPEC}] eq {MACHTELD CLI usage}}]
+check "the message names the option" [expr {
+    [catch {cli parse {--interval} $CSPEC} m] && [string match "*--interval*" $m]}]
+
+# user errors are `usage`
+foreach {label argl} {
+    "a non-numeric int"    {--interval abc}
+    "below the minimum"    {--interval 5}
+    "above the maximum"    {--interval 99999}
+    "an unknown option"    {--nonsense}
+    "a value outside choices" {--format xml}
+    "an extra positional"  {a b}
+} {
+    check "cli refuses $label" [expr {[errcode_of {cli parse $argl $CSPEC}] eq {MACHTELD CLI usage}}]
+}
+
+# spec errors are `badvalue` -- the author's mistake, not the user's, and worth a
+# different code precisely so a tool can tell them apart.
+foreach {label spec} {
+    "an unknown attribute" {--x {typo int}}
+    "an unknown type"      {--x {type integer}}
+    "a repeated name"      {--x {type flag} --x {type string}}
+    "a key collision"      {--dir {type string} dir {type string}}
+    "a positional flag"    {p {type flag}}
+    "a non-dict spec"      {this is not a spec because odd}
+} {
+    check "cli refuses $label in the spec" [expr {
+        [errcode_of {cli parse {} $spec}] eq {MACHTELD CLI badvalue}}]
+}
+
+# required
+set RSPEC {--who {type string required 1} what {type string required 1}}
+check "a missing required option is refused"   [expr {
+    [errcode_of {cli parse {x} $RSPEC}] eq {MACHTELD CLI usage}}]
+check "a missing required positional is refused" [expr {
+    [errcode_of {cli parse {--who me} $RSPEC}] eq {MACHTELD CLI usage}}]
+check "supplying both is accepted" [expr {
+    [dict get [cli parse {--who me thing} $RSPEC] what] eq "thing"}]
+
+# usage text is generated from the same spec, so it cannot describe a different
+# program from the one that runs.
+set u [cli usage $CSPEC mytool]
+check "usage names the program"     [string match "usage: mytool*" $u]
+check "usage lists every option"    [expr {
+    [string match "*--interval*" $u] && [string match "*--format*" $u] &&
+    [string match "*--all*" $u] && [string match "*--help*" $u]}]
+check "usage lists the positional"  [string match "*dir*" $u]
+check "usage states the default"    [string match "*2000*" $u]
+check "usage states the range"      [string match "*100*" $u]
+check "usage states the choices"    [string match "*text, json*" $u]
+check "usage rejects a bad spec"    [expr {
+    [errcode_of {cli usage {--x {typo 1}}}] eq {MACHTELD CLI badvalue}}]
+
+check "cli rejects an unknown subcommand" [expr {
+    [errcode_of {cli nosuch {} {}}] eq {MACHTELD CLI usage}}]
+
 # --- hash: digests, HMAC, and cryptographic random ---------------------------
 # Published vectors, not self-consistency: a hash that agrees only with itself
 # is worthless, and every one of these is checkable against NIST/RFC by hand.
@@ -708,7 +820,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach hash help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
+    {child cli detach hash help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }

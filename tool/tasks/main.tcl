@@ -430,34 +430,28 @@ proc ::tm::die {msg} {
     exit 2
 }
 
-set args $argv
-
-# EVERY argument is validated before anything acts on one, including --selftest's.
-# Dispatching on --selftest first meant `tasks --interval bogus --selftest` passed
-# cleanly, so the test that claimed to accept a valid interval never reached the
-# parser at all. Validation is not something a mode gets to skip.
-set selftest [expr {[lsearch -exact $args --selftest] >= 0}]
-set args [lsearch -all -inline -not -exact $args --selftest]
-
-# `set interval [lindex $args $i+1]` accepted the empty string when --interval was
-# passed with nothing after it, and `after ""` then threw out of tick -- so the
-# tool died at startup, or, if it was already running, stopped refreshing while
-# still showing a list that looked live. An option that is wrong says so once and
-# stops; it does not poison a timer several frames later.
-set i [lsearch -exact $args --interval]
-if {$i >= 0} {
-    set v [lindex $args [expr {$i+1}]]
-    if {![string is integer -strict $v] || $v < 100} {
-        ::tm::die "--interval takes a whole number of milliseconds, at least 100.\
-                   \nGot: [expr {$v eq {} ? {(nothing)} : $v}]"
-    }
-    set ::tm::interval $v
-    set args [lreplace $args $i [expr {$i+1}]]
+# The whole of the argument handling, declared once. What this replaces is worth
+# remembering: a hand-rolled `lsearch` that accepted `--interval` with nothing
+# after it, set the interval to the empty string, and let `after ""` throw out of
+# the refresh timer several frames later. `cli` refuses a missing value at the
+# point it is missing, and the usage text below is generated from this same
+# declaration rather than written separately and left to rot.
+set SPEC {
+    --interval {type int default 2000 min 100 max 3600000
+                help "how often to refresh the list, in milliseconds"}
+    --selftest {type flag help "run the model's own tests and exit"}
 }
-if {[llength $args]} {
-    ::tm::die "Unknown argument: [lindex $args 0]\
-               \n\nUsage: tasks ?--interval ms? ?--selftest?"
+if {[catch {::machteld::cli parse $argv $SPEC} opt]} {
+    ::tm::die "$opt
+
+[::machteld::cli usage $SPEC tasks]"
 }
+if {[dict get $opt help]} {
+    catch {puts [::machteld::cli usage $SPEC tasks]}
+    exit 0
+}
+set ::tm::interval [dict get $opt interval]
+set selftest [dict get $opt selftest]
 
 if {$selftest} { ::tm::selftest }
 ::tm::build_ui

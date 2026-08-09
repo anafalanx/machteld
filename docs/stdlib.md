@@ -124,7 +124,7 @@ unsuitable for anything that has to be unguessable.
 verb can be asked what it supports. Checked against the published NIST and RFC 2202/4231 vectors
 and against `Get-FileHash`; 25 MB streams in ~30 ms.
 
-### `cli` — Tcl
+### `cli` — Tcl — ✅ **done 2026-08-09**
 
 machteld is a **tool factory**, so every program it stamps needs argument parsing. A declarative
 spec yields a dict, generates `--help`, and raises `{MACHTELD CLI usage}` on bad input.
