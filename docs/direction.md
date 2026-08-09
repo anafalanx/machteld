@@ -83,18 +83,31 @@ built** in this stretch, because [creed](creed.md) 4 is the one principle curren
 hand. Once the manifest exists, the docs test stops comparing prose to code and starts
 comparing the runtime's own self-description to both.
 
-**7. Shipped shape is frozen from first use; growth is additive.** A verb's name, options,
-result dict and error codes do not change once something depends on them. *Amended 2026-08-09,
-as the counterweight to rule 5:* the freeze now binds at first **use**, not at first ship.
+**7. Pre-1.0.0 nothing is frozen — that is what 0.x means. Finish what you start.**
+*Rewritten 2026-08-09, replacing both the original and its first amendment.* The rule used to
+say a verb's shape was fixed the moment it shipped; the amendment moved the freeze to first
+*use* and invented a "provisional" category beside it. Both were machinery for a promise the
+version number says is not being made. `0.3.0` already declares that the surface may change;
+claiming a freeze on top of that asserted something stricter than the project actually offers,
+and made every experiment permanent on arrival.
 
-A verb that exists but that nothing yet relies on is **provisional** — in the manifest, tested
-and documented like any other, but reshapeable and removable. The shape locks the first time a
-tool, a script or a habit depends on it. Without this, permission to explore would have been
-permission to accumulate: every experiment frozen on arrival and nothing ever removable.
+**The surface is settling, not settled.** [Creed](creed.md) 6 — *orthogonal, frozen,
+additive-only* — is the promise **1.0.0** makes, and cutting 1.0.0 is precisely the act of
+deciding this is a surface worth living with. Until then a name, an option, a dict key or a code
+may change. Recorded when it does, because "not frozen" is not "not accountable": the manifest,
+[the contract](contract.md) and the gates keep telling the truth about the shape whatever the
+shape currently is.
 
-The promise this protects is unchanged for everything a caller can actually be relying on. The
-provisional set is small and named in [the palette](palette.md), so "is this frozen?" has an
-answer you can look up rather than infer.
+**What binds instead, and binds hard: finish what you start.** The real hazard before 1.0.0 is
+not a shape that changes — it is a drift of half-built things nobody will ever go back to. So
+the discipline is disposal, not preservation. A verb is **finished** — tested, documented, errors
+registered, in the manifest, and actually good at its job — or it is **out**. Something that
+half-works stays only while there is a live intention to finish it. "Shelved with a known
+defect" is a decision to revisit soon, not a resting state, and a shelf that accumulates is the
+failure this rule exists to prevent.
+
+This is the counterweight rule 5 needs. Permission to build on spec is safe only if unbuilding
+is normal, and unbuilding is normal only if nothing was frozen on arrival.
 
 **8. A verb is not built until it is tested and documented in the same commit.** Every new verb
 lands with cases in the suite and its entry in [the palette](palette.md); the doc-accuracy test
@@ -134,7 +147,8 @@ past this stretch, not refused; TclOO is there when a tool wants it.
 ## Ratified, 2026-08-08
 
 The whole surface was put back on the table and taken decision by decision. What follows is
-the contract; **it is frozen from here** and grows only by addition (rule 7, now literal).
+the contract; it grows by addition, and under the rewritten rule 7 it is **settling rather than
+frozen** until 1.0.0.
 
 **One hole in "additive-only", found by measurement and recorded rather than papered over.**
 `Tcl_GetIndexFromObj` runs with `flags = 0` at proc.c:709, proc.c:1068 and store.c:56, so
@@ -142,7 +156,7 @@ subcommands accept unique prefixes: `store k` resolves to `keys` and `child st` 
 today. Adding a subcommand that shares a prefix with an existing one therefore *breaks a
 spelling that works* — an addition that is not additive. Two honest ways out (switch those
 three sites to `TCL_EXACT` and declare abbreviation unsupported, or keep it and treat the
-prefix space as part of the frozen surface), and the choice belongs with the manifest work,
+prefix space as part of the eventual 1.0.0 surface), and the choice belongs with the manifest work,
 which is what will make the consequences visible. Until then: **new subcommands must not
 shorten an existing one's unique prefix.**
 

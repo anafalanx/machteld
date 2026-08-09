@@ -166,10 +166,11 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
-## Provisional — the session watching itself
+## Unfinished — the session watching itself
 
-> **`mt` is provisional and shelved.** It is not frozen under
-> [rule 7](direction.md): its shape may change or it may be removed. **Known defect, recorded
+> **`mt` is shelved with a known defect, which under [rule 7](direction.md) means it is on a
+> clock: finished or removed, not left here.** Nothing is frozen before 1.0.0, so its shape may
+> change or it may go entirely. **The defect, recorded
 > rather than hidden:** it refreshes 8×/second when idle and **not at all** while the session is
 > blocked in `child wait` (measured over 2039 ms) or `watch read` (1504 ms) — and while frozen it
 > shows stale rows with no indication that they are stale. Those blocking calls are exactly what
@@ -234,5 +235,5 @@ change-viewer needed live file events, the task manager needed a view of process
 not start — and that remains the best reason to build one, because it is also when the dict shape
 stops being a guess. It is no longer the *only* reason: [rule 5](direction.md) was rewritten on
 2026-08-09 to allow building a domain to find out what it wants to be. What holds instead is that
-a verb nothing yet depends on is **provisional** — reshapeable and removable — until something
-does.
+nothing is frozen before 1.0.0 anyway, so a shape built to find out is free to change once you
+have found out.
