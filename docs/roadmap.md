@@ -69,11 +69,13 @@ realignment of what the pool made stale, and `sums` as the end-to-end proof.
 
 The crossover for offering work to another process fell from **26 ms to about 1 ms** — measured
 afterwards against the alternatives, where it holds against a `child start` per item (**41×** the
-throughput at 0.5 ms items) and **does not** hold against a hand-written static partition, which
-matches or beats the pool on uniform work at every size tried. What the pool is actually worth is
-small items, item costs that are unpredictable or arrive clustered, supervision, and one call
-instead of thirty lines — not throughput over a partition you could have written yourself. The
-numbers, and the two predictions that came out wrong, are in [parallelism](parallel.md).
+throughput at 0.5 ms items) and buys **nothing** against a hand-written static partition, which it
+merely matches (3.21× against 3.17× on a 32-second job). What the pool is actually worth is small
+items, item costs that are unpredictable or arrive clustered, supervision, and one call instead of
+thirty lines. Two further numbers worth carrying: the ceiling on this box is **~3.2×**, and pool
+startup costs a few hundred milliseconds that are amortised by about **four seconds** of work —
+below a second, do not bother. The numbers, and the predictions that came out wrong, are in
+[parallelism](parallel.md).
 
 ✅ **`sums`** (`tool/sums`, wrapped to `sums.exe`) — the third shipped tool and the first that is
 not a window: it hashes a tree using **copies of itself** as workers. One artefact, no tclsh, no
