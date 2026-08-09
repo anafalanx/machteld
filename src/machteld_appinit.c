@@ -23,6 +23,9 @@ extern int Machteldjson_Init(Tcl_Interp *interp); /* src/json.c */
 #ifdef MACHTELD_PS
 extern int Machteldps_Init(Tcl_Interp *interp); /* src/ps.c */
 #endif
+#ifdef MACHTELD_HASH
+extern int Machteldhash_Init(Tcl_Interp *interp); /* src/hash.c */
+#endif
 
 int
 Machteld_RegisterLibs(Tcl_Interp *interp)
@@ -61,6 +64,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldps", Machteldps_Init, NULL);
+#endif
+
+#ifdef MACHTELD_HASH
+    /* digests, HMAC and cryptographic random over CNG -- the one stdlib category
+     * machteld had entirely empty. */
+    if (Machteldhash_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldhash", Machteldhash_Init, NULL);
 #endif
 
     /*

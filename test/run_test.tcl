@@ -553,6 +553,94 @@ check "pty info on a dead token"    [expr {
     [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
 pty close $p2
 
+# --- hash: digests, HMAC, and cryptographic random ---------------------------
+# Published vectors, not self-consistency: a hash that agrees only with itself
+# is worthless, and every one of these is checkable against NIST/RFC by hand.
+check "hash algorithms are the five documented" [expr {
+    [lsort [hash algorithms]] eq {md5 sha1 sha256 sha384 sha512}}]
+
+foreach {alg data want} {
+    md5    {}    d41d8cd98f00b204e9800998ecf8427e
+    md5    abc   900150983cd24fb0d6963f7d28e17f72
+    sha1   {}    da39a3ee5e6b4b0d3255bfef95601890afd80709
+    sha1   abc   a9993e364706816aba3e25717850c26c9cd0d89d
+    sha256 {}    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    sha256 abc   ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+    sha384 abc   cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7
+    sha512 abc   ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f
+} {
+    check "$alg of \"$data\" matches the published vector" [expr {[hash sum $alg $data] eq $want}]
+}
+
+# RFC 2202 / RFC 4231, test case 1.
+set hk [binary decode hex 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b]
+check "hmac-sha256 matches RFC 4231" [expr {[hash hmac sha256 $hk "Hi There"] eq
+    "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"}]
+check "hmac-sha1 matches RFC 2202"   [expr {[hash hmac sha1 $hk "Hi There"] eq
+    "b617318655057264e28bc0b6fb378c8ef146be00"}]
+check "hmac differs from the plain digest" [expr {
+    [hash hmac sha256 $hk "Hi There"] ne [hash sum sha256 "Hi There"]}]
+
+# WHICH BYTES GET HASHED. This is the rule the implementation got wrong first
+# time: Tcl 9 carries two byte-array object types and registers only one by name,
+# so a typePtr comparison missed exactly the values `binary decode` produces --
+# and they fell through to the string path, where each byte was read as a
+# character and re-encoded. `binary decode hex 636166c3a9` hashed as seven bytes
+# of UTF-8 instead of five bytes of data, silently.
+check "a string hashes as UTF-8" [expr {
+    [hash sum sha256 "café"] eq [hash sum sha256 [encoding convertto utf-8 "café"]]}]
+check "UTF-8 is what the OS agrees with" [expr {
+    [hash sum sha256 "café"] eq "850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e"}]
+check "a byte array hashes its bytes" [expr {
+    [hash sum sha256 [binary decode hex 616263]] eq [hash sum sha256 abc]}]
+check "a byte array is not re-encoded" [expr {
+    [hash sum sha256 [binary decode hex 636166c3a9]] eq [hash sum sha256 "café"]}]
+check "a non-Latin-1 string still hashes as UTF-8" [expr {
+    [hash sum sha256 "a日"] eq [hash sum sha256 [encoding convertto utf-8 "a日"]]}]
+
+# -binary gives the raw digest, which must encode back to the hex form.
+set hb [hash sum sha256 abc -binary]
+check "-binary returns 32 bytes"   [expr {[string length $hb] == 32}]
+check "-binary encodes to the hex" [expr {[binary encode hex $hb] eq [hash sum sha256 abc]}]
+
+# file: streamed, and cross-checked against the same bytes hashed as a value.
+set HF [file join $env(TEMP) mt_hash_suite.bin]
+set fh [open $HF wb] ; puts -nonewline $fh [string repeat "0123456789abcdef" 40000] ; close $fh
+check "hash file agrees with hash sum on the same bytes" [expr {
+    [hash file sha256 $HF] eq [hash sum sha256 [string repeat "0123456789abcdef" 40000]]}]
+check "hash file streams past one chunk" [expr {[file size $HF] > 65536}]
+check "hash file on a missing path => notfound" [expr {
+    [errcode_of {hash file sha256 [file join $env(TEMP) nosuch_zzz_42.bin]}] eq {MACHTELD HASH notfound}}]
+file delete -force $HF
+
+# incremental: same answer as one-shot, and `final` consumes the token.
+set before [llength [hash list]]
+set hh [hash start sha256]
+check "start returns a token"   [string match "hash#*" $hh]
+check "the token is listed"     [expr {$hh in [hash list]}]
+foreach chunk {abc def ghi} { hash update $hh $chunk }
+check "incremental equals one-shot" [expr {[hash final $hh] eq [hash sum sha256 abcdefghi]}]
+check "final consumed the token"    [expr {[llength [hash list]] == $before}]
+check "the consumed token is gone"  [expr {
+    [errcode_of {hash update $hh x}] eq {MACHTELD HASH nohandle}}]
+
+# random: the property that matters is that it is not the same twice.
+set r1 [hash random 32]
+set r2 [hash random 32]
+check "random returns the asked-for length" [expr {[string length $r1] == 32}]
+check "random is not repeating"             [expr {$r1 ne $r2}]
+check "random is a byte array"              [expr {[string length [binary encode hex $r1]] == 64}]
+check "random 0 => badvalue"   [expr {[errcode_of {hash random 0}] eq {MACHTELD HASH badvalue}}]
+check "random huge => badvalue" [expr {[errcode_of {hash random 99999999}] eq {MACHTELD HASH badvalue}}]
+
+# the error contract
+check "unknown algorithm => badvalue" [expr {
+    [errcode_of {hash sum sha999 x}] eq {MACHTELD HASH badvalue}}]
+check "unknown option => usage"       [expr {
+    [errcode_of {hash sum sha256 x -nope}] eq {MACHTELD HASH usage}}]
+check "bad token => nohandle"         [expr {
+    [errcode_of {hash final nosuch#9}] eq {MACHTELD HASH nohandle}}]
+
 # --- the manifest describes TCL verbs as fully as C ones ----------------------
 # Phase 0 of the stdlib plan. A Tcl verb used to report `kind tcl` plus `info
 # args` and nothing else, so `wrap` and `help` had no domain, no codes and no
@@ -620,7 +708,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
+    {child detach hash help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }

@@ -49,8 +49,8 @@ is the asymmetry to widen. The plan, its design rules and its ordering are in
 [the standard library](stdlib.md).
 
 ✅ **Phase 0 done 2026-08-09** — the prelude now holds itself to the contract it lands in: every
-error carries a code, and the manifest describes a Tcl verb as fully as a C one. Next is `hash`
-(C, over CNG), then `cli`, then `log`.
+error carries a code, and the manifest describes a Tcl verb as fully as a C one. ✅ **`hash` done 2026-08-09** — `md5 sha1 sha256 sha384 sha512`, HMAC, streamed file digests and
+a cryptographic RNG, over CNG with nothing vendored. Next is `cli`, then `log`.
 
 ## Later
 
