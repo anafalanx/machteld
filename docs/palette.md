@@ -221,6 +221,44 @@ going wrong.
 the sink closes the channel `log` opened, so the file is not locked for the life of the process.
 `-level` and `-channel` are checked when configured rather than discovered later by silence.
 
+## Built — persistent workers
+
+```tcl
+child start -channels -- $exe --worker    ;# the child's pipes become Tcl channels
+dict get [child info $tok] stdin          ;# ... reachable through child info
+```
+
+```tcl
+# in the worker process
+worker on digest {path {alg sha256}} { hash file $alg $path }
+worker ops                                ;# {digest {path {alg sha256}}}
+worker serve                              ;# a line in, a line out, until EOF
+```
+
+`-channels` hands a child's pipes to Tcl instead of draining them into buffers, which is what
+makes a **persistent** worker possible: the 26 ms of process startup is paid once rather than per
+item, and a round trip costs about **159 µs**. It is exclusive with capture — one pipe cannot have
+two consumers — so it refuses `-onout`, `-onerr` and `-stdin`, and the result dict keeps its
+documented shape with `out` and `err` simply empty.
+
+**Every supervision guarantee still applies**, which is the whole reason this is a verb rather
+than `open |cmd r+`: a channel-mode child is born in a job object, dies with its parent, is
+tree-killed by `child kill`, capped by `-mem`, killed by `-timeout`, and reaped by `scope`.
+
+**The handler's argument list is the request schema.** `worker on digest {path {alg sha256}}`
+says a digest request carries `path` and may carry `alg`; the dispatcher binds them from the
+request by name, so `worker ops` can answer what this worker accepts. It also means a handler is
+necessarily a **proc**, whose body Tcl compiles — the same loop at top level runs 3.6× slower, so
+a design inviting top-level bodies would give most of the parallelism back.
+
+One JSON object per line each way: `json encode` escapes newlines, so a value can never split its
+own record and `gets` is a safe frame reader. A failing handler answers
+`{ok 0 code {...} msg ...}` with **its own errorcode**, so the contract survives the process
+boundary; a malformed line is answered rather than fatal.
+
+> **A handler must not write to stdout.** Stdout *is* the protocol — a stray `puts` injects a line
+> that is not a reply. Use [`log`](#), which goes to stderr or a file.
+
 ## Built — declaring a tool's arguments
 
 ```tcl
