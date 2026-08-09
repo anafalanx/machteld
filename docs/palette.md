@@ -135,8 +135,29 @@ command reporting SQLite's.
 
 ```tcl
 store open db.sqlite ; store put k v ; store get k ; store keys ; store del k ; store version ; store close
+store open                            ;# no path: an in-memory database, gone when you close it
 wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see packaging.md)
 ```
+
+**`store open` with no path gives an in-memory database** — useful for a test, and for code that
+should work the same whether or not it is later pointed at a file.
+
+**Know the cliff between the two.** Measured at 20,000 keys:
+
+| | in memory | on disk |
+|---|---|---|
+| `store put` | 246,914/sec | **132/sec** |
+| `store get` | 384,615/sec | 25,974/sec |
+
+Writing to a file costs about **7.6 ms per `put`**, because each one is its own transaction and
+pays a disk sync. That is fine for settings and state — the things `store` is for — and ruinous
+for anything in a loop. If you are writing thousands of rows, you want a different shape, not a
+faster `store`: see [parallelism](parallel.md), where an append-only log measured 105,263/sec.
+
+**And if you only want in-memory key-value, Tcl already has it and is faster.** A plain `array`
+does the same job at 1.5M sets and 2.9M gets per second — six or seven times quicker than
+in-memory `store`, with no verb at all. The reason to use `store` in memory is not speed; it is
+that the *same code* works against a file later.
 
 ## Built — JSON
 
