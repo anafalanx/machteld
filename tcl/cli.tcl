@@ -187,7 +187,7 @@ proc ::machteld::CliHelpText {attrs} {
 proc ::machteld::cli {args} {
     # Named here the way the C verbs name theirs, so the manifest can read the
     # subcommand table out of the body instead of anyone maintaining a copy.
-    set subs {parse usage}
+    set subs {parse usage duration}
     # And declared empty on purpose. `cli` takes no options of its own -- the
     # `--help` and `--interval` literals below belong to the PROGRAM being parsed,
     # not to this verb, and a scanner cannot tell those two apart by looking. An
@@ -200,6 +200,23 @@ proc ::machteld::cli {args} {
     set sub [lindex $args 0]
     if {$sub ni $subs} {
         Fail CLI usage "cli: unknown subcommand \"$sub\": must be [join $subs { or }]"
+    }
+
+    # THE CONVENTION, MADE AVAILABLE TO THE TOOLS THAT HAVE TO HONOUR IT. Every
+    # machteld verb demands an explicit unit on a duration -- `-timeout 100` is
+    # refused so it can never silently mean 100 seconds -- and until now nothing
+    # exposed the parser that enforces it. So a stamped tool had two choices: a
+    # second dialect (`--grace 20`, a bare number, exactly what the palette
+    # rejects) or a hand-rolled regexp per tool. `life` and `lifelab` shipped
+    # with the first. A toolkit that insists on a convention owes its tools the
+    # means to keep it.
+    #
+    # Deliberately the SAME `_dur2ms` the verbs use, not a copy: two parsers for
+    # one syntax is how the tools and the palette would drift apart, and the
+    # drift would be silent because both would look right in isolation.
+    if {$sub eq "duration"} {
+        if {[llength $args] != 2} { Fail CLI usage "usage: cli duration value" }
+        return [_dur2ms CLI [lindex $args 1]]
     }
 
     if {$sub eq "usage"} {

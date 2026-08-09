@@ -602,6 +602,26 @@ static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
     return child_dict_ex(interp, c, 0);
 }
 
+/* SETTLE AN EXPIRED CAP. `child start -timeout` is a promise about the child, so
+ * it must not depend on which question the supervisor happens to ask. This lives
+ * in one function called from EVERY path that observes a child -- `child info`,
+ * `child wait`, `child list`, and `wait` -- because the first fix put it in
+ * `child wait` alone and left two other doors open: a director polling
+ * `child list`, or blocking in `wait -any`, still watched its children run past
+ * their cap. Three ways to be wrong about one idea is the signature of a rule
+ * enforced at call sites instead of at the thing it is about.
+ * Returns 1 if this call ended the child. */
+static int child_settle_deadline(child_t *c) {
+    if (c == NULL || c->reaped || c->deadline == 0) return 0;
+    if (GetTickCount64() < c->deadline) return 0;
+    const char *err = NULL;
+    c->killed = 1;
+    c->timeout = 1;
+    if (c->job) wj_job_terminate(c->job, 1);
+    child_reap(c, WJ_INFINITE, &err);
+    return 1;
+}
+
 static void child_free(child_t *c) {
     if (c == NULL) return;
     if (!c->reaped) {
@@ -901,6 +921,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (idx == LIST) {
         Tcl_Obj *l = Tcl_NewListObj(0, NULL);
         for (child_t *c = ctx->children; c; c = c->next) {
+            child_settle_deadline(c);   /* listing is observing */
             Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(c->token, -1));
         }
         Tcl_SetObjResult(interp, l);
@@ -913,21 +934,9 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     child_t *c = registry_find(ctx, token);
     if (c == NULL) return mt_error(interp, "CHILD", "nohandle", "no such child");
 
-    /* THE DEADLINE IS ENFORCED WHENEVER THE CHILD IS OBSERVED, not only when
-     * somebody waits. It used to live inside WAIT alone, which made
-     * `child start -timeout` an absolute maximum only for callers that happened
-     * to block on it -- a supervisor polling `child info` every 250 ms watched
-     * its children sail 6x past their cap, because asking "are you done?" is not
-     * waiting. `-timeout` is a promise about the CHILD, so every question about
-     * the child settles it first. The job object remains the backstop if this
-     * process dies without asking anything. */
-    if (c->deadline != 0 && !c->reaped && GetTickCount64() >= c->deadline) {
-        const char *derr = NULL;
-        c->killed = 1;
-        c->timeout = 1;
-        if (c->job) wj_job_terminate(c->job, 1);
-        child_reap(c, WJ_INFINITE, &derr);
-    }
+    /* Every question about a child settles its cap first. The job object remains
+     * the backstop if this process dies without asking anything at all. */
+    child_settle_deadline(c);
 
     switch (idx) {
     case WAIT: {
@@ -1044,48 +1053,69 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     if (n <= 0) return mt_error(interp, "WAIT", "usage", "wait ?-any? token ...");
     if (n > MAXIMUM_WAIT_OBJECTS) return mt_error(interp, "WAIT", "usage", "too many children to wait on (max 64)");
 
+    /* THIS WAITS UNDER THE CAPS, not past them. `wait -any` used to block
+     * INFINITE, so a child given `-timeout 10m` would be waited on forever if it
+     * never exited -- the third door left open by enforcing the deadline at call
+     * sites. The wait is bounded by the nearest deadline among the children being
+     * waited on; when that comes due the loop settles it and comes round again,
+     * and the killed child is then simply one of the ready ones. */
     Tcl_Obj *done = Tcl_NewListObj(0, NULL);
+    Tcl_IncrRefCount(done);
     HANDLE h[MAXIMUM_WAIT_OBJECTS];
     waitable ws[MAXIMUM_WAIT_OBJECTS];
-    int nh = 0;
-    for (int k = 0; k < n; k++) {
-        const char *tok = Tcl_GetString(objv[i + k]);
-        waitable w;
-        /* A token names a child or a watch; both are waitable, and `wait` is the
-         * one multiplexer over all of them -- so a tool can block on "either the
-         * build finished or a file changed" without polling either. */
-        child_t *c = registry_find(ctx, tok);
-        if (c != NULL) {
-            w.token = c->token;
-            w.h     = (HANDLE)c->proc;
-            w.ready = c->reaped;
-        } else if (!watch_waitable(ctx, tok, &w)) {
-            return mt_error(interp, "WAIT", "nohandle", "no such child or watch");
+    for (;;) {
+        Tcl_SetListObj(done, 0, NULL);
+        int nh = 0;
+        ULONGLONG nearest = 0;
+        for (int k = 0; k < n; k++) {
+            const char *tok = Tcl_GetString(objv[i + k]);
+            waitable w;
+            /* A token names a child or a watch; both are waitable, and `wait` is
+             * the one multiplexer over all of them -- so a tool can block on
+             * "either the build finished or a file changed" without polling. */
+            child_t *c = registry_find(ctx, tok);
+            if (c != NULL) {
+                child_settle_deadline(c);            /* waiting is observing */
+                w.token = c->token;
+                w.h     = (HANDLE)c->proc;
+                w.ready = c->reaped;
+                if (!c->reaped && c->deadline != 0 &&
+                    (nearest == 0 || c->deadline < nearest)) nearest = c->deadline;
+            } else if (!watch_waitable(ctx, tok, &w)) {
+                Tcl_DecrRefCount(done);
+                return mt_error(interp, "WAIT", "nohandle", "no such child or watch");
+            }
+            if (w.ready) {
+                Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(w.token, -1));
+            } else {
+                h[nh]  = w.h;
+                ws[nh] = w;
+                nh++;
+            }
         }
-        if (w.ready) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(w.token, -1));
+        /* -any and some are already done, or nothing left to wait on. */
+        if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) break;
+
+        DWORD ms = INFINITE;
+        if (nearest != 0) {
+            ULONGLONG now = GetTickCount64();
+            ms = (now >= nearest) ? 0 : (DWORD)(nearest - now);
+        }
+        DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, ms);
+        if (r == WAIT_TIMEOUT) continue;     /* a cap came due: settle, then re-ask */
+        if (any) {
+            if (r < WAIT_OBJECT_0 + (DWORD)nh) {
+                Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[r - WAIT_OBJECT_0].token, -1));
+            }
         } else {
-            h[nh]  = w.h;
-            ws[nh] = w;
-            nh++;
+            for (int k = 0; k < nh; k++) {
+                Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[k].token, -1));
+            }
         }
-    }
-    /* -any and some are already done, or nothing left to wait on: return now. */
-    if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) {
-        Tcl_SetObjResult(interp, done);
-        return TCL_OK;
-    }
-    DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
-    if (any) {
-        if (r < WAIT_OBJECT_0 + (DWORD)nh) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[r - WAIT_OBJECT_0].token, -1));
-        }
-    } else {
-        for (int k = 0; k < nh; k++) {
-            Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[k].token, -1));
-        }
+        break;
     }
     Tcl_SetObjResult(interp, done);
+    Tcl_DecrRefCount(done);
     return TCL_OK;
 }
 

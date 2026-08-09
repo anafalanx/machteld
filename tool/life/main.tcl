@@ -309,7 +309,7 @@ proc ::life::selftest {} {
 set SPEC {
     --seed      {type int    default 0 min 0 help "which start setting to use; the setting is derived from it"}
     --geometry  {type string default "" help "Tk geometry, e.g. +320+180"}
-    --grace     {type int    default 20 min 0 max 600 help "seconds to stay up after settling"}
+    --grace     {type string default 20s help "how long to stay up after settling (30s, 5m)"}
     --cell      {type int    default 3 min 1 max 20 help "pixels per cell"}
     --describe  {type flag   help "print the setting this seed means, as JSON, and exit"}
     --selftest  {type flag   help "run the model's own tests with no window and exit"}
@@ -331,7 +331,7 @@ set ::life::cols     [dict get $s cols]
 set ::life::rows     [dict get $s rows]
 set ::life::interval [dict get $s interval]
 set ::life::cell     [dict get $opt cell]
-set ::life::grace    [expr {[dict get $opt grace] * 1000}]
+set ::life::grace    [::machteld::cli duration [dict get $opt grace]]
 set ::life::born     [clock milliseconds]
 
 ::life::seed_grid $::life::seed

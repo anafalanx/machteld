@@ -213,6 +213,60 @@ check "a cap is enforced by polling alone"   [expr {$dt > 400 && $dt < 4000}]
 check "and the reason survives to the wait"  [expr {[dict get [child wait $c] status] eq "timeout"}]
 child close $c
 
+# A CAP HOLDS THROUGH EVERY DOOR, not just the one that got fixed first. The
+# deadline was enforced at call sites, so each new way of observing a child was a
+# fresh way to miss it: `child wait` had it, then `child info` needed it, then
+# `child list` and `wait -any` still did not. Three wrongs about one idea. It now
+# lives in one place, and this asserts every entrance to it.
+#
+# `child list` alone -- a supervisor that only ever asks "who is still here?".
+set t0 [clock milliseconds]
+set c [child start -timeout 600ms -- $MT $spin]
+while {[clock milliseconds] - $t0 < 6000} {
+    child list
+    if {![dict get [child info $c] running]} break
+    after 100
+}
+check "listing alone enforces a cap" [expr {
+    [clock milliseconds] - $t0 > 400 && [clock milliseconds] - $t0 < 4000}]
+child close $c
+
+# `wait -any` -- which blocked INFINITE and would have waited out a ten-minute
+# cap forever. The outer `after` bound is NOT a substitute: if the cap is not
+# enforced this check must fail, not hang the suite, so the elapsed time is what
+# is asserted.
+set t0 [clock milliseconds]
+set c [child start -timeout 700ms -- $MT $spin]
+set d [child start -- $MT $spin]
+set woke [wait -any $c $d]
+set dt [expr {[clock milliseconds] - $t0}]
+check "wait -any returns when a cap fires" [expr {$dt > 500 && $dt < 5000}]
+check "and it names the capped child"      [expr {$c in $woke}]
+check "which reports status timeout"       [expr {[dict get [child wait $c] status] eq "timeout"}]
+catch {child kill $d} ; catch {child wait $d} ; child close $d ; child close $c
+
+# THE DOCUMENTED PATTERN, EXECUTED. `palette.md` shows a supervisor loop for a Tk
+# tool; that loop used to kill every child it asked about, and no gate noticed
+# because gates test code and this was advice. So the advice is now run here, and
+# asserted to still be what the shipped doc says -- if either moves, this fails.
+set ADVICE {if {[dict get [child wait $c -timeout 50ms] status] ne "running"} { harvest $c }}
+# `string first`, not `string match`: in a match PATTERN the brackets all over
+# this snippet are character classes, so the comparison silently tested
+# something else entirely. Found by this check failing against a doc that plainly
+# contained the line.
+check "the palette still shows this loop" [expr {[string first $ADVICE [help palette]] >= 0}]
+set c [child start -- $MT $spin]
+proc harvest {tok} { set ::harvested $tok }
+set ::harvested ""
+eval $ADVICE
+check "the documented poll does not harvest a live child" [expr {$::harvested eq ""}]
+check "and does not kill it either"                       [expr {
+    [dict get [child info $c] running] == 1}]
+child kill $c ; child wait $c
+eval $ADVICE
+check "the same loop harvests it once it is gone"         [expr {$::harvested eq $c}]
+child close $c
+
 # Two deadlines can apply; the earlier must win, or a child given 5s at start
 # would get 30 more because someone waited generously. And when the START
 # deadline is the one that expires, it still kills -- that half was always right.
@@ -1186,6 +1240,38 @@ check "pmap rejects a dangling option"  [expr {
 check "a bad width surfaces as a pmap failure" [expr {
     [lrange [errcode_of {pmap {{op echo text a}} -width 0 -- $MT $PMW}] 0 1] eq {MACHTELD PMAP}}]
 file delete -force $PMW
+
+# --- cli duration: the palette's convention, available to its tools -----------
+# machteld refuses a bare number for a duration so `-timeout 100` can never
+# silently mean 100 seconds -- and then exposed no parser, so `life` and
+# `lifelab` shipped taking bare integers. The convention was not kept by the
+# tools the toolkit builds. This is the SAME `_dur2ms` the verbs use, so the two
+# cannot drift.
+check "cli duration parses ms"          [expr {[cli duration 500ms] == 500}]
+check "cli duration parses seconds"     [expr {[cli duration 30s] == 30000}]
+check "cli duration parses minutes"     [expr {[cli duration 5m] == 300000}]
+check "cli duration parses hours"       [expr {[cli duration 2h] == 7200000}]
+check "cli duration refuses a bare number" [expr {
+    [errcode_of {cli duration 100}] eq {MACHTELD CLI badvalue}}]
+check "cli duration refuses nonsense"   [expr {
+    [errcode_of {cli duration soon}] eq {MACHTELD CLI badvalue}}]
+check "cli duration rejects a bad arity" [expr {
+    [errcode_of {cli duration 1s 2s}] eq {MACHTELD CLI usage}}]
+# AND IT AGREES WITH THE C. One syntax, two enforcers, would drift silently
+# because each looks right alone: whatever `cli duration` accepts, a verb must
+# accept, and whatever it refuses, a verb must refuse.
+foreach d {250ms 3s 1m} {
+    set c [child start -- cmd /c "exit 0"]
+    check "the C accepts what cli duration accepts ($d)" [expr {
+        ![catch {child wait $c -timeout $d}]}]
+    child close $c
+}
+foreach d {100 soon -5s} {
+    set c [child start -- cmd /c "exit 0"]
+    check "the C refuses what cli duration refuses ($d)" [expr {
+        [lrange [errcode_of {child wait $c -timeout $d}] 0 1] eq {MACHTELD CHILD}}]
+    child close $c
+}
 
 # --- cli: declare a tool's arguments once ------------------------------------
 set CSPEC {
