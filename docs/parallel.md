@@ -214,6 +214,64 @@ Whatever surface this takes, the measurements say it needs four things `store` d
 SQLite, but it can certainly express a queue given a table — and a table is useful for things
 that are not queues, while a queue is not.
 
+## Is SQLite even the right technology? — measured, and no
+
+The design above assumed SQLite because it was already in the exe, which is exactly the reasoning
+that deserves testing. Writing 2000 results four ways:
+
+| mechanism | rate |
+|---|---|
+| SQLite, one `put` per result | 102/sec |
+| one file per result, write and close | 400/sec |
+| one file per result, `.tmp` + atomic rename | 152/sec |
+| **one append-only log per worker** | **105,263/sec** |
+
+**A thousandfold.** SQLite pays a transaction, a journal write and a B-tree update per row; an
+append pays a buffered write. Per-file schemes lose to NTFS metadata cost, and atomic rename —
+the classic lock-free commit — costs more than writing the file did.
+
+And the log is not merely faster; it answers the two things the SQLite design could not:
+
+- **Mid-flight readable with no WAL and no ceremony.** A director watching a running worker saw
+  its log grow 2 → 4 → 7 → 8 lines. Progress visibility is just reading a file.
+- **Notification without polling.** `watch` on the directory fired 5 events as the worker
+  appended. The polling gap in the queue design is closed by a verb machteld already has.
+
+It is also crash-honest: a half-written final line is visibly incomplete, and every earlier line
+is intact. With `json` the format is one object per line — machine-legible and human-legible at
+once ([creed](creed.md) 2), and readable by anything.
+
+**So the mechanism the evidence actually points at is: an append-only log per worker, `watch` for
+notification, `json` for the line format — and no database at all.** Every file still has exactly
+one writer for life, which was the good half of the original instinct.
+
+What SQLite would still be better at is **mutable state**: marking an item pending → in flight →
+done is an update, and a log cannot update. If a task ledger ever needs that, it is a reason to
+reach for a database. A results stream is not that; it is read once, whole.
+
+## Should this become the main mechanism for governing external processes?
+
+**No — because it governs a different noun.** A queue governs *work items*; `child` governs
+*processes*. The queue does not replace the process verbs, it sits on them: a worker still has to
+be launched, capped, timed out and tree-killed, and that is exactly what `child` does.
+
+The tax argument turns out not to be the reason. A log write costs **0.01 ms against a ~11 ms
+process launch** — a 0.07% overhead, so ledgering every launch would be affordable. The reasons
+are about shape:
+
+- **`run` is synchronous and returns a dict.** Routing it through a queue makes it asynchronous,
+  which is a different thing wearing the same name.
+- **The job-object guarantees are the differentiator** — born-in-job, die-with-parent, whole-tree
+  kill, memory and CPU caps. A queue has none of these; it needs `child` underneath to get them.
+- **`pty` cannot be queued at all.** Interactive steering is inherently synchronous and stateful.
+- **`scope` is lexical** — bounded lifetime by structure, an idea a queue does not express.
+
+There *is* a version of the question with legs, and it is worth naming precisely because it is
+not this one: a **supervisor** — a durable ledger of what *should* be running, so a set of
+long-lived processes survives the director's own restart. That is supervision over time rather
+than invocation, it is genuinely absent today, and it would be built *on* `child` rather than
+instead of it.
+
 ## What remains open
 
 - **`child` cannot feed a running child.** Its subcommands are `start wait kill info list close`;
