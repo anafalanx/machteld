@@ -221,6 +221,41 @@ going wrong.
 the sink closes the channel `log` opened, so the file is not locked for the life of the process.
 `-level` and `-channel` are checked when configured rather than discovered later by silence.
 
+## Built — a pool in one call
+
+```tcl
+set reqs [lmap p $paths {list op digest path $p}]
+set digests [pmap $reqs -width 8 -- $exe --worker]      ;# results, in submission order
+set replies [pmap $reqs -raw -width 8 -- $exe --worker] ;# the raw replies instead
+```
+
+Sugar over [`pool`](#), and it earns its place for two reasons rather than brevity.
+
+**The pool is always closed.** Create, submit, wait, close is four calls with three chances to
+leak a pool of live worker processes if anything between them raises. Here the close happens on
+every path, so a failure costs an error rather than a fistful of orphans.
+
+**A worker's failure is re-raised with the worker's own errorcode.** `pool` hands back replies,
+failures included, because a director usually wants to see all of them. A *map* is different —
+`lmap` does not return error markers, it propagates. So `pmap` returns plain results, and if an
+item failed it raises **that item's** error carrying the code it was raised with *in the worker*:
+
+```tcl
+try { pmap $reqs -- $exe --worker } trap {MACHTELD HASH notfound} {m} { … }
+```
+
+That is the error contract having travelled the whole way — raised in one process, trappable in
+another, unflattened. `pmap`'s **own** failures are `{MACHTELD PMAP …}`, because the domain is the
+verb you called; a worker's failure is not pmap's failure, and relabelling it would erase the only
+useful thing about it. A handler that raises a plain `error` has errorcode `NONE`, which nothing
+can trap on, so that becomes `{MACHTELD PMAP failed}` rather than a code that means nothing.
+
+**It takes an op the worker registered, never a script block.** A closure cannot cross a process
+boundary, and shipping script text per item would hand every worker an `eval` and defeat the
+bytecode caching that makes a handler worth calling twice. Workers are configured once, then fed
+data — the same reason `worker on` defines a proc. Building the requests stays ordinary Tcl, which
+is what `lmap` is for.
+
 ## Built — a pool of persistent workers
 
 ```tcl

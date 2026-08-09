@@ -87,6 +87,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `LOG` | `log` (all subcommands) |
 | `WORKER` | `worker` (all subcommands) |
 | `POOL` | `pool` (all subcommands) |
+| `PMAP` | `pmap` — its own failures only; a worker's failure keeps its own domain |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
@@ -108,6 +109,7 @@ errors.
 | `denied` | the OS refused the operation on a process you do not have the rights to touch |
 | `timeout` | a bounded wait ran out — `pty expect` with no pattern matched in time |
 | `unsupported` | this build cannot do it — `wrap` or `help` on a bare host with no embedded payload |
+| `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
 comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
