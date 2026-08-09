@@ -19,11 +19,13 @@ wait -any [child start -- build.cmd] $w      ;# the build finished, or a file ch
 dict get [manifest] watch subcommands        ;# what this exe can actually do
 ```
 
-Two tools built with it ship alongside, each one exe with no install: **`changes`**, a live view
-of what is changing in a directory tree, and **`tasks`**, a task manager — the process list,
-live and sortable, with End Task. Both exist as much to prove the factory as to be used: each
-was written first and then named the C capability it needed, which is how `watch` and `ps`
-came to be built.
+Three tools built with it ship alongside, each one exe with no install: **`changes`**, a live view
+of what is changing in a directory tree; **`tasks`**, a task manager — the process list, live and
+sortable, with End Task; and **`sums`**, which hashes a tree using **copies of itself** as worker
+processes. They exist as much to prove the factory as to be used. The first two were written
+first and then named the C capability they needed, which is how `watch` and `ps` came to be
+built; `sums` proves the other direction — that a stamped exe can spawn itself as a pool of
+persistent workers, with no tclsh and no worker script on disk.
 
 **Concept & design docs:** [`docs/`](docs/) — an [OKF v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog) knowledge bundle. Start at [`docs/index.md`](docs/index.md).
 

@@ -165,6 +165,18 @@ Two things, because the acceptance tests only prove the mechanism:
 - **A realistic win**: hash a large tree in parallel against sequentially, and record the numbers
   in [parallelism](parallel.md) beside the rest.
 
+✅ **Done.** [`sums`](../tool/sums/main.tcl) — a wrapped console exe that hashes a tree with copies
+of itself, carrying a selftest that passes both wrapped and as a script, and asserting the claim
+worth asserting: the pool's digests equal the ones the director computes alone, with no children
+left behind after a run that raised.
+
+The win is real but modest, and the honest version is recorded rather than the flattering one:
+**1.27×** over this project's own tree of 45 KB files, **0.38×** at width 1, and **2.34×–3.51×**
+on a gigabyte depending on the digest — ordered *inversely* to how fast the digest is, because a
+hardware-accelerated sha256 leaves reading as the remaining cost and reading does not parallelise.
+The first attempt at this measurement reported 38× and was wrong for an instructive reason; see
+[parallelism](parallel.md).
+
 ## Risks, in the order I expect them to bite
 
 1. **Handle ownership in Step 1.** Tcl closing a channel and `child_free` closing the same handle

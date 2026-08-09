@@ -8,6 +8,86 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — the worker pool: persistent workers, and a tool that spawns itself
+
+Six steps, each ending in something that builds and passes. The design and the refusals that
+shaped it are in [parallelism](parallel.md); the plan, including what previous work had to change,
+is in [the pool plan](pool-plan.md).
+
+**`child start -channels`** — the only new C. A child launched this way keeps its stdin write end
+open, does not start the capture reader threads, and hands its three pipes to Tcl as channels.
+Every supervision guarantee still applies, which is the entire reason this is a verb rather than
+`open |cmd r+`: the worker is born in a job object, dies with its parent, is tree-killed, capped,
+and reaped by `scope`. The hazard flagged as most likely to sink the step did bite — Tcl closing
+a channel and `child_free` closing the same handle is a double-close, and on Windows that is a
+crash, not an error — so the handles are nulled the moment Tcl owns them.
+
+It also uncovered a **pre-existing lie**: `child start -timeout` was accepted, documented in the
+manifest, and *ignored*; `child wait` always waited forever. A deadline is now stored at launch
+and the earlier of the two wins.
+
+**`worker`** — the far side. A handler is a proc and its argument list is the request schema, so
+the protocol documents itself and `worker ops` can answer what a worker accepts. That is not a
+style preference: the same loop at top level runs 3.6× slower, so a design inviting top-level
+handler bodies would hand most of the parallelism straight back.
+
+**`pool`** — supervision, which was the one thing the spike deliberately did not prove. Requeue on
+worker death, poison after `-maxtries`, results in submission order, and `chan event` throughout so
+a director never polls.
+
+**`pmap`** — the whole thing in one call. It closes the pool on **every** path, including the
+raising one, and re-raises a worker's failure carrying **the worker's own errorcode**. That is the
+error contract having travelled the whole way: raised in one process, `trap`-able in another.
+
+### `sums`, and a 38× speedup that was not one
+
+The end-to-end proof is a tool: `sums` hashes a tree using copies of *itself* as workers
+(`sums.exe --worker`), which is one artefact with no tclsh and no worker script on disk. It is also
+the first shipped tool that is not a window, so it exercises `wrap --console`.
+
+Its first measurement reported sequential 73.6 s against a pool at 1.9 s — **38×**, on twelve
+logical cores. The comment above that code said sequential ran first *so the pool could not
+inherit a warm cache*, which is exactly backwards: the first pass pays for every cold read and for
+the antivirus filter's first look at each file, and the second reads from the OS cache. Running
+first is a penalty. With a discarded warm-up pass and both halves timed warm, the same tree gives
+**1.27×** — and **0.38×** at width 1, which is the protocol's cost with no concurrency to pay for
+it, printed rather than hidden.
+
+On a gigabyte in 272 files the ordering across four digests is the finding: `md5` **3.51×**,
+`sha512` 2.75×, `sha1` 2.72×, `sha256` **2.34×**. The fastest digest parallelises worst, because
+this CPU hashes sha256 in hardware and what remains is reading, which does not parallelise.
+Hashing is a bandwidth problem wearing a CPU problem's clothes.
+
+### What the realignment step found
+
+`execution-model.md` still pointed the callback layer at the cockpit, removed hours earlier; it
+now points at `pool` and Tk, and the **two ways to wait** are a table rather than folklore —
+blocking verbs wait for a process, the event loop waits for data, and a blocking verb does not
+pump the event loop.
+
+The plan's own prescription for the namespace trap turned out to be the weaker fix. Rather than
+asking authors to remember a `namespace path`, `worker on` now compiles a handler **in the
+namespace where it was written**, so it calls that file's procs by bare name like every other line
+around it — moving the failure from late-and-remote (a per-item reply from another process) to the
+ordinary one, hit on the first line. Underneath it, a claim `palette.md` has made since the
+beginning is finally gated: **every verb resolves by its bare name**, so a future verb called
+`close` or `format` fails the suite instead of being silently answered by Tcl's command.
+
+### Three defects, each found by breaking something on purpose
+
+- A break-test aimed at `pmap`'s errorcode passthrough fired two checks it was not aimed at, and
+  following them up showed `pmap` could raise `{MACHTELD PMAP failed}` while declaring only
+  `badvalue usage`. The code had been assembled into a **variable**, and `-errorcode $code` is
+  invisible to both the manifest derivation and the registry scan, which match literals. An
+  errorcode built at runtime is invisible to derivation.
+- Reverting the handler namespace made the new gate fire — and **abort the run**, because with the
+  regression in place the handler was not there to call, so every check after it silently never
+  ran. That is the same failure this suite has learned three times (`wres`, `pres`, `pwait`);
+  `valof` is the general form.
+- `parallel.md` claimed `child` could not feed a running child. Step 1 had closed it. Note what
+  closing it did *not* need: a `child send` verb. Handing the pipes to Tcl gives `puts`, `gets`
+  and `chan event` at once, where a verb would have re-implemented one of them.
+
 ## 2026-08-09 — `log`, and Phase 1 complete
 
 The last of the three categories machteld had entirely empty. It matters more here than the count

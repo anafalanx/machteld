@@ -370,13 +370,62 @@ Granularity, which is the thing machteld cannot have today. The crossover moves 
 work per item to roughly **1 ms** — the difference between *parallelism is for spawning programs*
 and *parallelism is for anything worth a millisecond*.
 
+## Built, and measured in a shipped tool
+
+The design above is built: `child start -channels`, `worker`, `pool`, `pmap`. The proof that it
+works where it has to is [`sums`](../tool/sums/main.tcl) — a wrapped console exe that hashes a
+tree using **copies of itself** as workers (`sums.exe --worker`, one artefact, no tclsh, no
+worker script on disk). Its selftest passes both wrapped and run as a script, and asserts the
+thing worth asserting: the pool's digests equal the ones this process computes alone.
+
+**A cold first pass is not a sequential time, and getting that wrong produced a 38× "speedup".**
+The first version of the measurement ran sequential first *on the reasoning that the pool must
+not inherit a warm cache* — which is backwards. The first pass pays for every cold read and, on
+Windows, for the antivirus filter's first look at each file; the second reads from the OS cache.
+Sequential 73.6 s against a pool at 1.9 s is not parallelism: twelve logical cores cannot make
+anything go 38 times faster. The tool now does a discarded warm-up pass and times both halves
+warm, and prints the cold pass on its own line, where it belongs — for a tree read once, that
+number is what a user actually experiences.
+
+Warm, on this box, hashing **machteld's own tree** — 8,221 files, 368 MB, 45 KB average:
+
+| width | sequential | pool | |
+|---|---|---|---|
+| 12 | 2047.9 ms | 1609.2 ms | **1.27×** |
+| 4 | 1926.5 ms | 1691.5 ms | 1.14× |
+| 1 | 1847.0 ms | 4817.5 ms | **0.38×** |
+
+Small files are a poor pool workload, exactly as the `hash file` row above predicts, and **width 1
+is the honest picture of the protocol**: one worker, no concurrency to pay for the round trip, and
+the run takes 2.6× as long. A pool is not free and this is what it costs.
+
+Where the items are worth having, on **1 GB in 272 files** (3.67 MB average), width 12:
+
+| digest | sequential | pool | speedup | sequential throughput |
+|---|---|---|---|---|
+| `md5` | 3100.9 ms | 882.2 ms | **3.51×** | 322 MB/s |
+| `sha512` | 3161.8 ms | 1150.7 ms | 2.75× | 316 MB/s |
+| `sha1` | 2739.0 ms | 1007.3 ms | 2.72× | 364 MB/s |
+| `sha256` | 1592.8 ms | 681.6 ms | 2.34× | 627 MB/s |
+
+**The speedup is ordered by how much CPU each byte costs, inversely.** `sha256` is the *fastest*
+sequentially and parallelises *worst*, which is not a paradox: this CPU has SHA-NI, so CNG hashes
+sha256 in hardware at 627 MB/s and the remaining time is spent reading — and reading from the file
+cache does not parallelise. `md5` has no hardware path, saturates cores, and reaches **3.51×** —
+the same ceiling every other CPU-bound measurement on this 12-logical / 6-physical box reaches.
+
+So the pool did not change what parallelism is worth here; it changed what can be *offered* to it.
+Hashing a tree is a bandwidth problem wearing a CPU problem's clothes. The archetype remains
+fan-out over external programs at **4.84×**, and what the pool adds is that the crossover for
+offering work at all fell from 26 ms to about 1 ms.
+
 ## What remains open
 
-- **`child` cannot feed a running child.** Its subcommands are `start wait kill info list close`;
-  `-stdin` is a fixed string supplied once. So there are no persistent workers over plain
-  children, and every item pays the 26 ms boot. `child send` plus streaming reads is the change
-  that would unlock fine-grained data parallelism. (`pty send` can feed a live child, but a pty
-  is a terminal, not a data pipe.)
+- ~~**`child` cannot feed a running child.**~~ **Closed.** This was the one thing missing, and
+  `child start -channels` supplies it: the child's stdin, stdout and stderr become ordinary Tcl
+  channels, so a running child can be fed and read for as long as it lives. Note what it did
+  *not* need — a `child send` verb. Handing the pipes to Tcl gives `puts`, `gets`, `chan event`
+  and every other channel command at once, where a verb would have re-implemented one of them.
 - **Two machteld processes cannot share one store file.** `store open` fails outright with
   *database is locked*, because `CREATE TABLE IF NOT EXISTS` takes a write lock with no busy
   timeout. This is unrelated to queues — two instances of the same wrapped tool hit it — and is
