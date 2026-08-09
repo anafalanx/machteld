@@ -158,12 +158,19 @@ if {[info commands ::machteld::pty] ne ""} {
         }
     }
 
+    # HAND-MAINTAINED, AND THEREFORE A DRIFT HAZARD: a subcommand added to the C
+    # is invisible until it is named here too. `pty info` landed in proc.c and
+    # this map still had five entries, so the verb existed in the binary and
+    # could not be called. The count stayed at six either way -- five core plus
+    # `expect` -- so only a set comparison catches it, which is what the manifest
+    # test in run_test.tcl does.
     namespace ensemble create -command ::machteld::pty -map {
         spawn  {::machteld::PtyCore spawn}
         send   {::machteld::PtyCore send}
         read   {::machteld::PtyCore read}
         close  {::machteld::PtyCore close}
         list   {::machteld::PtyCore list}
+        info   {::machteld::PtyCore info}
         expect ::machteld::PtyExpect
     }
 }

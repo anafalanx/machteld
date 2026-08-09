@@ -242,3 +242,23 @@ Three shape decisions, each following an existing precedent rather than inventin
 
 `denied` joins the registry as the one code that reports a permission, confined to `ps` because
 `ps` is the one verb that reaches outside machteld's own children.
+
+## Shipping tools inside the exe — refused, with one exception that is not one (2026-08-09)
+
+**Bundling wrapped GUI tools into `machteld.exe` is refused.** Argued three ways and attacked by
+nine critics; every affirmative case failed. `argv[1]` is fully allocated by `Tcl_Main` — non-dash
+is a script path, dash is the REPL — so every dispatch spelling either breaks a spelling that
+works, which rule 2 already forbids, or depends on the working directory. The claimed benefits
+have no receiver: nothing here is signed, nothing is on PATH, and the author wrote both tools
+himself. Recorded so it is not relitigated.
+
+**But the question was framed wrongly, and the correction matters more than the answer.** The
+argument was about packaging *programs*; machteld already ships *code* — the prelude — and a third
+of the palette is written in it. So the real question is not "may the exe contain tools" but
+**"may the palette contain applications"**, which is a question about identity rather than
+mechanics.
+
+`mt` does not settle that question, because it does not pose it. Handle state is per-interpreter,
+so a cockpit over the current session **cannot** be a separate exe — it would enumerate its own
+children, which is nothing. It ships as Tcl because there is no alternative, not because Tcl is
+convenient. The identity question stays open for the first tool that could go either way.

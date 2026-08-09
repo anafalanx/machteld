@@ -24,6 +24,12 @@ Ratified 2026-08-08; the reasoning is in [direction](direction.md).
 2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
 3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d into its own 6.1 MB exe. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
 
+✅ **`mt`** landed 2026-08-09 — the cockpit: a live view of what the current session is
+controlling, plus the `watch info` / `pty info` it needed. It ships as a **palette verb, not a
+wrapped exe**, because handle state is per-interpreter: a separate monitor would enumerate its
+own children, which is nothing. This also retires the "chrome console" idea's vaguest form —
+what was wanted was not a nicer tkcon but a window that answers "what is this session doing".
+
 ✅ **`ps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
 (`ps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
 `tasks.exe`). This is rule 5 working as intended: the tool was written, it named a capability
@@ -36,7 +42,11 @@ not — and that capability was built to fit.
 
 - **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled: each is built when a tool reaches for it, as `watch` and `ps` were. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
 - **An object layer over TclOO** — deferred, not refused.
-- **The chrome console** — a Tk cockpit (fork tkcon: dark ttk, manifest-fed completion, a live child/event sidebar). Now a natural *consumer* of the manifest rather than a reason to build it.
+- **The chrome console** — partly answered by [`mt`](palette.md), which is the live child/event
+  sidebar as its own window. What remains is the *interactive* half: a REPL with manifest-fed
+  completion. Deferred until `mt` has been used enough to say whether steering from it is
+  actually wanted — `mt` is read-only on purpose, and making it a launcher is a decision that
+  should follow use rather than precede it.
 
 ## Settled
 

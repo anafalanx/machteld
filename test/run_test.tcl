@@ -241,7 +241,15 @@ if {![file isdirectory $SRC]} {
     # scan would otherwise miss entirely.
     set thrown {}
     set domains {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c] [file join $SRC ps.c]] {
+    # Every .c, found rather than listed: the previous hardcoded four meant a new
+    # source file was outside the gate until somebody remembered to add it, which
+    # is the same way `ps` slipped through undocumented.
+    set sources [lsort [glob -nocomplain -directory $SRC *.c]]
+    # sqlite3.c is a vendored amalgamation, not ours, and raises nothing in this
+    # registry; scanning it would only find false positives.
+    set sources [lsearch -all -inline -not [lsearch -all -inline -not $sources *sqlite3.c] *sqlite3ext*]
+    check "the registry scan covers every source file" [expr {[llength $sources] >= 4}]
+    foreach f $sources {
         set fh [open $f r]; set text [read $fh]; close $fh
         foreach {_ d c} [regexp -all -inline {mt_error\(interp,\s*"([A-Z]+)",\s*"([a-z]+)"} $text] {
             dict set thrown $c 1 ; dict set domains $d 1
@@ -269,6 +277,32 @@ if {![file isdirectory $SRC]} {
             dict set thrown $c 1
         }
     }
+
+    # THE PRELUDE RAISES TOO, AND USED TO BE OUTSIDE THIS GATE ENTIRELY. The scan
+    # read only src/*.c, so a Tcl verb's errors were invisible to it -- `mt`
+    # raises {MACHTELD MT badvalue} and nothing here would ever have asked for it
+    # to be documented. Creed 5 says errors are part of the contract; it does not
+    # say "the errors written in C".
+    #
+    # KNOWN HOLE, stated rather than hidden: the prelude also carries bare
+    # `return -code error` with no -errorcode at all, in `wrap` and `help`. Those
+    # raise nothing this scan can see because there is nothing to see -- they have
+    # no code. The check below counts them so the number is visible, but does not
+    # yet fail on them; making every prelude error coded is its own change.
+    set TCLSRC [file join $HERE .. tcl]
+    set uncoded 0
+    foreach f [lsort [glob -nocomplain -directory $TCLSRC *.tcl]] {
+        set fh [open $f r]; set text [read $fh]; close $fh
+        # `--` before the pattern: it begins with a dash, so regexp would
+        # otherwise read it as an option and fail with "bad option".
+        foreach {_ d c} [regexp -all -inline -- \
+            {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $text] {
+            dict set thrown $c 1 ; dict set domains $d 1
+        }
+        incr uncoded [regexp -all {return -code error (?!-errorcode)} $text]
+    }
+    puts "     note: $uncoded uncoded 'return -code error' in the prelude (not yet gated)"
+
     # The documented sets, parsed out of the shipped doc's own tables -- so the
     # DOC is the registry, and this test is what stops it becoming a lie.
     set documented {}
@@ -462,6 +496,72 @@ check "ps kill of the system process => denied" [expr {
 check "ps kill with an unknown option => usage" [expr {
     [errcode_of {ps kill [pid] -nope}] eq {MACHTELD PS usage}}]
 
+# --- watch info / pty info: observe without consuming -------------------------
+# The cockpit needs to show what is pending. `watch read` DRAINS and `pty read`
+# CONSUMES, so building a monitor on either would steal from the program being
+# monitored. These two report the same facts and take nothing, which is the only
+# property that makes a monitor honest -- so it is tested directly rather than
+# assumed from the implementation.
+set WD2 [file join $env(TEMP) mt_info_suite]
+file delete -force $WD2 ; file mkdir $WD2
+set w2 [watch start $WD2 -recursive]
+set fh [open [file join $WD2 probe.txt] w] ; puts $fh hello ; close $fh
+after 400
+
+set wi [watch info $w2]
+check "watch info shape" [expr {[lsort [dict keys $wi]] eq
+    {armed dir dropped pending recursive token}}]
+check "watch info reports the directory" [expr {
+    [file normalize [dict get $wi dir]] eq [file normalize $WD2]}]
+check "watch info reports -recursive"    [expr {[dict get $wi recursive] == 1}]
+check "watch info reports armed"         [expr {[dict get $wi armed] == 1}]
+set p0 [dict get $wi pending]
+check "watch info sees queued events"    [expr {$p0 > 0}]
+# The property that matters: asking repeatedly must not empty the queue.
+foreach _ {1 2 3 4 5} { watch info $w2 }
+check "watch info does not consume"      [expr {[dict get [watch info $w2] pending] == $p0}]
+check "the events are still readable"    [expr {[llength [watch read $w2]] >= 1}]
+check "watch info sees the drain"        [expr {[dict get [watch info $w2] pending] == 0}]
+check "watch info on a dead token"       [expr {
+    [errcode_of {watch info nosuch#9}] eq {MACHTELD WATCH nohandle}}]
+watch close $w2 ; file delete -force $WD2
+
+set p2 [pty spawn -- cmd]
+after 400
+set pi [pty info $p2]
+check "pty info shape" [expr {[lsort [dict keys $pi]] eq {pending pid running token}}]
+check "pty info reports a pid"      [expr {[dict get $pi pid] > 0}]
+# NOT asserted as 1: this suite runs with stdio redirected, so a ConPTY child
+# cannot route and `cmd` exits at once -- the same sandbox limit the pty section
+# above already records. What matters is that the field is a real boolean derived
+# from the process, not a placeholder.
+check "pty info reports running as a boolean" [expr {[dict get $pi running] in {0 1}}]
+set b0 [dict get $pi pending]
+foreach _ {1 2 3} { pty info $p2 }
+check "pty info does not consume"   [expr {[dict get [pty info $p2] pending] == $b0}]
+check "pty info on a dead token"    [expr {
+    [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
+pty close $p2
+
+# --- mt: the session reporting on itself --------------------------------------
+# The window is driven by test/mt_ui.tcl; this covers the model and the contract.
+set c9 [child start -- $MT $CHILD sleep 6000]
+set w9 [watch start $env(TEMP)]
+set snap [::machteld::MtSnapshot]
+check "mt snapshot is a list of rows" [expr {[llength $snap] >= 2}]
+check "mt sees the child we started"  [expr {
+    [llength [lsearch -all -inline -index 1 $snap $c9]] == 1}]
+check "mt sees the watch we started"  [expr {
+    [llength [lsearch -all -inline -index 1 $snap $w9]] == 1}]
+check "mt rows carry five fields"     [expr {
+    [llength [lmap r $snap {expr {[llength $r] == 5 ? 1 : [continue]}}]] == [llength $snap]}]
+check "mt summary names the session"  [string match "*session pid [pid]*"     [::machteld::MtSummary $snap]]
+check "mt rejects a bad -interval"    [expr {
+    [errcode_of {mt -interval 5}] eq {MACHTELD MT badvalue}}]
+check "mt rejects an unknown argument" [expr {
+    [errcode_of {mt --nonsense}] eq {MACHTELD MT usage}}]
+catch {child kill $c9} ; catch {child wait $c9} ; child close $c9 ; watch close $w9
+
 # --- the manifest describes the RUNNING binary -------------------------------
 # The generator derives the manifest from the C source; these check it against
 # the interpreter that actually shipped, which is the half a source scan cannot
@@ -471,7 +571,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
+    {child detach help json manifest mt ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -588,6 +688,21 @@ foreach t {changes tasks} {
 set known {changes tasks}
 set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
 check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
+
+# The window tests are separate FILES because they need a real mapped window, but
+# they are driven from here so they cannot become tests nobody runs -- which is
+# exactly what happened to `tasks --selftest`. Discovered by glob, so a new
+# *_ui.tcl is picked up without anyone remembering to add it.
+foreach uitest [lsort [glob -nocomplain -directory $HERE *_ui.tcl]] {
+    set r [run -timeout 120s -- $MT $uitest]
+    check "[file tail $uitest] passes" [expr {[dict get $r exit] == 0}]
+    if {[dict get $r exit] != 0} {
+        puts "     [string trim [dict get $r out]]"
+        puts "     [string trim [dict get $r err]]"
+    }
+}
+check "there are window tests to run" [expr {
+    [llength [glob -nocomplain -directory $HERE *_ui.tcl]] >= 2}]
 
 # --- tools reject bad arguments instead of dying in a timer -------------------
 # `tasks --interval` with nothing after it set the interval to the empty string;

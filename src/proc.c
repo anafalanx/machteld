@@ -1097,8 +1097,8 @@ done:
 
 static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
-    static const char *const subs[] = { "spawn", "send", "read", "close", "list", NULL };
-    enum { SPAWN, SEND, READ, CLOSE, LIST };
+    static const char *const subs[] = { "spawn", "send", "read", "close", "list", "info", NULL };
+    enum { SPAWN, SEND, READ, CLOSE, LIST, INFO };
     int idx;
     if (objc < 2) { Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?"); return TCL_ERROR; }
     if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
@@ -1139,6 +1139,25 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     if (p == NULL) return mt_error(interp, "PTY", "nohandle", "no such pty");
 
     switch (idx) {
+    /* INFO LOOKS WITHOUT TAKING. `pty read` consumes the child's output, so a
+     * monitor built on it would eat the very bytes the program is steering by.
+     * PeekNamedPipe reports how much is waiting and leaves it in the pipe, which
+     * is the only honest way to show "this terminal has something to say". */
+    case INFO: {
+        if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "token"); return TCL_ERROR; }
+        Tcl_Obj *d = Tcl_NewDictObj();
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(p->token, -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(p->pid));
+        long long code = 0;
+        const char *e = NULL;
+        int running = (p->proc != NULL) && (wj_wait_timeout(p->proc, 0, &code, &e) == 1);
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
+        DWORD avail = 0;
+        if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &avail, NULL)) avail = 0;
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pending", -1), Tcl_NewWideIntObj((Tcl_WideInt)avail));
+        Tcl_SetObjResult(interp, d);
+        return TCL_OK;
+    }
     case SEND: {
         if (objc != 4) { Tcl_WrongNumArgs(interp, 2, objv, "token text"); return TCL_ERROR; }
         Tcl_Size len;
@@ -1389,8 +1408,8 @@ static Tcl_Obj *watch_event_obj(const char *path, const char *action, const char
 
 static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
-    static const char *const subs[] = { "start", "read", "close", "list", NULL };
-    enum { START, READ, CLOSE, LIST };
+    static const char *const subs[] = { "start", "read", "close", "list", "info", NULL };
+    enum { START, READ, CLOSE, LIST, INFO };
     int idx;
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
@@ -1455,6 +1474,29 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
     watch_t *w = watch_find(ctx, Tcl_GetString(objv[2]));
     if (w == NULL) return mt_error(interp, "WATCH", "nohandle", "no such watch");
+
+    /* INFO ANSWERS WITHOUT CONSUMING. `watch read` drains the queue, so a monitor
+     * that used it to show "what is pending" would be stealing events from the
+     * program it is monitoring -- an observer that changes what it observes is
+     * worse than no observer. `pending` is the queue depth read under the same
+     * lock the reader thread takes, and nothing is dequeued. */
+    if (idx == INFO) {
+        if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "token"); return TCL_ERROR; }
+        Tcl_Obj *d = Tcl_NewDictObj();
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(w->token, -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("dir", -1),
+                       Tcl_NewStringObj(w->dir_path ? w->dir_path : "", -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("recursive", -1), Tcl_NewIntObj(w->recursive));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("armed", -1), Tcl_NewIntObj(w->armed));
+        EnterCriticalSection(&w->lock);
+        size_t pending = w->n;
+        int dropped = w->dropped;
+        LeaveCriticalSection(&w->lock);
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pending", -1), Tcl_NewWideIntObj((Tcl_WideInt)pending));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("dropped", -1), Tcl_NewIntObj(dropped));
+        Tcl_SetObjResult(interp, d);
+        return TCL_OK;
+    }
 
     if (idx == CLOSE) {
         watch_free(ctx, w);
