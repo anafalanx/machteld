@@ -221,6 +221,47 @@ going wrong.
 the sink closes the channel `log` opened, so the file is not locked for the life of the process.
 `-level` and `-channel` are checked when configured rather than discovered later by silence.
 
+## Built — a pool of persistent workers
+
+```tcl
+set p [pool create -width 8 -- $exe --worker]
+pool submit $p {{op digest path a.iso} {op digest path b.iso}}
+pool wait   $p -timeout 60s        ;# results, IN SUBMISSION ORDER
+pool info   $p                     ;# width, pending, inflight, dead, requeued, stderr
+pool close  $p
+```
+
+Built on `child start -channels`, never raw `open |cmd r+` — the transport was never the missing
+piece, so the whole reason this is a verb is the half Tcl cannot supply. **Every worker is an
+ordinary supervised child**: born in a job object, dying with its parent, tree-killed rather than
+asked to stop, cappable with `-mem`, and reaped by [`scope`](#) at the closing brace.
+
+**No polling anywhere.** `chan event` on each worker's stdout does the multiplexing that
+`wait -any` does by blocking, so a Tk tool stays responsive and an idle pool costs nothing.
+
+**Results come back in submission order.** Replies arrive in whatever order workers finish, which
+is not an order any caller asked for; the id is the item's index, so the answer is handed back
+aligned with what went in.
+
+**One item in flight per worker** — a legibility choice rather than a throughput one. With a
+single outstanding request, the mapping from a reply to the item it answers is a fact rather than
+a correlation, and a worker that dies has exactly one item to put back. A dying worker is
+detected, its item requeued, and an item that has killed `-maxtries` workers is answered
+`{MACHTELD POOL poison}` instead of looping forever.
+
+A failing item keeps **its own** errorcode: `{ok 0 code {MACHTELD HASH badvalue} msg ...}` rather
+than something flattened to prose, so the contract survives the process boundary.
+
+> **Stderr is drained, and that is not housekeeping.** A channel-mode child's stderr is a real
+> pipe — unlike a plain subprocess, which inherits the console's — and a pipe nobody reads fills
+> and blocks the worker *mid-write*: a hang, not an error. The pool reads it on its own
+> `chan event` and keeps the tail, capped, for `pool info` to report, because worker diagnostics
+> are usually the only evidence of why a pool went wrong.
+
+Measured: 2.62× on 8 workers for 65 ms items, and a pool of **width 1 costs 0.98×** against doing
+the same work in-process — the protocol overhead is nearly free, so the useful lower bound on item
+size is set by the work, not by the plumbing.
+
 ## Built — persistent workers
 
 ```tcl
