@@ -294,8 +294,23 @@ than something flattened to prose, so the contract survives the process boundary
 > are usually the only evidence of why a pool went wrong.
 
 Measured: 2.62× on 8 workers for 65 ms items, and a pool of **width 1 costs 0.98×** against doing
-the same work in-process — the protocol overhead is nearly free, so the useful lower bound on item
-size is set by the work, not by the plumbing.
+the same work in-process — at *that* item size the protocol is nearly free. It is not free at every
+size: width 1 over 45 KB file digests costs **0.38×**, because a 159 µs round trip against a
+quarter-millisecond of work is most of the work.
+
+**Two numbers decide whether to reach for a pool at all**
+([the study](parallel.md#what-the-pool-is-actually-worth--four-arms-measured)):
+
+- **Per item, ~1 ms and up.** Below that the round trip is a real fraction of the work; at 0.5 ms
+  the pool still wins (1.64×) but a spawn-per-item loop is 41× worse and in-process is better still.
+- **Per job, about four seconds.** Twelve workers cost a few hundred milliseconds to raise. A
+  one-second job collects two thirds of the available speedup; by four seconds the startup is paid
+  and it plateaus at **~3.2×** on this box, where it stays through at least 32 seconds.
+
+Against a hand-written static partition — twelve children, one slice each — the pool buys **no
+throughput**, it matches it (3.21× against 3.17×). What it buys is not having to write the
+partition, item costs that are unpredictable or arrive clustered (**2.18× against 1.50×** when the
+expensive items sit together), supervision, and a director that is not blocked in `child wait`.
 
 ## Built — persistent workers
 
@@ -312,8 +327,8 @@ worker serve                              ;# a line in, a line out, until EOF
 ```
 
 `-channels` hands a child's pipes to Tcl instead of draining them into buffers, which is what
-makes a **persistent** worker possible: the 26 ms of process startup is paid once rather than per
-item, and a round trip costs about **159 µs**. It is exclusive with capture — one pipe cannot have
+makes a **persistent** worker possible: the **44.5 ms** a machteld child costs to start is paid
+once rather than per item, and a round trip costs about **159 µs**. It is exclusive with capture — one pipe cannot have
 two consumers — so it refuses `-onout`, `-onerr` and `-stdin`, and the result dict keeps its
 documented shape with `out` and `err` simply empty.
 

@@ -25,7 +25,7 @@ This is an **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog) v0.
 - [The bet](rationale.md) — why a machine takes to Tcl.
 - [Direction](direction.md) — the goal, the eight rules, and the ratified contract for the current stretch.
 - [Roadmap](roadmap.md) — what's built, and what's next.
-- [Parallelism and the store](parallel.md) — measured: what runs in parallel today, and how far a store-backed queue goes.
+- [Parallelism and the store](parallel.md) — measured: what runs in parallel today, what the worker pool is and is not worth against the alternatives, and how far a store-backed queue goes.
 - [The worker pool plan](pool-plan.md) — step by step, and what previous work must change.
 - [The standard library](stdlib.md) — where the scripting surface is thin, and the order for fixing it.
 

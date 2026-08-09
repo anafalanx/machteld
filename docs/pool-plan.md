@@ -18,7 +18,9 @@ already-shipped work has to change to make room for it**.
 **Proved** (measured, on this machine):
 
 - Tcl's own `open |cmd r+` gives a live worker at **159 µs per round trip** against 26,000 µs to
-  spawn one — the whole reason for doing this.
+  spawn one — the whole reason for doing this. (Re-measured after the build: a machteld child costs
+  **44,500 µs** to start, so the ratio is nearer 280×. The spike used a lighter child; the argument
+  only got stronger.)
 - A pool driven by `chan event` and `vwait`, no polling: **3.23× on 12 workers** for 13 ms items,
   which is *below* the spawn crossover and therefore work `child start` cannot parallelise at all.
 - The hazard flagged as most likely to sink it — **deadlock by pipe buffer** — does not occur.
