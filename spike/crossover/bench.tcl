@@ -345,5 +345,47 @@ set aC [::bench::measure $REPS {::bench::arm_pool $items $files $WIDTH $::bench:
 
 }
 
+# --- workload 4: is the ceiling real, or is it the floor? --------------------
+# Across the four sizes above, the pool's WALL CLOCK barely moved -- 452, 374,
+# 376, 379 ms -- while sequential ranged 741 to 997. That flatness looks like a
+# fixed cost (twelve machteld starts at ~90 a second, plus teardown) dominating
+# jobs that are only a second long, which would make the ~2.5x "ceiling" an
+# artefact of short runs rather than a limit. If so, holding the item size fixed
+# and growing the JOB should walk the speedup up toward what the cores can give.
+#
+# No discarded warm-up pass here, unlike the sections above: that pass exists for
+# the file cache and the filter driver, and this workload touches no files. One
+# small call warms the bytecode, which is all this needs -- and a discard pass at
+# 32 seconds an arm would cost more than the measurement.
+if {[want long]} {
+puts "\n=== the same 8 ms item, total work from ~1s to ~32s =================="
+proc ::bench::measure_nw {reps script} {
+    set times {}
+    for {set i 0} {$i < $reps} {incr i} {
+        lappend times [uplevel 1 [list ::bench::ms $script]]
+    }
+    return [list [median $times] [tcl::mathfunc::min {*}$times] [tcl::mathfunc::max {*}$times]]
+}
+::bench::workitem 200000
+set n [expr {int(8 * $PERMS)}]
+foreach count {125 500 2000 4000} {
+    set items [lrepeat $count $n]
+    set files [lrepeat $count ""]
+    ::bench::write_items $ITEMFILE $items $files
+    puts [format "\n%d items x 8 ms = ~%.1f s of sequential work" $count [expr {$count * 8 / 1000.0}]]
+    set base [::bench::arm_seq $items $files]
+    set aA [::bench::measure_nw 2 {::bench::arm_seq $items $files}]
+    ::bench::report "A sequential" [lindex $aA 0] $aA
+    set rB2 [::bench::arm_chunk $items $WIDTH $ITEMFILE $::bench::EXE $::bench::SELF]
+    set aB2 [::bench::measure_nw 2 {::bench::arm_chunk $items $WIDTH $ITEMFILE $::bench::EXE $::bench::SELF}]
+    ::bench::void_check "B2 static chunks" $base $rB2
+    ::bench::report "B2 static chunks" [lindex $aA 0] $aB2
+    set rC [::bench::arm_pool $items $files $WIDTH $::bench::EXE $::bench::SELF]
+    set aC [::bench::measure_nw 2 {::bench::arm_pool $items $files $WIDTH $::bench::EXE $::bench::SELF}]
+    ::bench::void_check "C pool" $base $rC
+    ::bench::report "C pool (pmap)" [lindex $aA 0] $aC
+}
+}
+
 file delete -force $ITEMFILE
 puts "\ndone."

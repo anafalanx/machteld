@@ -438,9 +438,25 @@ registered before the run; three held, one was half right, and **two were wrong*
 | 30 ms × 40 | 1.00× | 1.39× | 2.51× | 2.47× |
 
 **Against spawn-per-item the claim holds, and by more than advertised** — 41× the throughput at
-0.5 ms items, not "a bit better". **Against a static partition it does not hold at all**: chunking
-matches or beats the pool at every size, because it pays the start cost twelve times in total and
-then has no protocol. On uniform work the pool's per-item round trip buys nothing.
+0.5 ms items, not "a bit better". **Against a static partition it buys no speed at all**: chunking
+matches the pool everywhere, because it pays the start cost twelve times in total and then has no
+protocol. On uniform work the per-item round trip earns nothing back.
+
+**But every row above is a ~1-second job, and that turned out to matter.** The pool's wall clock
+barely moved across the four sizes — 452, 374, 376, 379 ms — which is a fixed cost dominating, not
+a ceiling. Holding the item at 8 ms and growing the *job*:
+
+| sequential work | static chunks | pool |
+|---|---|---|
+| ~1 s | 2.28× | 2.07× |
+| ~4 s | 2.93× | **3.14×** |
+| ~16 s | 3.16× | 3.09× |
+| ~32 s | 3.17× | **3.21×** |
+
+The real ceiling is **~3.2×**, flat from 4 seconds of work onward, and a one-second job collects
+only two thirds of it. **Startup is worth a few hundred milliseconds and is fully amortised by
+about four seconds** — so a job under a second is not worth pooling, and above a few seconds the
+partition's edge disappears entirely: 3.17× against 3.21× is the same number.
 
 Where the queue earns its keep is **items whose cost you cannot predict**, and only when the
 expensive ones *cluster*. Same 500 items, same total work, a tenth of them 10× the rest:
@@ -463,8 +479,9 @@ that should be ~270 starts a second and it measures **~90**. Concurrency buys ab
 not 12×, so `spawn_cost / width` is the wrong model to reason with.
 
 So the honest summary: the pool's value is **small items, unpredictable or clustered item costs,
-supervision, and one call instead of thirty lines** — not throughput over a partition you could
-have written by hand. And for a single external program per item it is the wrong tool outright:
+supervision, and one call instead of thirty lines** — it matches a hand-written partition on speed
+rather than beating it, and only trails on jobs too short to be worth parallelising. And for a
+single external program per item it is the wrong tool outright:
 `child start` spawns the real program directly, with no intermediate process, and wins 2.60×
 against 2.34×. Full numbers and the prediction scoring in
 [spike/crossover/RESULTS.md](../spike/crossover/RESULTS.md).

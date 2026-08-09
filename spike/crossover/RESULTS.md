@@ -33,6 +33,35 @@ single measurement; that is why nothing here rests on one number.
 | B1 child per item (spawns `findstr` **directly**) | 938 ms | **2.60×** |
 | C pool | 1039 ms | 2.34× |
 
+## Was the ceiling real, or was it the floor?
+
+Across all four sizes in the first table the pool's **wall clock barely moved** — 452, 374, 376,
+379 ms — while sequential ranged 741 to 997. That is the signature of a fixed cost dominating, and
+it exposes a flaw in the sweep above: it varied *item size* while holding *total work* at about one
+second, which is exactly the regime where a few hundred milliseconds of startup swamps everything.
+Every speedup in that table is therefore depressed, and the "~2.5× ceiling" was partly an artefact
+of measuring one-second jobs.
+
+Holding the item at 8 ms and growing the job instead:
+
+| sequential work | A | B2 static chunks | C pool |
+|---|---|---|---|
+| ~1 s (125 items) | 952 ms | 417 ms — 2.28× | 461 ms — 2.07× |
+| ~4 s (500) | 4108 ms | 1403 ms — 2.93× | 1308 ms — **3.14×** |
+| ~16 s (2000) | 15960 ms | 5057 ms — 3.16× | 5172 ms — 3.09× |
+| ~32 s (4000) | 32204 ms | 10161 ms — 3.17× | 10039 ms — **3.21×** |
+
+**Both things are true.** The ceiling is real — it plateaus at **~3.2×** and does not move between 4
+and 32 seconds — but it sits higher than the first sweep suggested, and a one-second job gets only
+2.07× of it because the fixed cost eats a third of the gain. It is fully amortised by about four
+seconds of work.
+
+**And it corrects the finding above.** "Static chunking matches or beats the pool" is itself a
+short-job artefact: at 32 s they are 3.17× against 3.21×, which is the same number. The partition's
+edge exists only where the pool's startup has nothing to amortise against. At any job size worth
+parallelising, the two are equal on uniform work — and the pool is still the one that survives
+clustered costs and a worker dying.
+
 ## Scoring the predictions
 
 **1. WRONG, and the docs were right.** I predicted the shipped "~26 ms crossover" was a
@@ -75,9 +104,10 @@ The shipped claim — the crossover for offering work to another process falls f
 1 ms — **holds against spawn-per-item**, which is the comparison it was making, and the gap at
 small items is far larger than advertised (41×, not a few×).
 
-It does **not** hold as a claim about throughput in general, and the docs should not be read that
-way. Against a competent static partition the pool is not faster; on uniform work it is
-occasionally slower. What it is actually worth:
+It does **not** hold as a claim about throughput in general. Against a competent static partition
+the pool is not faster — it is *equal* on uniform work once the job is worth parallelising at all
+(3.21× against 3.17× at 32 s), and slower only on sub-second jobs where its startup has nothing to
+amortise against. What it is actually worth:
 
 - **Item costs you cannot predict or that arrive clustered.** 1.50× against 2.2–2.4× is the whole
   argument for a queue over a partition, and it is the only place here where the pool wins on time.
