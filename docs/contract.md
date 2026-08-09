@@ -68,7 +68,6 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `STORE` | `store` (all subcommands) |
 | `JSON` | `json` (all subcommands) |
 | `PS` | `ps` (all subcommands) |
-| `MT` | `mt` — the only domain raised from Tcl rather than C |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
@@ -94,11 +93,12 @@ comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned 
 tests. `watch start` on a directory it cannot open raises `notfound`, the same code a missing
 program gets — in both cases the thing you named is not there.
 
-`MT` is raised by the prelude, not by `src/*.c`. The registry scan reads both, because creed 5
-says errors are part of the contract without saying "the errors written in C". One hole is left
-open deliberately and named here rather than hidden: `wrap` and `help` still raise bare
-`return -code error` with no code at all, so they are outside the registry entirely — nothing to
-document, and nothing a scan can find. Coding them is its own change.
+The registry scan reads the prelude as well as `src/*.c`, because creed 5 says errors are part
+of the contract without saying "the errors written in C". No prelude verb currently raises a
+coded error — `mt` did, and was removed — but the scan stays, so the first one that does is
+covered on arrival rather than whenever somebody remembers. One hole is named here rather than
+hidden: `wrap` and `help` raise bare `return -code error` with no code at all, so they are
+outside the registry entirely. The suite counts them every run; coding them is its own change.
 
 `denied` is the one code that reports a *permission*, and it is confined to `ps`, because `ps`
 is the one verb that reaches processes machteld did not start. Note what it does **not** cover:
