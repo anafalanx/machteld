@@ -24,6 +24,14 @@ proc check {name ok} {
     if {$ok} { puts "ok   $name" } else { incr ::fails; puts "FAIL $name" }
 }
 
+# Hoisted to the top: it is used from the first test onward, and living halfway
+# down the file meant a new test above that point failed with "invalid command"
+# rather than with what it was actually checking.
+proc errcode_of {script} {
+    if {[catch {uplevel 1 $script} m opts] == 0} { return "" }
+    return [dict get $opts -errorcode]
+}
+
 # 0. the palette is exposed as bare verbs (unqualified run/child/... resolve)
 set ok 0
 if {![catch {run -- cmd /c echo bare-ok} br]} { set ok [string match *bare-ok* [dict get $br out]] }
@@ -133,6 +141,165 @@ check "child info running"  [expr {[dict get [::machteld::child info $c] running
 check "killed status"       [expr {[dict get [::machteld::child wait $c] status] eq "killed"}]
 ::machteld::child close $c
 
+# 7b. -timeout on an ASYNCHRONOUS child. This was accepted and silently ignored:
+# `-timeout` lives in the shared option parser, so the manifest declared it for
+# `child` while nothing enforced it, and `child wait` waited forever regardless.
+# A documented, declared, inert option is worse than a missing one, because a
+# caller builds on it. The spinner below never reads its input and never checks
+# for anything -- only the OS can stop it.
+set spin [file join $HERE _spin.tcl]
+set f [open $spin w] ; puts $f {proc spin {} { while {1} { set x [expr {sqrt(2.0)}] } } ; spin} ; close $f
+
+set t0 [clock milliseconds]
+set c [child start -timeout 800ms -- $MT $spin]
+# The outer bound is deliberate. `child wait` with no timeout of its own blocks
+# FOREVER on a spinner, so if the start deadline is ever lost this test would
+# hang the suite rather than fail it -- and a hang reports nothing at all. With
+# a 15s ceiling the same regression instead lands as a wall-clock failure below.
+set r [child wait $c -timeout 15s]
+set dt [expr {[clock milliseconds] - $t0}]
+check "child start -timeout kills an uncooperative child" [expr {[dict get $r status] eq "timeout"}]
+check "child start -timeout fires near its deadline"      [expr {$dt > 500 && $dt < 4000}]
+child close $c
+
+set t0 [clock milliseconds]
+set c [child start -- $MT $spin]
+set r [child wait $c -timeout 800ms]
+set dt [expr {[clock milliseconds] - $t0}]
+check "child wait -timeout kills too"        [expr {[dict get $r status] eq "timeout"}]
+check "child wait -timeout fires near time"  [expr {$dt > 500 && $dt < 4000}]
+child close $c
+
+# Two deadlines can apply; the earlier must win, or a child given 5s at start
+# would get 30 more because someone waited generously.
+set t0 [clock milliseconds]
+set c [child start -timeout 600ms -- $MT $spin]
+child wait $c -timeout 30s
+set dt [expr {[clock milliseconds] - $t0}]
+check "the earlier of the two deadlines wins" [expr {$dt < 4000}]
+child close $c
+
+set c [child start -timeout 30s -- cmd /c echo quick]
+set r [child wait $c]
+check "a child that finishes early is unaffected" [expr {[dict get $r status] eq "ok"}]
+check "and its output is still captured"          [string match "*quick*" [dict get $r out]]
+child close $c
+
+set c [child start -- cmd /c echo x]
+check "child wait rejects an unknown option" [expr {
+    [errcode_of {child wait $c -nope 1}] eq {MACHTELD CHILD usage}}]
+check "child wait rejects a bare number"     [expr {
+    [errcode_of {child wait $c -timeout 5}] eq {MACHTELD CHILD badvalue}}]
+child close $c
+# $spin is deleted at the end of the channel-mode block below, which also needs
+# it. Removing it here made that block launch a script that no longer existed:
+# the child died instantly with status "error", and its companion check -- which
+# asserted only SPEED -- passed anyway. A timing assertion cannot tell "killed on
+# time" from "died for the wrong reason".
+
+# 7c. CHANNEL MODE: the child's pipes become Tcl channels, so it can be talked
+# to while it runs. Everything here exists to answer one question -- does a child
+# still get every supervision guarantee when its pipes belong to Tcl? -- because
+# the transport alone was already available in stock Tcl (`open |cmd r+`), and
+# the guarantees are the entire reason for doing this in C.
+set ECHOW [file join $HERE _echoworker.tcl]
+set f [open $ECHOW w]
+puts $f {fconfigure stdin -translation lf
+fconfigure stdout -translation lf -buffering line
+while {[gets stdin l] >= 0} { if {$l eq "bye"} break ; puts "echo:$l" }}
+close $f
+
+set cc [child start -channels -- $MT $ECHOW]
+set ci [child info $cc]
+check "channel mode reports three channels" [expr {
+    [dict exists $ci stdin] && [dict exists $ci stdout] && [dict exists $ci stderr]}]
+set cin [dict get $ci stdin] ; set cout [dict get $ci stdout]
+puts $cin "hello" ; flush $cin
+check "a channel-mode child answers"        [expr {[gets $cout] eq "echo:hello"}]
+puts $cin "again" ; flush $cin
+check "and keeps answering (persistent)"    [expr {[gets $cout] eq "echo:again"}]
+check "it is a tracked child like any other" [expr {$cc in [child list]}]
+child close $cc
+check "child close releases the channels"   [expr {$cin ni [chan names]}]
+
+# The result dict MUST NOT fork: run and child wait share one builder and the
+# manifest derives `returns` from it, so channel mode keeps the documented shape
+# with out/err simply empty rather than growing a second shape behind one verb.
+set cc [child start -channels -- $MT $ECHOW]
+close [dict get [child info $cc] stdin]
+set cr [child wait $cc]
+check "channel mode keeps the result shape" [expr {[lsort [dict keys $cr]] eq
+    {err exit out pid status truncated}}]
+check "out and err are empty, not missing"  [expr {
+    [dict get $cr out] eq "" && [dict get $cr err] eq ""}]
+check "closing stdin gives the worker EOF"  [expr {[dict get $cr status] eq "ok"}]
+child close $cc
+
+# Capture and channels cannot both own a pipe.
+check "-channels refuses -onout" [expr {
+    [errcode_of {child start -channels -onout {puts} -- $MT $ECHOW}] eq {MACHTELD CHILD usage}}]
+check "-channels refuses -stdin" [expr {
+    [errcode_of {child start -channels -stdin x -- $MT $ECHOW}] eq {MACHTELD CHILD usage}}]
+
+# THE GUARANTEES. Each of these is why this is C and not a Tcl idiom.
+set t0 [clock milliseconds]
+set cc [child start -channels -timeout 800ms -- $MT $spin]
+set cr [child wait $cc]
+check "channel mode: -timeout still kills" [expr {[dict get $cr status] eq "timeout"}]
+check "channel mode: and kills promptly"   [expr {[clock milliseconds]-$t0 < 4000}]
+child close $cc
+
+set hog [file join $HERE _hog.tcl]
+set f [open $hog w] ; puts $f {proc hog {} { set L {} ; while {1} { lappend L [string repeat x 100000] } } ; hog} ; close $f
+set t0 [clock milliseconds]
+set cc [child start -channels -mem 64m -timeout 20s -- $MT $hog]
+set cr [child wait $cc]
+check "channel mode: -mem still caps"      [expr {[dict get $cr status] ne "timeout"}]
+check "channel mode: the cap bites fast"   [expr {[clock milliseconds]-$t0 < 10000}]
+child close $cc
+file delete -force $hog
+
+# TREE-KILL, tested against a real grandchild. An earlier version of this check
+# compared a process count that was zero both times and passed vacuously -- so
+# the worker now reports the pid it spawned and the test asks `ps` about that
+# exact process.
+set TREEW [file join $HERE _treeworker.tcl]
+set pidfile [file join $env(TEMP) mt_grandchild.txt]
+file delete -force $pidfile
+set f [open $TREEW w]
+puts $f [string map [list @PIDFILE@ $pidfile] {
+    set gp [exec cmd /c "ping -n 120 127.0.0.1" &]
+    set fh [open {@PIDFILE@} w] ; puts $fh $gp ; close $fh
+    after 120000}]
+close $f
+set cc [child start -channels -- $MT $TREEW]
+for {set i 0} {$i < 60 && ![file exists $pidfile]} {incr i} { after 100 }
+set gp ""
+if {[file exists $pidfile]} { set fh [open $pidfile] ; set gp [string trim [read $fh]] ; close $fh }
+check "the worker really spawned a grandchild" [expr {
+    $gp ne "" && ![catch {ps info $gp}]}]
+child kill $cc
+child wait $cc
+after 700
+check "child kill takes the grandchild too"    [expr {$gp eq "" || [catch {ps info $gp}]}]
+child close $cc
+file delete -force $pidfile $TREEW
+
+# scope reaps a channel-mode child at the closing brace, like any other.
+set outer3 [child list]
+scope {
+    child start -channels -- $MT $ECHOW
+    child start -channels -- $MT $ECHOW
+}
+check "scope reaps channel-mode children" [expr {[child list] eq $outer3}]
+
+# `--` ends the option scan, so a command may take -channels as its OWN argument.
+set argw [file join $HERE _argw.tcl]
+set f [open $argw w] ; puts $f {puts "ARGV=$argv"} ; close $f
+set ar [run -- $MT $argw -channels]
+check "-- stops the -channels scan" [string match "*ARGV=-channels*" [dict get $ar out]]
+file delete -force $argw $ECHOW $spin
+
 # 8. wait -any returns whichever child finishes first
 set a [::machteld::child start -- $MT $CHILD sleep 200]
 set b [::machteld::child start -- $MT $CHILD sleep 8000]
@@ -227,10 +394,6 @@ check "run dict matches its documented shape" [expr {
 # that is documented, and a code that is documented must be one the C can throw.
 # Both directions are checked against the SOURCE, so a new run_error() literal
 # added in a hurry fails this test until contract.md names it.
-proc errcode_of {script} {
-    if {[catch {uplevel 1 $script} m opts] == 0} { return "" }
-    return [dict get $opts -errorcode]
-}
 set SRC [file join $HERE .. src]
 if {![file isdirectory $SRC]} {
     puts "skip registry closure (no src/ beside the test)"
