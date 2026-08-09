@@ -75,7 +75,9 @@ A task manager was asked for. Writing it named the gap immediately: machteld cou
 processes it launched — born-in-job, tree-kill, caps — and could not **see** one it had not.
 `child list` returns machteld's own tokens; there was no `CreateToolhelp32Snapshot`, no
 `EnumProcesses`, nothing machine-wide anywhere in `src/`. So `ps` was built to fit the tool,
-which is rule 5 running the right way round.
+which is rule 5 running the right way round. (That rule was rewritten later the
+same day — building on spec is now allowed — but this is still how `ps` arrived, and still the
+version that produces the best-shaped dict.)
 
 - **`ps`** ([the palette](palette.md)) — `list` / `info` / `kill ?-tree?`. A row carries
   `pid ppid name exe mem private cpu threads started access`. 257 processes in 11 ms; the

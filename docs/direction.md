@@ -49,12 +49,33 @@ expressible in Tcl stays in Tcl, where it is readable, patchable and testable in
 exe. A power that works in the prelude does not get rewritten in C for speed without a
 measurement that says so.
 
-**5. `watch` first; every domain after it is built on demand.** Our own C for each; **TWAPI
-stays a quarry** and is opened only for WMI/COM, only when a verb demands it
-([ecosystem policy](ecosystem-policy.md)). `watch` comes first because the first real tool
-needs it and because file events are the smallest of the set. `reg`, `svc`, `evt` and the
-`net`/`host`/`user`/`wmi` group are all wanted and none are scheduled — each gets built when a
-tool reaches for it, which is also when its dict shape stops being a guess.
+**5. Build to find out. Speculation is allowed; unexamined accumulation is not.**
+*Rewritten 2026-08-09; the demand-first version is retired.* It read "each domain gets built
+when a tool reaches for it", and it produced good practical design — `watch` and `ps` both
+arrived that way and both are better for it. It was also wrong often enough to matter. It
+forbids exploring, and exploring is how you find out what a verb's dict should look like; it
+also refuses the thing a personal toolkit is *for*. Twice it was softened and twice it bit
+again, which is a rule failing rather than a user misreading it.
+
+A power may now be built because it is interesting, because you expect to need it, or because
+you want to see what it feels like. **What replaces the gate is not a lighter gate but a
+different discipline: keep the cost of being wrong low.** Rules 3, 6 and 8 already do most of
+that — one page, self-describing, tested and documented on arrival — so a speculative verb is
+cheap to *keep*. What was missing is that it must also be cheap to *drop*, which rule 7 made
+impossible by freezing a shape the moment it shipped. Hence the amendment there.
+
+The one thing that does not relax: a verb built on spec is still a verb, so it arrives with its
+tests, its docs, its error codes and its manifest entry like everything else. Exploration is not
+a licence to ship something unfinished — it is a licence to ship something *unneeded*.
+
+**Review, not permission.** A provisional verb still unused after a while is not a failure; it
+is a question. Answer it deliberately — keep it, reshape it, or take it out — rather than letting
+it sit and calling that a decision.
+
+**The domains are unchanged in substance:** `reg`, `svc`, `evt` and the `net`/`host`/`user`/`wmi`
+group are all wanted, our own C for each, and **TWAPI stays a quarry** opened only for WMI/COM
+([ecosystem policy](ecosystem-policy.md)). They are simply no longer gated behind a tool asking
+first. Building one to see what its dict wants to be is now a legitimate reason to build it.
 
 **6. Everything answers as a dict, fails with an errorcode, and describes itself.** The
 [contract](contract.md) holds for every new verb without exception — and **the manifest gets
@@ -62,9 +83,18 @@ built** in this stretch, because [creed](creed.md) 4 is the one principle curren
 hand. Once the manifest exists, the docs test stops comparing prose to code and starts
 comparing the runtime's own self-description to both.
 
-**7. Shipped shape is frozen; growth is additive.** A verb's name, options, result dict and
-error codes do not change after they ship. Getting the shape right before shipping is
-therefore part of the work, not a later pass — see rule 8.
+**7. Shipped shape is frozen from first use; growth is additive.** A verb's name, options,
+result dict and error codes do not change once something depends on them. *Amended 2026-08-09,
+as the counterweight to rule 5:* the freeze now binds at first **use**, not at first ship.
+
+A verb that exists but that nothing yet relies on is **provisional** — in the manifest, tested
+and documented like any other, but reshapeable and removable. The shape locks the first time a
+tool, a script or a habit depends on it. Without this, permission to explore would have been
+permission to accumulate: every experiment frozen on arrival and nothing ever removable.
+
+The promise this protects is unchanged for everything a caller can actually be relying on. The
+provisional set is small and named in [the palette](palette.md), so "is this frozen?" has an
+answer you can look up rather than infer.
 
 **8. A verb is not built until it is tested and documented in the same commit.** Every new verb
 lands with cases in the suite and its entry in [the palette](palette.md); the doc-accuracy test
@@ -242,6 +272,24 @@ Three shape decisions, each following an existing precedent rather than inventin
 
 `denied` joins the registry as the one code that reports a permission, confined to `ps` because
 `ps` is the one verb that reaches outside machteld's own children.
+
+## The cockpit — shelved (2026-08-09)
+
+`mt` is **provisional and shelved**. It works and it is tested, but measurement showed it is live
+exactly when nothing is happening and frozen exactly when something is: 8 refreshes per second
+idle, **0** while blocked in `child wait` (2039 ms) or `watch read` (1504 ms) — which are the
+operations that constitute supervision. Worse, while frozen it shows stale data with no
+indication, the same defect fixed in `tasks` hours earlier and reproduced here in another form.
+
+Not removed, because it costs 1.3 ms of parse and nothing else, and because the by-products are
+independently worth having: `watch info` and `pty info` closed a real asymmetry (`child` had
+`info`; the other handle verbs returned bare tokens), and non-destructive observation is the
+right primitive whether or not a window uses it. If a read/write cockpit is ever built — one that
+owns the event loop and therefore cannot freeze — this is its starting point. If not, rule 5's
+review clause applies and it comes out.
+
+**The known defect stays recorded rather than quietly fixed**, because a shelved thing with a
+hidden trap is worse than a shelved thing with a documented one.
 
 ## Shipping tools inside the exe — refused, with one exception that is not one (2026-08-09)
 
