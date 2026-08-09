@@ -172,7 +172,9 @@ puts "built [file nativename $out] ([file size $out] bytes)"
 foreach {tooldir toolexe subsystem} [list \
         [Rp tool changes] [Rp build changes.exe] --gui \
         [Rp tool tasks]   [Rp build tasks.exe]   --gui \
-        [Rp tool sums]    [Rp build sums.exe]    --console] {
+        [Rp tool sums]    [Rp build sums.exe]    --console \
+        [Rp tool life]    [Rp build life.exe]    --gui \
+        [Rp tool lifelab] [Rp build lifelab.exe] --gui] {
     if {![file isdirectory $tooldir]} continue
     set script [Rp build .wrap.tcl]
     set fh [open $script w]

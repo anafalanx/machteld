@@ -172,21 +172,56 @@ check "child start -timeout kills an uncooperative child" [expr {[dict get $r st
 check "child start -timeout fires near its deadline"      [expr {$dt > 500 && $dt < 4000}]
 child close $c
 
+# A CALLER'S WAIT BOUND IS NOT A DEATH SENTENCE, and this block asserted the
+# opposite until a supervisor needed to poll. `child wait -timeout` used to
+# tree-kill on expiry -- which meant the polling pattern the docs recommend for a
+# Tk tool ("a short -timeout from an after handler") silently killed every child
+# it asked about. Two timeouts that look alike are not alike: the one declared at
+# `child start` is a contract the child was launched under, the one passed to
+# `wait` is only how long the CALLER is prepared to stand there.
 set t0 [clock milliseconds]
 set c [child start -- $MT $spin]
 set r [child wait $c -timeout 800ms]
 set dt [expr {[clock milliseconds] - $t0}]
-check "child wait -timeout kills too"        [expr {[dict get $r status] eq "timeout"}]
-check "child wait -timeout fires near time"  [expr {$dt > 500 && $dt < 4000}]
+check "child wait -timeout returns near time"   [expr {$dt > 500 && $dt < 4000}]
+check "an expired wait bound says running"      [expr {[dict get $r status] eq "running"}]
+check "a running child has no exit code yet"    [expr {[dict get $r exit] eq ""}]
+check "a bounded wait does NOT kill the child"  [expr {[dict get [child info $c] running] == 1}]
+# The shape must not fork for it -- same keys as every other result dict, with
+# `exit` empty rather than a second shape hiding behind one verb.
+check "the running dict keeps run's shape"      [expr {
+    [lsort [dict keys $r]] eq {err exit out pid status truncated}}]
+# Asking again, unbounded, still gets the real answer once it is over.
+child kill $c
+set r [child wait $c]
+check "after killing, the same handle reports it" [expr {[dict get $r status] eq "killed"}]
+child close $c
+
+# AN ABSOLUTE MAXIMUM MUST NOT DEPEND ON BEING WAITED FOR. The deadline used to
+# be checked only inside `child wait`, so a supervisor that polls `child info` --
+# which is what a tool with a window has to do -- never triggered it. Caught by
+# watching Life windows run 148 seconds under a 25-second cap. Asking "are you
+# done?" is not waiting, and `-timeout` is a promise about the child.
+set t0 [clock milliseconds]
+set c [child start -timeout 600ms -- $MT $spin]
+while {[clock milliseconds] - $t0 < 6000} {
+    if {![dict get [child info $c] running]} break
+    after 100
+}
+set dt [expr {[clock milliseconds] - $t0}]
+check "a cap is enforced by polling alone"   [expr {$dt > 400 && $dt < 4000}]
+check "and the reason survives to the wait"  [expr {[dict get [child wait $c] status] eq "timeout"}]
 child close $c
 
 # Two deadlines can apply; the earlier must win, or a child given 5s at start
-# would get 30 more because someone waited generously.
+# would get 30 more because someone waited generously. And when the START
+# deadline is the one that expires, it still kills -- that half was always right.
 set t0 [clock milliseconds]
 set c [child start -timeout 600ms -- $MT $spin]
-child wait $c -timeout 30s
+set r [child wait $c -timeout 30s]
 set dt [expr {[clock milliseconds] - $t0}]
 check "the earlier of the two deadlines wins" [expr {$dt < 4000}]
+check "and an expired START deadline kills"   [expr {[dict get $r status] eq "timeout"}]
 child close $c
 
 set c [child start -timeout 30s -- cmd /c echo quick]
@@ -1523,7 +1558,7 @@ file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 # Driven by a LIST rather than one hardcoded call: `tasks` shipped with its
 # selftest unwired, so the tool had a passing test nothing ever ran. A gate that
 # covers the first tool and not the second is how that happens twice.
-foreach t {changes tasks sums} {
+foreach t {changes tasks sums life lifelab} {
     set TOOL [file join $HERE .. tool $t]
     if {![file isdirectory $TOOL]} { continue }
     check "$t passes its own selftest" [expr {
@@ -1533,7 +1568,7 @@ foreach t {changes tasks sums} {
 
 # Every tool directory in tool/ must be covered by the loop above -- otherwise
 # adding a third tool silently adds an untested one.
-set known {changes tasks sums}
+set known {changes tasks sums life lifelab}
 set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
 check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
 
