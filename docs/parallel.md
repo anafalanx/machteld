@@ -272,6 +272,104 @@ long-lived processes survives the director's own restart. That is supervision ov
 than invocation, it is genuinely absent today, and it would be built *on* `child` rather than
 instead of it.
 
+## The thorough design — workers are channels
+
+Everything above treats a worker as a process you start, wait for, and reap. That is the wrong
+noun. **In Tcl a worker is a channel**, and once it is, the whole concurrency machinery Tcl
+already has applies without inventing anything.
+
+### The finding that reorganises it
+
+Tcl core already opens a bidirectional pipe to a live subprocess:
+
+```tcl
+set ch [open "|[list $MT worker.tcl]" r+]
+fconfigure $ch -translation lf -buffering line
+puts $ch $request ; set answer [gets $ch]
+```
+
+Measured: **159 µs per round trip, against 26,000 µs to spawn a fresh worker — a 164× improvement
+in granularity.** And it drives the event loop natively: a pool built on `chan event` and `vwait`,
+with no polling anywhere, ran 300 items of 13 ms each at **3.23× on 12 workers** — work that is
+*below* the spawn crossover and that `child start` cannot parallelise at all.
+
+So the missing piece was never the transport. Tcl has it. **What Tcl's pipe lacks is
+supervision**: a child opened that way is not born in a job object, cannot be tree-killed, does
+not die with its parent, takes no memory or CPU cap, never appears in `child list`, and is not
+cleaned up by `scope`.
+
+That is the whole of the C work, and it is exactly machteld's thesis — *Tcl for the language, C
+for the kernel surface*.
+
+### Why channels, and not `child send` / `child recv`
+
+Two reasons, and both are about fitting rather than taste.
+
+**Tcl's own thread model is message-passing between isolated interpreters.** Each thread gets its
+own interpreter; variables are not shared, and `thread::send` marshals a script across. A pool of
+worker *processes* is therefore architecturally identical to Tcl threading — with stronger
+isolation, no C extension thread-safety hazard, and a slower start. The process design is not a
+compromise version of threads; **it is the same model with a different boundary.**
+
+**Tcl's async primitive is the event loop over channels** — `chan event`, `fconfigure -blocking
+0`, `vwait`, and `coroutine` for sequential-looking code on top. A design whose workers *are*
+channels inherits all of that. A pair of `send`/`recv` verbs would be a second, poorer copy of it,
+and would extend the grammar where [rule 1](direction.md) asks for vocabulary.
+
+### The layers
+
+**L0 — C: `child start` gains a channel mode.** The one genuinely new thing. The child is born in
+a job object with every existing guarantee, *and* its stdin/stdout come back as Tcl channels via
+`Tcl_MakeFileChannel`. This is exclusive with capture: `child_t` drains the pipes with reader
+threads into buffers today, and one pipe cannot have two consumers. A channel-mode child gives
+channels instead of `out` / `err`, and the manifest has to say so.
+
+**L1 — Tcl: the protocol is JSON lines.** One object per line, so `gets` reads exactly one and
+there is no framing to invent. `json` is already in the palette, and one-object-per-line is
+machine-legible and human-legible at once — [creed](creed.md) 2 rather than a coincidence.
+
+**L2 — Tcl: the worker side.** A dispatch loop that reads a line, calls a registered handler,
+writes a line. Handlers live in **procs**, and that is not style: a hot loop at top level runs
+3.6× slower, so the worker template must put the work inside a procedure or throw most of its
+speed away.
+
+**L3 — Tcl: the pool, event-driven.** `chan event $ch readable` per worker, and the event loop
+does the multiplexing that `wait -any` does by blocking. Backpressure through non-blocking writes
+and writable events. No polling anywhere.
+
+**L4 — Tcl: `pmap`, as a coroutine.** The caller writes sequential code; underneath it yields
+while the event loop feeds results back. This is the Tcl 8.6+ idiom for waiting without blocking
+the event loop, and it is what keeps a Tk tool responsive while a pool runs.
+
+**L5 — Tcl, optional: the durable ledger.** The append-only log — 105,263 writes/sec, readable
+mid-flight, `watch`-notifiable — for work that must outlive the director. Not the transport; the
+transport is the channel.
+
+### What comes free, and what has to be faced
+
+Free, because workers are `child`ren: born-in-job, die-with-parent, whole-tree kill, memory and
+CPU caps, `-timeout`, visibility in `child list`, cleanup by `scope` at the closing brace. Free,
+because errors are dicts: a worker's `{MACHTELD X y}` crosses the line as a field and is re-raised
+by the pool, so the error contract holds **across a process boundary**.
+
+The hard parts, named rather than glossed:
+
+- **Deadlock by pipe buffer.** A worker writing more than the pipe holds while the director is not
+  reading will block, and so will the director. Non-blocking channels with `chan event` in both
+  directions is the answer, and it is the part most likely to be subtly wrong on Windows.
+- **Capture versus channels** is an either/or per child, and the manifest must declare it.
+- **A worker dying mid-item.** The channel reaches EOF with an item outstanding: the pool must
+  detect it, requeue, and decide when a repeatedly-fatal item poisons the run.
+- **The line format becomes a compatibility surface** the moment a wrapped tool ships a worker.
+- **Amortisation only pays if workers are reused.** The 26 ms is now paid once per worker rather
+  than once per item — but a pool created per call throws that straight back.
+
+### What it buys
+
+Granularity, which is the thing machteld cannot have today. The crossover moves from ~26 ms of
+work per item to roughly **1 ms** — the difference between *parallelism is for spawning programs*
+and *parallelism is for anything worth a millisecond*.
+
 ## What remains open
 
 - **`child` cannot feed a running child.** Its subcommands are `start wait kill info list close`;
