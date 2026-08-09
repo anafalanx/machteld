@@ -284,11 +284,11 @@ if {![file isdirectory $SRC]} {
     # to be documented. Creed 5 says errors are part of the contract; it does not
     # say "the errors written in C".
     #
-    # KNOWN HOLE, stated rather than hidden: the prelude also carries bare
-    # `return -code error` with no -errorcode at all, in `wrap` and `help`. Those
-    # raise nothing this scan can see because there is nothing to see -- they have
-    # no code. The check below counts them so the number is visible, but does not
-    # yet fail on them; making every prelude error coded is its own change.
+    # Phase 0 of the stdlib plan closed the hole this used to merely count: the
+    # prelude raised eleven bare `return -code error` with no code at all, which
+    # put `wrap` and `help` outside the registry entirely. It is a GATE now, not a
+    # note, because the standard library lands in the prelude and an uncoded error
+    # would otherwise become the norm there rather than the exception.
     set TCLSRC [file join $HERE .. tcl]
     set uncoded 0
     foreach f [lsort [glob -nocomplain -directory $TCLSRC *.tcl]] {
@@ -299,9 +299,19 @@ if {![file isdirectory $SRC]} {
             {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $text] {
             dict set thrown $c 1 ; dict set domains $d 1
         }
-        incr uncoded [regexp -all {return -code error (?!-errorcode)} $text]
+        # Fail's own body is the one legitimate `return -code error`, and it
+        # carries an -errorcode; anything else without one is the defect.
+        incr uncoded [regexp -all -- {return -code error (?!-errorcode)} $text]
+        # The prelude's raiser, and a helper told its domain by the caller.
+        foreach {_ d c} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} $text] {
+            dict set thrown $c 1 ; dict set domains $d 1
+        }
+        foreach {_ c} [regexp -all -inline -- {Fail\s+\$\w+\s+([a-z]+)\s} $text] {
+            dict set thrown $c 1
+        }
     }
-    puts "     note: $uncoded uncoded 'return -code error' in the prelude (not yet gated)"
+    check "every prelude error carries an errorcode" [expr {$uncoded == 0}]
+    if {$uncoded != 0} { puts "     $uncoded uncoded 'return -code error' remain" }
 
     # The documented sets, parsed out of the shipped doc's own tables -- so the
     # DOC is the registry, and this test is what stops it becoming a lie.
@@ -542,6 +552,64 @@ check "pty info does not consume"   [expr {[dict get [pty info $p2] pending] == 
 check "pty info on a dead token"    [expr {
     [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
 pty close $p2
+
+# --- the manifest describes TCL verbs as fully as C ones ----------------------
+# Phase 0 of the stdlib plan. A Tcl verb used to report `kind tcl` plus `info
+# args` and nothing else, so `wrap` and `help` had no domain, no codes and no
+# options in the dict whose whole purpose is describing the palette. These check
+# the derivation actually derives -- a MtclFacts that quietly returned nothing
+# would leave every assertion below trivially true, which is the failure mode
+# three gates already had today.
+set M0 [manifest]
+foreach v {wrap help} {
+    check "manifest gives $v a domain" [expr {[dict exists $M0 $v domain]}]
+    check "manifest gives $v codes"    [expr {
+        [dict exists $M0 $v codes] && [llength [dict get $M0 $v codes]] >= 2}]
+}
+check "manifest gives wrap its options" [expr {
+    [dict exists $M0 wrap options] &&
+    [lsort [dict get $M0 wrap options]] eq {--console --gui --no-prelude -o}}]
+check "a verb that cannot fail has no domain" [expr {
+    ![dict exists $M0 version domain] && ![dict exists $M0 vtstrip domain]}]
+
+# The codes a Tcl verb declares must be codes it really raises.
+foreach {label script want} {
+    "wrap with no arguments"   {wrap}                        {MACHTELD WRAP usage}
+    "wrap with a stray arg"    {wrap a b c}                  {MACHTELD WRAP usage}
+    "wrap on a dir with no main.tcl" {wrap $env(TEMP) -o x}  {MACHTELD WRAP notfound}
+    "help on a missing topic"  {help nosuch_topic_zzz}       {MACHTELD HELP notfound}
+} {
+    check "$label => [lindex $want 2]" [expr {[errcode_of $script] eq $want}]
+}
+foreach v {wrap help} {
+    foreach c [expr {[dict exists $M0 $v codes] ? [dict get $M0 $v codes] : {}}] {
+        check "$v declares $c, which is in the registry" [expr {[dict exists $documented $c]}]
+    }
+}
+
+# Every option the PRELUDE parses must be declared, the mirror of the C check.
+set fh [open [file join $HERE .. tcl machteld.tcl] r] ; set ptext [read $fh] ; close $fh
+if {[regexp {proc ::machteld::wrap \{args\} \{(.*?)
+\}} $ptext -> wbody]} {
+    set inTcl {}
+    foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $wbody] {
+        lappend inTcl $o
+    }
+    set declared [expr {[dict exists $M0 wrap options] ? [dict get $M0 wrap options] : {}}]
+    set miss [lsort -unique [lmap o $inTcl {expr {$o in $declared ? [continue] : $o}}]]
+    check "every option wrap parses is in the manifest" [expr {$miss eq ""}]
+    if {$miss ne ""} { puts "     undeclared: $miss" }
+    check "the prelude option scan found something" [expr {[llength $inTcl] >= 3}]
+}
+
+# A Tcl subcommand behind a C verb is as visible as a C one: `pty expect` is
+# written in the prelude, and the manifest used to be silent about both the
+# option it takes and the timeout it raises.
+check "pty declares expect's -timeout" [expr {
+    [dict exists $M0 pty subcommands expect options] &&
+    "-timeout" in [dict get $M0 pty subcommands expect options]}]
+check "pty declares expect's timeout code" [expr {
+    "timeout" in [dict get $M0 pty codes]}]
 
 # --- the manifest describes the RUNNING binary -------------------------------
 # The generator derives the manifest from the C source; these check it against

@@ -73,21 +73,30 @@ correct and stays: `-timeout 5s` is an argument to a command, `--interval 500` i
 a program, and the audiences differ. `cli` therefore parses `--option`, while every palette verb
 keeps `-option`.
 
-## Phase 0 — make the prelude a first-class citizen
+## Phase 0 — make the prelude a first-class citizen — ✅ **done 2026-08-09**
 
 **Prerequisite, not housekeeping.** Everything in Phase 1–3 that is not C lands in the prelude,
-and the prelude is currently the part of machteld that does not hold itself to the contract:
+and the prelude was the one part of machteld that did not hold itself to machteld's contract:
 
-- **11 bare `return -code error`** with no `-errorcode` at all, in `wrap` and `help`. They are
-  outside the error registry entirely — nothing to document and nothing a scan can find. Adding
-  four or five more Tcl verbs makes the uncoded error the *norm* rather than the exception.
-- **The manifest's Tcl half is a stub**: `kind tcl` plus `info args`. No domain, no codes, no
-  options, no subcommands. Today that covers 6 of 15 verbs; after this plan it would cover
-  roughly half the palette, so [creed](creed.md) 4 degrades in exact proportion to how much
-  standard library gets added.
+- **11 bare `return -code error`** with no `-errorcode` at all, in `wrap` and `help` — outside
+  the error registry entirely, nothing to document and nothing a scan could find. Adding four or
+  five more Tcl verbs would have made the uncoded error the *norm* rather than the exception.
+- **The manifest's Tcl half stopped at** `kind tcl` plus `info args`: no domain, no codes, no
+  options. That covered 6 of 15 verbs, and after this plan it would have covered roughly half the
+  palette — so [creed](creed.md) 4 would have decayed in exact proportion to how much standard
+  library got added.
 
 So: code the prelude's errors, teach the manifest to describe Tcl verbs as fully as it describes
 C ones, and gate both. Doing this after the fact means retrofitting five verbs instead of two.
+
+**Done.** All eleven uncoded errors now raise through `Fail domain code msg`, the prelude's
+mirror of the C's `mt_error`; `WRAP` and `HELP` joined the domain table and `timeout` and
+`unsupported` the code registry. The manifest reads `info body` for a Tcl verb's domain, codes
+and options, follows a shared helper told its caller's domain, and merges the facts of a Tcl
+subcommand sitting behind a C verb — so `pty` now declares the `timeout` that `pty expect` really
+raises. Both are gated, and both gates were broken on purpose to confirm they bite: injecting one
+uncoded error fails the suite, and neutering the derivation fails nine checks rather than
+silently passing.
 
 ## Phase 1 — the three empty categories
 

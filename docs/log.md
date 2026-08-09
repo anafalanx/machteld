@@ -8,6 +8,35 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — Phase 0: the prelude becomes a first-class citizen
+
+Groundwork for [the standard library](stdlib.md), and deliberately done first: everything in that
+plan which is not C lands in the prelude, and the prelude was the part of machteld that did not
+hold itself to machteld's own contract.
+
+- **Every prelude error now carries a code.** Eleven bare `return -code error` in `wrap` and
+  `help` put them outside the error registry entirely — nothing to document and nothing a scan
+  could find. They raise through **`Fail domain code msg`** now, the prelude's mirror of the C's
+  `mt_error`. `WRAP` and `HELP` join the domain table; `timeout` and `unsupported` join the code
+  registry. A shared helper is told which domain to raise in (`_dur2ms PTY $v`), for the same
+  reason the C option parser is: the domain is the verb you called, never the helper that failed.
+- **The manifest describes Tcl verbs as fully as C ones.** It used to stop at `kind tcl` plus
+  `info args`. It now reads **`info body`** — the actual body of the actual command, so it cannot
+  drift and it works inside a wrapped tool — for domain, codes and options, following a helper
+  one level to attribute what it raises to its caller.
+- **A Tcl subcommand behind a C verb is no longer second-class.** `pty expect` is written in the
+  prelude, and the manifest was silent about both its `-timeout` and the `timeout` it raises.
+  `pty` declares both now.
+
+Why the timing mattered: adding four or five Tcl verbs on top of the old state would have made
+the uncoded error the *norm* rather than the exception, and left creed 4 covering barely half the
+palette — decaying in exact proportion to how much standard library got added.
+
+Both new gates were broken on purpose. Injecting one uncoded `return -code error` fails the
+suite; neutering the derivation fails nine checks. The second break also showed the checks
+aborting the run partway through, so they were made to survive a missing key and report the whole
+picture instead of the first four.
+
 ## 2026-08-09 — a cockpit, built and removed; and the rules that changed because of it
 
 The question was whether to ship GUI tools inside `machteld.exe`. Three positions were argued

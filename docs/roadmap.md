@@ -46,8 +46,11 @@ Assessed 2026-08-09 against Python, Go and Deno rather than against what happens
 three categories are **empty** — crypto/hashing, CLI parsing, logging — and TLS is missing, so
 `http` cannot reach an https URL. Process control, meanwhile, is already ahead of all three and
 is the asymmetry to widen. The plan, its design rules and its ordering are in
-[the standard library](stdlib.md). **Phase 0 comes first**: the prelude has to hold itself to the
-contract before it becomes the place the standard library lives.
+[the standard library](stdlib.md).
+
+✅ **Phase 0 done 2026-08-09** — the prelude now holds itself to the contract it lands in: every
+error carries a code, and the manifest describes a Tcl verb as fully as a C one. Next is `hash`
+(C, over CNG), then `cli`, then `log`.
 
 ## Later
 
