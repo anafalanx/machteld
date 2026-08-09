@@ -50,7 +50,9 @@ is the asymmetry to widen. The plan, its design rules and its ordering are in
 
 ✅ **Phase 0 done 2026-08-09** — the prelude now holds itself to the contract it lands in: every
 error carries a code, and the manifest describes a Tcl verb as fully as a C one. ✅ **`hash` done 2026-08-09** — `md5 sha1 sha256 sha384 sha512`, HMAC, streamed file digests and
-a cryptographic RNG, over CNG with nothing vendored. Next is `cli`, then `log`.
+a cryptographic RNG, over CNG with nothing vendored. ✅ **`cli` done 2026-08-09** — declarative argument parsing, pure (it prints nothing and never
+exits, because a wrapped GUI exe has no standard channels). `tasks` now runs on it and gained
+`--help`. Next is `log`.
 
 ## Later
 

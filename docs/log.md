@@ -8,6 +8,52 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — `cli`: declare a tool's arguments once
+
+Second of the three empty stdlib categories. Argument parsing exists in every standard library
+there is — `argparse`, `flag`, `cli` — and machteld, a **tool factory**, had none, so every program
+it stamped wrote its own.
+
+Two design decisions did the work:
+
+- **It is pure: prints nothing, never exits.** An argparse-style "print usage and exit" is
+  invisible exactly where it matters most — a wrapped GUI exe starts with **no standard channels
+  at all**, so a tool reporting a bad argument on stdout reports it to nowhere. `tasks` learned
+  that the hard way earlier today. `--help` comes back as a value; a bad argument raises
+  `{MACHTELD CLI usage}` whose message already carries the usage block.
+- **The spec is a dict, not a mini-language.** `{--interval int 2000..}` would mean inventing
+  syntax to parse, which rule 1 exists to prevent. `min`, `choices` and whatever comes next are
+  ordinary keys.
+
+Two codes, because two different people make the mistakes: `usage` is the user's (unknown option,
+missing value, out of range), `badvalue` is the author's (unknown attribute, unknown type, a name
+declared twice). A tool shows the first and should fail on the second.
+
+`tasks` was moved onto it, which is the real test: all ten of its existing argument tests still
+pass, its hand-rolled `lsearch` parsing is gone, and it gained a `--help` it never had.
+
+### A Tcl dict hides a duplicate key
+
+`{--x {...} --x {...}}` does not collide — the dict simply keeps the last, and the first
+declaration vanishes with its type and default, silently. The only place that is still visible is
+before the dict exists: `llength $spec` against `2 * [dict size $spec]`.
+
+### And a vacuous gate, caught by breaking it
+
+The missing-value check — the whole reason this verb exists — was covered by a test that could
+not fail. Removing the check entirely left the suite green, because `--interval` is typed `int`
+and the *type* check rejects an empty value anyway, producing the same `{MACHTELD CLI usage}`. The
+test asserted the code, not the behaviour.
+
+The case that actually mattered was a **string** option, where nothing downstream checks
+anything: without the guard, `--name` at the end of argv silently binds the empty string — the
+exact shape of the bug that killed `tasks` at startup. Four tests now cover it, and removing the
+guard fails all four.
+
+Worth recording separately: the first break-test attempt reported zero failures because the
+injection itself had not applied. An unverified break-test proves nothing. The second asserted
+the marker was present before replacing it.
+
 ## 2026-08-09 — `hash`: the empty category, filled
 
 Phase 1 of [the standard library](stdlib.md). Crypto/hashing was the one category machteld had

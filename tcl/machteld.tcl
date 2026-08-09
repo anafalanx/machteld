@@ -120,6 +120,24 @@ proc ::machteld::MtclFacts {cmd} {
             {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $body] {
         set domain $d ; lappend codes $c
     }
+    # An internal helper that raises on the verb's behalf. `cli` delegates its
+    # spec checking to CliNorm and CliCheck, and every `badvalue` it can produce
+    # lives in those -- so a scan of `cli`'s own body declared `usage` and nothing
+    # else, while the verb could plainly raise `badvalue`. Any internal proc named
+    # in the body is followed one level.
+    foreach hcmd [info procs ::machteld::*] {
+        set hname [namespace tail $hcmd]
+        if {![string match {[A-Z_]*} $hname]} continue
+        # `\\y` doubled on purpose: inside a quoted "\y$hname\y" Tcl collapses the
+        # unknown escape to a bare y before the regex engine sees it, so the
+        # pattern silently becomes yCliNormy and matches nothing at all.
+        if {![regexp \\y$hname\\y $body]} continue
+        foreach {_ hd hc} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} [info body $hcmd]] {
+            if {$domain eq ""} { set domain $hd }
+            if {$hd eq $domain} { lappend codes $hc }
+        }
+    }
+
     # A shared helper told which domain to raise in: `_dur2ms PTY $v` fails with
     # badvalue, but that literal lives in _dur2ms, not here. The C generator has
     # the same problem with parse_opts and solves it the same way -- follow the
@@ -134,18 +152,37 @@ proc ::machteld::MtclFacts {cmd} {
         }
     }
 
-    # Options, in the two idioms the prelude actually uses: a switch arm, and an
-    # equality test against a literal. Matching only one of them is exactly how
-    # the C side once under-reported `watch`'s options as none.
+    # Options. A verb may DECLARE its table -- `set opts {...}` -- and that wins
+    # outright, including when it is empty. Guessing is only a fallback, because
+    # guessing cannot distinguish a verb's own options from option literals it
+    # handles on someone else's behalf: `cli` compares against "--help" while
+    # parsing a *tool's* argv, and the scanner read that as an option of `cli`.
     set options {}
-    foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $body] {
-        lappend options $o
+    if {[regexp -line -- {^\s+set opts \{([^\}]*)\}} $body -> declared]} {
+        set options $declared
+    } else {
+        # The two idioms the prelude uses where nothing is declared: a switch arm,
+        # and an equality against a literal. Matching only one is exactly how the
+        # C side once under-reported `watch`'s options as none.
+        foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $body] {
+            lappend options $o
+        }
+        foreach {_ o} [regexp -all -inline -- {eq\s+"(--?[a-z][-a-z0-9]*)"} $body] {
+            lappend options $o
+        }
     }
-    foreach {_ o} [regexp -all -inline -- {eq\s+"(--?[a-z][-a-z0-9]*)"} $body] {
-        lappend options $o
+
+    # Subcommands, declared the way the C declares them. A C verb names its
+    # table in `static const char *const subs[]`; a Tcl verb writes
+    # `set subs {parse usage}` for exactly the same reason -- so the manifest can
+    # read the table rather than anyone keeping a second copy of it in a doc.
+    set subcommands {}
+    if {[regexp -line -- {^\s+set subs \{([^\}]*)\}} $body -> raw]} {
+        foreach sname $raw { dict set subcommands $sname [dict create options {}] }
     }
 
     set out [dict create]
+    if {[dict size $subcommands]} { dict set out subcommands $subcommands }
     if {$domain ne ""}      { dict set out domain $domain }
     if {[llength $codes]}   { dict set out codes [lsort -unique $codes] }
     if {[llength $options]} { dict set out options [lsort -unique $options] }

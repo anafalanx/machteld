@@ -166,6 +166,43 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
+## Built — declaring a tool's arguments
+
+```tcl
+set spec {
+    --interval {type int    default 2000 min 100 help "refresh interval, ms"}
+    --format   {type string default text choices {text json} help "output format"}
+    --all      {type flag                help "show everything"}
+    dir        {type string default .    help "directory to watch"}
+}
+set opt [cli parse $argv $spec]      ;# a dict: interval, format, all, dir, help
+cli usage $spec tasks                ;# the help text, from the same declaration
+```
+
+Every program `wrap` stamps needs argument parsing, and every one used to write its own. A name
+beginning `--` is an option, anything else is a positional taken in declaration order, and `--`
+ends option parsing. Attributes: `type` (`flag` / `int` / `string`), `default`, `min`, `max`,
+`choices`, `required`, `help`.
+
+**It prints nothing and never exits.** An `argparse`-style "print usage and exit" is invisible
+exactly where it matters most: a wrapped GUI exe starts with **no standard channels**, so a tool
+reporting a bad argument on stdout reports it to nowhere. So `--help` comes back as a value in
+the dict, and a bad argument raises `{MACHTELD CLI usage}` whose message already contains the
+usage block — the tool decides whether that goes to stderr, a dialog or a log.
+
+**The spec is a dict, not a mini-language.** `{--interval int 2000..}` would mean inventing
+syntax to parse, which is what [rule 1](direction.md) exists to prevent. `min` and `choices` are
+ordinary keys, so the next attribute is a key too rather than new punctuation.
+
+**Two codes, because two different people make the mistakes.** `usage` is the *user's* — an
+unknown option, a missing value, a number out of range. `badvalue` is the *author's* — an unknown
+attribute, an unknown type, a name declared twice. A tool can show the first and should fail on
+the second.
+
+The bug it removes is real: `tasks --interval` with nothing after it used to set the interval to
+the empty string, and `after ""` then threw out of the refresh timer, killing the tool at
+startup. A missing value is now refused where it is missing.
+
 ## Built — digests, HMAC and cryptographic random
 
 ```tcl
