@@ -45,7 +45,8 @@ namespace eval ::life {
     variable pattern ""
     variable density 0
     variable done  0
-    variable interval 60
+    variable interval 1
+    variable redraw 1
 
     # The named starts, each a list of {dx dy} offsets placed at the middle.
     # Chosen because they behave differently for a long time: r-pentomino runs
@@ -78,7 +79,7 @@ proc ::life::setting {seed} {
     set kind [expr {$seed % ($n + 3)}]          ;# +3 => three of every ten are soup
     set cols [expr {24 + (($seed / 7)  % 3) * 8}]
     set rows [expr {24 + (($seed / 11) % 3) * 8}]
-    set ivl  [expr {40 + (($seed / 3)  % 5) * 20}]
+    set ivl  1        ;# flat out: the interesting variation is the pattern, not the frame rate
     if {$kind < $n} {
         return [dict create pattern [lindex $names $kind] density 0 \
                     cols $cols rows $rows interval $ivl]
@@ -169,28 +170,61 @@ proc ::life::build_ui {geo} {
     wm protocol . WM_DELETE_WINDOW [list ::life::finish closed]
 }
 
+# ONLY THE CELLS THAT CHANGED. The first version recoloured all 1600 rectangles
+# every generation, which made the canvas -- not the rules -- the speed limit: a
+# `itemconfigure` per cell per frame is ~1600 Tk calls to express a change that
+# is typically a few dozen cells. `prev` already holds the previous generation
+# for the stasis test, so the diff is free.
+#
+# A full repaint is still needed twice: the first frame, and the moment the
+# colour changes because the pattern settled -- both flagged rather than
+# detected, since a diff cannot see a change that is not in the grid.
 proc ::life::render {} {
-    variable grid ; variable ids ; variable staleat
-    set on [expr {$staleat eq "" ? "#7fd1b9" : "#d98f4f"}]   ;# amber once it has settled
+    variable grid ; variable prev ; variable ids ; variable staleat ; variable redraw
+    set on  [expr {$staleat eq "" ? "#7fd1b9" : "#d98f4f"}]   ;# amber once it has settled
+    set off "#10131a"
+    if {$redraw || [llength $prev] != [llength $grid]} {
+        set redraw 0
+        set i 0
+        foreach v $grid {
+            .c itemconfigure [lindex $ids $i] -fill [expr {$v ? $on : $off}]
+            incr i
+        }
+        return
+    }
     set i 0
-    foreach v $grid {
-        .c itemconfigure [lindex $ids $i] -fill [expr {$v ? $on : "#10131a"}]
+    foreach v $grid p $prev {
+        if {$v != $p} { .c itemconfigure [lindex $ids $i] -fill [expr {$v ? $on : $off}] }
         incr i
     }
 }
 
 proc ::life::tick {} {
     variable done ; variable gen ; variable staleat ; variable grace ; variable interval
+    variable redraw
     if {$done} return
-    step
-    incr gen
-    if {$staleat eq ""} {
-        if {[stale]} { set staleat [clock milliseconds] ; wm title . "[wm title .] — settled" }
-    } elseif {[clock milliseconds] - $staleat >= $grace} {
-        finish stale
+    # ONCE SETTLED, STOP STEPPING. A fixed point cannot become anything else, so
+    # every further generation is pure heat -- and at ~450 a second across ten
+    # windows, a great deal of it. It also keeps `generations` honest: the count
+    # it took to reach stasis, not that plus however long the grace period ran.
+    # At 10 generations a second this was invisible; at 450 it is most of the
+    # number.
+    if {$staleat ne ""} {
+        if {[clock milliseconds] - $staleat >= $grace} { finish stale ; return }
+        after 50 ::life::tick
         return
     }
+    step
+    incr gen
+    if {[stale]} {
+        set staleat [clock milliseconds]
+        set redraw 1                          ;# the colour changes, so repaint in full
+        wm title . "[wm title .] — settled"
+    }
     catch {render}
+    # `after 1` rather than a per-seed 40-120 ms: as fast as the machine will go
+    # while still yielding to the event loop, which is what keeps the window
+    # responsive and lets the director's kill land. `after 0` would starve it.
     after $interval ::life::tick
 }
 
