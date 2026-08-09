@@ -24,11 +24,12 @@ Ratified 2026-08-08; the reasoning is in [direction](direction.md).
 2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
 3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, `wrap`'d into its own 6.1 MB exe. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
 
-✅ **`mt`** landed 2026-08-09 — the cockpit: a live view of what the current session is
-controlling, plus the `watch info` / `pty info` it needed. It ships as a **palette verb, not a
-wrapped exe**, because handle state is per-interpreter: a separate monitor would enumerate its
-own children, which is nothing. This also retires the "chrome console" idea's vaguest form —
-what was wanted was not a nicer tkcon but a window that answers "what is this session doing".
+✅ **`watch info` / `pty info`** landed 2026-08-09. They arrived with a cockpit verb (`mt`) that
+was **built, measured and removed the same day**: it refreshed 8×/second idle and not at all while
+the session was blocked in `child wait` or `watch read`, which is what supervision is made of.
+The two `info` subcommands stay because they closed a real asymmetry — `child` had `info`, the
+other handle verbs returned bare tokens — and because non-destructive observation is the right
+primitive with or without a window. See [direction](direction.md).
 
 ✅ **`ps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
 (`ps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
@@ -43,11 +44,11 @@ longer has to be asked for before it may be built.
 
 - **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `ps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
 - **An object layer over TclOO** — deferred, not refused.
-- **The chrome console** — partly answered by [`mt`](palette.md), which is the live child/event
-  sidebar as its own window. What remains is the *interactive* half: a REPL with manifest-fed
-  completion. Deferred until `mt` has been used enough to say whether steering from it is
-  actually wanted — `mt` is read-only on purpose, and making it a launcher is a decision that
-  should follow use rather than precede it.
+- **The chrome console** — a Tk cockpit. The read-only version was tried and removed: a window
+  that only *observes* the session freezes during exactly the blocking calls it exists to show.
+  The measurement says the viable shape is one that **owns the event loop** — you launch work from
+  it, so nothing at the top level ever blocks. That is a launcher, not a monitor, and it is a
+  bigger thing than what was built. Unscheduled.
 
 ## Settled
 

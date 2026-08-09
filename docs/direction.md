@@ -287,23 +287,32 @@ Three shape decisions, each following an existing precedent rather than inventin
 `denied` joins the registry as the one code that reports a permission, confined to `ps` because
 `ps` is the one verb that reaches outside machteld's own children.
 
-## The cockpit — shelved (2026-08-09)
+## The cockpit — built, measured, removed (2026-08-09)
 
-`mt` is **provisional and shelved**. It works and it is tested, but measurement showed it is live
-exactly when nothing is happening and frozen exactly when something is: 8 refreshes per second
-idle, **0** while blocked in `child wait` (2039 ms) or `watch read` (1504 ms) — which are the
-operations that constitute supervision. Worse, while frozen it shows stale data with no
-indication, the same defect fixed in `tasks` hours earlier and reproduced here in another form.
+`mt` was a live window over the current session. It is **gone**, in the same day it arrived, and
+the sequence is worth keeping because it is rule 7 working rather than rule 7 being ignored.
 
-Not removed, because it costs 1.3 ms of parse and nothing else, and because the by-products are
-independently worth having: `watch info` and `pty info` closed a real asymmetry (`child` had
-`info`; the other handle verbs returned bare tokens), and non-destructive observation is the
-right primitive whether or not a window uses it. If a read/write cockpit is ever built — one that
-owns the event loop and therefore cannot freeze — this is its starting point. If not, rule 5's
-review clause applies and it comes out.
+Measurement killed it: 8 refreshes per second idle, **0** while blocked in `child wait`
+(2039 ms) or `watch read` (1504 ms). Those blocking calls are what supervision is made of, so the
+window was live exactly when nothing was happening and frozen exactly when something was — and
+while frozen it showed stale rows with no indication, the same defect fixed in `tasks` hours
+earlier and reproduced here in another form.
 
-**The known defect stays recorded rather than quietly fixed**, because a shelved thing with a
-hidden trap is worse than a shelved thing with a documented one.
+It was shelved first, with the defect documented. That was the wrong call: "shelved with a known
+defect" is how a drift of half-built things starts, which is precisely what rule 7 now forbids.
+With no live intention to finish it, *finished or out* resolves to out. Removed the same day the
+rule was written, so the first thing the rule touched was not exempted from it.
+
+**What stays, because it was finished and is independently worth having:** `watch info` and
+`pty info`. `child` already had `info`; the other two handle verbs returned bare tokens, so a
+watch could not be attributed to a directory. Non-destructive observation is the right primitive
+with or without a window on top of it.
+
+**What was learned and is worth more than the window:** handle state is per-interpreter —
+`proc_ctx` is allocated per interpreter and passed to each command as its client data, with no
+global registry — so *any* cross-session monitor is impossible without machteld processes
+publishing state. A read/write cockpit that owns its own event loop remains the only shape that
+could work. `tcl/mt.tcl` is in the history at `98bc96e` if that is ever built.
 
 ## Shipping tools inside the exe — refused, with one exception that is not one (2026-08-09)
 
@@ -320,7 +329,8 @@ of the palette is written in it. So the real question is not "may the exe contai
 **"may the palette contain applications"**, which is a question about identity rather than
 mechanics.
 
-`mt` does not settle that question, because it does not pose it. Handle state is per-interpreter,
-so a cockpit over the current session **cannot** be a separate exe — it would enumerate its own
-children, which is nothing. It ships as Tcl because there is no alternative, not because Tcl is
-convenient. The identity question stays open for the first tool that could go either way.
+`mt` looked like it might settle that question and did not, because it never posed it: handle
+state is per-interpreter, so a cockpit over the current session **cannot** be a separate exe — it
+would enumerate its own children, which is nothing. It would have shipped as Tcl for lack of an
+alternative rather than as a choice, and then it was removed anyway. The identity question stays
+open for the first tool that could genuinely go either way.

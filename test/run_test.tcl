@@ -543,25 +543,6 @@ check "pty info on a dead token"    [expr {
     [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
 pty close $p2
 
-# --- mt: the session reporting on itself --------------------------------------
-# The window is driven by test/mt_ui.tcl; this covers the model and the contract.
-set c9 [child start -- $MT $CHILD sleep 6000]
-set w9 [watch start $env(TEMP)]
-set snap [::machteld::MtSnapshot]
-check "mt snapshot is a list of rows" [expr {[llength $snap] >= 2}]
-check "mt sees the child we started"  [expr {
-    [llength [lsearch -all -inline -index 1 $snap $c9]] == 1}]
-check "mt sees the watch we started"  [expr {
-    [llength [lsearch -all -inline -index 1 $snap $w9]] == 1}]
-check "mt rows carry five fields"     [expr {
-    [llength [lmap r $snap {expr {[llength $r] == 5 ? 1 : [continue]}}]] == [llength $snap]}]
-check "mt summary names the session"  [string match "*session pid [pid]*"     [::machteld::MtSummary $snap]]
-check "mt rejects a bad -interval"    [expr {
-    [errcode_of {mt -interval 5}] eq {MACHTELD MT badvalue}}]
-check "mt rejects an unknown argument" [expr {
-    [errcode_of {mt --nonsense}] eq {MACHTELD MT usage}}]
-catch {child kill $c9} ; catch {child wait $c9} ; child close $c9 ; watch close $w9
-
 # --- the manifest describes the RUNNING binary -------------------------------
 # The generator derives the manifest from the C source; these check it against
 # the interpreter that actually shipped, which is the half a source scan cannot
@@ -571,7 +552,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child detach help json manifest mt ps pty run scope store version vtstrip wait watch wrap}}]
+    {child detach help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -702,7 +683,7 @@ foreach uitest [lsort [glob -nocomplain -directory $HERE *_ui.tcl]] {
     }
 }
 check "there are window tests to run" [expr {
-    [llength [glob -nocomplain -directory $HERE *_ui.tcl]] >= 2}]
+    [llength [glob -nocomplain -directory $HERE *_ui.tcl]] >= 1}]
 
 # --- tools reject bad arguments instead of dying in a timer -------------------
 # `tasks --interval` with nothing after it set the interval to the empty string;

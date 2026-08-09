@@ -8,7 +8,7 @@ timestamp: 2026-07-09
 
 # Log
 
-## 2026-08-09 — `mt`: the session watching itself
+## 2026-08-09 — a cockpit, built and removed; and the rules that changed because of it
 
 The question was whether to ship GUI tools inside `machteld.exe`. Three positions were argued
 and nine adversarial critics attacked them; every affirmative case died, mostly on dispatch
@@ -19,13 +19,24 @@ The argument had been about packaging *programs* when the question was about shi
 And the tool worth shipping was neither of the ones being argued over. `manifest` says what
 machteld can do; nothing said what it is *doing*.
 
-- **`mt`** ([the palette](palette.md)) — a live window over the current session: children
-  launched, terminals steered, directories watched, and processes started and deliberately let
-  go. Each row joins machteld's own token to what `ps` knows about that pid, so `child#3` shows
-  with its name, memory and CPU.
-- **`watch info` and `pty info`** — additive subcommands the cockpit demanded. `child` had
-  `info`; the other two handle verbs returned bare tokens, so a watch could not be attributed to
-  a directory. Rule 5 again, and read-only.
+- **`mt`** — a live window over the current session. **Built, measured, and removed the same
+  day.** It refreshed 8×/second idle and **0** times while blocked in `child wait` (2039 ms) or
+  `watch read` (1504 ms) — the calls supervision is made of — and while frozen it showed stale
+  rows with no indication, the same defect fixed in `tasks` hours earlier. It was shelved first
+  with the defect documented; that was wrong, because "shelved with a known defect" is how a
+  drift of half-built things starts. Removed. In the history at `98bc96e`.
+- **`watch info` and `pty info`** — **kept.** `child` had `info`; the other two handle verbs
+  returned bare tokens, so a watch could not be attributed to a directory. They report queue
+  depth and pending bytes where a read would have emptied them, which is the right primitive with
+  or without a window on top.
+
+- **Rules 5 and 7 rewritten**, which is the lasting outcome. Rule 5 required a tool to demand a
+  capability before it could be built; that stifles the exploring which is how a verb's shape
+  gets found, and it was softened once and bit again. Building on spec is now allowed. Rule 7
+  used to freeze a shape on ship — machinery for a promise `0.x` says is not being made — and now
+  says the opposite: **nothing is frozen before 1.0.0, and what binds is finishing what you
+  start.** A verb is finished or it is out. `mt` was the first thing the new rule touched and it
+  was not exempted from it.
 
 ### Why it is a verb and not an exe — architecture, not preference
 
