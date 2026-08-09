@@ -11,8 +11,9 @@
 # WHY THIS TOOL EXISTS AT ALL. machteld could already supervise processes it
 # started -- born-in-job, tree-kill, caps. It could not see a process it did not
 # start. Writing this is what made that gap concrete, and `ps` is what closed
-# it: the rule is that a capability lands when a tool reaches for it, and this is
-# the tool that reached.
+# it. The rule at the time was that a capability lands only when a tool reaches
+# for it; that has since been relaxed, but this is still how `ps` got its shape --
+# a dict designed against a real caller rather than guessed at.
 #
 # As with `changes`, everything that decides WHAT is shown lives in ::tm and
 # touches no widget, so --selftest exercises the model with no window.

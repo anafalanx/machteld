@@ -166,7 +166,15 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
-## Built — the session watching itself
+## Provisional — the session watching itself
+
+> **`mt` is provisional and shelved.** It is not frozen under
+> [rule 7](direction.md): its shape may change or it may be removed. **Known defect, recorded
+> rather than hidden:** it refreshes 8×/second when idle and **not at all** while the session is
+> blocked in `child wait` (measured over 2039 ms) or `watch read` (1504 ms) — and while frozen it
+> shows stale rows with no indication that they are stale. Those blocking calls are exactly what
+> supervision is made of, so the window is live when nothing is happening and blind when
+> something is. Read it at the REPL; do not trust it inside a script that waits.
 
 ```tcl
 mt                                 ;# open the cockpit: what THIS session is controlling
@@ -221,6 +229,10 @@ The machine-control **domains** `reg` / `svc` / `evt`, and later `net` / `wmi` /
 [ecosystem policy](ecosystem-policy.md)). Also deferred: the `say` / `csv` / `fs` / `clock`
 conveniences — Tcl's own `file` / `env` / `clock` cover much of that today.
 
-None of these is scheduled. Each lands when a tool reaches for it, which is how `watch` and then
-`ps` arrived: the change-viewer needed live file events, and the task manager needed a view of
-processes machteld did not start.
+None of these is scheduled. `watch` and `ps` both arrived because a tool asked — the
+change-viewer needed live file events, the task manager needed a view of processes machteld did
+not start — and that remains the best reason to build one, because it is also when the dict shape
+stops being a guess. It is no longer the *only* reason: [rule 5](direction.md) was rewritten on
+2026-08-09 to allow building a domain to find out what it wants to be. What holds instead is that
+a verb nothing yet depends on is **provisional** — reshapeable and removable — until something
+does.

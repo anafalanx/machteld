@@ -32,15 +32,16 @@ what was wanted was not a nicer tkcon but a window that answers "what is this se
 
 ✅ **`ps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
 (`ps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
-`tasks.exe`). This is rule 5 working as intended: the tool was written, it named a capability
-machteld did not have — it could supervise processes it *started* but could not see one it did
-not — and that capability was built to fit.
+`tasks.exe`). The tool was written, it named a capability machteld did not have — it
+could supervise processes it *started* but could not see one it did not — and that capability was
+built to fit. That was rule 5 as it then stood; the rule has since been rewritten so a domain no
+longer has to be asked for before it may be built.
 
 ✅ **`json`** landed 2026-08-09 — hand-rolled C into `Tcl_Obj`, gated on the vendored nst/JSONTestSuite (95/95 `y_`, 188/188 `n_`). The signature-derived CLI and shapes remain, to land at the moment a tool reaches for them.
 
 ## Later
 
-- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled: each is built when a tool reaches for it, as `watch` and `ps` were. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
+- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `ps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
 - **An object layer over TclOO** — deferred, not refused.
 - **The chrome console** — partly answered by [`mt`](palette.md), which is the live child/event
   sidebar as its own window. What remains is the *interactive* half: a REPL with manifest-fed
