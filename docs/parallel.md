@@ -28,8 +28,13 @@ to outlive the caller.
 The gap between 7.46× overlap and ~3× end-to-end is boot cost plus hyperthreading: twelve
 logical cores are about six physical ones for this kind of work.
 
-**The 26 ms boot sets the crossover.** Below roughly 25–30 ms of work per item, spawning costs
-more than it saves. A bounded pool is about twelve lines over `child start` and `wait -any`,
+**The boot cost sets the crossover.** Below roughly 25–30 ms of work per item, spawning costs
+more than it saves — **confirmed by measurement later** (see the four-arm study below), including
+the tempting objection that spawns overlap so the real crossover must be far lower. They do not
+overlap well. Re-measured with the child kind named, since "26 ms" was one number for two very
+different things: an external program costs **17.1 ms** to start and a machteld child **44.5 ms**,
+and under 12-way concurrency the *aggregate* rate is only ~90 starts a second rather than the ~270
+that dividing by width would predict. A bounded pool is about twelve lines over `child start` and `wait -any`,
 though 24 items spawned all at once (736 ms) beat every bounded width tried (869–1256 ms):
 Windows schedules them fine, so a pool bounds memory and handles rather than buying speed.
 
@@ -415,9 +420,54 @@ cache does not parallelise. `md5` has no hardware path, saturates cores, and rea
 the same ceiling every other CPU-bound measurement on this 12-logical / 6-physical box reaches.
 
 So the pool did not change what parallelism is worth here; it changed what can be *offered* to it.
-Hashing a tree is a bandwidth problem wearing a CPU problem's clothes. The archetype remains
-fan-out over external programs at **4.84×**, and what the pool adds is that the crossover for
-offering work at all fell from 26 ms to about 1 ms.
+Hashing a tree is a bandwidth problem wearing a CPU problem's clothes.
+
+## What the pool is actually worth — four arms, measured
+
+The claim above ("the crossover fell from 26 ms to about 1 ms") is arithmetic from a 159 µs round
+trip against a 26 ms spawn, and arithmetic is not a measurement. [`spike/crossover`](../spike/crossover/README.md)
+measures it against the two things a competent person would write instead — a `child start` per
+item, and a **static partition**: twelve children, each handed a contiguous slice. Predictions were
+registered before the run; three held, one was half right, and **two were wrong**.
+
+| per item | sequential | child per item | static chunks | pool (`pmap`) |
+|---|---|---|---|---|
+| 0.5 ms × 1600 | 1.00× | **0.04×** | **2.33×** | 1.64× |
+| 2 ms × 500 | 1.00× | 0.17× | 2.48× | 2.46× |
+| 8 ms × 150 | 1.00× | 0.54× | 2.64× | **2.65×** |
+| 30 ms × 40 | 1.00× | 1.39× | 2.51× | 2.47× |
+
+**Against spawn-per-item the claim holds, and by more than advertised** — 41× the throughput at
+0.5 ms items, not "a bit better". **Against a static partition it does not hold at all**: chunking
+matches or beats the pool at every size, because it pays the start cost twelve times in total and
+then has no protocol. On uniform work the pool's per-item round trip buys nothing.
+
+Where the queue earns its keep is **items whose cost you cannot predict**, and only when the
+expensive ones *cluster*. Same 500 items, same total work, a tenth of them 10× the rest:
+
+| | static chunks | pool |
+|---|---|---|
+| heavy items scattered at random | **2.30×** | 2.05× |
+| heavy items contiguous (a sorted list, a directory of large files) | 1.50× | **2.18×** |
+
+Scattered, the chunks self-average and a partition is fine — which is why the first version of this
+test proved nothing. Clustered, the partition is bounded by its unluckiest child while the queue
+simply hands the next item to whoever is free.
+
+**And one correction to the number above it.** "Below roughly 25–30 ms per item, spawning costs
+more than it saves" was written as a single-item statement, and the obvious objection is that
+spawns overlap too, so the real crossover should be far lower. It is not: spawn-per-item stays
+underwater until ~20–30 ms per item, exactly as first written. **Process creation does not
+parallelise.** Serially one `cmd /c exit` costs 17.1 ms and one machteld child 44.5 ms; at width 12
+that should be ~270 starts a second and it measures **~90**. Concurrency buys about 4× on spawning,
+not 12×, so `spawn_cost / width` is the wrong model to reason with.
+
+So the honest summary: the pool's value is **small items, unpredictable or clustered item costs,
+supervision, and one call instead of thirty lines** — not throughput over a partition you could
+have written by hand. And for a single external program per item it is the wrong tool outright:
+`child start` spawns the real program directly, with no intermediate process, and wins 2.60×
+against 2.34×. Full numbers and the prediction scoring in
+[spike/crossover/RESULTS.md](../spike/crossover/RESULTS.md).
 
 ## What remains open
 
