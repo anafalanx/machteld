@@ -37,8 +37,8 @@ namespace eval ::lab {
     variable spawned 0
     variable width   10
     variable total   50
-    variable capsec  600
-    variable grace   20
+    variable capms   600000
+    variable gracems 20000
     variable cmd     {}        ;# argv prefix that starts one window
     variable cell    3
     variable out     ""
@@ -103,12 +103,13 @@ proc ::lab::summarise {recs} {
 # --- running the field -------------------------------------------------------
 
 proc ::lab::launch {slot} {
-    variable cmd ; variable spawned ; variable LIVE ; variable capsec
-    variable grace ; variable slots ; variable cell
+    variable cmd ; variable spawned ; variable LIVE ; variable capms
+    variable gracems ; variable slots ; variable cell
     set seed $spawned
     incr spawned
     set geo [lindex $slots $slot]
-    set c [child start -timeout ${capsec}s -- {*}$cmd                --seed $seed --geometry $geo --grace $grace --cell $cell]
+    set c [child start -timeout ${capms}ms -- {*}$cmd \
+               --seed $seed --geometry $geo --grace ${gracems}ms --cell $cell]
     dict set LIVE $c [list $seed $slot [clock milliseconds]]
     return $c
 }
@@ -273,8 +274,8 @@ proc ::lab::selftest {} {
 set SPEC {
     --windows  {type int    default 10 min 1 max 200  help "how many windows run at once"}
     --total    {type int    default 50 min 1 max 5000 help "how many to spawn before draining"}
-    --cap      {type int    default 600 min 1 max 3600 help "seconds any one window may live"}
-    --grace    {type int    default 20 min 0 max 600  help "seconds a settled window stays up"}
+    --cap      {type string default 10m help "how long any one window may live (90s, 10m)"}
+    --grace    {type string default 20s help "how long a settled window stays up (20s, 2m)"}
     --cellsize {type int    default 3 min 1 max 20    help "pixels per cell in each window"}
     --out      {type string default ""  help "JSONL record file (default build/lifelab.jsonl)"}
     --selftest {type flag   help "run the scheduler's own tests with no windows and exit"}
@@ -289,8 +290,22 @@ if {[dict get $opt selftest]} { ::lab::selftest }
 
 set ::lab::width  [dict get $opt windows]
 set ::lab::total  [dict get $opt total]
-set ::lab::capsec [dict get $opt cap]
-set ::lab::grace  [dict get $opt grace]
+# Durations in the palette's own syntax, parsed by the palette's own parser --
+# `cli duration`, which is `_dur2ms`, which is what every verb uses. These flags
+# took bare integers until that parser was exposed, which meant this tool
+# accepted `--cap 600` while `child start -timeout 600` next to it was refused:
+# the toolkit's convention not kept by the toolkit's own tools.
+#
+# Parsed at the edge, so a bad duration is refused before ten windows start
+# rather than by each of them separately.
+if {[catch {::machteld::cli duration [dict get $opt cap]} ::lab::capms]} {
+    catch {puts stderr "lifelab: --cap: $::lab::capms"}
+    exit 2
+}
+if {[catch {::machteld::cli duration [dict get $opt grace]} ::lab::gracems]} {
+    catch {puts stderr "lifelab: --grace: $::lab::gracems"}
+    exit 2
+}
 
 # The window exe sits beside this one when both are wrapped, and beside the
 # script when this is run as a script. Resolved rather than assumed, because a
