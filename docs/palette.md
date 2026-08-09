@@ -166,6 +166,42 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
+## Built — digests, HMAC and cryptographic random
+
+```tcl
+hash sum sha256 $data              ;# hex digest of a value
+hash sum sha256 $data -binary      ;# the raw 32 bytes instead
+hash file sha256 big.iso           ;# streamed; 64 KB of memory whatever the size
+hash hmac sha256 $key $data
+hash random 32                     ;# 32 unguessable bytes
+
+set h [hash start sha256]          ;# hash#1 -- stateful, so it is a token
+hash update $h $chunk
+hash final $h                      ;# the digest, and the token is gone
+hash list ; hash algorithms
+```
+
+`md5 sha1 sha256 sha384 sha512`, over Windows CNG — already on the machine, so nothing is
+vendored and there is no OpenSSL. Verified against the published NIST and RFC 2202/4231 vectors
+and against `Get-FileHash`; 25 MB streams in about 30 ms.
+
+**Which bytes get hashed is the part worth reading.** A Tcl value is not bytes — it is a value
+with a byte representation that depends on how you ask, and hashing the Latin-1 view of `café`
+gives a different answer from hashing its UTF-8. The rule is the one [`json encode`](#) already
+follows: read what the value **is**, never what its text looks like.
+
+- a **byte array** — from `binary decode`, or a channel read in binary mode — hashes those bytes
+  exactly;
+- **anything else** hashes its UTF-8, so `hash sum sha256 abc` agrees with `sha256sum`,
+  `certutil` and `Get-FileHash`.
+
+`hash file` opens through the Tcl channel layer with `-translation binary`, so zipfs paths work
+and a digest never depends on line endings.
+
+**`hash random` is the only unguessable source in the palette.** `expr {rand()}` is a
+deterministic PRNG seeded from the clock; it is fine for jitter and must never be used for a
+token, a nonce or a temporary name that someone might predict.
+
 ## Built — observing a handle without disturbing it
 
 ```tcl

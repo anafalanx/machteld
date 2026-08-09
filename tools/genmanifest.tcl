@@ -42,6 +42,7 @@ set IMPL {
     StoreCmd  store
     JsonCmd   json
     PsCmd     ps
+    HashCmd   hash
 }
 
 # NOTE ON TCL REGEXPS HERE: Tcl's ARE takes its greediness for the WHOLE
@@ -78,6 +79,7 @@ set proc_c  [slurp [file join $SRC proc.c]]
 set store_c [slurp [file join $SRC store.c]]
 set json_c  [slurp [file join $SRC json.c]]
 set ps_c    [slurp [file join $SRC ps.c]]
+set hash_c  [slurp [file join $SRC hash.c]]
 set fns     [functions $proc_c]
 # store.c and json.c implement exactly one verb each, so the whole file is that
 # verb's body -- otherwise `notopen`, raised in the needDb helper rather than in
@@ -85,6 +87,7 @@ set fns     [functions $proc_c]
 dict set fns StoreCmd $store_c
 dict set fns JsonCmd  $json_c
 dict set fns PsCmd    $ps_c
+dict set fns HashCmd  $hash_c
 
 # ---- verbs the C actually registers ---------------------------------------
 set verbs {}

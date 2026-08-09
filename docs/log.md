@@ -8,6 +8,45 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — `hash`: the empty category, filled
+
+Phase 1 of [the standard library](stdlib.md). Crypto/hashing was the one category machteld had
+**entirely** empty while Python, Go and Deno all ship it: Tcl 9 offers CRC32 and Adler32 through
+zlib and nothing else, so there was no way to ask whether two files were the same, and no source
+of unguessable bytes at all.
+
+`hash sum / file / hmac / start / update / final / list / algorithms / random`, over Windows CNG.
+Nothing vendored and no OpenSSL — the provider ships with the OS, so the ecosystem policy's
+question, "can I own this snapshot?", does not arise. Checked against the published NIST and
+RFC 2202/4231 vectors and against `Get-FileHash`; 25 MB streams in about 30 ms in 64 KB chunks.
+
+Shaped to the architecture rather than to another language's API: algorithms are **values, not
+subcommands**, so adding SHA-3 later cannot widen the subcommand surface; an incremental context
+is stateful and therefore a **token** with the `child#N` / `pty#N` / `watch#N` lifetime, and
+`final` consumes it; `hash file` opens through the Tcl channel layer, so zipfs paths work and a
+digest never depends on line endings.
+
+### The bug worth recording
+
+**Which bytes get hashed** is the whole correctness question, and the first implementation got it
+wrong in a way that only showed up on non-ASCII input.
+
+Tcl 9 carries **two byte-array object types and registers only one of them** under the name
+`bytearray`, so comparing `v->typePtr` against `Tcl_GetObjType("bytearray")` returns false for
+precisely the values `binary decode` produces. Those fell through to the string path, where each
+byte was read as a character and re-encoded: `binary decode hex 636166c3a9` hashed as *seven*
+bytes of UTF-8 rather than five bytes of data. Silently, and with a plausible-looking digest.
+
+It cost some time because the symptom pointed the wrong way — the string path looked broken when
+it was correct, since the "expected" values were being computed through the same broken path.
+What settled it was instrumenting the C to report the bytes it was about to hash, and then
+checking against an external oracle (`Get-FileHash`) rather than against machteld itself. A hash
+that agrees only with itself is worthless.
+
+`Tcl_GetBytesFromObj` is not the fix either: it is a coercion, not a predicate, and will happily
+turn the string `café` into four Latin-1 bytes. The type **name** is the one thing that is both
+public and true. The regression is gated — restoring the pointer comparison fails three checks.
+
 ## 2026-08-09 — Phase 0: the prelude becomes a first-class citizen
 
 Groundwork for [the standard library](stdlib.md), and deliberately done first: everything in that

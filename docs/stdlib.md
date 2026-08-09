@@ -100,7 +100,7 @@ silently passing.
 
 ## Phase 1 — the three empty categories
 
-### `hash` — C, over CNG (`bcrypt.dll`)
+### `hash` — C, over CNG (`bcrypt.dll`) — ✅ **done 2026-08-09**
 
 Verified working against the toolchain: `sha256("abc")` returns `ba7816bf8f01cfea…`. No
 vendoring, no OpenSSL — the provider is already on the machine.
@@ -117,8 +117,12 @@ hash final $h                      ;# digest, and the token is gone
 hash list                          ;# open contexts, like child/pty/watch
 ```
 
-Fixes `random` at the same time: today the only source is `expr {rand()}`, which is a PRNG and
-not suitable for anything that needs to be unguessable.
+Fixes `random` at the same time: the only other source is `expr {rand()}`, a deterministic PRNG
+unsuitable for anything that has to be unguessable.
+
+**Built as specified**, with `sum`/`file` replacing the shorthand and `algorithms` added so the
+verb can be asked what it supports. Checked against the published NIST and RFC 2202/4231 vectors
+and against `Get-FileHash`; 25 MB streams in ~30 ms.
 
 ### `cli` — Tcl
 
