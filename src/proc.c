@@ -575,10 +575,18 @@ static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
     return 0;
 }
 
-static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
+/* The one result shape, shared by `run` and `child wait`. `alive` says the child
+ * is STILL RUNNING -- only `child wait` can produce that, when the caller's own
+ * -timeout bound expired without the child finishing. The shape does not fork
+ * for it: same keys, `exit` empty because there is no exit code yet, and
+ * `status running` so a caller can tell "not done" from "done, and here is how".
+ * A forked shape would have been the cheaper change and the wrong one. */
+static Tcl_Obj *child_dict_ex(Tcl_Interp *interp, child_t *c, int alive) {
     Tcl_Obj *d = Tcl_NewDictObj();
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
-    const char *st = c->timeout ? "timeout" : c->killed ? "killed" : (c->exit_code == 0 ? "ok" : "error");
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1),
+                   alive ? Tcl_NewStringObj("", -1) : Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
+    const char *st = alive ? "running"
+                   : c->timeout ? "timeout" : c->killed ? "killed" : (c->exit_code == 0 ? "ok" : "error");
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("status", -1), Tcl_NewStringObj(st, -1));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("out", -1), Tcl_NewStringObj(c->ro.buf ? c->ro.buf : "", (Tcl_Size)c->ro.len));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("err", -1), Tcl_NewStringObj(c->re.buf ? c->re.buf : "", (Tcl_Size)c->re.len));
@@ -588,6 +596,10 @@ static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
     if (c->re.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("err", -1));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("truncated", -1), trunc);
     return d;
+}
+
+static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
+    return child_dict_ex(interp, c, 0);
 }
 
 static void child_free(child_t *c) {
@@ -901,6 +913,22 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     child_t *c = registry_find(ctx, token);
     if (c == NULL) return mt_error(interp, "CHILD", "nohandle", "no such child");
 
+    /* THE DEADLINE IS ENFORCED WHENEVER THE CHILD IS OBSERVED, not only when
+     * somebody waits. It used to live inside WAIT alone, which made
+     * `child start -timeout` an absolute maximum only for callers that happened
+     * to block on it -- a supervisor polling `child info` every 250 ms watched
+     * its children sail 6x past their cap, because asking "are you done?" is not
+     * waiting. `-timeout` is a promise about the CHILD, so every question about
+     * the child settles it first. The job object remains the backstop if this
+     * process dies without asking anything. */
+    if (c->deadline != 0 && !c->reaped && GetTickCount64() >= c->deadline) {
+        const char *derr = NULL;
+        c->killed = 1;
+        c->timeout = 1;
+        if (c->job) wj_job_terminate(c->job, 1);
+        child_reap(c, WJ_INFINITE, &derr);
+    }
+
     switch (idx) {
     case WAIT: {
         const char *err = NULL;
@@ -916,22 +944,38 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             if (want < 0) return mt_error(interp, "CHILD", "badvalue", "bad -timeout value");
             k++;
         }
+        /* WHICH deadline binds decides what expiry MEANS, and the first version
+         * of this got it wrong: it killed on either. That is right for the
+         * child's own deadline and wrong for the caller's bound -- "wait up to
+         * 2s for this" must not mean "and shoot it if it is not done". It made
+         * the polling pattern the docs recommend for a Tk tool silently fatal to
+         * every child it asked about. Found by building a supervisor that needed
+         * exactly that poll. */
         unsigned wait_ms = WJ_INFINITE;
+        int deadline_binds = 0;         /* the START deadline is the earlier one */
         if (want >= 0) wait_ms = (unsigned)want;
         if (c->deadline != 0 && !c->reaped) {
             ULONGLONG now = GetTickCount64();
             ULONGLONG left = (now >= c->deadline) ? 0 : (c->deadline - now);
-            if (wait_ms == WJ_INFINITE || (ULONGLONG)wait_ms > left) wait_ms = (unsigned)left;
+            if (wait_ms == WJ_INFINITE || (ULONGLONG)wait_ms > left) {
+                wait_ms = (unsigned)left;
+                deadline_binds = 1;
+            }
         }
         if (!c->reaped) {
             int w = child_reap(c, wait_ms, &err);
-            if (w == 1) {
-                /* Expired. Tree-kill and reap, so the answer is a status rather
-                 * than a caller left holding a handle to something still running. */
+            if (w == 1 && deadline_binds) {
+                /* The child's OWN deadline, declared at `child start -timeout`.
+                 * Tree-kill and reap: that is the contract it was launched under. */
                 c->killed = 1;
                 c->timeout = 1;
                 if (c->job) wj_job_terminate(c->job, 1);
                 w = child_reap(c, WJ_INFINITE, &err);
+            } else if (w == 1) {
+                /* The CALLER's bound. The child is untouched and still running;
+                 * say so and let them ask again. */
+                Tcl_SetObjResult(interp, child_dict_ex(interp, c, 1));
+                return TCL_OK;
             }
             if (w < 0) return mt_error(interp, "CHILD", "oserror", err);
         }

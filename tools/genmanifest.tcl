@@ -230,11 +230,30 @@ foreach {fn verb} $IMPL {
 # ---- result shapes ---------------------------------------------------------
 # One shared builder produces the dict `run` and `child wait` both answer with.
 if {[dict exists $fns child_dict]} {
-    set keys {}
-    foreach {_ k} [regexp -all -inline {Tcl_NewStringObj\("(\w+)", *-1\)} [dict get $fns child_dict]] {
-        lappend keys $k
+    # FOLLOW THE DELEGATION, to closure. The keys live in whichever function
+    # actually calls Tcl_DictObjPut, and that moved: `child_dict` became a
+    # one-line wrapper over `child_dict_ex` the moment `child wait` gained a
+    # "still running" answer. Matching one hardcoded name, this scanner derived
+    # an EMPTY result shape and the manifest quietly claimed `run` returns
+    # nothing -- caught only because a separate test compares the manifest to a
+    # real call. A derivation that reports nothing when the code moves is worse
+    # than one that reports nothing at all, because it looks like an answer.
+    set keys {} ; set todo [list child_dict] ; set seen {}
+    while {[llength $todo]} {
+        set f [lindex $todo 0] ; set todo [lrange $todo 1 end]
+        if {$f in $seen || ![dict exists $fns $f]} continue
+        lappend seen $f
+        set body [dict get $fns $f]
+        foreach {_ k} [regexp -all -inline {Tcl_NewStringObj\("(\w+)", *-1\)} $body] {
+            lappend keys $k
+        }
+        # Anything it calls that is also defined in this source tree.
+        foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $body] {
+            if {[dict exists $fns $callee]} { lappend todo $callee }
+        }
     }
     set keys [lsort -unique $keys]
+    if {![llength $keys]} { error "genmanifest: derived an empty result shape from child_dict" }
     foreach v {run child} {
         if {[dict exists $manifest $v]} { dict set manifest $v returns $keys }
     }

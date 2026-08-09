@@ -13,7 +13,7 @@ timestamp: 2026-07-09
 - **Namespace + bare verbs:** every command is `::machteld::<verb>`; the prelude also exposes them unqualified (via `namespace path`) so scripts read like a shell — without shadowing any core Tcl command.
 - **Options:** Tcl-classic `-flag value`, with a `--` guard separating machteld's options from the external command's args.
 - **Values:** durations carry an explicit unit (`500ms`, `30s`, `5m`, `2h`) — a bare number is **rejected**, so `-timeout 100` can never silently mean 100 seconds. Byte sizes take `K`/`M`/`G`.
-- **Results:** a dict. `run` returns `{exit status out err pid truncated}` (`status` ∈ `ok` / `error` / `timeout` / `killed`).
+- **Results:** a dict. `run` returns `{exit status out err pid truncated}` (`status` ∈ `ok` / `error` / `timeout` / `killed` / `running`). Only `child wait` can answer `running` — see [the two timeouts](#the-two-timeouts-and-only-one-of-them-kills).
 - **Errors:** thrown with a structured `-errorcode {MACHTELD RUN <code>}`.
 
 ## Built — execution core
@@ -35,6 +35,34 @@ detach -- watchdog.exe   → 8140               ;# fire-and-forget daemon; retur
 ```
 
 (Runtime semantics — linear + bounded lifetime — are in the [execution model](execution-model.md).)
+
+### The two timeouts, and only one of them kills
+
+They look alike and mean opposite things:
+
+| | |
+|---|---|
+| `child start -timeout 10m` | a **contract the child is launched under**. On expiry it is tree-killed and `status` is `timeout` — settled whenever the child is *observed*, so `child info` enforces it just as `child wait` does, and a supervisor polling every 250 ms caps within 250 ms. |
+| `child wait $c -timeout 200ms` | only **how long the caller will stand there**. On expiry the child is untouched and the dict says `status running`, `exit` empty. |
+
+When both apply the **earlier wins**, and what expiry *means* follows from which one it was: a child
+given 10 minutes at start does not get more because somebody waited generously, and a caller who
+waits 200 ms has not sentenced anything.
+
+That makes a bounded wait safe to poll with, which is what a Tk supervisor needs:
+
+```tcl
+proc tick {} {
+    foreach c [child list] {
+        if {[dict get [child wait $c -timeout 50ms] status] ne "running"} { harvest $c }
+    }
+    after 200 tick                                ;# the window stays alive throughout
+}
+```
+
+*It did not always. `child wait -timeout` used to tree-kill on expiry — so the loop above, which is
+the pattern this document recommends, quietly killed every child it asked about. Found by building
+a supervisor that needed exactly this.*
 
 ## Built — interactive (ConPTY)
 
