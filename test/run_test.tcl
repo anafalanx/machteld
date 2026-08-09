@@ -1523,7 +1523,7 @@ file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 # Driven by a LIST rather than one hardcoded call: `tasks` shipped with its
 # selftest unwired, so the tool had a passing test nothing ever ran. A gate that
 # covers the first tool and not the second is how that happens twice.
-foreach t {changes tasks} {
+foreach t {changes tasks sums} {
     set TOOL [file join $HERE .. tool $t]
     if {![file isdirectory $TOOL]} { continue }
     check "$t passes its own selftest" [expr {
@@ -1533,7 +1533,7 @@ foreach t {changes tasks} {
 
 # Every tool directory in tool/ must be covered by the loop above -- otherwise
 # adding a third tool silently adds an untested one.
-set known {changes tasks}
+set known {changes tasks sums}
 set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
 check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
 

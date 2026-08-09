@@ -57,6 +57,24 @@ exits, because a wrapped GUI exe has no standard channels). `tasks` now runs on 
 **Phase 1 is complete**: all three empty categories are filled. Next is Phase 2 — `fetch` over
 WinHTTP (so `http` can finally reach an https URL), then `csv`.
 
+## Parallelism
+
+✅ **The worker pool landed 2026-08-09**, in six steps against
+[the plan](pool-plan.md): `child start -channels` (the only new C — a child's pipes become Tcl
+channels, and its handles are still in a job object), `worker` (the far side: a handler is a proc,
+its argument list is the request schema), `pool` (supervision — requeue on death, poison after
+`-maxtries`, and results in submission order), `pmap` (the whole thing in one call, closing the
+pool on every path and re-raising a worker's failure with the worker's own errorcode), the
+realignment of what the pool made stale, and `sums` as the end-to-end proof.
+
+The crossover for offering work to another process fell from **26 ms to about 1 ms**. What that
+buys, and what it does not — hashing turns out to be a bandwidth problem wearing a CPU problem's
+clothes — is measured in [parallelism](parallel.md).
+
+✅ **`sums`** (`tool/sums`, wrapped to `sums.exe`) — the third shipped tool and the first that is
+not a window: it hashes a tree using **copies of itself** as workers. One artefact, no tclsh, no
+worker script on disk. It also exercises `wrap --console`.
+
 ## Later
 
 - **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `ps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).

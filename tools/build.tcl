@@ -171,7 +171,8 @@ puts "built [file nativename $out] ([file size $out] bytes)"
 # about to release, not on the one from last time.
 foreach {tooldir toolexe subsystem} [list \
         [Rp tool changes] [Rp build changes.exe] --gui \
-        [Rp tool tasks]   [Rp build tasks.exe]   --gui] {
+        [Rp tool tasks]   [Rp build tasks.exe]   --gui \
+        [Rp tool sums]    [Rp build sums.exe]    --console] {
     if {![file isdirectory $tooldir]} continue
     set script [Rp build .wrap.tcl]
     set fh [open $script w]
