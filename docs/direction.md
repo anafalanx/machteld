@@ -308,6 +308,160 @@ Three shape decisions, each following an existing precedent rather than inventin
 `denied` joins the registry as the one code that reports a permission, confined to `ps` because
 `ps` is the one verb that reaches outside machteld's own children.
 
+## The store is not the parallelism mechanism (2026-08-09)
+
+**Refused.** A store-backed work queue was built and measured properly first: WAL, a busy
+timeout, and 
+[38;5;8mUnknown command 'del'.[0m
+
+[38;5;8mUse 'help' to see available commands.[0m returning its row count give an atomic claim with no new verb, and it
+reached **12,500 claims/sec across 6 processes with every job claimed exactly once**. The numbers
+were good.
+
+It was turned down on what it would have made 
+
+[38;5;69m ██████╗  ████████╗   ██████╗   ██████╗   ███████╗         ██████╗  ██╗       [0m
+[38;5;69m██╗  [0m
+[38;5;69m██╔════╝  ╚══██╔══╝  ██╔═══██╗  ██╔══██╗  ██╔════╝        ██╔════╝  ██║       [0m
+[38;5;69m██║  [0m
+[38;5;189m╚█████╗      ██║     ██║   ██║  ██████╔╝  █████╗          ██║       ██║       [0m
+[38;5;189m██║  [0m
+[38;5;153m ╚═══██╗     ██║     ██║   ██║  ██╔══██╗  ██╔══╝          ██║       ██║       [0m
+[38;5;153m██║  [0m
+[38;5;153m██████╔╝     ██║     ╚██████╔╝  ██║  ██║  ███████╗        ╚██████╗  ███████╗  [0m
+[38;5;153m██║  [0m
+[38;5;75m╚═════╝      ╚═╝      ╚═════╝   ╚═╝  ╚═╝  ╚══════╝         ╚═════╝  ╚══════╝  [0m
+[38;5;75m╚═╝  [0m
+
+[38;5;8mv22606.1401.13.0 - Preview[0m
+
+Usage: [38;5;69mstore[0m [38;5;189m<command>[0m [38;5;8m[options][0m
+       [38;5;69mstore[0m [38;5;51m--help[0m
+
+Use '[38;5;69mstore[0m [38;5;189m<command>[0m [38;5;51m--help[0m' to get detailed help for any command.
+
+[38;5;69mDiscovery Commands:[0m
+[38;5;238m┌──────────────┬──────────────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m      [38;5;238m│[0m [38;5;189mdescription[0m                              [38;5;238m│[0m
+[38;5;238m├──────────────┼──────────────────────────────────────────┤[0m
+[38;5;238m│[0m addons       [38;5;238m│[0m List add-ons for a game                  [38;5;238m│[0m
+[38;5;238m│[0m browse-apps  [38;5;238m│[0m Browse ranked app lists                  [38;5;238m│[0m
+[38;5;238m│[0m browse-games [38;5;238m│[0m Browse ranked game lists                 [38;5;238m│[0m
+[38;5;238m│[0m extension    [38;5;238m│[0m Find apps that open specific file types  [38;5;238m│[0m
+[38;5;238m│[0m protocol     [38;5;238m│[0m Find apps that handle custom URL schemes [38;5;238m│[0m
+[38;5;238m│[0m publisher    [38;5;238m│[0m Find products from a publisher           [38;5;238m│[0m
+[38;5;238m│[0m search       [38;5;238m│[0m Search for apps and games                [38;5;238m│[0m
+[38;5;238m│[0m show         [38;5;238m│[0m Show product details and ratings         [38;5;238m│[0m
+[38;5;238m│[0m similar      [38;5;238m│[0m Find similar products                    [38;5;238m│[0m
+[38;5;238m└──────────────┴──────────────────────────────────────────┘[0m
+
+[38;5;69mOperations Commands:[0m
+[38;5;238m┌───────────┬─────────────────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m   [38;5;238m│[0m [38;5;189mdescription[0m                                 [38;5;238m│[0m
+[38;5;238m├───────────┼─────────────────────────────────────────────┤[0m
+[38;5;238m│[0m install   [38;5;238m│[0m Install an app from the Store               [38;5;238m│[0m
+[38;5;238m│[0m installed [38;5;238m│[0m List all installed apps                     [38;5;238m│[0m
+[38;5;238m│[0m update    [38;5;238m│[0m Check updates for a specific app            [38;5;238m│[0m
+[38;5;238m│[0m updates   [38;5;238m│[0m Check for updates across all installed apps [38;5;238m│[0m
+[38;5;238m└───────────┴─────────────────────────────────────────────┘[0m
+
+[38;5;69mHelper Commands:[0m
+[38;5;238m┌─────────────────┬─────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m         [38;5;238m│[0m [38;5;189mdescription[0m                     [38;5;238m│[0m
+[38;5;238m├─────────────────┼─────────────────────────────────┤[0m
+[38;5;238m│[0m app-categories  [38;5;238m│[0m List app categories             [38;5;238m│[0m
+[38;5;238m│[0m game-categories [38;5;238m│[0m List game categories            [38;5;238m│[0m
+[38;5;238m│[0m muid            [38;5;238m│[0m Get the Store device identifier [38;5;238m│[0m
+[38;5;238m└─────────────────┴─────────────────────────────────┘[0m
+
+[38;5;69mExamples:[0m
+  [38;5;8mstore search "Microsoft Teams"[0m
+  [38;5;8mstore show "Visual Studio Code"[0m
+  [38;5;8mstore browse-apps top-free --category productivity[0m
+  [38;5;8mstore browse-games top-paid --only-game-pass[0m
+  [38;5;8mstore similar firefox[0m
+  [38;5;8mstore updates[0m
+  [38;5;8mstore install whatsapp[0m into. 
+
+[38;5;69m ██████╗  ████████╗   ██████╗   ██████╗   ███████╗         ██████╗  ██╗       [0m
+[38;5;69m██╗  [0m
+[38;5;69m██╔════╝  ╚══██╔══╝  ██╔═══██╗  ██╔══██╗  ██╔════╝        ██╔════╝  ██║       [0m
+[38;5;69m██║  [0m
+[38;5;189m╚█████╗      ██║     ██║   ██║  ██████╔╝  █████╗          ██║       ██║       [0m
+[38;5;189m██║  [0m
+[38;5;153m ╚═══██╗     ██║     ██║   ██║  ██╔══██╗  ██╔══╝          ██║       ██║       [0m
+[38;5;153m██║  [0m
+[38;5;153m██████╔╝     ██║     ╚██████╔╝  ██║  ██║  ███████╗        ╚██████╗  ███████╗  [0m
+[38;5;153m██║  [0m
+[38;5;75m╚═════╝      ╚═╝      ╚═════╝   ╚═╝  ╚═╝  ╚══════╝         ╚═════╝  ╚══════╝  [0m
+[38;5;75m╚═╝  [0m
+
+[38;5;8mv22606.1401.13.0 - Preview[0m
+
+Usage: [38;5;69mstore[0m [38;5;189m<command>[0m [38;5;8m[options][0m
+       [38;5;69mstore[0m [38;5;51m--help[0m
+
+Use '[38;5;69mstore[0m [38;5;189m<command>[0m [38;5;51m--help[0m' to get detailed help for any command.
+
+[38;5;69mDiscovery Commands:[0m
+[38;5;238m┌──────────────┬──────────────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m      [38;5;238m│[0m [38;5;189mdescription[0m                              [38;5;238m│[0m
+[38;5;238m├──────────────┼──────────────────────────────────────────┤[0m
+[38;5;238m│[0m addons       [38;5;238m│[0m List add-ons for a game                  [38;5;238m│[0m
+[38;5;238m│[0m browse-apps  [38;5;238m│[0m Browse ranked app lists                  [38;5;238m│[0m
+[38;5;238m│[0m browse-games [38;5;238m│[0m Browse ranked game lists                 [38;5;238m│[0m
+[38;5;238m│[0m extension    [38;5;238m│[0m Find apps that open specific file types  [38;5;238m│[0m
+[38;5;238m│[0m protocol     [38;5;238m│[0m Find apps that handle custom URL schemes [38;5;238m│[0m
+[38;5;238m│[0m publisher    [38;5;238m│[0m Find products from a publisher           [38;5;238m│[0m
+[38;5;238m│[0m search       [38;5;238m│[0m Search for apps and games                [38;5;238m│[0m
+[38;5;238m│[0m show         [38;5;238m│[0m Show product details and ratings         [38;5;238m│[0m
+[38;5;238m│[0m similar      [38;5;238m│[0m Find similar products                    [38;5;238m│[0m
+[38;5;238m└──────────────┴──────────────────────────────────────────┘[0m
+
+[38;5;69mOperations Commands:[0m
+[38;5;238m┌───────────┬─────────────────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m   [38;5;238m│[0m [38;5;189mdescription[0m                                 [38;5;238m│[0m
+[38;5;238m├───────────┼─────────────────────────────────────────────┤[0m
+[38;5;238m│[0m install   [38;5;238m│[0m Install an app from the Store               [38;5;238m│[0m
+[38;5;238m│[0m installed [38;5;238m│[0m List all installed apps                     [38;5;238m│[0m
+[38;5;238m│[0m update    [38;5;238m│[0m Check updates for a specific app            [38;5;238m│[0m
+[38;5;238m│[0m updates   [38;5;238m│[0m Check for updates across all installed apps [38;5;238m│[0m
+[38;5;238m└───────────┴─────────────────────────────────────────────┘[0m
+
+[38;5;69mHelper Commands:[0m
+[38;5;238m┌─────────────────┬─────────────────────────────────┐[0m
+[38;5;238m│[0m [38;5;189mcommand[0m         [38;5;238m│[0m [38;5;189mdescription[0m                     [38;5;238m│[0m
+[38;5;238m├─────────────────┼─────────────────────────────────┤[0m
+[38;5;238m│[0m app-categories  [38;5;238m│[0m List app categories             [38;5;238m│[0m
+[38;5;238m│[0m game-categories [38;5;238m│[0m List game categories            [38;5;238m│[0m
+[38;5;238m│[0m muid            [38;5;238m│[0m Get the Store device identifier [38;5;238m│[0m
+[38;5;238m└─────────────────┴─────────────────────────────────┘[0m
+
+[38;5;69mExamples:[0m
+  [38;5;8mstore search "Microsoft Teams"[0m
+  [38;5;8mstore show "Visual Studio Code"[0m
+  [38;5;8mstore browse-apps top-free --category productivity[0m
+  [38;5;8mstore browse-games top-paid --only-game-pass[0m
+  [38;5;8mstore similar firefox[0m
+  [38;5;8mstore updates[0m
+  [38;5;8mstore install whatsapp[0m holds a tool's own key-value
+state; a work queue is a different thing with different rules, and putting both in one file
+behind one lock conflates them — [creed](creed.md) 6 asks for one way to do each thing, and this
+was one thing doing two.
+
+The durability question was the tell rather than the obstacle: a queue wants
+, state a user keeps may want , and when one knob cannot serve both
+defensible answers it is usually because two things are sharing one mechanism. Measured, recorded
+in [parallel](parallel.md), reverted.
+
+A durable cross-process queue, if ever wanted, arrives as **its own verb with its own file**.
+
+Two findings outlive the refusal and are recorded in [parallel](parallel.md): **SQLite is a
+coordination point, not a parallel data path** (throughput *falls* from 14,151 to 6,749 claims/sec
+between 2 and 24 workers, because there is one writer at a time), and **a hot loop at a script's
+top level runs ~8× slower than the same loop in a proc** — which made the first parallelism
+benchmark report a 0.79× slowdown when the machine was in fact overlapping 7.46×.
+
 ## The cockpit — built, measured, removed (2026-08-09)
 
 `mt` was a live window over the current session. It is **gone**, in the same day it arrived, and
