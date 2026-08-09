@@ -166,6 +166,40 @@ is emitted as a JSON *number* only if it is already a valid JSON number literal 
 stays the string `"01234"` rather than silently becoming `1234` — and booleans and nulls do not
 round-trip, because Tcl has neither. See [the contract](contract.md).
 
+## Built — saying what happened
+
+```tcl
+log configure -level info -file app.log   ;# or -channel stderr
+log info  "watching" dir $d count 3
+log warn  "queue filling" pct 91
+log error "cannot open" path $p
+log configure                             ;# level, channel, file, and drops
+```
+
+Levels are `debug info warn error`, ordered, plus `off`. A line reads:
+
+```
+2026-08-09T15:53:06.832 INFO  watching dir=C:/dev/_machteld count=3
+```
+
+**A write failure never throws.** This is the decision the rest hangs on. A wrapped GUI exe is
+started with **no standard channels**, so `puts stderr` raises there — and a log call that can
+throw is a log call that kills the program at whatever arbitrary point it was asked to record
+something. A failed write increments a counter instead, and `log configure` reports it: the same
+bargain [`watch`](#) makes with its `dropped` count. Losing data silently is unacceptable, so it
+is counted and reported; it does not become an exception in the middle of unrelated work.
+
+**Pairs after the message are structure, not decoration.** [Creed](creed.md) 2 says
+machine-legible and human-legible should be the same thing, and a log line is where that
+principle is most often abandoned. Values containing spaces or quotes are quoted, so a line can
+be read back. A dangling key with no value renders as `key=?` rather than raising — the caller's
+mistake must not cost the message, which is being written precisely because something is already
+going wrong.
+
+`-file` **appends**: a tool restarting must not erase the record of why it restarted. Changing
+the sink closes the channel `log` opened, so the file is not locked for the life of the process.
+`-level` and `-channel` are checked when configured rather than discovered later by silence.
+
 ## Built — declaring a tool's arguments
 
 ```tcl

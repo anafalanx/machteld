@@ -553,6 +553,109 @@ check "pty info on a dead token"    [expr {
     [errcode_of {pty info nosuch#9}] eq {MACHTELD PTY nohandle}}]
 pty close $p2
 
+# --- log: say what happened, where someone can read it later -----------------
+set LGF [file join $env(TEMP) mt_log_suite.txt]
+proc logfile {} { set c [open $::LGF r] ; set t [read $c] ; close $c ; return $t }
+proc logreset {} {
+    # Switching sinks first is not tidiness: Windows refuses to delete a file
+    # that is still open, so this only works because `log` closes the channel it
+    # owns when the sink changes. If it leaked, every reset below would fail.
+    catch {log configure -channel stderr}
+    file delete -force $::LGF
+    log configure -file $::LGF -level debug
+}
+
+logreset
+log info "hello"
+# The reset above proves it, but state it as a claim: an owned file channel is
+# released when the sink changes, or it would be locked for the process's life.
+log configure -channel stderr
+check "switching sinks releases the file" [expr {[catch {file delete -force $LGF}] == 0}]
+log configure -file $LGF -level debug
+log info "hello"
+check "a line carries an ISO timestamp" [regexp {^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3} } [logfile]]
+check "a line carries the level"        [string match "*INFO *"  [logfile]]
+check "a line carries the message"      [string match "*hello*"  [logfile]]
+
+logreset
+log info "started" pid 4812 dir /tmp
+check "pairs render as key=value" [expr {
+    [string match "*pid=4812*" [logfile]] && [string match "*dir=/tmp*" [logfile]]}]
+logreset
+log info "spaced" path "C:/some path/x.txt"
+check "a value with spaces is quoted"  [string match {*path="C:/some path/x.txt"*} [logfile]]
+logreset
+log info "empty" k ""
+check "an empty value is visibly empty" [string match {*k=""*} [logfile]]
+
+# A dangling key must not lose the message: the caller made a mistake, but a log
+# line is the worst place to raise about it.
+logreset
+log warn "half a pair" a 1 dangling
+check "a dangling key is marked"        [string match "*dangling=?*" [logfile]]
+check "a dangling key keeps the message" [string match "*half a pair*" [logfile]]
+check "a dangling key keeps the good pairs" [string match "*a=1*" [logfile]]
+
+# Levels
+logreset
+log configure -level warn
+log debug "no" ; log info "no" ; log warn "yes-warn" ; log error "yes-error"
+check "below the level is dropped" [expr {![string match "*no*" [logfile]]}]
+check "at the level is kept"       [string match "*yes-warn*"  [logfile]]
+check "above the level is kept"    [string match "*yes-error*" [logfile]]
+logreset
+log configure -level off
+log error "silenced"
+check "off silences even error" [expr {[string trim [logfile]] eq ""}]
+
+# -file APPENDS. A tool restarting must not erase the record of why it restarted.
+logreset
+log info "first run"
+log configure -file $LGF
+log info "second run"
+check "reconfiguring the same file appends" [expr {
+    [string match "*first run*" [logfile]] && [string match "*second run*" [logfile]]}]
+
+# THE PROPERTY THE WHOLE VERB RESTS ON: a failed write never throws. A wrapped
+# GUI exe has no standard channels, so `puts stderr` raises there -- and a log
+# call that can throw kills the program at whatever arbitrary point it was asked
+# to record something.
+logreset
+set dead [open [file join $env(TEMP) mt_log_dead.txt] w]
+log configure -channel $dead
+close $dead
+set before [dict get [log configure] dropped]
+check "logging to a dead channel does not throw" [expr {[catch {log error "into the void"}] == 0}]
+check "logging to a dead channel does not throw twice" [expr {[catch {log warn "again"}] == 0}]
+check "the drops are counted"  [expr {[dict get [log configure] dropped] == $before + 2}]
+check "configure reports what was lost" [expr {[dict get [log configure] dropped] > 0}]
+
+# configure reads back
+log configure -channel stderr -level info
+set lc [log configure]
+check "configure returns a dict"        [expr {[lsort [dict keys $lc]] eq {channel dropped file level}}]
+check "configure reports the level"     [expr {[dict get $lc level] eq "info"}]
+check "configure reports the channel"   [expr {[dict get $lc channel] eq "stderr"}]
+
+# the error contract -- and the split that matters: a bad LEVEL is the author's
+# mistake (badvalue), an unknown OPTION is a usage error.
+check "an unknown level => badvalue"     [expr {
+    [errcode_of {log configure -level shouty}] eq {MACHTELD LOG badvalue}}]
+check "an unknown channel => badvalue"   [expr {
+    [errcode_of {log configure -channel nosuch}] eq {MACHTELD LOG badvalue}}]
+check "an unwritable file => oserror"    [expr {
+    [errcode_of {log configure -file [file join $env(TEMP) nosuchdir_zzz x.log]}]
+        eq {MACHTELD LOG oserror}}]
+check "an unknown option => usage"       [expr {
+    [errcode_of {log configure -nope 1}] eq {MACHTELD LOG usage}}]
+check "an option without a value => usage" [expr {
+    [errcode_of {log configure -level}] eq {MACHTELD LOG usage}}]
+check "an unknown subcommand => usage"   [expr {
+    [errcode_of {log shout "hi"}] eq {MACHTELD LOG usage}}]
+check "a level with no message => usage" [expr {
+    [errcode_of {log info}] eq {MACHTELD LOG usage}}]
+file delete -force $LGF [file join $env(TEMP) mt_log_dead.txt]
+
 # --- cli: declare a tool's arguments once ------------------------------------
 set CSPEC {
     --interval {type int    default 2000 min 100 max 60000 help "refresh interval, ms"}
@@ -820,7 +923,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach hash help json manifest ps pty run scope store version vtstrip wait watch wrap}}]
+    {child cli detach hash help json log manifest ps pty run scope store version vtstrip wait watch wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }

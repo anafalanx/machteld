@@ -8,6 +8,44 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-09 — `log`, and Phase 1 complete
+
+The last of the three categories machteld had entirely empty. It matters more here than the count
+suggests: running things unattended is the whole premise, and a `detach`'d daemon had nowhere to
+write at all.
+
+`log configure / debug / info / warn / error`, levels ordered with `off` to silence, output to a
+channel or an appending file, and structured pairs after the message:
+
+```
+2026-08-09T15:53:06.832 INFO  watching dir=C:/dev/_machteld count=3
+```
+
+**A write failure never throws**, and that decision shapes everything else. A wrapped GUI exe
+starts with no standard channels, so `puts stderr` raises there — and a log call that can throw
+kills the program at whatever arbitrary point it was asked to record something. A failed write
+increments a counter and `log configure` reports it: the same bargain `watch` already makes with
+`dropped`. Losing data silently is unacceptable, so it is counted; it does not become an
+exception in the middle of unrelated work. Removing the guard fails four tests.
+
+Pairs are structure rather than decoration — creed 2 says machine-legible and human-legible
+should be the same thing, and a log line is where that is most often abandoned. A dangling key
+renders `key=?` rather than raising: the caller's mistake must not cost the message, which is
+being written precisely because something is already going wrong.
+
+Two smaller decisions worth their lines. `-file` **appends**, because a tool restarting must not
+erase the record of why it restarted. And changing the sink closes the channel `log` opened — not
+tidiness but necessity: Windows refuses to delete an open file, so a leak would lock the log for
+the life of the process. The suite's own reset only works because of it, which is why it is also
+asserted directly.
+
+### Phase 1 is complete
+
+`hash`, `cli` and `log` — the three categories present in Python, Go and Deno alike and absent
+here. The palette stands at **18 verbs**, four of them Tcl-written with full manifest facts
+(domain, codes, options, subcommands), which is Phase 0 paying for itself: each of these landed
+already describing itself, with nothing retrofitted.
+
 ## 2026-08-09 — `cli`: declare a tool's arguments once
 
 Second of the three empty stdlib categories. Argument parsing exists in every standard library
