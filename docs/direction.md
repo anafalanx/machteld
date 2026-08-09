@@ -68,9 +68,30 @@ The one thing that does not relax: a verb built on spec is still a verb, so it a
 tests, its docs, its error codes and its manifest entry like everything else. Exploration is not
 a licence to ship something unfinished — it is a licence to ship something *unneeded*.
 
-**Review, not permission.** A provisional verb still unused after a while is not a failure; it
-is a question. Answer it deliberately — keep it, reshape it, or take it out — rather than letting
-it sit and calling that a decision.
+**Review, not permission.** A verb still unused after a while is not a failure; it is a question.
+Answer it deliberately — keep it, reshape it, or take it out — rather than letting it sit and
+calling that a decision.
+
+**Where the case for a capability comes from, in order.** *Added 2026-08-09, because the retired
+demand-first rule kept being reconstructed in new costumes even after it was written out.* The
+evidence for building something is, strongest first:
+
+1. **The domain.** What does a Windows machine-control toolkit need in order to be one? This is
+   the question that actually decides, and it does not depend on what happens to exist yet.
+2. **What comparable standard libraries settled on.** Python, Go, Deno and PowerShell encode
+   decades of accumulated evidence from millions of programs. A category present in all of them
+   and absent here is a real hole; a category absent from all of them needs a specific argument.
+3. **What already-built tools needed** — **a tiebreak at most, never the primary case.**
+
+The third was doing all the work and it produced badly ranked answers. Ranking the standard
+library from two Tk tools written the same afternoon put byte-formatting helpers second and
+crypto — absent from machteld entirely, present in every comparable stdlib — fourth, because
+neither tool happened to hash anything. Two programs of one genre cannot be a sample for what a
+*standard* library needs; "standard" means serving programs nobody has written yet.
+
+The failure mode this guards against is subtle and recurring: demand-first reasoning is
+comfortable, feels rigorous, and reappears as "but what would use it?" long after the rule
+requiring it is gone. That question is worth asking last, not first.
 
 **The domains are unchanged in substance:** `reg`, `svc`, `evt` and the `net`/`host`/`user`/`wmi`
 group are all wanted, our own C for each, and **TWAPI stays a quarry** opened only for WMI/COM

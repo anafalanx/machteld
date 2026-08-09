@@ -40,6 +40,15 @@ longer has to be asked for before it may be built.
 
 ✅ **`json`** landed 2026-08-09 — hand-rolled C into `Tcl_Obj`, gated on the vendored nst/JSONTestSuite (95/95 `y_`, 188/188 `n_`). The signature-derived CLI and shapes remain, to land at the moment a tool reaches for them.
 
+## The standard library
+
+Assessed 2026-08-09 against Python, Go and Deno rather than against what happens to be built:
+three categories are **empty** — crypto/hashing, CLI parsing, logging — and TLS is missing, so
+`http` cannot reach an https URL. Process control, meanwhile, is already ahead of all three and
+is the asymmetry to widen. The plan, its design rules and its ordering are in
+[the standard library](stdlib.md). **Phase 0 comes first**: the prelude has to hold itself to the
+contract before it becomes the place the standard library lives.
+
 ## Later
 
 - **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `ps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
