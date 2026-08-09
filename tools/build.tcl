@@ -151,7 +151,7 @@ run $tclshs [Rp tools genmanifest.tcl] [Rp src] $genman
 set staged [Rp build prelude.tcl]
 set fo [open $staged w]
 fconfigure $fo -translation lf
-foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] $genman] {
+foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] $genman] {
     set fi [open $part r]
     fconfigure $fi -translation lf
     puts $fo [read $fi]

@@ -39,8 +39,9 @@ libraries settled on second, and from existing tools only as a tiebreak.
 | uuid / ids | `uuid` | — | `uuid`, `ulid` | ❌ |
 | **process control** | `subprocess` | `os/exec` | — | ✅✅ **ahead of all three** |
 
-Three categories are **empty** and present in every comparison runtime: crypto/hashing, CLI
-parsing, logging. Those are the plan.
+Three categories were **empty** while present in every comparison runtime: crypto/hashing, CLI
+parsing, logging. **All three are now built** (`hash`, `cli`, `log`), which completes Phase 1.
+What remains is Phase 2 (`fetch` over WinHTTP, `csv`) and Phase 3.
 
 ## What "fits the architecture" means here
 
@@ -142,7 +143,7 @@ dict get $opt interval
 declaration rather than from prose somebody has to remember to update — the same reasoning that
 made the manifest derived rather than hand-written.
 
-### `log` — Tcl
+### `log` — Tcl — ✅ **done 2026-08-09**
 
 Unattended execution is machteld's premise, and a `detach`'d daemon currently has nowhere to
 write.

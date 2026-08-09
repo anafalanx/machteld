@@ -84,6 +84,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `HELP` | `help` |
 | `HASH` | `hash` (all subcommands) |
 | `CLI` | `cli` |
+| `LOG` | `log` (all subcommands) |
 
 **The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
 they can throw a code this table does not name, *and* fails if the table names a code the C
