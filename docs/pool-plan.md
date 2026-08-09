@@ -63,6 +63,24 @@ destructor — with every symptom pointing at the pipe. This is documented in
 `worker` and `pool` templates must carry `namespace path ::machteld`, and anything sharing a name
 with a Tcl built-in must use the ensemble form (`chan close`).
 
+**Resolved in step 5**, once there was something real to point them at:
+
+1. [Execution model](execution-model.md) now points the callback layer at `pool` and at Tk, where
+   it actually went.
+2. The two ways to wait are a **table** in that document — blocking verbs wait for a *process*,
+   the event loop waits for *data*, neither subsumes the other, and a blocking verb does not pump
+   the event loop. Named, not hidden.
+3. Held: a channel-mode child returns the same six keys as any other, verified rather than
+   assumed.
+4. Superseded by a better fix than the one written here. Rather than telling authors to declare a
+   namespace path, `worker on` now compiles a handler **in the namespace where it was written**,
+   so a handler calls its own file's procs by bare name like every other line around it. The
+   prescription below would have left the trap in place and asked people to remember; this removes
+   it for the case that bit. What is left is one ordinary rule — a namespace of your own needs
+   `namespace path ::machteld` — plus a gate asserting **every palette verb is reachable by its
+   bare name**, so a future verb called `close` or `format` fails the suite instead of being
+   silently answered by Tcl's command of that name.
+
 ## The steps
 
 Each step ends in a state that builds, passes the suite, and is worth committing. No step depends

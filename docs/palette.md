@@ -335,6 +335,12 @@ boundary; a malformed line is answered rather than fatal.
 > **A handler must not write to stdout.** Stdout *is* the protocol — a stray `puts` injects a line
 > that is not a reply. Use [`log`](#), which goes to stderr or a file.
 
+**A handler body is compiled in the namespace where you wrote it**, so it reads like the code
+around it and calls that namespace's own procs by bare name. The ordinary rule therefore applies
+to handlers exactly as it applies to every other line in the file — a namespace of your own needs
+`namespace path ::machteld` for bare palette verbs, and at global scope, which is what a small
+worker script uses, both resolve with nothing declared.
+
 ## Built — declaring a tool's arguments
 
 ```tcl
