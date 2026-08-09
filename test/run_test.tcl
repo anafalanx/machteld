@@ -567,15 +567,53 @@ check "store put/get round-trips"    [expr {[store put a b] eq "" && [store get 
 store close
 file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 
-# --- the first real tool, wrapped and self-testing -----------------------------
-# `changes` is a pure Tcl/Tk tool stamped by wrap. Its own --selftest exercises
-# the event model with no window, because a hidden Tk window drops events and
-# would be testing something other than the program.
-set TOOL [file join $HERE .. tool changes]
-if {[file isdirectory $TOOL]} {
-    check "the change-viewer's model passes its own selftest" [expr {
+# --- the shipped tools, self-testing -----------------------------------------
+# Each tool is pure Tcl/Tk stamped by wrap, and each carries a --selftest that
+# exercises its model with no window -- a hidden Tk window drops events and would
+# be testing something other than the program.
+#
+# Driven by a LIST rather than one hardcoded call: `tasks` shipped with its
+# selftest unwired, so the tool had a passing test nothing ever ran. A gate that
+# covers the first tool and not the second is how that happens twice.
+foreach t {changes tasks} {
+    set TOOL [file join $HERE .. tool $t]
+    if {![file isdirectory $TOOL]} { continue }
+    check "$t passes its own selftest" [expr {
         ![catch {run -timeout 60s -- $MT [file join $TOOL main.tcl] --selftest} tr]
         && [dict get $tr exit] == 0}]
+}
+
+# Every tool directory in tool/ must be covered by the loop above -- otherwise
+# adding a third tool silently adds an untested one.
+set known {changes tasks}
+set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
+check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
+
+# --- tools reject bad arguments instead of dying in a timer -------------------
+# `tasks --interval` with nothing after it set the interval to the empty string;
+# `after ""` then threw out of tick, so the tool died at startup -- or, worse, if
+# it was already running, stopped refreshing while still showing a list that
+# looked live. The next button in that window is End Task.
+set TASKS [file join $HERE .. tool tasks main.tcl]
+if {[file exists $TASKS]} {
+    foreach {label argl} {
+        "--interval with no value"   {--interval}
+        "--interval with a non-number" {--interval abc}
+        "--interval below the floor" {--interval 5}
+        "an unknown argument"        {--nonsense}
+    } {
+        set r [run -timeout 30s -- $MT $TASKS {*}$argl]
+        check "tasks rejects $label" [expr {[dict get $r exit] == 2}]
+        check "tasks explains $label" [expr {
+            [string match "*tasks:*" [dict get $r err]] ||
+            [string match "*tasks:*" [dict get $r out]]}]
+    }
+    # A valid value must survive the parser AND still reach the mode: validation
+    # runs before --selftest is honoured, so this exercises both.
+    set r [run -timeout 60s -- $MT $TASKS --interval 500 --selftest]
+    check "tasks accepts a valid --interval" [expr {[dict get $r exit] == 0}]
+    set r [run -timeout 30s -- $MT $TASKS --interval bogus --selftest]
+    check "a bad --interval is caught even in selftest mode" [expr {[dict get $r exit] == 2}]
 }
 
 file delete $CHILD
