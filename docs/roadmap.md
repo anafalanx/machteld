@@ -67,9 +67,13 @@ its argument list is the request schema), `pool` (supervision — requeue on dea
 pool on every path and re-raising a worker's failure with the worker's own errorcode), the
 realignment of what the pool made stale, and `sums` as the end-to-end proof.
 
-The crossover for offering work to another process fell from **26 ms to about 1 ms**. What that
-buys, and what it does not — hashing turns out to be a bandwidth problem wearing a CPU problem's
-clothes — is measured in [parallelism](parallel.md).
+The crossover for offering work to another process fell from **26 ms to about 1 ms** — measured
+afterwards against the alternatives, where it holds against a `child start` per item (**41×** the
+throughput at 0.5 ms items) and **does not** hold against a hand-written static partition, which
+matches or beats the pool on uniform work at every size tried. What the pool is actually worth is
+small items, item costs that are unpredictable or arrive clustered, supervision, and one call
+instead of thirty lines — not throughput over a partition you could have written yourself. The
+numbers, and the two predictions that came out wrong, are in [parallelism](parallel.md).
 
 ✅ **`sums`** (`tool/sums`, wrapped to `sums.exe`) — the third shipped tool and the first that is
 not a window: it hashes a tree using **copies of itself** as workers. One artefact, no tclsh, no
