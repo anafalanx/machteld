@@ -35,9 +35,19 @@ Windows schedules them fine, so a pool bounds memory and handles rather than buy
 
 > ## The trap to know before writing any worker
 >
-> A hot loop at a script's **top level** runs about **8× slower** than the same loop inside a
-> `proc` — 1.75 µs against 0.22 µs per iteration here. Tcl compiles procedure bodies to local
-> variable slots; top-level code resolves globals every time.
+> A hot loop at a script's **top level** runs **3.6× slower** than the same loop inside a `proc`:
+> 1488 ms against 415 ms for the same two million iterations in the same spawned child. In-process
+> the ratio is 2.2×.
+>
+> *(An earlier draft of this file said 8×. That compared a child's top-level loop against the
+> parent's proc, so it charged the difference between two processes to the difference between two
+> scopes. The number above is the same script twice, in one child.)*
+>
+> The cause is not local-versus-global variables, which is the intuitive guess and is wrong: a
+> proc using `global` runs 428 ms against 401 ms for one using locals, because `global` installs
+> a **link in the local frame** and keeps the slot. What matters is being inside a procedure body
+> at all — that is what gives the compiler a frame to assign slots in. `apply` at top level is
+> equally fast (413 ms), which pins it: an anonymous proc is still a proc.
 >
 > This is not a footnote. The first version of the benchmark above put the loop at top level in
 > the worker and inside a proc in the parent, and duly reported parallelism as a **0.79×
@@ -91,6 +101,78 @@ change was measured, recorded here, and reverted.
 
 If a durable cross-process queue is ever genuinely wanted, it should arrive as **its own verb
 with its own file**, free to choose its own durability — not as a second personality for `store`.
+
+## A separate mechanism — the shape the evidence points at
+
+**Decided: whatever this becomes, it is not `store`.** What follows is design, not built.
+
+The proposal that started it: a director writes tasks to a database, workers pick them up, each
+worker writes results to **its own** database, and the director reads them all. The claim was
+*never any write contention*.
+
+### What the measurements say about it
+
+**The results half is right, and better than it looks.** With realistic work — 96 items of ~50 ms
+each, one durable result row written per item — it reaches **3.48× on 8 workers with 96/96 rows
+collected**. The database cost disappears into the work.
+
+**But "no write contention" is only true at the SQLite level.** Separate files remove *lock*
+contention and cannot remove *disk* contention. Eight workers writing 400 trivial rows each to
+eight separate files aggregate **175 rows/sec — the same as one worker's 156**. Every write is
+its own transaction paying an fsync at ~2.4 ms, and eight processes syncing independently still
+queue at the storage layer.
+
+Those two results are not in conflict; they bound each other. **The fsync ceiling is roughly 400
+writes/sec on this disk, and it only bites when an item's own work is smaller than 2.4 ms.**
+machteld cannot profitably run items that small anyway — a worker costs 26 ms to start. So at the
+grain machteld actually works, per-item durability is free; at finer grain, nothing about file
+layout saves it and only **batched commits** would.
+
+### The refinement worth taking
+
+Push the instinct all the way and the design gets better: **every file has exactly one writer, for
+its whole life.**
+
+```
+tasks-N.db     written only by the director,   read only by worker N
+results-N.db   written only by worker N,       read only by the director
+```
+
+Now there is no claim, no arbitration and no lock contention **by construction** rather than by
+timing. A worker never writes a file anyone else touches, and neither does the director.
+
+The obvious objection is load balancing: a static split leaves stragglers, which is visible above
+as the plateau between 8 workers (2103 ms) and 12 (2096 ms) — twelve workers with eight items
+each finish unevenly and the slowest sets the wall clock. The answer keeps the single-writer rule
+intact: **the director tops up**. It watches each worker's results file, and when a worker is
+running low it appends more tasks to that worker's own task file. Balance is restored without any
+file ever gaining a second writer.
+
+The cost is polling latency on both sides, which at 50 ms-per-item grain is noise.
+
+### What such a mechanism has to provide
+
+Whatever surface this takes, the measurements say it needs four things `store` does not have:
+
+1. **Its own file, and its own durability choice** — a queue may pick `synchronous=NORMAL`; a
+   user's state may not want to.
+2. **WAL**, so the director can read a worker's results *while it is still writing them*. That is
+   the capability nothing else here offers: progress visible mid-flight, not at exit.
+3. **Batched commits** — one fsync per batch rather than per row. This is the only thing that
+   moves the 400/sec ceiling, and no amount of file separation substitutes for it.
+4. **Append and range-read**, not key-value. Results are a sequence, and `keys`-then-`get` is the
+   wrong shape for reading 10,000 of them.
+
+### Two candidate shapes
+
+- **A job verb** — `queue`/`take`/`post`/`drain`, with the pattern built in. Convenient, and it
+  fixes one policy for everyone.
+- **A thin table verb** — append rows to your own file, read ranges, commit in batches, and let
+  the director/worker pattern live in the prelude as ordinary Tcl.
+
+[Rule 4](direction.md) argues for the second: C only for what Tcl cannot reach. Tcl cannot reach
+SQLite, but it can certainly express a queue given a table — and a table is useful for things
+that are not queues, while a queue is not.
 
 ## What remains open
 

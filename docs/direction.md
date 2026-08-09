@@ -459,7 +459,7 @@ A durable cross-process queue, if ever wanted, arrives as **its own verb with it
 Two findings outlive the refusal and are recorded in [parallel](parallel.md): **SQLite is a
 coordination point, not a parallel data path** (throughput *falls* from 14,151 to 6,749 claims/sec
 between 2 and 24 workers, because there is one writer at a time), and **a hot loop at a script's
-top level runs ~8× slower than the same loop in a proc** — which made the first parallelism
+top level runs 3.6× slower than the same loop in a proc** — which made the first parallelism
 benchmark report a 0.79× slowdown when the machine was in fact overlapping 7.46×.
 
 ## The cockpit — built, measured, removed (2026-08-09)
