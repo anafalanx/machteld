@@ -54,6 +54,46 @@ Windows schedules them fine, so a pool bounds memory and handles rather than buy
 > slowdown**. It was measuring the compiler, not the cores. A worker whose hot loop sits at top
 > level throws away most of its speed and will look exactly like "parallelism doesn't work here".
 
+## What this is good for
+
+One number decides most cases: **a worker costs 26 ms to start**, so an item must be worth far
+more than that. Measured on the two shapes that matter:
+
+| shape | per item | speedup |
+|---|---|---|
+| **an external program per item** (`findstr` over 14 files) | 40 ms | **4.84×** |
+| CPU-bound Tcl in a worker | 50 ms | 3.48× |
+| the same 14 files hashed **in-process** by `hash file` | 0.4 ms | **do not** — 6 ms total |
+
+External programs parallelise best because they are partly latency-bound and overlap rather than
+saturating cores. Pure CPU work saturates twelve logical cores at about 3.5×, which is roughly
+what six physical ones can give.
+
+**The work it suits, then:**
+
+- **Fan-out over external programs** — compile, convert, sign, lint, test, package. This is the
+  archetype, it is what machteld is *for*, and it is where the numbers are best. Any loop of
+  `run` calls over a list is a candidate.
+- **Long batches**, minutes upward, where losing progress to a crash actually costs something —
+  which is where the durable half earns its place rather than being ceremony.
+- **Work that outlives its launcher**: queued by one session, executed later, collected by
+  something that was not running when it started. `child`/`wait` cannot do this at all.
+- **Runs worth watching.** With WAL the director reads a worker's results *while it writes them*,
+  so a long job has a progress view instead of a silence followed by an answer.
+
+**The work it does not suit** — and the last row of the table is the one people get wrong:
+
+- **Anything a palette verb already does in-process.** Fourteen files hashed take 6 ms; spawning
+  fourteen workers to do it costs 364 ms in startup alone. `hash`, `json`, `ps` and `store` are C
+  in the same process. Parallelising them is pure loss.
+- **Items under ~30 ms.** Spawn dominates. Fine-grained data parallelism needs persistent workers,
+  which needs `child send`.
+- **Anything wanting shared mutable state.** These are processes; there is no shared memory, and
+  SQLite is a lock rather than a cache.
+- **Bulk data through the database.** It is a coordination point. Move payloads through files both
+  sides can see, or the child's own stdout.
+- **More than one machine.** SQLite over SMB or NFS is a documented hazard.
+
 ## The store as a work queue — studied, then refused
 
 SQLite is already in the exe, it is durable, and it is visible to every process on the machine
