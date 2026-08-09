@@ -185,6 +185,27 @@ typedef struct child_s {
     HANDLE          outR, errR;  /* pipe read ends */
     HANDLE          tOut, tErr;  /* reader threads */
     reader_t        ro, re;      /* captured stdout/stderr */
+    /* CHANNEL MODE. The child's pipes become Tcl channels instead of being
+     * drained into buffers, so a caller can talk to it while it runs -- the
+     * persistent-worker case (docs/pool-plan.md). Exclusive with capture,
+     * because one pipe cannot have two consumers: the reader threads are not
+     * started and ro/re keep no buffers, which is also 2 MB per worker saved.
+     *
+     * NAMES, not Tcl_Channel pointers. Once a channel is registered the SCRIPT
+     * may close it, after which the pointer dangles; a name can be looked up and
+     * come back NULL, which is the difference between tidy cleanup and a
+     * use-after-free. */
+    int             channels;    /* -channels was given */
+    HANDLE          inW;         /* stdin write end, kept open (channel mode) */
+    char            chIn[24], chOut[24], chErr[24];
+    /* A DEADLINE, IN TICKS, or 0 for none. `child start -timeout` was accepted
+     * and then silently ignored: the option is in the shared parser, so the
+     * manifest declared it for `child` while nothing anywhere enforced it, and
+     * `child wait` waited forever regardless. An option that is documented,
+     * declared and inert is worse than one that does not exist, because a caller
+     * builds on it. Enforced now at the point a caller waits, which is the only
+     * place an asynchronous child is being watched at all. */
+    ULONGLONG       deadline;    /* GetTickCount64() by which it must be done */
     int             reaped;      /* wait/reap already collected the exit + output */
     int             killed;      /* was tree-killed by machteld (child kill) */
     int             timeout;     /* specifically: killed because -timeout elapsed */
@@ -247,6 +268,7 @@ typedef struct {
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
+    int                channels;   /* -channels: hand the pipes over as Tcl channels */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -335,6 +357,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
     o->env_block = NULL;
     o->onout = NULL;
     o->onerr = NULL;
+    o->channels = 0;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -401,8 +424,9 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         *err = "CreatePipe failed";
         goto fail;
     }
-    /* stdin: a pipe pre-loaded with o->stdin_text if given, else the null device */
-    if (o->stdin_text != NULL) {
+    /* stdin: a pipe pre-loaded with o->stdin_text if given, a pipe left OPEN in
+     * channel mode so the caller can keep writing, else the null device. */
+    if (o->stdin_text != NULL || o->channels) {
         if (!CreatePipe(&stdinR, &stdinW, &sa, 0)) { *err = "CreatePipe(stdin) failed"; goto fail; }
     } else {
         nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
@@ -428,13 +452,19 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         jobh[1] = wj_job_handle(c->job);
         njobs = 2;
     }
-    wj_stdio io = { (o->stdin_text != NULL) ? stdinR : nul, outW, errW };
+    wj_stdio io = { (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
     if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err) != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
     if (nul) { CloseHandle(nul); nul = NULL; }
-    if (o->stdin_text != NULL) {
+    if (o->channels) {
+        /* The read end belongs to the child; ours stays open for writing, and is
+         * what becomes the stdin channel. */
+        CloseHandle(stdinR); stdinR = NULL;
+        c->inW = stdinW; stdinW = NULL;
+        c->channels = 1;
+    } else if (o->stdin_text != NULL) {
         /* feed the child its stdin, then EOF; the child holds its own dup of stdinR */
         size_t n = strlen(o->stdin_text);
         if (n > 0) { DWORD wr; WriteFile(stdinW, o->stdin_text, (DWORD)n, &wr, NULL); }
@@ -442,15 +472,25 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         CloseHandle(stdinR); stdinR = NULL;
     }
 
-    size_t cap = 1u << 20;
-    c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
-    c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
-    /* Streaming pumps the pipes on the interp thread instead of draining them on
-     * reader threads; the buffers still capture any pipe that has no callback. */
-    if (!stream) {
-        c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
-        c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
+    /* Channel mode allocates no capture buffers and starts no reader threads:
+     * the pipes are about to belong to Tcl. child_dict already renders a NULL
+     * buffer as "", so the result dict keeps its documented shape with `out` and
+     * `err` simply empty -- one shape for the verb, which is what the contract
+     * requires. */
+    if (!o->channels) {
+        size_t cap = 1u << 20;
+        c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
+        c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
+        /* Streaming pumps the pipes on the interp thread instead of draining them
+         * on reader threads; the buffers still capture any pipe that has no
+         * callback. */
+        if (!stream) {
+            c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
+            c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
+        }
     }
+
+    if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
 
     free(exe);
     if (track) {
@@ -466,12 +506,56 @@ fail:
     if (nul) CloseHandle(nul);
     if (stdinR) CloseHandle(stdinR);
     if (stdinW) CloseHandle(stdinW);
+    if (c->inW) CloseHandle(c->inW);
     if (c->outR) CloseHandle(c->outR);
     if (c->errR) CloseHandle(c->errR);
     if (c->job) wj_job_free(c->job);
     free(exe);
     free(c);
     return NULL;
+}
+
+/* Hand a child's pipes to Tcl as channels, and record their NAMES.
+ *
+ * THE DOUBLE-CLOSE THIS AVOIDS: Tcl_MakeFileChannel takes ownership of the OS
+ * handle, so closing the channel closes the handle. child_reap closes outR/errR
+ * unconditionally, and wj teardown would close them again -- on Windows a
+ * double CloseHandle is not an error you catch, it is a process that stops. So
+ * the handles are nulled here the moment Tcl owns them, and every later cleanup
+ * path skips what it no longer holds.
+ *
+ * Registered in the interp so a script can `close` them itself; cleanup looks
+ * the names up again rather than keeping pointers, because a name that no longer
+ * resolves is a fact while a stale pointer is a crash. */
+static void child_channels(Tcl_Interp *interp, child_t *c) {
+    Tcl_Channel ci = Tcl_MakeFileChannel((void *)c->inW,  TCL_WRITABLE);
+    Tcl_Channel co = Tcl_MakeFileChannel((void *)c->outR, TCL_READABLE);
+    Tcl_Channel ce = Tcl_MakeFileChannel((void *)c->errR, TCL_READABLE);
+    c->inW = NULL; c->outR = NULL; c->errR = NULL;   /* Tcl owns them now */
+    Tcl_RegisterChannel(interp, ci);
+    Tcl_RegisterChannel(interp, co);
+    Tcl_RegisterChannel(interp, ce);
+    /* Line-oriented UTF-8 by default: the worker protocol is one JSON object per
+     * line, and a caller that wants bytes can fconfigure it back. */
+    Tcl_SetChannelOption(interp, ci, "-translation", "lf");
+    Tcl_SetChannelOption(interp, co, "-translation", "lf");
+    Tcl_SetChannelOption(interp, ce, "-translation", "lf");
+    Tcl_SetChannelOption(interp, ci, "-buffering", "line");
+    snprintf(c->chIn,  sizeof c->chIn,  "%s", Tcl_GetChannelName(ci));
+    snprintf(c->chOut, sizeof c->chOut, "%s", Tcl_GetChannelName(co));
+    snprintf(c->chErr, sizeof c->chErr, "%s", Tcl_GetChannelName(ce));
+}
+
+/* Close whatever the script has not already closed. */
+static void child_channels_free(Tcl_Interp *interp, child_t *c) {
+    if (!c->channels) return;
+    const char *names[3] = { c->chIn, c->chOut, c->chErr };
+    for (int k = 0; k < 3; k++) {
+        if (names[k][0] == '\0') continue;
+        Tcl_Channel ch = Tcl_GetChannel(interp, names[k], NULL);
+        if (ch != NULL) Tcl_UnregisterChannel(interp, ch);
+    }
+    c->chIn[0] = c->chOut[0] = c->chErr[0] = '\0';
 }
 
 /* Wait up to wait_ms; 0 = reaped (exit + output collected), 1 = timeout, -1 err. */
@@ -736,7 +820,51 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
     if (idx == START) {
         run_opts o;
-        if (parse_opts(interp, "CHILD", objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        /* `-channels` is a FLAG, and parse_opts requires every option it sees to
+         * carry a value. It is lifted out here rather than taught to the shared
+         * parser, and that is a manifest decision as much as a parsing one:
+         * parse_opts's option set belongs to run, detach and pty spawn as well,
+         * none of which can hand back a channel, so a flag added there would have
+         * all four verbs declaring an option only one of them honours.
+         * `watch start -recursive` is the same shape for the same reason.
+         *
+         * The scan stops where parse_opts's does -- at `--` or at the first
+         * non-option -- because `child start -- worker.exe -channels` passes
+         * -channels to the CHILD, and eating it there would silently change the
+         * command being run. */
+        Tcl_Obj *fobjv[128];
+        int fobjc = 0;
+        int want_channels = 0;
+        if (objc > 128) return mt_error(interp, "CHILD", "usage", "too many arguments");
+        fobjv[fobjc++] = objv[0];
+        fobjv[fobjc++] = objv[1];
+        int k = 2;
+        for (; k < objc; k++) {
+            const char *a = Tcl_GetString(objv[k]);
+            if (strcmp(a, "--") == 0) break;
+            if (a[0] != '-' || a[1] == '\0') break;
+            if (strcmp(a, "-channels") == 0) { want_channels = 1; continue; }
+            fobjv[fobjc++] = objv[k];
+            if (k + 1 < objc) fobjv[fobjc++] = objv[k + 1];
+            k++;
+        }
+        for (; k < objc; k++) fobjv[fobjc++] = objv[k];
+
+        if (parse_opts(interp, "CHILD", fobjc, fobjv, 2, &o) != TCL_OK) return TCL_ERROR;
+        o.channels = want_channels;
+        /* Capture and channels are exclusive: one pipe cannot have two
+         * consumers, and -onout/-onerr are the capture path. Refused here rather
+         * than silently ignoring one of them. */
+        if (o.channels && (o.onout != NULL || o.onerr != NULL)) {
+            return mt_error(interp, "CHILD", "usage",
+                            "-channels cannot be combined with -onout or -onerr");
+        }
+        if (o.channels && o.stdin_text != NULL) {
+            return mt_error(interp, "CHILD", "usage",
+                            "-channels cannot be combined with -stdin: write to the stdin channel instead");
+        }
+        objc = fobjc;
+        objv = fobjv;
         int cargc = 0;
         const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
         if (cargv == NULL) return mt_error(interp, "CHILD", "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
@@ -753,6 +881,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err, &code);
         free(cargv);
         if (c == NULL) return mt_error(interp, "CHILD", code, err);
+        if (o.channels) child_channels(interp, c);
         Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));
         return TCL_OK;
     }
@@ -775,7 +904,37 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     switch (idx) {
     case WAIT: {
         const char *err = NULL;
-        if (!c->reaped && child_reap(c, WJ_INFINITE, &err) < 0) return mt_error(interp, "CHILD", "oserror", err);
+        /* Two deadlines can apply: the one this call asks for, and the one the
+         * child was started with. The earlier wins -- a child given 5s at start
+         * does not get 30 more because someone waited generously. */
+        long long want = -1;
+        for (int k = 3; k < objc; k++) {
+            const char *a = Tcl_GetString(objv[k]);
+            if (strcmp(a, "-timeout") != 0) return mt_error(interp, "CHILD", "usage", "unknown option");
+            if (k + 1 >= objc) return mt_error(interp, "CHILD", "usage", "option needs a value");
+            want = parse_duration_ms(Tcl_GetString(objv[k + 1]));
+            if (want < 0) return mt_error(interp, "CHILD", "badvalue", "bad -timeout value");
+            k++;
+        }
+        unsigned wait_ms = WJ_INFINITE;
+        if (want >= 0) wait_ms = (unsigned)want;
+        if (c->deadline != 0 && !c->reaped) {
+            ULONGLONG now = GetTickCount64();
+            ULONGLONG left = (now >= c->deadline) ? 0 : (c->deadline - now);
+            if (wait_ms == WJ_INFINITE || (ULONGLONG)wait_ms > left) wait_ms = (unsigned)left;
+        }
+        if (!c->reaped) {
+            int w = child_reap(c, wait_ms, &err);
+            if (w == 1) {
+                /* Expired. Tree-kill and reap, so the answer is a status rather
+                 * than a caller left holding a handle to something still running. */
+                c->killed = 1;
+                c->timeout = 1;
+                if (c->job) wj_job_terminate(c->job, 1);
+                w = child_reap(c, WJ_INFINITE, &err);
+            }
+            if (w < 0) return mt_error(interp, "CHILD", "oserror", err);
+        }
         Tcl_SetObjResult(interp, child_dict(interp, c));
         return TCL_OK;
     }
@@ -805,10 +964,24 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         if (c->reaped) {
             Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
         }
+        /* The channels live HERE and not in the result of `child wait`, because
+         * `run` and `child wait` share one dict builder and the manifest derives
+         * `returns` from it -- a second result shape behind one verb would break
+         * the contract to save a field. Absent unless -channels was given. */
+        if (c->channels) {
+            Tcl_DictObjPut(interp, d, Tcl_NewStringObj("stdin", -1), Tcl_NewStringObj(c->chIn, -1));
+            Tcl_DictObjPut(interp, d, Tcl_NewStringObj("stdout", -1), Tcl_NewStringObj(c->chOut, -1));
+            Tcl_DictObjPut(interp, d, Tcl_NewStringObj("stderr", -1), Tcl_NewStringObj(c->chErr, -1));
+        }
         Tcl_SetObjResult(interp, d);
         return TCL_OK;
     }
     case CLOSE:
+        /* Channels first: closing the stdin channel is what gives the worker its
+         * EOF, so a well-behaved worker exits on its own and child_free has
+         * nothing to kill. Doing it the other way round would terminate every
+         * worker by force and call that normal. */
+        child_channels_free(interp, c);
         registry_remove(ctx, c);
         child_free(c); /* kills first if still running */
         return TCL_OK;
