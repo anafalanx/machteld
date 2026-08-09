@@ -502,6 +502,81 @@ check "run dict matches its documented shape" [expr {
     [dict exists $rdoc exit] && [dict exists $rdoc status] && [dict exists $rdoc out] &&
     [dict exists $rdoc err] && [dict exists $rdoc pid] && [dict exists $rdoc truncated]}]
 
+# --- every doc is checked against the binary, not proofread -------------------
+# The palette's poll loop was tested by hand, one snippet. This is the class: the
+# docs make claims about verbs, subcommands and options, and until now nothing
+# compared any of them to the manifest. Two lies were sitting in the bundle --
+# `hash sha256 -file` in stdlib (an API that was planned and never shipped) and,
+# in the other direction, `json encode -dict` which WORKS while the manifest
+# denied it. Both were found by running this scanner for the first time, and the
+# second turned out to be the manifest's fault, not the doc's.
+#
+# WHAT THIS CANNOT CHECK, stated so nobody mistakes green for proof: prose,
+# measured numbers, and any snippet's behaviour. It checks names and options --
+# the claims that go stale silently when code moves.
+set docdrift {}
+set docblocks 0
+set M [manifest]
+set VERBS [dict keys $M]
+foreach topic [lsearch -all -inline -not -exact [lmap l [split [help] \n] {
+        set t [string trim $l]
+        expr {[regexp {^[a-z][a-z-]*$} $t] ? $t : [continue]}}] all] {
+    set text [help $topic]
+    set inblock 0 ; set block ""
+    foreach line [split $text \n] {
+        if {[regexp {^\s*```tcl\s*$} $line]} { set inblock 1 ; set block "" ; incr docblocks ; continue }
+        if {[regexp {^\s*```} $line]} {
+            # A block that does not parse is a doc nobody ran, and the most
+            # basic lie there is: it cannot be what the author meant.
+            if {$inblock && ![info complete $block]} {
+                lappend docdrift "$topic: a tcl block is not syntactically whole"
+            }
+            set inblock 0 ; continue
+        }
+        if {!$inblock} continue
+        append block $line "\n"
+        set code [string trim [regsub {\s;#.*$} [string trim $line] ""]]
+        if {$code eq "" || [string index $code 0] eq "#"} continue
+        # EVERY COMMAND ON THE LINE, not just the first. `child list ; child reap
+        # $c` slipped through the first version of this gate: it read `child
+        # list`, found it valid, and never looked past the semicolon. A
+        # break-test put a non-existent subcommand there and the suite stayed
+        # green -- the same vacuous-gate shape as matching `ps` against "steps".
+        # Bracketed commands count too: half the doc's lines wrap a verb in
+        # `[...]`, and those were invisible as well.
+        set cmds [split $code {;}]
+        foreach {_ inner} [regexp -all -inline {\[([^\[\]]+)\]} $code] { lappend cmds $inner }
+    foreach cmd $cmds {
+        set toks [split [string trim $cmd]]
+        set v [lindex $toks 0]
+        if {$v ni $VERBS} continue
+        set m [dict get $M $v]
+        set rest [lrange $toks 1 end]
+        set declared {}
+        if {[dict exists $m options]} { set declared [dict get $m options] }
+        if {[dict exists $m subcommands]} {
+            set subs [dict keys [dict get $m subcommands]]
+            set s [lindex $rest 0]
+            if {$s ne "" && [regexp {^[a-z]+$} $s] && $s ni $subs} {
+                lappend docdrift "$topic: `$v $s` is not a subcommand ($subs)"
+            }
+            if {[dict exists [dict get $m subcommands] $s]} {
+                set sm [dict get $m subcommands $s]
+                if {[dict exists $sm options]} { set declared [concat $declared [dict get $sm options]] }
+            }
+        }
+        foreach tok $rest {
+            if {$tok eq "--"} break        ;# past the guard it is the child's argv
+            if {![regexp {^-[a-z]+$} $tok]} continue
+            if {$tok ni $declared} { lappend docdrift "$topic: `$v ... $tok` is not an option ($declared)" }
+        }
+    }
+    }
+}
+check "the shipped docs have tcl blocks to check" [expr {$docblocks > 20}]
+check "no doc names a verb, subcommand or option that does not exist" [expr {$docdrift eq ""}]
+foreach d $docdrift { puts "     $d" }
+
 # --- the error-code registry is closed ---------------------------------------
 # Creed 5: errors are part of the contract. A code you can trap must be a code
 # that is documented, and a code that is documented must be one the C can throw.

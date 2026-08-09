@@ -106,10 +106,17 @@ silently passing.
 Verified working against the toolchain: `sha256("abc")` returns `ba7816bf8f01cfea…`. No
 vendoring, no OpenSSL — the provider is already on the machine.
 
+The shape below is what shipped, which is **not** what this section proposed before it was built:
+the plan wrote `hash sha256 -file big.iso` and `hash hmac sha256 -key $k $data`, and the verb took
+`file` and `hmac` as subcommands instead, so both lines were examples of an API that never existed.
+Nothing noticed for a day, because a plan doc reads like a record. It is now checked against the
+manifest with everything else.
+
 ```tcl
-hash sha256 $data                  ;# hex digest of a value
-hash sha256 -file big.iso          ;# streams; constant memory
-hash hmac sha256 -key $k $data
+hash sum sha256 $data              ;# hex digest of a value
+hash sum sha256 $data -binary      ;# the raw bytes instead of hex
+hash file sha256 big.iso           ;# streams; constant memory
+hash hmac sha256 $k $data
 hash random 32                     ;# cryptographically secure bytes
 
 set h [hash start sha256]          ;# hash#1 -- stateful, so it is a token

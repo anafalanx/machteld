@@ -84,6 +84,15 @@ set fns     [functions $proc_c]
 # store.c and json.c implement exactly one verb each, so the whole file is that
 # verb's body -- otherwise `notopen`, raised in the needDb helper rather than in
 # StoreCmd, would be invisible to a per-function scan.
+#
+# Their individual functions are ALSO indexed, because a whole-file body has no
+# structure to follow: `hash`'s -binary lives in the helper `want_binary`, which
+# is defined ABOVE the dispatcher and therefore sits outside every `idx ==`
+# region. Indexed as a function, it can be followed from the branch that calls
+# it; left as anonymous file text, it is invisible to attribution and the option
+# is lost. Merged UNDER the whole-file entries so those still win for the verb.
+set fns [dict merge [functions $store_c] [functions $json_c] \
+                    [functions $ps_c] [functions $hash_c] $fns]
 dict set fns StoreCmd $store_c
 dict set fns JsonCmd  $json_c
 dict set fns PsCmd    $ps_c
@@ -121,9 +130,30 @@ set var_codes [lsort -unique $var_codes]
 
 # Options a region of C accepts: the shared parser's set if it calls parse_opts,
 # plus any comparison it makes itself (wait's -any, pty read's -timeout).
-proc opts_in {region shared} {
+proc opts_in {region shared {fns {}}} {
     set out {}
     if {[regexp {parse_opts\(interp,} $region]} { set out $shared }
+    # FOLLOW THE HELPERS, to closure. An option is wherever the code happens to
+    # test for it, and that is not always the verb's own body: `hash`'s -binary
+    # lives in `want_binary()`, a helper called from three subcommands, and a
+    # scan of the dispatcher alone reported hash as taking no options at all --
+    # while the palette documented -binary and the binary accepted it. Same
+    # shape as the result-shape scanner following `child_dict` to
+    # `child_dict_ex`: derivation must go where the code went.
+    set todo {} ; set seen {}
+    foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $region] {
+        if {[dict exists $fns $callee]} { lappend todo $callee }
+    }
+    while {[llength $todo]} {
+        set f [lindex $todo 0] ; set todo [lrange $todo 1 end]
+        if {$f in $seen} continue
+        lappend seen $f
+        set body [dict get $fns $f]
+        append region "\n" $body
+        foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $body] {
+            if {[dict exists $fns $callee] && $callee ni $seen} { lappend todo $callee }
+        }
+    }
     # Any strcmp against a "-something" literal is an option check, whichever
     # way the argument got there: some sites compare Tcl_GetString(objv[i])
     # directly, others hoist it into a local first. Matching only the first
@@ -189,9 +219,12 @@ foreach {fn verb} $IMPL {
 
     set entry [dict create kind c domain $domain codes [lsort -unique $codes]]
 
-    if {[llength $subs] == 0} {
-        dict set entry options [opts_in $body $shared_opts]
-    } else {
+    # THE VERB-LEVEL SET IS THE ONE THAT IS GUARANTEED: every option this verb
+    # accepts anywhere, helpers included. It is always published, even for verbs
+    # with subcommands, because it is the only claim the derivation can actually
+    # stand behind.
+    dict set entry options [opts_in $body $shared_opts $fns]
+    if {[llength $subs] != 0} {
         # Split the body at each branch marker (`idx == NAME` or `case NAME:`)
         # and attribute what follows to that subcommand.
         set marks {}
@@ -205,17 +238,50 @@ foreach {fn verb} $IMPL {
             }
         }
         set positions [lsort -integer -index 0 $positions]
+        # MARKERS THAT SHARE A GUARD SHARE ITS BLOCK. `if (idx == SUM || idx ==
+        # FILE_ || idx == HMAC || idx == START)` is four markers on one line, and
+        # "each marker's region runs to the next marker" gave the first three a
+        # region of zero characters. So the block those four subcommands share
+        # was attributed to the last of them alone -- and `hash`'s -binary, which
+        # is reached through a helper called inside it, landed nowhere at all.
+        # Markers glued by `||` with no brace between them are one guard.
+        set groups {}
+        set i 0
+        while {$i < [llength $positions]} {
+            set startpos [lindex [lindex $positions $i] 0]
+            set names [list [lindex [lindex $positions $i] 1]]
+            while {$i + 1 < [llength $positions]} {
+                set glue [string range $body [lindex [lindex $positions $i] 0] \
+                              [expr {[lindex [lindex $positions [expr {$i + 1}]] 0] - 1}]]
+                if {![string match {*||*} $glue] || [string first "\{" $glue] >= 0} break
+                incr i
+                lappend names [lindex [lindex $positions $i] 1]
+            }
+            lappend groups [list $startpos $names]
+            incr i
+        }
         set submap {}
-        for {set i 0} {$i < [llength $positions]} {incr i} {
-            lassign [lindex $positions $i] pos name
-            set end [expr {$i + 1 < [llength $positions]
-                           ? [lindex [lindex $positions [expr {$i+1}]] 0] - 1 : "end"}]
-            set region [string range $body $pos $end]
-            set idx [lsearch -exact $enums $name]
-            if {$idx < 0 || $idx >= [llength $subs]} { continue }
-            set sub [lindex $subs $idx]
-            set o [opts_in $region $shared_opts]
-            if {$o ne ""} { dict set submap $sub [lsort -unique [concat [expr {[dict exists $submap $sub] ? [dict get $submap $sub] : {}}] $o]] }
+        for {set g 0} {$g < [llength $groups]} {incr g} {
+            lassign [lindex $groups $g] pos names
+            set end [expr {$g + 1 < [llength $groups]
+                           ? [lindex [lindex $groups [expr {$g + 1}]] 0] - 1 : "end"}]
+            # NO HELPER FOLLOWING HERE, deliberately. An option tested inside
+            # the branch belongs to that branch; one reached through a helper
+            # called from a block several subcommands share cannot be pinned to
+            # any of them by reading the text. Following helpers here produced a
+            # precise-looking manifest that said `hash update` takes -binary
+            # (it does not) and `hash file` does not (it does). Where attribution
+            # is not derivable the union above is the honest answer, and a
+            # confident wrong answer is the failure this file exists to prevent.
+            set o [opts_in [string range $body $pos $end] $shared_opts {}]
+            if {$o eq ""} continue
+            foreach name $names {
+                set idx [lsearch -exact $enums $name]
+                if {$idx < 0 || $idx >= [llength $subs]} { continue }
+                set sub [lindex $subs $idx]
+                dict set submap $sub [lsort -unique [concat \
+                    [expr {[dict exists $submap $sub] ? [dict get $submap $sub] : {}}] $o]]
+            }
         }
         set subdict {}
         foreach s $subs {
@@ -225,6 +291,32 @@ foreach {fn verb} $IMPL {
         dict set entry subcommands $subdict
     }
     dict set manifest $verb $entry
+}
+
+# ---- nothing may go unattributed -------------------------------------------
+# Every `-option` literal a verb's code tests for must end up declared SOMEWHERE
+# in that verb's entry -- at verb level or under a subcommand. Under-reporting is
+# the one failure this generator exists to prevent, and it has now happened
+# twice quietly: `hash -binary` lived in a helper nobody followed, and json's
+# `-dict`/`-list` were attributed to the wrong subcommand because the encode
+# branch had no marker. Both produced a manifest that looked plausible and was
+# wrong. A generator that cannot see something must SAY so, not omit it.
+foreach {fn verb} $IMPL {
+    if {![dict exists $fns $fn] || ![dict exists $manifest $verb]} { continue }
+    set entry [dict get $manifest $verb]
+    set declared {}
+    if {[dict exists $entry options]} { set declared [dict get $entry options] }
+    if {[dict exists $entry subcommands]} {
+        dict for {_ sm} [dict get $entry subcommands] {
+            if {[dict exists $sm options]} { set declared [concat $declared [dict get $sm options]] }
+        }
+    }
+    set found [opts_in [dict get $fns $fn] $shared_opts $fns]
+    foreach o $found {
+        if {$o ni $declared} {
+            error "genmanifest: $verb accepts $o but the manifest does not declare it"
+        }
+    }
 }
 
 # ---- result shapes ---------------------------------------------------------
