@@ -1973,11 +1973,28 @@ foreach c {which env tools projects runtimes roots journal} {
     check "$c is a front-door command" [expr {$c in [::machteld::FrontCommands]}]
 }
 # ONE DEFINITION. `FrontCommands` reads `front`'s own `set subs {...}` line, the
-# same line MtclFacts reads for the manifest; if they ever diverge, `mt X` and
-# `front X` disagree about what exists.
-check "the promoted set is front's own subcommand table" [expr {
-    [lsort [::machteld::FrontCommands]] eq
+# same line MtclFacts reads for the manifest -- minus the names deliberately not
+# promoted. If they ever diverge otherwise, `mt X` and `front X` disagree about
+# what exists.
+check "the promoted set is front's subcommands minus the exclusions" [expr {
+    [lsort [concat [::machteld::FrontCommands] [::machteld::FrontUnpromoted]]] eq
     [lsort [dict keys [dict get [manifest] front subcommands]]]}]
+# `run` IS NOT PROMOTED, and ten projects depend on that. `front run` is the
+# plumbing that executes a resolved name, so `mt run rg` would only be `mt rg`
+# with extra words -- while claiming a bare name that ten of the twelve projects
+# here declare as a command of their own. z has no `run` built-in either.
+check "run is not promoted to a bare name" [expr {
+    "run" ni [::machteld::FrontCommands]}]
+check "and front run still works in full" [expr {
+    "run" in [dict keys [dict get [manifest] front subcommands]]}]
+set claimed {}
+foreach p [valof {json decode [front projects -json]}] {
+    foreach n [dict keys [::machteld::FrontProjectCommands [dict get $p path]]] {
+        if {$n in [::machteld::FrontCommands]} { lappend claimed "[dict get $p name]/$n" }
+    }
+}
+if {$claimed ne ""} { puts "     project commands a promoted name shadows: $claimed" }
+check "no promoted name shadows a project command" [expr {$claimed eq ""}]
 # NOTHING IS SHADOWED. z reserves its built-in names; here the check is live,
 # because the workspace gains tools without asking anybody.
 set shadowed {}
@@ -2016,6 +2033,50 @@ foreach k {mirror mirrorState deep} {
 }
 check "status -deep is refused, not approximated" [expr {
     [errcode_of {front status -deep}] eq {MACHTELD FRONT unsupported}}]
+
+# --- the project tier, and the qualifiers ------------------------------------
+# `z:name` means THE KIT's name -- a curated tool -- and explicitly not a
+# builtin: a builtin needs no qualifying, there being nothing to qualify it
+# against. machteld had this backwards until 2026-08-10, so `z:rg` did not
+# resolve while `z:run` reached the palette. Never caught, because the agreement
+# test only ever asked bare names.
+check "z: reaches a curated tool"        [expr {
+    [string match "*rg.exe" [valof {front which z:rg}]]}]
+check "z: does not reach the palette"    [expr {
+    [errcode_of {front which z:run}] eq {MACHTELD FRONT notfound}}]
+check "an unknown qualifier is a usage error" [expr {
+    [errcode_of {front which nope:rg}] eq {MACHTELD FRONT usage}}]
+
+# PROJECT COMMANDS, the tier machteld did not have. Every project's z.json
+# `commands` entry: argv[0] resolving to a curated tool CLONES that tool's whole
+# target -- env overlay, PATH shaping, prepended arguments -- and the rest of the
+# argv is appended to it, with the project root as the working directory.
+set pcmd {}
+foreach p [valof {json decode [front projects -json]}] {
+    set c [::machteld::FrontProjectCommands [dict get $p path]]
+    if {[dict size $c]} { set pcmd [list [dict get $p path] $c] ; break }
+}
+check "a project declares commands to resolve" [expr {$pcmd ne ""}]
+if {$pcmd ne ""} {
+    lassign $pcmd proot cmds
+    set n [lindex [lsort [dict keys $cmds]] 0]
+    set t [dict get $cmds $n]
+    check "a project command is kind project"   [expr {[dict get $t kind] eq "project"}]
+    check "it runs from the project root"       [expr {
+        [string equal -nocase [dict get $t cwd] [file nativename $proot]]}]
+    check "it carries the project's env"        [expr {
+        [dict get $t env MT_PROJECT_ROOT] eq [file nativename $proot]}]
+    # PATHS ARE CLEANED, because `filepath.Join` cleans and `file join` does
+    # not: `./drang.exe` came out as `_drang\.\drang.exe` and `../_drang/...`
+    # as `_exp\..\_drang\...` -- both run, both the wrong string, both differing
+    # from z on nothing but punctuation.
+    set dirty {}
+    foreach nm [dict keys $cmds] {
+        set e [dict get $cmds $nm exe]
+        if {[string first "\\.\\" $e] >= 0 || [string first "\\..\\" $e] >= 0} { lappend dirty $nm }
+    }
+    check "project command paths are cleaned"   [expr {$dirty eq ""}]
+}
 
 # THE `t/` DIRECTORY IS A SOURCE OF TOOLS, not just an override of manifest
 # entries. Four tools existed only as `.z/t/<name>/` directories and machteld

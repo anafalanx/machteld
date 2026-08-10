@@ -144,9 +144,55 @@ foreach d [lrange $differ 0 [expr {$VERBOSE ? "end" : 9}]] {
     puts "  [lindex $d 0]:"
     foreach p [lindex $d 1] { puts "      $p" }
 }
-if {[llength $differ] || [llength $mine_refused]} {
+# --- and every PROJECT COMMAND, resolved from inside its project -------------
+# The kit's inventory is only half the front door's job. Each project's z.json
+# declares commands whose argv[0] resolves to a curated tool and CLONES that
+# tool's whole target -- env overlay, PATH shaping, prepended arguments -- with
+# the rest of the argv appended and the project root as the working directory.
+# Three defects hid in that one paragraph until it was diffed:
+#
+#   - the palette was consulted before project commands, so `run` -- a palette
+#     verb AND a command in ten of the twelve projects -- resolved to the wrong
+#     one every time;
+#   - `filepath.Join` cleans and `file join` does not, so `./drang.exe` came out
+#     as `_drang\.\drang.exe`;
+#   - `z:` reached builtins and not tools, exactly backwards.
+set here [pwd]
+set ptotal 0 ; set pagree 0 ; set pbad {}
+foreach p [json decode [front projects -json]] {
+    set root [dict get $p path]
+    set cmds [::machteld::FrontProjectCommands $root]
+    if {![dict size $cmds]} continue
+    cd $root
+    foreach n [lsort [dict keys $cmds]] {
+        incr ptotal
+        set zr [run -timeout 60s -dir $root -- $zexe env --json $n]
+        if {[dict get $zr exit] != 0} { lappend pbad "[dict get $p name]/$n: z refused" ; continue }
+        set z [json decode [dict get $zr out]]
+        if {[catch {front env $n} m]} { lappend pbad "[dict get $p name]/$n: machteld refused" ; continue }
+        set probs {}
+        if {[dict get $z exe] ne [dict get $m exe]} {
+            lappend probs "exe z=[dict get $z exe] machteld=[dict get $m exe]"
+        }
+        set zp [expr {[dict exists $z pre] ? [dict get $z pre] : {}}]
+        set mp [expr {[dict exists $m pre] ? [dict get $m pre] : {}}]
+        if {$zp ne $mp} { lappend probs "pre z={$zp} machteld={$mp}" }
+        if {[dict exists $z cwd] && [dict get $z cwd] ne [dict get $m cwd]} {
+            lappend probs "cwd z=[dict get $z cwd] machteld=[dict get $m cwd]"
+        }
+        if {[llength $probs]} {
+            lappend pbad "[dict get $p name]/$n: [join $probs {; }]"
+        } else { incr pagree }
+    }
+}
+cd $here
+puts [format "project commands : %d / %d" $pagree $ptotal]
+foreach b [lrange $pbad 0 [expr {$VERBOSE ? "end" : 9}]] { puts "  $b" }
+if {$ptotal < 20} { puts "  (suspiciously few -- is FrontProjectCommands reading anything?)" }
+
+if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20} {
     puts "DISAGREEMENT"
     exit 1
 }
-puts "AGREED on all [llength $names]"
+puts "AGREED on all [llength $names] tools and all $ptotal project commands"
 exit 0

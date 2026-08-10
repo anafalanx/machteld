@@ -296,8 +296,48 @@ which is true, rather than a `mirror: null` that would be a claim — and there 
 that claim would be false. `mt status -deep` is refused outright with `{MACHTELD FRONT unsupported}`
 naming what it needs, the same way an `arg0` manifest entry is refused rather than approximated.
 
-**Next:** `in`, `verify`, `scout`, `logs`, then `mirror` and `ledger` — after which `status`
-finishes itself.
+### The project tier, and three defects in one paragraph
+
+`in` looked like the smallest command left. It needed a **resolution tier machteld did not have**:
+a project's `z.json` declares `commands`, and standing inside `_els`, `z build` runs that project's
+build. `_els` alone declares eighteen; twelve projects declare 135 between them; machteld resolved
+builtins and curated tools and then stopped.
+
+The rule, read out of `project.go`: **argv[0] is resolved, not executed.** A name that is a curated
+tool CLONES that tool's whole target — its environment overlay, its PATH shaping, its prepended
+arguments — and the command's remaining words are appended to those. So
+`["tclsh90", "tools/tasks.tcl", "build"]` runs the workspace's tclsh, with the workspace's Tcl
+environment, on a project-relative script, from the project root. Otherwise argv[0] must be a path,
+absolute or project-relative; a bare word that is neither is dropped rather than looked up on the
+system `PATH`.
+
+Diffing all 135 against z found three defects in that one paragraph:
+
+- **The palette was consulted first, and `run` is a palette verb.** Ten of the twelve projects
+  declare a `run` command, and `mt run` resolved to the palette's `run` in every one. z's reserved
+  set is *its built-ins and its curated tools* — and machteld's equivalent of z's built-ins is the
+  **front-door command set**, not the whole Tcl palette. `which` and `status` are the front door's;
+  `run`, `json` and `hash` are scripting verbs that merely happen to be typeable. The palette tier
+  moved to last, and `front run` is no longer promoted to a bare name at all: `mt run rg` was only
+  ever `mt rg` with extra words, and z has no `run` built-in for the same reason.
+- **`filepath.Join` cleans and `file join` does not.** `["./drang.exe"]` came out as
+  `_drang\.\drang.exe` and `["../_drang/drang.exe"]` as `_exp\..\_drang\drang.exe`. Both run; both
+  are the wrong string; both differed from z on nothing but punctuation.
+- **The qualifiers were backwards.** `z:name` means *the kit's* name — a curated tool — and
+  explicitly not a builtin, there being nothing to qualify a builtin against. machteld had `z:`
+  reaching builtins and skipping tools, so `z:rg` did not resolve and `z:run` reached the palette.
+  Never caught, because the agreement test had only ever asked bare names.
+
+`front in <project> <name>` then falls out: find the project by name (leading underscore optional,
+comparison case-insensitive), resolve in *that* project's context, run from its root with
+`MT_PROJECT_ROOT` and `MT_PROJECT_NAME` set to it rather than to wherever the caller stands.
+
+`test/front_agree.tcl` now diffs **275 tools and 135 project commands**, and fails if it finds
+fewer than twenty of the latter — a count that silently drops to zero is the failure mode this
+whole step keeps rediscovering.
+
+**Next:** `verify`, `scout`, `logs`, then `mirror` and `ledger` — after which `status` finishes
+itself.
 
 ## The risk, named
 
