@@ -1,7 +1,7 @@
 ---
 type: overview
 title: What machteld is
-description: A single-exe Windows 11 Tcl/Tk toolkit — a workspace front door plus a machine-control primitive library.
+description: A single-exe Windows 11 Tcl/Tk toolkit — a workspace front door, a tool factory, and a machine-control primitive library.
 tags: [machteld, overview, tcl, windows]
 timestamp: 2026-07-09
 ---
@@ -12,7 +12,9 @@ A single signed Windows executable (Win 11 23H2+) that is two things at once, sh
 
 1. **A workspace front door.** [`front`](front-door.md) turns a *name* into something runnable under a controlled environment: a builtin verb, one of the tools that ride inside the exe, or one the workspace curates — resolved in that order, with **no system-`PATH` fallback**. `mt rg -n TODO .` is the everyday spelling, and every run lands in a [journal](journal.md). See [architecture](architecture.md) and [packaging](packaging.md).
 
-2. **A machine-control primitive library**, present in every tool it runs and in its own REPL: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, capture, per-line streaming), interactive **ConPTY** steering (`pty` / `expect`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
+2. **A tool factory.** [`wrap`](palette.md) turns a pure-Tcl/Tk program into its own standalone exe — console or GUI — with **no compiler** and nothing to install on the target. Both subsystem hosts and the Tcl/Tk script libraries ride inside `mt.exe`; it extracts the right one and appends your tool via zipfs, the els/starpack overlay. For when a colleague on a share needs to run what you wrote this afternoon. See [packaging](packaging.md).
+
+3. **A machine-control primitive library**, present in every tool it runs and in its own REPL: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, capture, per-line streaming), interactive **ConPTY** steering (`pty` / `expect`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
 
 You write **Tcl**; the power and the packaging are in **C**, exposed as a command palette. *Reach the metal, and ship the tool; don't invent a language.*
 

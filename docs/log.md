@@ -8,6 +8,41 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-10 — `wrap` comes back, and the front door pays 130 ms for it
+
+A receiver turned up, and it is the one the refusal said did not exist. At work, a small tool
+written in an afternoon has to reach colleagues through a shared SMB folder — machines with no Tcl,
+no Python and no install rights. One self-contained exe on a share is the whole answer, and that is
+precisely what `wrap` produces. Both bare hosts are back inside `mt.exe`, console and GUI, so the
+exe alone can stamp with no toolchain and no workspace.
+
+**Measured rather than assumed, because the prediction was wrong.** I expected embedding to cost
+nothing — an unread part of a file is never paged in — and `mt version`, a builtin answered
+in-process, says otherwise:
+
+| build | size | median of 40 |
+|---|---|---|
+| no basekits | 5.99 MB | 237–254 ms |
+| both basekits | 10.21 MB | 362–378 ms |
+| 4.6 MB × 2 of random data | 14.77 MB | 359 ms |
+
+**+130 ms on every invocation**, reproducible with the builds interleaved. And not an antivirus
+reaction to executables nested in an executable, which was the obvious hypothesis: incompressible
+random data of greater total size costs the same, so it is the appended archive's size and it
+behaves like a step rather than a slope. The cheap alternative — basekits in `.mt/r/`, since they
+never need to travel — was offered and declined in favour of one file that can stamp anywhere.
+
+**Restoring it needed one thing that only building it could have shown.** A stamped tool's `argv0`
+is its own `main.tcl` inside its own zipfs, so under "the first argument is a name" the front door
+resolved that path as a tool name and exited 127 before the program ran. The old shape test had hid
+this by accident — a zipfs path has separators, so it was handed straight back. The dispatcher now
+stands aside when it finds a root `main.tcl` in a mounted archive, which is exact rather than a
+guess: `tools/package.tcl` fails the build if one ever lands in `mt.exe`'s own archive, so the two
+halves assert the same fact from opposite sides. Verified by removing the check and watching three
+gates fail.
+
+453 checks pass.
+
 ## 2026-08-10 — no applications ship inside it
 
 `changes`, `tasks`, `sums`, `life` and `lifelab` are gone from the tree, along with the resolution

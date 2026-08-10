@@ -1773,7 +1773,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker}}]
+    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -1930,6 +1930,60 @@ check "tcl with no script is a usage error" [expr {
     [errcode_of {tcl}] eq {MACHTELD TCL usage}}]
 check "tcl on a missing script says so"     [expr {
     [errcode_of {tcl no_such_script_zzz.tcl}] eq {MACHTELD TCL notfound}}]
+
+# --- `wrap`: a tool of your own, with no compiler ----------------------------
+# THIS IS THE ONE VERB WHOSE OUTPUT IS THE TEST. Everything else here can be
+# checked by asking the running binary a question; `wrap` is only proved by
+# stamping an exe and running it on a machine that has no Tcl, which is the whole
+# point of it -- a colleague on a share, with nothing installed.
+#
+# The fixture writes a marker file beside itself recording what it could see, so
+# app-mode and the prelude are verifiable HEADLESSLY. The window itself needs a
+# desktop and is checked by the same marker when there is one.
+check "wrap declares its options" [expr {
+    [lsort [valof {dict get [manifest] wrap options}]] eq {--console --gui --no-prelude -o}}]
+foreach {label script want} {
+    "wrap with no arguments"          {wrap}                       {MACHTELD WRAP usage}
+    "wrap with a stray argument"      {wrap a b c}                 {MACHTELD WRAP usage}
+    "wrap on a dir with no main.tcl"  {wrap $env(TEMP) -o x.exe}   {MACHTELD WRAP notfound}
+} {
+    check "$label => [lindex $want 2]" [expr {[errcode_of $script] eq $want}]
+}
+
+set WTOOL [file join $HERE hello_tool]
+# STAMPED INSIDE THE WORKSPACE, deliberately. The obvious place is $TEMP, and
+# there the last check below proves nothing: `FrontRoots` finds no `.mt` above
+# $TEMP, so the dispatcher stands aside for want of a workspace and the stamped
+# tool runs whether or not it is recognised as one. Here the workspace IS found,
+# so only the zipfs-main.tcl check keeps the front door out of the way.
+set WOUT  [file join $HERE .. build mt_wrap_[pid].exe]
+set WMARK [file join $HERE .. build _hello_ran.txt]
+if {[file isdirectory $WTOOL]} {
+    file delete -force $WMARK
+    check "wrap stamps an exe"        [expr {
+        ![catch {wrap $WTOOL -o $WOUT --console}] && [file exists $WOUT]}]
+    # SELF-CONTAINED means it carries a whole Tcl/Tk runtime, so it is big. A
+    # 200 KB result would mean the basekit was not appended and the thing would
+    # not run anywhere but here.
+    check "and it is self-contained"  [expr {[file size $WOUT] > 4000000}]
+    set wr [run -timeout 60s -- $WOUT]
+    check "the stamped exe runs"      [expr {[dict get $wr exit] == 0}]
+    check "and its main.tcl auto-ran" [expr {[file exists $WMARK]}]
+    if {[file exists $WMARK]} {
+        set wf [open $WMARK r] ; set wtext [read $wf] ; close $wf
+        # THE PRELUDE RIDES ALONG, which is what makes a stamped tool worth
+        # having: the whole palette is inside it, on a machine with no Tcl.
+        check "the palette is inside it" [expr {[string match "*prelude: loaded*" $wtext]}]
+        check "and so is the C library"  [expr {[string match "*proc-in-basekit: yes*" $wtext]}]
+    }
+    # A STAMPED TOOL MUST NOT REACH THE FRONT DOOR'S DISPATCHER. Its argv0 is
+    # its own main.tcl inside its own zipfs, and under "the first argument is a
+    # name" that would resolve as a tool name and exit 127 before the program
+    # ran. Caught by building this, not by reading the code.
+    check "a stamped tool is not dispatched as a name" [expr {
+        [dict get $wr exit] != 127}]
+    file delete -force $WOUT $WMARK
+}
 
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"

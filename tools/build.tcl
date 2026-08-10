@@ -127,13 +127,27 @@ run $gcc -municode -static-libgcc -Wl,--gc-sections \
     {*}$syslibs -o $bare
 catch {run $strip $bare}
 
-# ONE HOST, CONSOLE SUBSYSTEM. There used to be a -mwindows sibling built from
-# the same objects, embedded alongside this one so `wrap` could stamp a windowed
-# tool with no console. Both are gone with `wrap`, and so are the tools that
-# wanted them: nothing double-clickable is produced here for a GUI subsystem to
-# serve. A script that opens a window still works from a console host -- the
-# window opens, the terminal stays. When `mt --gui` lands it decides once, at
-# startup.
+# GUI-subsystem sibling bare (WinMain, -mwindows): same objects, different entry,
+# so a windowed tool `wrap` stamps shows no console window. Shares
+# machteld_appinit.o, so a C library added there lands in both.
+#
+# The subsystem is COMPILED IN, not a PE byte-flip: a console host running in a
+# GUI subsystem has no valid standard channels and `puts stdout` throws "can not
+# find channel named stdout". Two hosts, the way tclkit has always done it
+# (`tclkit` vs `tclkitsh`).
+puts "cc   machteld_gui_main.c  (GUI host, c23)"
+run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
+    -ffunction-sections -fdata-sections \
+    -c [Rp src machteld_gui_main.c] -o [Rp build machteld_gui_main.o] -I$inc
+
+puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
+set baregui [Rp build machteld-bare-gui.exe]
+run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
+    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
+    [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
+    [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
+    {*}$syslibs -o $baregui
+catch {run $strip $baregui}
 
 # The manifest is DERIVED from the C, then appended to the prelude, so the exe
 # ships a self-description that cannot disagree with the code it describes
@@ -157,12 +171,14 @@ close $fo
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
     --tcltk $TCLTK --prelude $staged --wrapper $bare --out $out \
-    --docs [Rp docs]
+    --docs [Rp docs] --embed-console $bare --embed-gui $baregui
 
 puts "built [file nativename $out] ([file size $out] bytes)"
 
-# NOTHING IS STAMPED HERE ANY MORE. The build used to end by running the exe it
-# had just produced five times, to `wrap` five tool directories into five
-# standalone exes of 5.9 MB each. `wrap` was retired on 2026-08-10 and the tools
-# followed it out of the tree the same day -- so the build ends when the exe is
-# built, which is the whole of it.
+# NOTHING IS STAMPED HERE. The build used to end by running the exe it had just
+# produced five times, to `wrap` five tool directories into five standalone exes.
+# Those five programs left the project on 2026-08-10 -- a front door does not
+# host applications -- so nothing here needs stamping. `wrap` itself stayed,
+# because a VERB is not an application: it is a capability this exe offers to
+# whoever wants an exe of their own, and the suite proves it by stamping a
+# fixture rather than by shipping five.

@@ -7,9 +7,9 @@
 # host sources it explicitly and leaves Tcl_Main's REPL/script handling intact.
 #
 #   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> \
-#           --out <exe> ?--docs <dir>?
+#           --out <exe> ?--docs <dir>? ?--embed-console <exe>? ?--embed-gui <exe>?
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --docs ""}
+array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --docs "" --embed-console "" --embed-gui ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {[info exists opt($a)]} {
@@ -87,16 +87,28 @@ if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
     copy_tree $opt(--docs) [file join $stage docs]
 }
 
-# NOTHING ELSE RIDES IN HERE. Two things did, and both are gone:
+# THE BASEKITS: a console and a GUI copy of the bare host, so `wrap` can stamp a
+# standalone exe with no toolchain, no `sdx` and no Tcl install anywhere. It
+# extracts the one matching the chosen subsystem and appends onto it.
 #
-# - `//zipfs:/basekit/`, a console and a GUI copy of the bare host, so the `wrap`
-#   verb could stamp a standalone exe per tool. 4.7 MB, retired with `wrap`.
-# - `//zipfs:/app/tool/<name>/main.tcl`, five programs the front door could run
-#   by name. That lasted a day: a front door resolves names, and hosting the
-#   applications too made it two things at once.
+# These are the whole reason `mt.exe` is 10 MB rather than 6, and that is the
+# deal: 4.5 MB of it is a Windows Tcl/Tk runtime that anyone this exe reaches can
+# be handed a copy of. A wrapped tool carries no basekits of its own, so only
+# `mt.exe` can wrap.
 #
-# What is left is what the exe needs to be itself: the script libraries, the
-# prelude, and the docs `help` serves.
+# What does NOT ride in here, and did for one day: the applications themselves.
+# A front door resolves names; hosting the programs as well made it two things at
+# once. `wrap` is a capability, not an application -- it hands you an exe of your
+# own rather than keeping one of its own.
+if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
+    file mkdir [file join $stage basekit]
+    if {$opt(--embed-console) ne ""} {
+        file copy -force $opt(--embed-console) [file join $stage basekit console.exe]
+    }
+    if {$opt(--embed-gui) ne ""} {
+        file copy -force $opt(--embed-gui) [file join $stage basekit gui.exe]
+    }
+}
 
 file delete -force $OUT
 set entries [zip_entries $stage]
