@@ -574,6 +574,101 @@ proc ::machteld::FrontProjectCommands {root {probVar ""}} {
     return $out
 }
 
+# SCOUT LOOKS AT EVERY UNDERSCORE DIRECTORY, not at every hosted project -- and
+# the difference is the point of the command. `projects` lists the eleven or
+# twelve that carry a project file; scout lists all twenty-three and reports
+# which ones do not, which is how a directory that was meant to become a project
+# and never did gets noticed.
+#
+# Note it does NOT apply the length check `projects` does: a directory named
+# exactly `_` is scouted and is not a project. Faithfully copied, because the
+# two commands really are asking different questions.
+proc ::machteld::FrontUnderscoreDirs {} {
+    variable FRONT_ROOT
+    FrontRoots
+    set dirs {}
+    foreach d [glob -nocomplain -types d -directory $FRONT_ROOT *] {
+        if {[string index [file tail $d] 0] eq "_"} { lappend dirs $d }
+    }
+    # Sorted by lowercased basename, which is z's order and not Tcl's default.
+    return [lmap p [lsort -index 0 [lmap d $dirs {list [string tolower [file tail $d]] $d}]] \
+                {lindex $p 1}]
+}
+
+proc ::machteld::FrontScoutStatic {dir} {
+    variable FRONT_PROJFILES
+    set name [file tail $dir]
+    if {[string index $name 0] eq "_"} { set name [string range $name 1 end] }
+    set hasz 0
+    foreach f $FRONT_PROJFILES {
+        if {[file exists [file join $dir $f]]} { set hasz 1 ; break }
+    }
+    set row [dict create name $name zjson $hasz \
+                 readme [file exists [file join $dir README.md]] \
+                 git no-git branch - commands {}]
+    if {$hasz} { dict set row commands [lsort [dict keys [FrontProjectCommands $dir]]] }
+    return $row
+}
+
+# THE GIT PROBES RUN CONCURRENTLY, and it is worth 2.7x -- measured on a warm
+# cache, after a cold-cache reading of the same comparison said the opposite by
+# a factor of ten. Two `git` invocations per directory over twenty-three
+# directories: serial 1.12 s, concurrent 0.41 s. z is concurrent by default for
+# the same reason, and `--serial` exists on both to turn it off.
+#
+# Every probe is a SUPERVISED CHILD -- born in the job object, tree-killable,
+# dying with this process, and carrying its own deadline -- so a `git` that
+# wedges on one repository cannot hang the front door or leak a process. That is
+# the argument for the palette existing, applied to the front door's own work.
+proc ::machteld::FrontScoutProbe {dirs git serial} {
+    set out {}
+    foreach d $dirs { dict set out $d [dict create git no-git branch -] }
+    set probing {}
+    foreach d $dirs {
+        if {[file exists [file join $d .git]]} { lappend probing $d }
+    }
+    if {$git eq ""} {
+        foreach d $probing { dict set out $d git git? }
+        return $out
+    }
+    set base [list [dict get $git exe]]
+    if {[dict exists $git pre]} { lappend base {*}[dict get $git pre] }
+    set genv [dict get $git env]
+    foreach probe {status branch} {
+        set argl [expr {$probe eq "status" ? {status --short} : {branch --show-current}}]
+        set kids {}
+        foreach d $probing {
+            if {$serial} {
+                set text [FrontGitRun $git $d $argl code]
+                dict set kids $d [list done $text $code]
+                continue
+            }
+            if {[catch {child start -timeout 120s -dir $d -env $genv -- {*}$base {*}$argl} c]} {
+                dict set kids $d [list done "" 1]
+            } else {
+                dict set kids $d [list child $c]
+            }
+        }
+        dict for {d k} $kids {
+            lassign $k how a b
+            if {$how eq "done"} {
+                set text $a ; set code $b
+            } else {
+                set r [child wait $a]
+                catch {child close $a}
+                set text [dict get $r out] ; set code [dict get $r exit]
+            }
+            if {$probe eq "status"} {
+                dict set out $d git [expr {$code != 0 ? "git?" :
+                    ([string trim $text] eq "" ? "clean" : "dirty")}]
+            } elseif {$code == 0 && [string trim $text] ne ""} {
+                dict set out $d branch [string trim $text]
+            }
+        }
+    }
+    return $out
+}
+
 # WHAT THE WORKSPACE ROOT MAY CONTAIN: the front door itself, its private
 # directory, and hosted projects. Anything else is reported -- this is a
 # workspace whose root is meant to be almost empty, and drift there is the kind
@@ -777,7 +872,7 @@ proc ::machteld::FrontWithin {base candidate} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in verify}
+    set subs {roots which env tools run journal projects runtimes status in verify scout}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -863,6 +958,50 @@ proc ::machteld::front {args} {
             dict set r cwd [dict get $proj path]
         }
         return [FrontExec $r 1 [lrange $args 3 end]]
+    }
+
+    if {$sub eq "scout"} {
+        set asjson 0 ; set showcmds 0 ; set serial 0
+        foreach a [lrange $args 1 end] {
+            switch -- $a {
+                -json - --json         { set asjson 1 }
+                -c - --commands        { set showcmds 1 }
+                --serial - -serial     { set serial 1 }
+                default { Fail FRONT usage "usage: front scout ?-commands? ?--serial? ?-json?" }
+            }
+        }
+        set git ""
+        catch {set git [FrontResolve z:git]}
+        set dirs [FrontUnderscoreDirs]
+        set probed [FrontScoutProbe $dirs $git $serial]
+        set rows {}
+        foreach d $dirs {
+            set row [FrontScoutStatic $d]
+            dict set row git    [dict get $probed $d git]
+            dict set row branch [dict get $probed $d branch]
+            lappend rows $row
+        }
+        if {$asjson} { return [json encode $rows -list] }
+        variable FRONT_ROOT
+        set out [list "mt scout" "root: [file nativename $FRONT_ROOT]" ""]
+        lappend out [format "%-12s%-8s%-8s%-8s%-18s%s" project z.json readme git branch commands]
+        lappend out [string repeat - 72]
+        set hosted 0 ; set dirty 0
+        foreach r $rows {
+            if {[dict get $r zjson]} { incr hosted }
+            if {[dict get $r git] eq "dirty"} { incr dirty }
+            lappend out [format "%-12s%-8s%-8s%-8s%-18s%s" [dict get $r name] \
+                [expr {[dict get $r zjson] ? "yes" : "no"}] \
+                [expr {[dict get $r readme] ? "yes" : "no"}] \
+                [dict get $r git] [dict get $r branch] [llength [dict get $r commands]]]
+            if {$showcmds && [llength [dict get $r commands]]} {
+                lappend out "  [join [dict get $r commands] {, }]"
+            }
+        }
+        lappend out ""
+        lappend out "summary: [llength $rows] underscore dirs, $hosted hosted projects,\
+                     [expr {[llength $rows] - $hosted}] missing z.json, $dirty dirty git repos"
+        return [join $out \n]
     }
 
     # `verify` -- the structural problems, which must agree with z's exactly.
