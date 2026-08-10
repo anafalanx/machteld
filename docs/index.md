@@ -26,6 +26,7 @@ This is an **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog) v0.
 - [Direction](direction.md) — the goal, the eight rules, and the ratified contract for the current stretch.
 - [Roadmap](roadmap.md) — what's built, and what's next.
 - [Parallelism and the store](parallel.md) — measured: what runs in parallel today, what the worker pool is and is not worth against the alternatives, and how far a store-backed queue goes.
+- [The journal](journal.md) — what the front door records about every process it starts, and why SQLite.
 - [The worker pool plan](pool-plan.md) — step by step, and what previous work must change.
 - [The standard library](stdlib.md) — where the scripting surface is thin, and the order for fixing it.
 
