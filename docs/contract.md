@@ -85,6 +85,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `HASH` | `hash` (all subcommands) |
 | `CLI` | `cli` |
 | `LOG` | `log` (all subcommands) |
+| `FRONT` | `front` — the workspace front door |
 | `WORKER` | `worker` (all subcommands) |
 | `POOL` | `pool` (all subcommands) |
 | `PMAP` | `pmap` — its own failures only; a worker's failure keeps its own domain |
@@ -110,6 +111,8 @@ errors.
 | `timeout` | a bounded wait ran out — `pty expect` with no pattern matched in time |
 | `unsupported` | this build cannot do it — `wrap` or `help` on a bare host with no embedded payload |
 | `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
+| `noroot` | no workspace was found at or above the executable — there is no `.mt` (nor `.z`) |
+| `manifest` | the workspace manifest is missing, unreadable, or does not describe what was asked for |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
 comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
