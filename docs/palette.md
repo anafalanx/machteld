@@ -468,6 +468,36 @@ the line you typed, not what it resolved to, how long it took, or whether it was
 `front run` records around every spawn, so the record accrues without anyone remembering to ask.
 The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
 
+## Built — a tool of your own, with no compiler
+
+```tcl
+wrap ./mytool -o mytool.exe --gui       ;# a windowed tool, one file, no install
+wrap ./mytool -o mytool.exe --console   ;# a command-line one
+```
+
+`<tooldir>` holds the tool's Tcl, entry point `main.tcl`. Out comes **one exe that is the tool**:
+the Tcl/Tk script libraries, the whole [palette](#), and the tool's own files, appended onto a bare
+host with `zipfs lmkimg`. Nothing is compiled — the hosts ride inside `mt.exe` already
+([packaging](packaging.md)).
+
+**What it is for**, stated plainly because it is the thing that justifies the weight: you write a
+small tool in an afternoon and a colleague needs to run it. They have no Tcl, no Python, no install
+rights and no patience. `wrap` hands you a single file to drop on a share. That is the receiver —
+and it is exactly the one an earlier refusal of this feature said did not exist, which is why the
+[register](direction.md) now records it by name.
+
+**Two subsystems, because Windows compiles the choice in.** `--gui` stamps onto the `-mwindows`
+host so a windowed tool shows no console; `--console` stamps onto the `Tcl_Main` host so a
+command-line tool has real stdio. It is not a PE byte-flip: a console host running in a GUI
+subsystem has no valid standard channels and `puts stdout` throws *"can not find channel named
+stdout"*.
+
+**It costs the front door 130 ms.** Carrying both hosts makes `mt.exe` 10.2 MB instead of 6.0, and
+a large appended archive measurably slows every startup — `mt version` goes from ~240 ms to ~370 ms,
+median of 40 runs, reproducible interleaved. Measured rather than assumed, and **not** an antivirus
+reaction to nested executables: 9.2 MB of random data in their place costs the same. Paid
+deliberately, so that one file is all there is.
+
 ## Built — naming a script
 
 ```tcl

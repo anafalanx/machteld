@@ -588,3 +588,43 @@ old habit teaches rather than merely fails. `file exists` appears in that messag
 the decision — what `mt` runs still cannot depend on what happens to be in the working directory,
 which was the property the original refusal existed to protect and which is *stronger* now, not
 weaker.
+
+## `wrap` comes back, and the front door pays 130 ms for it (2026-08-10)
+
+**A receiver arrived, and it is the one the original refusal said did not exist.** The 2026-08-09
+entry retired `wrap` partly on the grounds that "the claimed benefits have no receiver: nothing here
+is signed, nothing is on PATH, and the author wrote both tools himself." That was true of *this*
+workspace and false of the author's working life: at work, a small tool written in an afternoon has
+to reach colleagues through a shared SMB folder, on machines with no Tcl, no Python and no install
+rights. One self-contained exe on a share is the entire answer, and it is what `wrap` produces.
+
+Both bare hosts are back inside `mt.exe`, console and GUI, so `wrap` needs no toolchain and no
+workspace — the exe alone can stamp.
+
+**What that costs, measured rather than assumed.** `mt version` — a builtin verb answered
+in-process, so the timing is process start plus zipfs mount plus prelude source and nothing else:
+
+| build | size | median of 40 |
+|---|---|---|
+| no basekits | 5.99 MB | 237–254 ms |
+| both basekits | 10.21 MB | 362–378 ms |
+| 4.6 MB × 2 of random data instead | 14.77 MB | 359 ms |
+
+**+130 ms on every invocation.** Reproducible with the two builds interleaved, so it is not drift.
+And **not** an antivirus reaction to executables nested inside an executable, which was the obvious
+hypothesis: replacing them with incompressible random data costs the same despite a *larger* file,
+so it is the size of the appended archive, and it behaves like a step rather than a slope.
+
+I had predicted no measurable effect, on the reasoning that demand paging means an unread part of a
+file is never read. That reasoning was sound and the conclusion was wrong, which is rule 5's entire
+argument for building rather than reasoning about it.
+
+**The cheap alternative was offered and declined, deliberately.** The basekits never need to travel
+— `wrap` runs on the machine that has the workspace, and only its *output* goes on the share — so
+putting them in `.mt/r/basekit/` would have kept the front door at 240 ms with no loss of
+capability. It was refused in favour of **one file that can wrap anywhere**, which is a simplicity
+worth 130 ms. Recorded with the number so the trade stays visible rather than becoming folklore.
+
+**`wrap` is a capability, not an application**, and that is what distinguishes this from the five
+tools deleted the same day. A verb hands the caller an exe of their own; an application would be an
+exe machteld keeps. The front door still hosts nothing.

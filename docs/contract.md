@@ -80,6 +80,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `STORE` | `store` (all subcommands) |
 | `JSON` | `json` (all subcommands) |
 | `MTPS` | `mtps` (all subcommands) |
+| `WRAP` | `wrap` — stamp a Tcl/Tk directory into a standalone exe |
 | `HELP` | `help` |
 | `HASH` | `hash` (all subcommands) |
 | `CLI` | `cli` |
@@ -110,7 +111,7 @@ errors.
 | `depth` | nesting past the 512 limit, on the way in or out — refused rather than crashing the stack |
 | `denied` | the OS refused the operation on a process you do not have the rights to touch |
 | `timeout` | a bounded wait ran out — `pty expect` with no pattern matched in time |
-| `unsupported` | this build cannot do it — `help` on a host with no embedded docs, or a manifest key the front door has yet to implement |
+| `unsupported` | this build cannot do it — `wrap` or `help` on a host with no embedded payload, or a manifest key the front door has yet to implement |
 | `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
 | `noroot` | no workspace was found at or above the executable — there is no `.mt` (nor `.z`) |
 | `manifest` | the workspace manifest is missing, unreadable, or does not describe what was asked for |

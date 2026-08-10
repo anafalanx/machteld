@@ -566,6 +566,25 @@ proc ::machteld::FrontDispatch {} {
     # tool called "a". Only running it showed that.
     set name $argv0
 
+    # A STAMPED TOOL IS NOT A FRONT DOOR, and this is where it says so.
+    #
+    # `wrap` puts the tool's main.tcl at the ROOT of the appended archive, which
+    # is exactly what TclZipfs_AppHook turns into the startup script -- so a
+    # wrapped program reaches this line with argv0 pointing into its own zipfs,
+    # and without this check the front door would try to resolve that path as a
+    # tool name and exit 127 before the program ran at all. It did not need the
+    # check while the dispatcher had a shape test, because a zipfs path contains
+    # separators and was handed straight back; removing the heuristic removed
+    # that accident with it.
+    #
+    # The test is a fact, not a guess: `tools/package.tcl` FAILS THE BUILD if a
+    # root main.tcl ever lands in mt.exe's own archive, so a root main.tcl means
+    # a stamped tool and nothing else. The two halves assert the same thing from
+    # opposite sides.
+    foreach _m [dict keys [zipfs mount]] {
+        if {[file exists [file join $_m main.tcl]]} return
+    }
+
     # No script argument at all: argv0 is this executable. That is the shell.
     if {[string equal -nocase [file normalize $name]                               [file normalize [info nameofexecutable]]]} return
     if {[string index $name 0] eq "-"} return         ;# Tcl_Main's options; `-` is stdin
