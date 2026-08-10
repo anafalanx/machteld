@@ -450,6 +450,70 @@ proc ::machteld::FrontProjects {} {
     return [lsort -index 1 $out]
 }
 
+# GIT, AS THE COCKPIT COUNTS IT. Two commands per directory -- the branch and
+# the short status -- and a tally whose rules are exact and slightly surprising:
+# `??` is untracked and is tested FIRST, so an untracked file is never counted
+# as anything else; then a `D` anywhere in the two-character prefix is a
+# deletion, then an `M` is a modification, and everything else is `other`. A
+# line like `MD` counts as deleted, not modified, because D is tested first.
+#
+# An empty branch means a detached HEAD, and z says so in those words.
+proc ::machteld::FrontGit {dir} {
+    set g [FrontResolve git]
+    set branch [string trim [FrontGitRun $g $dir {branch --show-current}]]
+    set st [FrontGitRun $g $dir {status --short} code err]
+    if {$code != 0} {
+        set detail [string trim $err]
+        if {$detail eq ""} { set detail [string trim $st] }
+        return [dict create ok 0 branch $branch lines {} detail $detail]
+    }
+    set lines {}
+    foreach line [split [string map {\r\n \n \r \n} $st] \n] {
+        if {$line ne ""} { lappend lines $line }
+    }
+    set c [dict create modified 0 deleted 0 untracked 0 other 0]
+    foreach line $lines {
+        set pre [string range $line 0 1]
+        if {[string range $line 0 1] eq "??"} {
+            dict incr c untracked
+        } elseif {[string first "D" $pre] >= 0} {
+            dict incr c deleted
+        } elseif {[string first "M" $pre] >= 0} {
+            dict incr c modified
+        } else {
+            dict incr c other
+        }
+    }
+    if {$branch eq ""} { set branch "(detached)" }
+    return [dict create ok 1 branch $branch lines $lines counts $c]
+}
+
+# One line of prose from a git summary, for the human rendering only -- the
+# -json form carries the dict and lets whoever reads it do its own counting.
+proc ::machteld::FrontGitLine {g} {
+    if {![dict get $g ok]} { return "unavailable ([dict get $g detail])" }
+    set c [dict get $g counts]
+    set bits {}
+    foreach k {modified deleted untracked other} {
+        if {[dict get $c $k]} { lappend bits "[dict get $c $k] $k" }
+    }
+    if {![llength $bits]} { return "clean on [dict get $g branch]" }
+    return "dirty on [dict get $g branch]: [join $bits {, }]"
+}
+
+proc ::machteld::FrontGitRun {g dir argl {codeVar ""} {errVar ""}} {
+    if {$codeVar ne ""} { upvar 1 $codeVar code }
+    if {$errVar ne ""} { upvar 1 $errVar err }
+    set argv [list [dict get $g exe]]
+    if {[dict exists $g pre]} { lappend argv {*}[dict get $g pre] }
+    lappend argv {*}$argl
+    set code 1 ; set err ""
+    if {[catch {run -timeout 60s -dir $dir -env [dict get $g env] -- {*}$argv} r]} { return "" }
+    set code [dict get $r exit]
+    set err  [dict get $r err]
+    return [dict get $r out]
+}
+
 # WHICH PAYLOADS KEEP THEIR VERSIONS IN SUBDIRECTORIES. Copied from z rather
 # than derived, because in z it is a literal `switch` and there is nothing to
 # derive it from. When `.mt` becomes the workspace's own directory this belongs
@@ -559,7 +623,7 @@ proc ::machteld::FrontWithin {base candidate} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes}
+    set subs {roots which env tools run journal projects runtimes status}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -612,6 +676,54 @@ proc ::machteld::front {args} {
     # convention is one dash; z's is two, and these commands exist to be typed
     # where `z projects --json` was typed. Accepting both is what a strangler
     # costs at the seam -- one of the two spellings can go when z does.
+    # `status` IS A COCKPIT, and that is why it is only half here. z's status
+    # reports the workspace's git state AND the latest mirror report, the mirror
+    # run state, and -- under `--deep` -- the results of `verify` and `ledger
+    # check`. Three of those four are the commands [the plan](front-door.md)
+    # defers to last, so a faithful `status` cannot precede them. The plan put
+    # it in the first batch; the code says otherwise.
+    #
+    # What is here is exact: root, the `.z` directory's git state, and every
+    # hosted project's. What is not here is ABSENT rather than guessed -- no
+    # `mirror: null` pretending there is no report when there is one.
+    if {$sub eq "status"} {
+        set deep 0 ; set asjson 0
+        foreach a [lrange $args 1 end] {
+            switch -- $a {
+                -json - --json { set asjson 1 }
+                -deep - --deep { set deep 1 }
+                default { Fail FRONT usage "usage: front status ?-deep? ?-json?" }
+            }
+        }
+        if {$deep} {
+            Fail FRONT unsupported "front status: -deep runs `verify` and `ledger check`,\
+                                    and neither is built yet"
+        }
+        variable FRONT_ROOT ; variable FRONT_HOME
+        FrontRoots
+        set d [dict create root [file nativename $FRONT_ROOT] zGit [FrontGit $FRONT_HOME]]
+        set rows {}
+        foreach p [FrontProjects] {
+            dict set p git [FrontGit [dict get $p path]]
+            lappend rows $p
+        }
+        dict set d projects $rows
+        if {$asjson} { return [json encode $d] }
+        set out {}
+        lappend out "mt status"
+        lappend out "  root: [dict get $d root]"
+        lappend out "  workspace git: [FrontGitLine [dict get $d zGit]]"
+        lappend out ""
+        lappend out "projects"
+        foreach p $rows {
+            lappend out [format "  %-12s %s" [dict get $p name] [dict get $p path]]
+            lappend out "       git: [FrontGitLine [dict get $p git]]"
+        }
+        lappend out ""
+        lappend out "not yet: mirror state, latest report, and --deep (verify + ledger check)"
+        return [join $out \n]
+    }
+
     if {$sub in {projects runtimes}} {
         set asjson 0
         foreach a [lrange $args 1 end] {
