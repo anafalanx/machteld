@@ -131,8 +131,23 @@ The one thing only running it could have shown: by the time AppInit executes, `T
 `argv`. Reading `argv[0]` made the front door resolve the first *argument* of every command, so
 `mt script.tcl a b` went looking for a tool called "a".
 
-**Next:** the [journal](journal.md), then step 3 — retire `wrap` and the two embedded bare hosts,
-which halves the exe.
+**The [journal](journal.md) is built and recording.** `front run` writes a row before the spawn and
+closes it after, in `$MT_HOME/mt.db`; `front journal` opens it for a reader, `journal rows` queries
+it. Everything the recorder does is inside a `catch`, so a journal that cannot be written is a
+front door that still runs the tool.
+
+Its cost was paid somewhere unrelated. A new C file compiled, linked and ran while `manifest` never
+saw the verb, because the generator worked off two hand-kept lists and the runtime called anything
+it had no entry for "Tcl". Both lists are now read out of the source, and the suite asks the running
+binary whether every C verb was seen — which is the answer to the failure class this project keeps
+meeting: **a derivation that quietly reports nothing when the code moves is worse than no
+derivation, because it looks like an answer.**
+
+Still not built, and named rather than assumed: the `pid` at insert and the `mtps` reconciliation
+that would let `rows -live` tell a running process from one whose front door died, and the
+once-per-session pruning — so today the file only grows.
+
+**Next:** step 3 — retire `wrap` and the two embedded bare hosts, which halves the exe.
 
 ## The risk, named
 
