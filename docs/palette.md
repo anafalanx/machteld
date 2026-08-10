@@ -384,6 +384,33 @@ to handlers exactly as it applies to every other line in the file — a namespac
 `namespace path ::machteld` for bare palette verbs, and at global scope, which is what a small
 worker script uses, both resolve with nothing declared.
 
+## Built — the workspace front door
+
+```tcl
+front roots                        ;# where the workspace is, and which dir was found
+front which rg                     ;# C:/dev/.mt/t/rg/rg.exe
+front env rg                       ;# exe, args, env, cwd -- everything, as a dict
+front env rg -json                 ;# the same, on the wire
+front tools ?pattern?              ;# what the workspace curates
+```
+
+machteld is becoming the front door to the workspace it lives in ([the plan](front-door.md)):
+one exe at `C:\dev\mt.exe` that turns a **name** into something runnable under a controlled
+environment. Resolution is **builtin, then curated tool**, and there is deliberately
+**no system-`PATH` fallback** — what runs is what the workspace vendored, not what happens to be
+installed on the machine.
+
+The inventory is not this verb's: it is read from the workspace's own `manifest.json`, so while
+two front doors exist they cannot disagree about what a name means. Every resolution carries
+`MT_ROOT` and `MT_HOME`, plus `MT_PROJECT_ROOT` and `MT_PROJECT_NAME` when the working directory
+is inside a project — and the `Z_` spellings as well for as long as the workspace's private
+directory is still `.z`, so scripts written against the Go front door keep working.
+
+**Read-only for now, and it refuses rather than guesses.** A manifest entry using a key the
+front door does not implement yet (`preFromRoot`, `pre`, `envFromRoot`, `arg0`) is an *error*,
+not a silent partial answer: the point of this stage is to be compared against `z`, and a
+confident wrong resolution is worse than a refusal that names what is missing.
+
 ## Built — declaring a tool's arguments
 
 ```tcl

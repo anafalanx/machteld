@@ -1615,7 +1615,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach hash help json log manifest pmap pool ps pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach front hash help json log manifest pmap pool ps pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
