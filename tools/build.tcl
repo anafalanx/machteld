@@ -129,11 +129,11 @@ catch {run $strip $bare}
 
 # ONE HOST, CONSOLE SUBSYSTEM. There used to be a -mwindows sibling built from
 # the same objects, embedded alongside this one so `wrap` could stamp a windowed
-# tool with no console. Both are gone with `wrap`: a tool is reached as
-# `mt life` now, typed into a shell that already has a console, so there is no
-# double-clickable exe left for a GUI subsystem to serve. Tk works fine from a
-# console host -- the window opens, the terminal stays. When `mt --gui` lands it
-# decides once, at startup, rather than per tool.
+# tool with no console. Both are gone with `wrap`, and so are the tools that
+# wanted them: nothing double-clickable is produced here for a GUI subsystem to
+# serve. A script that opens a window still works from a console host -- the
+# window opens, the terminal stays. When `mt --gui` lands it decides once, at
+# startup.
 
 # The manifest is DERIVED from the C, then appended to the prelude, so the exe
 # ships a self-description that cannot disagree with the code it describes
@@ -157,11 +157,12 @@ close $fo
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
     --tcltk $TCLTK --prelude $staged --wrapper $bare --out $out \
-    --docs [Rp docs] --tools [Rp tool]
+    --docs [Rp docs]
 
 puts "built [file nativename $out] ([file size $out] bytes)"
 
 # NOTHING IS STAMPED HERE ANY MORE. The build used to end by running the exe it
 # had just produced five times, to `wrap` five tool directories into five
-# standalone exes of 5.9 MB each. The tools ride inside this one now, and the
-# front door runs them by name -- so the build ends when the exe is built.
+# standalone exes of 5.9 MB each. `wrap` was retired on 2026-08-10 and the tools
+# followed it out of the tree the same day -- so the build ends when the exe is
+# built, which is the whole of it.

@@ -44,6 +44,12 @@ The five stamped tools (`changes`, `tasks`, `sums`, `life`, `lifelab`) become **
 front door runs**, which is what they should have been: a front door that hosts Tcl/Tk already
 gives them a window and the whole palette without a second artefact each.
 
+> **They were removed from the project instead, on 2026-08-10.** This paragraph is the plan as
+> written, and it was half right: the second artefact each should indeed go. What it did not ask is
+> whether the *first* one belongs here either. A front door resolves names and supervises what it
+> starts; the applications belong wherever their authors keep them, reached with `mt tcl app.tcl`
+> or curated into the workspace like any other tool.
+
 ## What it becomes instead
 
 `els` refuses to run as a Tcl-script host on purpose — it is an application. machteld must do the
@@ -89,7 +95,9 @@ Each ends in something that builds, passes, and is worth committing.
 2. **Spawning.** `front run`, and the argv dispatcher above. At this point
    `machteld rg -n TODO .` works and the environment it hands over is machteld's, not Go's.
 3. **Retire the factory.** Drop `wrap`, the two embedded bares and the packaging step; the five
-   tools become scripts. The exe halves.
+   tools become scripts. The exe halves. *(Done — and the second half of that sentence went
+   further than planned: the tools were removed from the project, not turned into scripts the exe
+   carries. See below.)*
 4. **Strangle z, command by command.** 20 commands, mostly independent. The read-only ones first
    (`which`, `env`, `projects`, `status`, `tools`, `runtimes`), leaving `mirror`, `ledger` and the
    shell shim — the three biggest — until the pattern is proven.
@@ -160,12 +168,17 @@ once-per-session pruning — so today the file only grows.
 the build are gone. The build used to finish by running the exe it had just produced five times, to
 turn five tool directories into five 5.9 MB standalone exes; it now finishes when the exe is built.
 
-**The tools ride inside `mt.exe`** at `//zipfs:/app/tool/<name>/main.tcl`, and resolution gained a
-tier: **builtin verb → shipped tool → curated tool**. `mt sums .` sources the script in this
-process — no exe on disk, no manifest entry, no process to start. None of the five names collides
-with any of the 273 the workspace curates, which is why the tier can sit above them.
+**The tools then left the project entirely, the same day.** For a few hours they rode inside
+`mt.exe` at `//zipfs:/app/tool/<name>/main.tcl`, with resolution gaining a third tier — builtin
+verb → shipped tool → curated tool — so `mt sums .` sourced the script in this process. That was
+strictly cheaper than `wrap` and it answered the wrong question. Retiring the factory had raised
+one the plan had not: not *how* should the exe carry applications, but *should it*. It should not,
+and all five were deleted. **`mt.exe` ships the Tcl/Tk libraries, the prelude and its own docs;
+resolution is builtin verb → curated tool, as it was.** [The register](direction.md) carries the
+reversal and its reinstatement in full.
 
-Two things only building it could have shown:
+Two things only building it could have shown, and both outlived it — they are why
+[`tcl`](palette.md) works the way it does:
 
 - **`Tcl_Main` reads its startup script before it calls `AppInit`.** The neat implementation is to
   let the dispatcher rewrite `argv0` to the tool's script and hand it back to `Tcl_Main` — and it
@@ -175,18 +188,17 @@ Two things only building it could have shown:
   calls `vwait`: under `tclsh`, `package require Tk` hands `Tk_MainLoop` to `Tcl_SetMainLoop` and
   `Tcl_Main` runs it *after* the script returns. Source a windowed tool with nothing after it and
   it builds its window, returns, and the process ends before one event is dispatched. `tkwait
-  window .` is that loop for these programs. Verified end to end: `mt life --seed 41 --grace 2s`
-  opens a real window, runs 131 generations, detects stasis, prints its JSON death line and exits 0.
+  window .` is that loop for a program with one main window. Verified end to end while the tools
+  were still here: `mt life --seed 41 --grace 2s` opened a real window, ran 131 generations,
+  detected stasis, printed its JSON death line and exited 0.
 
-`front which` answers with the *script* for a shipped tool rather than the exe that sources it —
-otherwise `which changes` and `which life` would both say `machteld.exe`, which is true and tells
-you nothing. And `front tools` lists them alongside the curated ones, because a name that resolves
-and is not in that answer is a name nobody can discover.
-
-**One decision was reversed to get here**, and [the register](direction.md) says so rather than
-being quietly contradicted: shipping tools inside the exe was refused on 2026-08-09, on the grounds
-that `argv[1]` is fully allocated by `Tcl_Main` and the benefits had no receiver. The dispatcher
-built in step 2 answered the first, and the front door itself is the receiver.
+**A decision was reversed and then reinstated inside one day**, and [the register](direction.md)
+carries both rather than being quietly contradicted. Shipping tools inside the exe was refused on
+2026-08-09 because `argv[1]` is fully allocated by `Tcl_Main` and the benefits had no receiver; the
+dispatcher answered the first and the front door was the receiver, so it was reversed. Every step
+of that was locally sound and it still landed wrong, because it never asked the question the
+original entry had already identified as the real one — whether a front door should host
+applications at all. It should not.
 
 ### And then the dispatcher lost its last heuristic
 

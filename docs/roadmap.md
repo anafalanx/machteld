@@ -14,7 +14,7 @@ timestamp: 2026-07-09
 - **M1 — execution core.** `run` / `child` / `wait` / `scope` / `detach` in C over the winjob substrate: born-in-job launch, `KILL_ON_JOB_CLOSE` die-with-parent, whole-tree kill, resource caps, BatBadBut / CVE-2024-24576 mitigation, `EscapeArg` quoting; `-timeout` / `-mem` / `-cpu` / `-dir` / `-stdin` / `-env`, and `-onout` / `-onerr` live streaming. Adversarial invariants translated from drang and verified.
 - **M2 — pty.** ConPTY `spawn` / `send` / `read` / `close` / `list`, the `expect` loop, and `vtstrip`. Verified on real hardware; host reap confirmed clean.
 - **`store`** — statically-linked SQLite key-value.
-- **The tool factory — built, then retired 2026-08-10.** The shared-AppInit factoring, the GUI `WinMain` bare, both bares embedded in `machteld.exe`, and the self-contained `wrap` verb: one self-contained tclkit that stamped a Tcl/Tk directory into a standalone exe with no compiler. It worked. It went when machteld became a front door rather than a thing that makes exes — 4.7 MB of embedded bares and five 5.9 MB artefacts, to ship five files of Tcl. The tools ride inside the one exe now and `mt sums .` runs one. 10.2 MB → 6.0 MB. See [packaging](packaging.md).
+- **The tool factory — built, then retired 2026-08-10.** The shared-AppInit factoring, the GUI `WinMain` bare, both bares embedded in `machteld.exe`, and the self-contained `wrap` verb: one self-contained tclkit that stamped a Tcl/Tk directory into a standalone exe with no compiler. It worked. It went when machteld became a front door rather than a thing that makes exes — 4.7 MB of embedded bares and five 5.9 MB artefacts, to ship five files of Tcl. The tools rode inside the one exe for a few hours after that, and were then removed from the project altogether: a front door resolves names, and hosting the applications made it two things at once. 10.2 MB → 6.0 MB. See [packaging](packaging.md) and [the register](direction.md).
 - **The front door.** `front which` / `env` / `tools` / `run` / `journal`, the argv dispatcher (`mt rg -n TODO .`), and a SQLite [journal](journal.md) of every process it starts. Resolution is builtin verb, then shipped tool, then curated tool — and there is no system-`PATH` fallback. See [the plan](front-door.md).
 
 ## Next — 0.3.0, in order
@@ -23,7 +23,7 @@ Ratified 2026-08-08; the reasoning is in [direction](direction.md).
 
 1. **The manifest** — the self-describing runtime dict ([creed](creed.md) 4 / [the contract](contract.md)), built *first* so every new verb declares itself into it rather than being retrofitted. Carries each verb's error codes too, which is how creed 5's closed registry gets its completeness test.
 2. **`watch`** — live file events: handle + blocking read, waitable by the existing `wait`, coalesced by default with `-raw` available.
-3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, at the time `wrap`'d into its own 6.1 MB exe and now shipped inside `mt.exe`. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
+3. **The change-viewer** — ✅ built (`tool/changes`): a live list of paths as they change with a preview of the one you click, pure Tcl/Tk, at the time `wrap`'d into its own 6.1 MB exe; removed from the project on 2026-08-10 with the other four. Filters VCS and build churn (`--all` to see everything), describes binaries rather than dumping them, and carries `--selftest` so the tool tests its own model with no window — which matters because a hidden Tk window drops events and would be testing something else. **0.3.0 ships when it does.**
 
 ✅ **`watch info` / `pty info`** landed 2026-08-09. They arrived with a cockpit verb (`mt`) that
 was **built, measured and removed the same day**: it refreshed 8×/second idle and not at all while
@@ -34,7 +34,9 @@ primitive with or without a window. See [direction](direction.md).
 
 ✅ **`mtps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
 (`mtps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, then wrapped to
-`tasks.exe`). The tool was written, it named a capability machteld did not have — it
+`tasks.exe`, removed 2026-08-10). **`mtps` stays**: it is a machine-control primitive, the half
+`child list` is not, and the [journal](journal.md)'s reconciliation sweep needs it. Losing its only
+in-repo caller makes it a verb to review deliberately, which rule 5 says to do — reviewed, kept. The tool was written, it named a capability machteld did not have — it
 could supervise processes it *started* but could not see one it did not — and that capability was
 built to fit. That was rule 5 as it then stood; the rule has since been rewritten so a domain no
 longer has to be asked for before it may be built.
@@ -52,7 +54,7 @@ is the asymmetry to widen. The plan, its design rules and its ordering are in
 ✅ **Phase 0 done 2026-08-09** — the prelude now holds itself to the contract it lands in: every
 error carries a code, and the manifest describes a Tcl verb as fully as a C one. ✅ **`hash` done 2026-08-09** — `md5 sha1 sha256 sha384 sha512`, HMAC, streamed file digests and
 a cryptographic RNG, over CNG with nothing vendored. ✅ **`cli` done 2026-08-09** — declarative argument parsing, pure (it prints nothing and never
-exits, because a wrapped GUI exe has no standard channels). `tasks` now runs on it and gained
+exits, because a program with no standard channels cannot report to them). `tasks` now runs on it and gained
 `--help`. ✅ **`log` done 2026-08-09** — levelled, structured, and it never throws on a write failure.
 
 **Phase 1 is complete**: all three empty categories are filled. Next is Phase 2 — `fetch` over
@@ -78,7 +80,7 @@ startup costs a few hundred milliseconds that are amortised by about **four seco
 below a second, do not bother. The numbers, and the predictions that came out wrong, are in
 [parallelism](parallel.md).
 
-✅ **`sums`** (`tool/sums`, then wrapped to `sums.exe`) — the third shipped tool and the first that is
+✅ **`sums`** (`tool/sums`, then wrapped to `sums.exe`, removed 2026-08-10) — the third shipped tool and the first that is
 not a window: it hashes a tree using **copies of itself** as workers. One artefact, no tclsh, no
 worker script on disk.
 

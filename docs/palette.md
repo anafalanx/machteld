@@ -479,8 +479,8 @@ dispatcher handed anything that *looked like* a path — a separator, or a `.tcl
 `Tcl_Main` as a script, so `mt app.tcl` ran app.tcl the way `tclsh app.tcl` does. That was never
 "does this file exist", which would have let a stray file change what `mt rg` means. It was still a
 **shape test**: a heuristic guessing which of two kinds of thing you meant from how you spelled the
-word. And it left one case honestly ambiguous — a file named `changes`, no extension, beside a
-shipped tool named `changes`.
+word. The case it could not answer is `mt rg` standing next to a file called `rg` — and there are
+273 curated names for such a file to be named after.
 
 So a script is named now, and the dispatcher has no heuristic left in it:
 
@@ -561,9 +561,11 @@ unknown option, a missing value, a number out of range. `badvalue` is the *autho
 attribute, an unknown type, a name declared twice. A tool can show the first and should fail on
 the second.
 
-The bug it removes is real: `tasks --interval` with nothing after it used to set the interval to
-the empty string, and `after ""` then threw out of the refresh timer, killing the tool at
-startup. A missing value is now refused where it is missing.
+The bug it removes is real, and it is why the two codes are separate. A Tk task manager built on
+this palette took `--interval` with nothing after it, set the interval to the empty string, and
+`after ""` then threw out of the refresh timer — killing the tool at startup, or worse, stopping a
+running one from refreshing while it still showed a list that looked live. A missing value is
+refused where it is missing now.
 
 ## Built — digests, HMAC and cryptographic random
 

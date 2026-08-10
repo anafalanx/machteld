@@ -8,17 +8,51 @@ timestamp: 2026-07-09
 
 # Log
 
-## 2026-08-10 — the factory is retired: 10.2 MB → 6.0 MB, and the tools ride inside
+## 2026-08-10 — no applications ship inside it
+
+`changes`, `tasks`, `sums`, `life` and `lifelab` are gone from the tree, along with the resolution
+tier that found them and the window test that drove one. `mt.exe` carries the Tcl/Tk libraries, the
+prelude and its own docs; resolution is **builtin verb → curated tool**, as it was before this
+morning.
+
+**The reasoning is one line.** A front door resolves names and supervises what it starts. Hosting
+the applications as well makes it two things at once, and the second grows without limit — every
+program added is another name competing with the workspace's own 273, permanently.
+
+**The interesting part is that the entry below is wrong, and every step of it was sound.** Retiring
+`wrap` reversed a refusal recorded the previous day, and the reversal answered each stated
+objection honestly: the mechanical one had genuinely been solved by the argv dispatcher, the
+benefits had genuinely acquired a receiver, and the cost had genuinely moved the other way. What it
+never asked was whether a front door should host applications *at all* — a question the refused
+entry had itself flagged as the real one, in the paragraph the reversal quoted while getting it
+backwards. **Answering a different question well is a failure mode that looks exactly like being
+right**, and the only thing that catches it is going back to what the register said the question
+was.
+
+What the tools taught outlives them, which is why they were worth having. `changes` and `tasks`
+named the C capabilities they needed, and that is where `watch` and `mtps` came from. `sums` proved
+the exe can spawn copies of itself as a pool of persistent workers. `life`/`lifelab` were the
+stress experiment that found the cap-enforcement and `child wait -timeout` defects. And the two
+facts about `Tcl_Main` found while making them run in-process are why [`tcl`](palette.md) works the
+way it does.
+
+`mtps` loses its only in-repo caller and **stays**: it is a machine-control primitive, the half
+`child list` is not, and the journal's planned reconciliation sweep has no other mechanism. Rule 5
+says an unused verb is a question to answer deliberately rather than let sit — asked, and answered.
+The suite covers it directly (27 checks), so nothing became untested when `tasks` left. 441 checks
+pass; 273 of 273 resolutions still agree with z.
+
+## 2026-08-10 — the factory is retired: 10.2 MB → 6.0 MB
 
 Step 3 of [the front-door plan](front-door.md). `wrap`, both embedded bare hosts, the GUI
 `WinMain` host, `tools/pack.tcl` and the tool-stamping loop at the end of the build are gone. The
 build used to finish by running the exe it had just produced five times, turning five tool
 directories into five 5.9 MB standalone exes; it finishes when the exe is built now.
 
-**The five tools ride inside `mt.exe`** at `//zipfs:/app/tool/<name>/main.tcl`, and resolution
-gained a tier: **builtin verb → shipped tool → curated tool**. `mt sums .` sources the script in
-this process — no exe on disk, no manifest entry, no process to start. None of the five names
-collides with any of the 273 the workspace curates.
+**The five tools rode inside `mt.exe`** at `//zipfs:/app/tool/<name>/main.tcl` for a few hours,
+with resolution gaining a tier — builtin verb → shipped tool → curated tool — so `mt sums .`
+sourced the script in this process. **Then all five were deleted from the project**, later the same
+day, and the tier with them. See the next entry; what follows is what was built before that.
 
 Two things only building it could have shown:
 
