@@ -213,7 +213,26 @@ if {$zv ne $mv} {
     puts "  only machteld: [lmap x $mv {expr {$x in $zv ? [continue] : $x}}]"
 }
 
-if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20 || $vbad} {
+# --- and the scout table, line for line --------------------------------------
+# Each side's own first line differs (it names which front door produced it) and
+# z prints a trailing hint of its own; everything between must be identical.
+proc scoutBody {text} {
+    set out {}
+    foreach l [lrange [split [string map {\r\n \n} [string trimright $text]] \n] 1 end] {
+        set l [string trimright $l]
+        if {[string match "hint:*" $l]} continue
+        lappend out $l
+    }
+    return $out
+}
+set zs [scoutBody [dict get [run -timeout 300s -- $zexe scout] out]]
+set ms [scoutBody [dict get [run -timeout 300s -- [info nameofexecutable] scout] out]]
+set sbad 0
+foreach a $zs b $ms { if {$a ne $b} { incr sbad ; if {$sbad < 4} { puts "  z : '$a'" ; puts "  mt: '$b'" } } }
+if {[llength $zs] != [llength $ms]} { incr sbad }
+puts [format "scout table      : %d lines, %s" [llength $zs] [expr {$sbad ? "$sbad DIFFER" : "identical"}]]
+
+if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20 || $vbad || $sbad} {
     puts "DISAGREEMENT"
     exit 1
 }

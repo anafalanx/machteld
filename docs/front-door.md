@@ -358,8 +358,39 @@ include `mt.exe` the day it lands beside `z.exe`. For a while `z verify` will th
 problem `mt verify` does not — that difference is the transition, not a defect in either, and it is
 gated so it cannot be quietly lost.
 
-**Next:** `scout`, `logs`/`follow`, `cdirs`, `init`, then `mirror` and `ledger` — after which both
-halves of `status --deep` exist and `status` finishes itself.
+### `scout`, and a cold cache that lied by a factor of ten
+
+`mt scout` walks every underscore directory — all twenty-three, not just the twelve carrying a
+project file, which is the whole point of the command: a directory meant to become a project and
+never did shows up here as `no`. Its table is **identical to z's, line for line**, all twenty-nine.
+
+**The interesting part was nearly a false claim.** The first timing said serial machteld ran in
+1.15 s against z's concurrent 11.53 s, and "ten times faster than the Go one, without even using
+concurrency" is a very quotable number. It was a **cold file cache** — the first `git status` across
+twenty-three repositories reading from disk. On repeat runs:
+
+| | median of 3 |
+|---|---|
+| `z scout` (concurrent) | 0.46 s |
+| `z scout --serial` | 1.12 s |
+| `mt scout --serial` | 1.17 s |
+| `mt scout` (concurrent) | **0.56 s** |
+
+So the truth is the opposite of the first reading: serial machteld matches serial z, and
+**concurrency is worth 2.1×** — which is why z is concurrent by default and why `--serial` is not a
+flag machteld could accept and quietly ignore. This is the second cold-cache misreading in this
+project's history and the log records the first; the rule earned there is that a surprising number
+is a reason to measure again, not to write it down.
+
+The probes are **supervised children** — born in the job object, tree-killable, dying with the
+front door, each carrying its own deadline — so a `git` that wedges on one repository cannot hang
+the command or leak a process. That is the palette's own argument, applied to the front door's work.
+
+`test/front_agree.tcl` now diffs four things: **275 tools, 135 project commands, 5 verify problems,
+29 scout lines.**
+
+**Next:** `logs`/`follow`, `cdirs`, `init`, then `mirror` and `ledger` — after which both halves of
+`status --deep` exist and `status` finishes itself.
 
 ## The risk, named
 

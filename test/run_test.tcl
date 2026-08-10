@@ -2100,6 +2100,28 @@ foreach keep {z.exe mt.exe .z .mt} {
 check "no kit name is defined twice" [expr {
     [llength [lsearch -all -inline -glob [dict get $vf problems] "kit defines*"]] == 0}]
 
+# --- scout: every underscore directory, not every project --------------------
+# `projects` lists the ones carrying a project file; `scout` lists them ALL and
+# reports which do not, which is how a directory meant to become a project and
+# never did gets noticed. Different questions, and scout deliberately omits the
+# length check `projects` applies.
+set sc [valof {json decode [front scout -json]}]
+check "scout sees more than projects does" [expr {
+    [llength $sc] > [llength [valof {json decode [front projects -json]}]]}]
+check "every scout row is complete" [expr {
+    [llength [lmap r $sc {expr {
+        [dict exists $r name] && [dict exists $r zjson] && [dict exists $r readme]
+        && [dict exists $r git] && [dict exists $r branch] && [dict exists $r commands]
+        ? [continue] : $r}}]] == 0}]
+check "scout reports a git state it recognises" [expr {
+    [llength [lmap r $sc {expr {
+        [dict get $r git] in {clean dirty no-git git?} ? [continue] : $r}}]] == 0}]
+# CONCURRENT AND SERIAL MUST AGREE. The probes run as supervised children by
+# default -- 1.17 s serial against 0.56 s concurrent, measured -- and a
+# concurrency that changes the answer is not an optimisation.
+check "concurrent and --serial scout agree" [expr {
+    [valof {front scout -json}] eq [valof {front scout --serial -json}]}]
+
 # THE `t/` DIRECTORY IS A SOURCE OF TOOLS, not just an override of manifest
 # entries. Four tools existed only as `.z/t/<name>/` directories and machteld
 # refused all four while z ran them -- invisible for a month because the
