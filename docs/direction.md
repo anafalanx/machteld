@@ -651,3 +651,50 @@ control that seemed to confirm it was measuring `manifest` too.
 others, and a measurement will attribute the entire gap to whichever difference you had in mind.
 Vary one thing, from one source, in one session — and when a number is surprising, that is a reason
 to isolate further rather than to write it down.
+
+## `cdirs` does not become Tcl — measured, and refused (2026-08-11)
+
+**The one command in [the front-door plan](front-door.md) that should not be rewritten in the
+prelude.** `cdirs` walks every directory under `C:\` and writes the list; it is 426 lines of tuned
+Go with reparse-point classification, depth limits, deduplication, flush intervals and GC tuning.
+Step 4's premise is that z's commands are a page of Tcl each. This one is not.
+
+**The measurement**, on `C:\dev` (a bounded subtree, warm cache, both walkers skipping directory
+reparse points rather than descending them):
+
+| | directories | time |
+|---|---|---|
+| `z cdirs --root C:\dev` | 21,765 | **1.5–1.75 s** |
+| a Tcl walker over `glob -types d` | 20,979 (96% of them) | **12.2 s** |
+
+**Seven to eight times slower at 96% coverage**, and closing that last 4% makes it slower still.
+The prediction registered before running was 3–10×; the outcome is inside it, which is the least
+interesting part.
+
+**The interesting part is that the walker is still wrong, three attempts in.** Every failure was
+silent — no error, no exception, just a different number:
+
+- `glob -types d -directory $d *` does **not** match dot-names on Windows, so every `.git` subtree
+  vanished: 786 directories short.
+- `glob ... -- * .*` matches them **twice**, because `*` also matches dot-names once the pattern
+  list asks for them. Every dot-directory was queued and walked twice: 16,504 phantom entries, a
+  77% overcount, and the walk *terminated normally*.
+- Deduplicating by lowercased path fixed the overcount and lost the dot-directories again. Still
+  786 short, cause not established.
+
+None of that was visible without diffing the full list against z's. A directory walker looks like
+the simplest possible program and is not: on Windows it is reparse-point classification, dot-name
+semantics, case-insensitive identity and cycle avoidance, and Tcl's `glob` hides the first three
+behind a pattern language that answers differently than it reads.
+
+**The decision: `cdirs` is not reimplemented in the prelude.** Two honest routes remain, and this
+entry does not pick between them because nothing yet needs it to:
+
+1. **A C verb.** [Rule 4](#) says C is for what Tcl cannot reach, and this is measurably that — a
+   `FindFirstFileEx` walk with explicit reparse-tag handling would match Go's speed and settle the
+   semantics in one place. It is the same argument that put `run`, `pty` and `watch` in C.
+2. **It stays outside machteld.** `cdirs` writes a cache file nothing else in the front door reads.
+   A workspace tool that happens to be a separate binary is not a failure of the plan.
+
+What this does **not** license is the third route: writing it in Tcl anyway and accepting an
+eight-times-slower, still-incorrect walk because the rest of step 4 went well.

@@ -389,8 +389,33 @@ the command or leak a process. That is the palette's own argument, applied to th
 `test/front_agree.tcl` now diffs four things: **275 tools, 135 project commands, 5 verify problems,
 29 scout lines.**
 
-**Next:** `logs`/`follow`, `cdirs`, `init`, then `mirror` and `ledger` — after which both halves of
-`status --deep` exist and `status` finishes itself.
+### What is left, and what will not be built
+
+Three of the remaining commands turn out not to be work at all, and one turns out not to be Tcl.
+
+**`init` and `bom` do not exist.** Both are listed in z's built-in table and both answer *"planned
+but not implemented yet"*. There is nothing to strangle.
+
+**`logs` and `follow` belong to `mirror`.** Both read the mirror's robocopy logs and report
+artefacts, through the same OneDrive resolution and artefact index that `status`'s missing half
+needs. They land when `mirror` does, not before.
+
+**`cdirs` is not becoming Tcl**, and that is measured rather than asserted — see
+[the register](direction.md). On `C:\dev`, warm: z walks 21,765 directories in 1.5 s; a Tcl walker
+manages 96% of them in 12.2 s, seven to eight times slower, and is *still wrong* after three
+attempts, each failing silently in a different way (`glob *` misses dot-names; `glob -- * .*`
+matches them twice and overcounts by 77%; deduplicating loses them again). A directory walker looks
+like the simplest possible program and on Windows it is reparse-point classification, dot-name
+semantics and case-insensitive identity. It wants a C verb or it stays outside machteld.
+
+**`help` and `version` already exist** as machteld's own, answering about machteld rather than
+about z, which is correct and not a gap.
+
+So what genuinely remains of step 4 is **`mirror`, `ledger` and the shell shim** — the three the
+plan always meant to do last — plus `logs`/`follow` and `status --deep` behind them.
+
+**Next:** `ledger`, which is the smallest of the three and the only one that does not touch the
+replica.
 
 ## The risk, named
 
