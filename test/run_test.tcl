@@ -2078,6 +2078,28 @@ if {$pcmd ne ""} {
     check "project command paths are cleaned"   [expr {$dirty eq ""}]
 }
 
+# --- verify: the workspace's structural problems -----------------------------
+set vf [valof {json decode [front verify -json]}]
+check "verify answers with problems and counts" [expr {
+    [dict exists $vf problems] && [dict exists $vf counts builtins]
+    && [dict exists $vf counts tools] && [dict exists $vf counts project]}]
+# THE ROOT IS MEANT TO BE ALMOST EMPTY: the front door, its private directory,
+# and hosted projects. Anything else is reported, because drift there is the
+# kind nobody notices for years.
+check "verify reports unexpected root entries" [expr {
+    [llength [lsearch -all -inline -glob [dict get $vf problems] "unexpected workspace-root entry*"]] > 0}]
+# BOTH FRONT DOORS ARE ACCEPTED while both exist -- otherwise `mt verify` would
+# flag `mt.exe` the day it lands beside `z.exe`, which is the transition rather
+# than a problem with the workspace.
+foreach keep {z.exe mt.exe .z .mt} {
+    check "verify accepts $keep at the root" [expr {
+        [llength [lsearch -all -inline -glob [dict get $vf problems] "*$keep"]] == 0}]
+}
+# A KIT NAME DEFINED TWICE would be a real problem; there are none, and the
+# check has to be live because the workspace gains tools without asking.
+check "no kit name is defined twice" [expr {
+    [llength [lsearch -all -inline -glob [dict get $vf problems] "kit defines*"]] == 0}]
+
 # THE `t/` DIRECTORY IS A SOURCE OF TOOLS, not just an override of manifest
 # entries. Four tools existed only as `.z/t/<name>/` directories and machteld
 # refused all four while z ran them -- invisible for a month because the

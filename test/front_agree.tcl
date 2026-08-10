@@ -190,7 +190,30 @@ puts [format "project commands : %d / %d" $pagree $ptotal]
 foreach b [lrange $pbad 0 [expr {$VERBOSE ? "end" : 9}]] { puts "  $b" }
 if {$ptotal < 20} { puts "  (suspiciously few -- is FrontProjectCommands reading anything?)" }
 
-if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20} {
+# --- and the structural problems `verify` reports ----------------------------
+# The problem LIST must agree exactly; the counts footer must not and cannot,
+# since z counts its 21 built-ins and machteld counts its own front-door
+# commands, which are different sets on purpose.
+proc verifyProblems {text} {
+    set out {}
+    foreach line [split [string map {\r\n \n} $text] \n] {
+        if {[string range [string trim $line] 0 1] eq "- "} {
+            lappend out [string trim [string range [string trim $line] 2 end]]
+        }
+    }
+    return [lsort $out]
+}
+set zv [verifyProblems [dict get [run -timeout 60s -- $zexe verify] out]]
+set mv [lsort [dict get [json decode [front verify -json]] problems]]
+puts [format "verify problems  : z %d, machteld %d" [llength $zv] [llength $mv]]
+set vbad 0
+if {$zv ne $mv} {
+    set vbad 1
+    puts "  only z      : [lmap x $zv {expr {$x in $mv ? [continue] : $x}}]"
+    puts "  only machteld: [lmap x $mv {expr {$x in $zv ? [continue] : $x}}]"
+}
+
+if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20 || $vbad} {
     puts "DISAGREEMENT"
     exit 1
 }
