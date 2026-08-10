@@ -27,11 +27,18 @@ if {![catch {
 puts $f $gui
 close $f
 
-# On a real desktop, keep the window up briefly so it's visible; headless (window
-# creation failed) just falls through and exits.
+# Then go, promptly. This used to linger 4000 ms so a human could see the window
+# -- and nobody was watching: it was 4.4 of the suite's 22.7 seconds, the single
+# most expensive check in it, spent asleep. The evidence this fixture exists to
+# produce is already in the marker above, written before the pause ever started.
+#
+# The linger is still available for the one case it was written for, by asking:
+#   MT_HELLO_LINGER=4000 hello.exe
 if {[string match *OK* $gui]} {
     wm protocol . WM_DELETE_WINDOW {exit 0}
-    after 4000 {exit 0}
+    set linger 150
+    if {[info exists env(MT_HELLO_LINGER)]} { set linger $env(MT_HELLO_LINGER) }
+    after $linger {exit 0}
     vwait forever
 }
 exit 0
