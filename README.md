@@ -4,8 +4,8 @@
 
 machteld is one signed Windows executable (Win 11 23H2+) that does two things:
 
-- **A tool factory.** `wrap` a pure-Tcl/Tk program into its own standalone, signable exe — console **or** GUI, with **zero compiler**. Both subsystem basekits and the Tcl/Tk libraries ride inside `machteld.exe`, so no toolchain or Tcl runtime is needed to build a tool or to run one.
-- **A machine-control primitive library** — bundled into every tool it builds, and into its own REPL: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, live capture/streaming), interactive **ConPTY** steering (`pty` / `expect`), live file events (`watch`), a machine-wide process view (`mtps`), JSON (`json`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
+- **A workspace front door.** `mt <name>` turns a name into something runnable under a controlled environment — a builtin verb, one of the tools it ships, or one the workspace curates — with **no system-`PATH` fallback**, so what runs is what the workspace vendored. It records every one in a [SQLite journal](docs/journal.md).
+- **A machine-control primitive library** — in every tool it runs, and in its own REPL: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, live capture/streaming), interactive **ConPTY** steering (`pty` / `expect`), live file events (`watch`), a machine-wide process view (`mtps`), JSON (`json`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
 
 Built to be as legible to agents as to humans — *no AI inside; the agent is an external mind.*
 Every tool it stamps carries **its own spec inside it**: `help` serves the documentation bundle
@@ -24,7 +24,7 @@ of what is changing in a directory tree; **`tasks`**, a task manager — the pro
 sortable, with End Task; and **`sums`**, which hashes a tree using **copies of itself** as worker
 processes. They exist as much to prove the factory as to be used. The first two were written
 first and then named the C capability they needed, which is how `watch` and `mtps` came to be
-built; `sums` proves the other direction — that a stamped exe can spawn itself as a pool of
+built; `sums` proves the other direction — that a shipped tool can spawn itself as a pool of
 persistent workers, with no tclsh and no worker script on disk.
 
 **Concept & design docs:** [`docs/`](docs/) — an [OKF v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog) knowledge bundle. Start at [`docs/index.md`](docs/index.md).

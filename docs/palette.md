@@ -1,7 +1,7 @@
 ---
 type: reference
 title: The palette
-description: Surface conventions and the verb set — what is built (execution core, pty, store, wrap) and what is deferred.
+description: Surface conventions and the verb set — what is built (execution core, pty, store, front door) and what is deferred.
 tags: [machteld, palette, verbs, reference]
 timestamp: 2026-07-09
 ---
@@ -175,12 +175,11 @@ vtstrip $text                      ;# remove ANSI/VT escape sequences, keep the 
 in a headless test. Note `version` is the *palette's* version; `store version` is a different
 command reporting SQLite's.
 
-## Built — storage & packaging
+## Built — storage
 
 ```tcl
 store open db.sqlite ; store put k v ; store get k ; store keys ; store del k ; store version ; store close
 store open                            ;# no path: an in-memory database, gone when you close it
-wrap ./mytool -o mytool.exe --gui     ;# stamp a Tcl/Tk tool into a standalone exe (see packaging.md)
 ```
 
 **`store open` with no path gives an in-memory database** — useful for a test, and for code that
@@ -247,8 +246,8 @@ Levels are `debug info warn error`, ordered, plus `off`. A line reads:
 2026-08-09T15:53:06.832 INFO  watching dir=C:/dev/_machteld count=3
 ```
 
-**A write failure never throws.** This is the decision the rest hangs on. A wrapped GUI exe is
-started with **no standard channels**, so `puts stderr` raises there — and a log call that can
+**A write failure never throws.** This is the decision the rest hangs on. A process started
+with **no standard channels** — a GUI host, a detached child — makes `puts stderr` raise — and a log call that can
 throw is a log call that kills the program at whatever arbitrary point it was asked to record
 something. A failed write increments a counter instead, and `log configure` reports it: the same
 bargain [`watch`](#) makes with its `dropped` count. Losing data silently is unacceptable, so it
@@ -500,13 +499,13 @@ set opt [cli parse $argv $spec]      ;# a dict: interval, format, all, dir, help
 cli usage $spec tasks                ;# the help text, from the same declaration
 ```
 
-Every program `wrap` stamps needs argument parsing, and every one used to write its own. A name
+Every program machteld ships needs argument parsing, and every one used to write its own. A name
 beginning `--` is an option, anything else is a positional taken in declaration order, and `--`
 ends option parsing. Attributes: `type` (`flag` / `int` / `string`), `default`, `min`, `max`,
 `choices`, `required`, `help`.
 
 **It prints nothing and never exits.** An `argparse`-style "print usage and exit" is invisible
-exactly where it matters most: a wrapped GUI exe starts with **no standard channels**, so a tool
+exactly where it matters most: a program with **no standard channels** cannot report, so a tool
 reporting a bad argument on stdout reports it to nowhere. So `--help` comes back as a value in
 the dict, and a bad argument raises `{MACHTELD CLI usage}` whose message already contains the
 usage block — the tool decides whether that goes to stderr, a dialog or a log.

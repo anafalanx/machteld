@@ -8,6 +8,49 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-10 — the factory is retired: 10.2 MB → 6.0 MB, and the tools ride inside
+
+Step 3 of [the front-door plan](front-door.md). `wrap`, both embedded bare hosts, the GUI
+`WinMain` host, `tools/pack.tcl` and the tool-stamping loop at the end of the build are gone. The
+build used to finish by running the exe it had just produced five times, turning five tool
+directories into five 5.9 MB standalone exes; it finishes when the exe is built now.
+
+**The five tools ride inside `mt.exe`** at `//zipfs:/app/tool/<name>/main.tcl`, and resolution
+gained a tier: **builtin verb → shipped tool → curated tool**. `mt sums .` sources the script in
+this process — no exe on disk, no manifest entry, no process to start. None of the five names
+collides with any of the 273 the workspace curates.
+
+Two things only building it could have shown:
+
+- **`Tcl_Main` reads its startup script before it calls `AppInit`.** The neat implementation is to
+  have the dispatcher rewrite `argv0` and hand the script back to `Tcl_Main`; it cannot work,
+  because the decision about what to evaluate has already been taken by the time `AppInit` sources
+  the prelude. The process still tries to read a file called `sums`, and says so.
+- **The event loop had to be replaced, not skipped.** Four of the five tools are Tk and none calls
+  `vwait`: `package require Tk` hands `Tk_MainLoop` to `Tcl_SetMainLoop` and `Tcl_Main` runs it
+  after the script returns. Source a windowed tool with nothing after it and it builds its window,
+  returns, and the process ends before one event is dispatched. `tkwait window .` is that loop
+  here. `mt life --seed 41 --grace 2s` opens a real window, runs 131 generations, detects stasis,
+  prints its JSON death line and exits 0.
+
+**A name is joined onto a directory here, which nothing else the front door resolves is** — every
+other name is a key in a dict the workspace wrote. The zipfs resolves `..` (checked: `file exists
+//zipfs:/app/tool/../tool/sums/main.tcl` is 1), so without a name check `mt ../tool/sums` would
+have found a real tool, and enough `..` would have walked out of the archive onto the disk. A
+shipped tool's name is letters and digits or it is not one, and the gate uses spellings that
+*would* resolve rather than ones that would have failed anyway.
+
+**One decision was reversed**, and [the register](direction.md) records it rather than being
+quietly contradicted: shipping tools inside the exe was refused on 2026-08-09, because `argv[1]` is
+fully allocated by `Tcl_Main` and the claimed benefits had no receiver. The argv dispatcher built
+in step 2 answered the first — it broke no spelling that worked — and the front door is the
+receiver.
+
+`front which` now answers with the script for a shipped tool rather than the exe that sources it,
+`front tools` lists them beside the curated ones, and `test/front_agree.tcl` excludes them from the
+z comparison by name rather than reporting five deliberate differences as five surprises every run.
+474 checks pass; 273 of 273 resolutions still agree with z.
+
 ## 2026-08-09 — the worker pool: persistent workers, and a tool that spawns itself
 
 Six steps, each ending in something that builds and passes. The design and the refusals that

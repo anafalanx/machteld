@@ -150,7 +150,7 @@ options correctly.
 |---|---|---|
 | **Phasers** (`LEAVE` / `KEEP` / `UNDO`) | prelude | Generalizes `scope`, which is already this idea for one resource. The orchestration case wants it constantly: start a child and you must kill it. Shape verified. |
 | **Lazy sequences** (`gather`/`take`) | prelude | Tcl coroutines make this natural; bounds memory over a long child's output and makes "stop early" cheap. |
-| **Signature-derived CLI** | prelude | A wrapped tool's entry declares its parameters once and gets argv parsing *and* `--help` from them. Fits the [tool factory](packaging.md) exactly. |
+| **Signature-derived CLI** | prelude | A tool's entry declares its parameters once and gets argv parsing *and* `--help` from them. |
 | **Shapes** (`where`-constrained validation) | prelude | Declare a dict's shape once, check it at every boundary; composes with the manifest. |
 
 **Refused, on rule 2**, so they are not relitigated: junctions and any autothreading operator;
@@ -184,7 +184,9 @@ shorten an existing one's unique prefix.**
 ### The built palette — ratified as-is
 
 `run` / `child` / `wait` / `scope` / `detach` · `pty` / `expect` / `vtstrip` · `store` ·
-`wrap` / `help` / `version`. No changes; the shapes they have today are the shapes they keep.
+`help` / `version`. No changes; the shapes they have today are the shapes they keep. (`wrap` was
+on this list and was retired on 2026-08-10 — see the reversal below. Ratifying a shape is not
+freezing the verb; rule 7 says nothing is frozen pre-1.0.0.)
 
 ### The conventions — ratified as-is
 
@@ -491,12 +493,36 @@ could work. `tcl/mt.tcl` is in the history at `98bc96e` if that is ever built.
 
 ## Shipping tools inside the exe — refused, with one exception that is not one (2026-08-09)
 
+> **REVERSED 2026-08-10.** The five tools now ride inside the exe at
+> `//zipfs:/app/tool/<name>/main.tcl` and `mt sums .` runs one. What follows is what was argued,
+> and then what actually changed — because a register exists to make a reversal deliberate, not to
+> be quietly contradicted by the next commit.
+
 **Bundling wrapped GUI tools into `machteld.exe` is refused.** Argued three ways and attacked by
 nine critics; every affirmative case failed. `argv[1]` is fully allocated by `Tcl_Main` — non-dash
 is a script path, dash is the REPL — so every dispatch spelling either breaks a spelling that
 works, which rule 2 already forbids, or depends on the working directory. The claimed benefits
 have no receiver: nothing here is signed, nothing is on PATH, and the author wrote both tools
 himself. Recorded so it is not relitigated.
+
+**What changed, point by point.** Not a change of mind — a change of premises, two of them by
+building the thing the argument said could not be built:
+
+- *"`argv[1]` is fully allocated."* It was, for a toolkit. It is not for a **front door**, whose
+  entire job is turning a name into something runnable. `mt rg -n TODO .` was built in step 2 of
+  [the front-door plan](front-door.md) and accepted on its own merits, and it broke no spelling
+  that worked: a leading `-` still belongs to Tcl, and anything that *looks like* a path — a
+  separator, or a `.tcl` extension — is still a script. Deliberately **not** "if the file exists",
+  which is the working-directory dependence the refusal correctly feared.
+- *"The claimed benefits have no receiver."* True then, and the receiver arrived: the exe **is**
+  the workspace's front door now, so these are not unrelated GUI tools being bundled — they are
+  the front door carrying its own, the way it already carries its prelude and its docs.
+- *The cost moved the other way.* Keeping them out meant keeping `wrap`, which meant carrying two
+  bare hosts inside the exe: 4.7 MB of payload and five 5.9 MB artefacts, to ship five files of
+  Tcl. Retiring it took the exe from 10.2 MB to 6.0 MB.
+
+The correction below turned out to be the load-bearing part, and it is what actually decided this:
+the question was never "may the exe contain tools".
 
 **But the question was framed wrongly, and the correction matters more than the answer.** The
 argument was about packaging *programs*; machteld already ships *code* — the prelude — and a third

@@ -134,7 +134,7 @@ and against `Get-FileHash`; 25 MB streams in ~30 ms.
 
 ### `cli` — Tcl — ✅ **done 2026-08-09**
 
-machteld is a **tool factory**, so every program it stamps needs argument parsing. A declarative
+Every program machteld ships needs argument parsing, and every one used to write its own. A declarative
 spec yields a dict, generates `--help`, and raises `{MACHTELD CLI usage}` on bad input.
 
 ```tcl

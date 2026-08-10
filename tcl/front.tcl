@@ -50,6 +50,7 @@ namespace eval ::machteld {
     # order: machteld's own file wins, the Go front door's is still honoured.
     variable FRONT_PROJFILES {mt.json z.json}
 
+    variable FRONT_SHIPPED ""   ;# "" untried, a zipfs dir, or "none"
     variable FRONT_JOURNAL ""   ;# "" untried, "on" open, "off" unavailable
     variable FRONT_SESSION ""   ;# this front door invocation
 }
@@ -223,6 +224,36 @@ proc ::machteld::FrontBaseEnv {} {
 # NAME -> SOMETHING RUNNABLE. Resolution order is the workspace's: a builtin
 # first, then a curated tool. `z:name` restricts to the front door's own, the way
 # `z` qualifies a collision.
+# The tools this exe ships, at //zipfs:/app/tool/<name>/main.tcl. Found by
+# looking for the mount that has them rather than by naming `//zipfs:/app`,
+# which is a mount point the host chooses and not a constant.
+#
+# THE NAME IS CHECKED BEFORE IT IS JOINED. Everything else the front door
+# resolves is a key in a dict the workspace wrote; this one is joined onto a
+# path, and the string comes from argv. `mt ../../../etc/x` must not become a
+# file lookup, so a shipped tool's name is letters and digits, or it is not one.
+proc ::machteld::FrontShippedRoot {} {
+    variable FRONT_SHIPPED
+    if {$FRONT_SHIPPED eq ""} {
+        set FRONT_SHIPPED none
+        foreach m [dict keys [zipfs mount]] {
+            if {[file isdirectory [file join $m tool]]} {
+                set FRONT_SHIPPED [file join $m tool]
+                break
+            }
+        }
+    }
+    return [expr {$FRONT_SHIPPED eq "none" ? "" : $FRONT_SHIPPED}]
+}
+proc ::machteld::FrontShipped {name} {
+    set root [FrontShippedRoot]
+    if {$root eq ""} { return "" }
+    if {![regexp {^[a-z][a-z0-9]*$} $name]} { return "" }
+    set p [file join $root $name main.tcl]
+    if {[file exists $p]} { return $p }
+    return ""
+}
+
 proc ::machteld::FrontResolve {name} {
     variable FRONT_HOME
     FrontRoots
@@ -238,6 +269,17 @@ proc ::machteld::FrontResolve {name} {
         if {[dict exists [manifest] $name]} {
             return [dict create kind builtin name $name exe [info nameofexecutable] \
                         args [list $name] env [FrontBaseEnv] cwd [pwd]]
+        }
+        # A SHIPPED TOOL is a program machteld carries -- Tcl, inside this exe's
+        # own zipfs, with no file on disk and no entry in anyone's manifest.
+        # Above curated tools on purpose: these are the front door's own, the
+        # way a builtin verb is, and none of the five collides with any of the
+        # 273 the workspace curates.
+        set script [FrontShipped $name]
+        if {$script ne ""} {
+            return [dict create kind script name $name exe [info nameofexecutable] \
+                        script $script pre [list $script] args {} \
+                        env [FrontBaseEnv] cwd [file nativename [pwd]]]
         }
     }
 
@@ -317,7 +359,8 @@ proc ::machteld::FrontResolve {name} {
         }
     }
 
-    Fail FRONT notfound "\"$name\" is not a builtin or a curated tool -- there is no PATH fallback"
+    Fail FRONT notfound "\"$name\" is not a builtin, a shipped tool or a curated tool\
+                         -- there is no PATH fallback"
 }
 
 proc ::machteld::front {args} {
@@ -350,9 +393,20 @@ proc ::machteld::front {args} {
     if {$sub eq "tools"} {
         if {[llength $args] > 2} { Fail FRONT usage "usage: front tools ?pattern?" }
         set pat [expr {[llength $args] == 2 ? [lindex $args 1] : "*"}]
+        # THE SHIPPED TOOLS ARE LISTED TOO. `front tools` answers "what can I
+        # run"; a name that resolves and is not in that answer is a name nobody
+        # can discover. They come first because that is the order resolution
+        # takes them in.
+        set names {}
+        set sroot [FrontShippedRoot]
+        if {$sroot ne ""} {
+            foreach d [glob -nocomplain -types d -directory $sroot *] {
+                if {[file exists [file join $d main.tcl]]} { lappend names [file tail $d] }
+            }
+        }
         set m [FrontManifest]
-        if {![dict exists $m tools]} { return {} }
-        return [lsort [lsearch -all -inline -glob [dict keys [dict get $m tools]] $pat]]
+        if {[dict exists $m tools]} { lappend names {*}[dict keys [dict get $m tools]] }
+        return [lsearch -all -inline -glob [lsort -unique $names] $pat]
     }
 
     # ONE PLACE KNOWS THE FILENAME. `front run` opens the journal lazily and a
@@ -390,6 +444,11 @@ proc ::machteld::front {args} {
     set r [FrontResolve [lindex $args 1]]
     if {$sub eq "which"} {
         if {[llength $args] != 2} { Fail FRONT usage "usage: front which name" }
+        # A SHIPPED TOOL IS ITS SCRIPT, not the exe that sources it. `which`
+        # answers "what will run", and for these the exe is the interpreter --
+        # `which changes` and `which life` would both say machteld.exe, which
+        # is true and tells you nothing.
+        if {[dict exists $r script]} { return [dict get $r script] }
         return [dict get $r exe]
     }
     # env
@@ -460,6 +519,74 @@ proc ::machteld::FrontExec {r inherit cargs} {
     return $res
 }
 
+# A shipped tool run in-process still belongs in the record, but closing its row
+# is a different problem from closing a child's: there is no `wait` to come back
+# from, because the tool IS this process. `exit` is the hook -- it is where a
+# program ends and Tcl lets it be traced.
+#
+# WHAT THIS DOES NOT CATCH, said plainly: a tool that ends by falling off the end
+# of its script exits through Tcl_Main's own C path, which never runs the Tcl
+# `exit` command, so its row stays `running`. That is the same reconciliation gap
+# [the journal](journal.md) already names for a child whose front door died, and
+# the same `mtps` sweep closes both.
+proc ::machteld::FrontShippedRecord {r cargs} {
+    variable FRONT_SESSION
+    if {![FrontJournal]} return
+    set jid ""
+    catch {
+        set jid [journal add [dict create \
+            session $FRONT_SESSION parent "" pid [pid] \
+            name [dict get $r name] kind [dict get $r kind] \
+            exe [dict get $r script] argv [json encode $cargs -list] \
+            cwd [dict get $r cwd] \
+            project [expr {[dict exists $r env MT_PROJECT_NAME]
+                           ? [dict get $r env MT_PROJECT_NAME] : ""}]]]
+    }
+    if {$jid ne ""} {
+        catch {trace add execution ::exit enter [list ::machteld::FrontShippedDone $jid]}
+    }
+}
+proc ::machteld::FrontShippedDone {jid cmd op} {
+    set code [expr {[llength $cmd] > 1 ? [lindex $cmd 1] : 0}]
+    if {![string is integer -strict $code]} { set code 1 }
+    catch {journal done $jid [expr {$code == 0 ? "ok" : "error"}] $code}
+}
+
+# RUN A SHIPPED TOOL IN THIS PROCESS. It is sourced here, in the prelude, and
+# then this takes over the two jobs `Tcl_Main` would have done for a script named
+# on the command line: run the event loop, and exit.
+#
+# HANDING IT BACK TO Tcl_Main WOULD HAVE BEEN NEATER, AND DOES NOT WORK.
+# `Tcl_Main` reads its startup script into a local before it calls AppInit --
+# which is what sources this prelude -- so by the time the front door knows that
+# `sums` means a script, the decision about what to evaluate has been taken.
+# Setting `argv0` afterwards changes the variable and nothing else: the process
+# still tries to read a file called "sums", and says so.
+#
+# THE EVENT LOOP IS THE PART THAT MUST BE REPLACED, not skipped. Four of the five
+# tools are Tk and not one calls `vwait`: under `tclsh`, `package require Tk`
+# hands Tk_MainLoop to Tcl_SetMainLoop and Tcl_Main runs it after the script
+# returns. Source a windowed tool with nothing after it and it builds its
+# window, returns, and the process ends before one event is dispatched.
+# `tkwait window .` is that loop for these programs -- Tk_MainLoop runs while a
+# main window exists, and every one of them has exactly the one.
+proc ::machteld::FrontShippedRun {r cargs} {
+    global argv argv0
+    set script [dict get $r script]
+    FrontShippedRecord $r $cargs
+    set argv0 $script
+    set argv $cargs
+    if {[catch {uplevel #0 [list source $script]} e opts]} {
+        catch {puts stderr "mt: [dict get $r name]: $e"}
+        exit 1
+    }
+    if {[info exists ::tk_version] && [llength [info commands ::winfo]]
+        && [winfo exists .]} {
+        catch {uplevel #0 {tkwait window .}}
+    }
+    exit 0
+}
+
 # THE ARGV DISPATCHER. `Tcl_Main` calls AppInit -- which sources this prelude --
 # before it looks at argv, so the front door can take a name over from here with
 # no C at all.
@@ -498,6 +625,9 @@ proc ::machteld::FrontDispatch {} {
         catch {puts stderr "mt: $r"}
         exit 127                                      ;# the shell's "no such command"
     }
+
+    if {[dict get $r kind] eq "script"} { FrontShippedRun $r $argv }
+
     if {[catch {FrontExec $r 1 $argv} res]} {
         catch {puts stderr "mt: $res"}
         exit 126                                      ;# found, could not run

@@ -147,7 +147,41 @@ Still not built, and named rather than assumed: the `pid` at insert and the `mtp
 that would let `rows -live` tell a running process from one whose front door died, and the
 once-per-session pruning — so today the file only grows.
 
-**Next:** step 3 — retire `wrap` and the two embedded bare hosts, which halves the exe.
+## Step 3 is done: the factory is retired, 10.2 MB → 6.0 MB
+
+`wrap`, both embedded bare hosts, the GUI `WinMain` host and the tool-stamping loop at the end of
+the build are gone. The build used to finish by running the exe it had just produced five times, to
+turn five tool directories into five 5.9 MB standalone exes; it now finishes when the exe is built.
+
+**The tools ride inside `mt.exe`** at `//zipfs:/app/tool/<name>/main.tcl`, and resolution gained a
+tier: **builtin verb → shipped tool → curated tool**. `mt sums .` sources the script in this
+process — no exe on disk, no manifest entry, no process to start. None of the five names collides
+with any of the 273 the workspace curates, which is why the tier can sit above them.
+
+Two things only building it could have shown:
+
+- **`Tcl_Main` reads its startup script before it calls `AppInit`.** The neat implementation is to
+  let the dispatcher rewrite `argv0` to the tool's script and hand it back to `Tcl_Main` — and it
+  cannot work, because by the time `AppInit` sources the prelude, the decision about what to
+  evaluate has been taken. The process still tries to read a file called `sums`, and says so.
+- **The event loop had to be replaced, not skipped.** Four of the five tools are Tk and not one
+  calls `vwait`: under `tclsh`, `package require Tk` hands `Tk_MainLoop` to `Tcl_SetMainLoop` and
+  `Tcl_Main` runs it *after* the script returns. Source a windowed tool with nothing after it and
+  it builds its window, returns, and the process ends before one event is dispatched. `tkwait
+  window .` is that loop for these programs. Verified end to end: `mt life --seed 41 --grace 2s`
+  opens a real window, runs 131 generations, detects stasis, prints its JSON death line and exits 0.
+
+`front which` answers with the *script* for a shipped tool rather than the exe that sources it —
+otherwise `which changes` and `which life` would both say `machteld.exe`, which is true and tells
+you nothing. And `front tools` lists them alongside the curated ones, because a name that resolves
+and is not in that answer is a name nobody can discover.
+
+**One decision was reversed to get here**, and [the register](direction.md) says so rather than
+being quietly contradicted: shipping tools inside the exe was refused on 2026-08-09, on the grounds
+that `argv[1]` is fully allocated by `Tcl_Main` and the benefits had no receiver. The dispatcher
+built in step 2 answered the first, and the front door itself is the receiver.
+
+**Next:** step 4 — strangle z command by command.
 
 ## The risk, named
 
