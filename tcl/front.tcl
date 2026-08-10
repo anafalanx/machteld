@@ -192,7 +192,9 @@ proc ::machteld::FrontProject {{dir ""}} {
 # The environment every spawned command receives. Z_ROOT and Z_HOME always; the
 # project pair only when one is active, because an absent variable and an empty
 # one are different answers and a script can tell them apart.
-proc ::machteld::FrontBaseEnv {} {
+# `projdir` names the project explicitly, for `front in <project> ...`, where
+# the project is an argument rather than wherever the caller happens to stand.
+proc ::machteld::FrontBaseEnv {{projdir ""}} {
     variable FRONT_ROOT ; variable FRONT_HOME ; variable FRONT_DIR
     FrontRoots
     # NATIVE SEPARATORS. These land in a child process's environment on Windows,
@@ -201,7 +203,7 @@ proc ::machteld::FrontBaseEnv {} {
     # sees. Caught by diffing against the front door being replaced.
     set e [dict create MT_ROOT [file nativename $FRONT_ROOT] \
                        MT_HOME [file nativename $FRONT_HOME]]
-    set p [FrontProject]
+    set p [FrontProject $projdir]
     if {[dict size $p]} {
         dict set e MT_PROJECT_NAME [dict get $p name]
         dict set e MT_PROJECT_ROOT [file nativename [dict get $p root]]
@@ -230,7 +232,7 @@ proc ::machteld::FrontBaseEnv {} {
 # hosting the applications as well made it two things at once. Every name the
 # front door resolves is now a key in a dict somebody else wrote -- which is
 # also why nothing here joins a caller's string onto a path.
-proc ::machteld::FrontResolve {name} {
+proc ::machteld::FrontResolve {name {projdir ""}} {
     variable FRONT_HOME
     FrontRoots
     set only ""
@@ -240,43 +242,85 @@ proc ::machteld::FrontResolve {name} {
         set name $rest
     }
 
-    if {$only in {"" z}} {
-        # A builtin is a verb this exe already has: no process, no path.
-        #
-        # ASKED THE CHEAP WAY, and that is not a micro-optimisation. This line
-        # read `dict exists [manifest] $name` until 2026-08-10 -- the same
-        # question -- and so every single `mt <name>` derived the palette's
-        # entire self-description before it could look anything up: 316 ms of
-        # MtclFacts to answer yes or no. It was the whole of why this front door
-        # took 361 ms where z.exe takes 9.
-        #
-        # `PaletteVerb` is the very predicate `manifest`'s own loop uses, so
-        # there is still exactly one definition of what counts as a verb.
-        if {[PaletteVerb $name]} {
-            return [dict create kind builtin name $name exe [info nameofexecutable] \
-                        args [list $name] env [FrontBaseEnv] cwd [pwd]]
+    # THE QUALIFIERS WERE BACKWARDS. `z:name` means "the KIT's name" -- a curated
+    # tool or a kit script -- and explicitly NOT a builtin, because a builtin is
+    # unambiguous already and there is nothing to qualify it against. machteld
+    # had it the other way round until 2026-08-10: `z:` reached builtins and
+    # skipped tools, so `z:rg` did not resolve and `z:run` resolved to the
+    # palette. Never caught, because the agreement test only ever asked bare
+    # names.
+    if {$only eq "z"} {
+        if {[FrontSafeName $name]} {
+            if {![catch {FrontCurated $name} r]} { return $r }
         }
-        # A FRONT-DOOR COMMAND, reachable by its bare name. `mt which rg`, not
-        # `mt front which rg` -- because these exist to be typed where `z which
-        # rg` was typed, and a front door that needs a prefix is not a
-        # replacement for one that does not.
-        #
-        # Below the palette, so a verb of the same name wins: `mt run` is the
-        # palette's `run`, and `front run` keeps its full spelling. That is one
-        # collision today and it is the right way round -- the palette is the
-        # older claim on the name.
-        #
-        # Safe to sit above curated tools because it shadows nothing: all 21 of
-        # z's built-in names were checked against the 273 the workspace curates
-        # and not one collides. The suite re-checks it, since the workspace
-        # gains tools without asking anybody.
+        Fail FRONT notfound "the kit has no tool or script named \"$name\""
+    }
+    if {$only eq "project"} {
+        set p [FrontProject]
+        if {[dict size $p]} {
+            set cmds [FrontProjectCommands [dict get $p root]]
+            if {[dict exists $cmds $name]} { return [dict get $cmds $name] }
+        }
+        Fail FRONT notfound "the project declares no command named \"$name\""
+    }
+
+    # THE ORDER, AND WHAT IS RESERVED. z's rule is that its BUILT-INS and its
+    # curated tools are reserved -- a project may not shadow either, so a bare
+    # core name always means the kit. machteld's equivalent of z's built-ins is
+    # the front-door command set, NOT the whole Tcl palette: `which` and `status`
+    # are the front door's own commands, while `run`, `json` and `hash` are
+    # scripting verbs that merely happen to be reachable from a command line.
+    #
+    # THE PALETTE USED TO COME FIRST, and it cost every project its `run`. Ten of
+    # the twelve projects here declare a `run` command; `run` is also a palette
+    # verb; so `mt run` inside a project was the palette's `run` in every one of
+    # them, and z's was the project's. Reserving the whole palette reserves a
+    # namespace far larger than the front door has any claim to.
+    if {$only eq ""} {
+        # 1. THE FRONT DOOR'S OWN COMMANDS -- `mt which rg`, not `mt front which
+        #    rg`, because these exist to be typed where `z which rg` was, and a
+        #    front door that needs a prefix does not replace one that does not.
+        #    Reserved: all 21 of z's built-in names were checked against the 275
+        #    the workspace curates and not one collides, and the suite re-checks
+        #    it because the workspace gains tools without asking anybody.
         if {$name in [FrontCommands]} {
             return [dict create kind command name $name exe [info nameofexecutable] \
                         args [list front $name] env [FrontBaseEnv] cwd [pwd]]
         }
+        # 2. A CURATED TOOL. Also reserved.
+        if {[FrontSafeName $name] && ![catch {FrontCurated $name} r]} { return $r }
+        # 3. THE PROJECT'S OWN COMMANDS, which may not shadow either of the two
+        #    above. `_els` declares eighteen; `mt build` standing inside it runs
+        #    the project's build, which machteld could not do at all until
+        #    2026-08-10, having stopped at curated tools.
+        set p [FrontProject $projdir]
+        if {[dict size $p]} {
+            set cmds [FrontProjectCommands [dict get $p root]]
+            if {[dict exists $cmds $name]} { return [dict get $cmds $name] }
+        }
+        # 4. AND LAST, A PALETTE VERB, as a convenience rather than a claim:
+        #    `mt version`, `mt manifest`, `mt help`. Nothing else wants those
+        #    names -- no palette verb shadows a curated tool, checked -- and
+        #    anything that does want one gets it first.
+        #
+        #    Asked with `PaletteVerb` rather than `dict exists [manifest] $name`,
+        #    which is the same question and derives the entire self-description
+        #    to answer it: 316 ms, on every single invocation.
+        if {[PaletteVerb $name]} {
+            return [dict create kind builtin name $name exe [info nameofexecutable] \
+                        args [list $name] env [FrontBaseEnv] cwd [pwd]]
+        }
     }
 
-    if {$only eq ""} {
+    Fail FRONT notfound "\"$name\" is not a builtin, a curated tool or a project command\
+                         -- there is no PATH fallback"
+}
+
+# THE CURATED TOOLS, as their own proc so the bare name and the `z:`
+# qualifier resolve through one implementation rather than two.
+proc ::machteld::FrontCurated {name} {
+    variable FRONT_HOME
+    FrontRoots
         set m [FrontManifest]
         # THE `t/` DIRECTORY IS A SOURCE, NOT AN OVERRIDE. This was gated on
         # `dict exists $m tools $name` until 2026-08-10, which made the manifest
@@ -366,9 +410,7 @@ proc ::machteld::FrontResolve {name} {
             return $r
             }
         }
-    }
-
-    Fail FRONT notfound "\"$name\" is not a builtin or a curated tool -- there is no PATH fallback"
+    Fail FRONT notfound "\"$name\" is not a curated tool"
 }
 
 # A NAME THAT MAY BE JOINED ONTO A PATH. `t/<name>/<name>.exe` puts a caller's
@@ -412,14 +454,22 @@ proc ::machteld::FrontSafeName {name} {
 # and `front projects` stops, or the reverse; `MtclFacts` reads the same `set
 # subs {...}` line for the manifest, so this is the third reader of one truth
 # rather than a second copy of it. Cached: one regexp, once per process.
+# NOT EVERY SUBCOMMAND IS PROMOTED, and `run` is why the exception exists.
+# `front run` is the plumbing that executes a resolved name -- `mt run rg` is
+# just `mt rg` with extra words -- so promoting it buys nothing, and it costs
+# the bare name `run`, which TEN of the twelve projects here declare as a
+# command of their own. z has no `run` built-in for exactly that reason.
+# It stays reachable in full as `front run`.
 proc ::machteld::FrontCommands {} {
     variable FRONT_CMDS
     if {![info exists FRONT_CMDS]} {
-        set FRONT_CMDS {}
-        regexp -line -- {^\s+set subs \{([^\}]*)\}} [info body ::machteld::front] -> FRONT_CMDS
+        set subs {}
+        regexp -line -- {^\s+set subs \{([^\}]*)\}} [info body ::machteld::front] -> subs
+        set FRONT_CMDS [lmap s $subs {expr {$s in [FrontUnpromoted] ? [continue] : $s}}]
     }
     return $FRONT_CMDS
 }
+proc ::machteld::FrontUnpromoted {} { return {run} }
 
 # --- the workspace's own inventory -------------------------------------------
 #
@@ -448,6 +498,74 @@ proc ::machteld::FrontProjects {} {
                          path [file nativename [file join $FRONT_ROOT $dir]]]
     }
     return [lsort -index 1 $out]
+}
+
+# --- project commands: the tier machteld did not have ------------------------
+#
+# A project's `z.json` declares `commands`, each one an argv list. `_els` alone
+# has eighteen. Standing inside a project, `z build` runs that project's build --
+# and until now `mt build` said the workspace curates no such tool, because
+# machteld resolved builtins and curated tools and then stopped.
+#
+# argv[0] IS RESOLVED, NOT EXECUTED. A name that is a curated tool CLONES that
+# tool's whole target -- its env overlay, its PATH shaping, its prepended
+# arguments -- and the command's remaining words are appended to those. So
+# `["tclsh90", "tools/tasks.tcl", "build"]` runs the workspace's tclsh, with the
+# workspace's Tcl environment, on a project-relative script. Otherwise argv[0]
+# must be a PATH: absolute, or containing a separator and taken relative to the
+# project root. A bare word that is neither is dropped rather than looked up on
+# the system PATH -- the no-fallback rule reaches in here too.
+#
+# The working directory is the project root, which is what makes the rest of the
+# argv able to be project-relative.
+proc ::machteld::FrontProjectCommands {root} {
+    variable FRONT_PROJFILES
+    set spec {}
+    foreach f $FRONT_PROJFILES {
+        set p [file join $root $f]
+        if {![file exists $p]} continue
+        set fh [open $p r] ; fconfigure $fh -encoding utf-8
+        set text [read $fh] ; close $fh
+        if {[catch {json decode $text} m]} {
+            Fail FRONT manifest "[file nativename $p] is not valid JSON: $m"
+        }
+        if {[dict exists $m commands]} { set spec [dict get $m commands] }
+        break
+    }
+    set out {}
+    foreach name [lsort [dict keys $spec]] {
+        set argv [dict get $spec $name]
+        if {![llength $argv]} continue                    ;# `z verify` calls this a problem
+        set a0 [lindex $argv 0]
+        set t ""
+        if {![catch {FrontResolve "z:$a0"} r] && [dict get $r kind] eq "tool"} {
+            set t $r
+        } elseif {[file pathtype $a0] eq "absolute"} {
+            set t [dict create kind project exe [file nativename [FrontClean $a0]] \
+                       pre {} env [FrontBaseEnv $root]]
+        } elseif {[string first "/" $a0] >= 0 || [string first "\\" $a0] >= 0} {
+            # CLEANED, because `filepath.Join` cleans and `file join` does not.
+            # `["./drang.exe", ...]` came out as `_drang\.\drang.exe` and
+            # `["../_drang/drang.exe"]` as `_exp\..\_drang\drang.exe` -- both
+            # run, both are the wrong string, and both differed from z on
+            # nothing but punctuation. Six commands across two projects.
+            set t [dict create kind project \
+                       exe [file nativename [FrontClean [file join $root $a0]]] \
+                       pre {} env [FrontBaseEnv $root]]
+        } else {
+            continue                                      ;# neither a tool nor a path: dropped
+        }
+        set pre [expr {[dict exists $t pre] ? [dict get $t pre] : {}}]
+        lappend pre {*}[lrange $argv 1 end]
+        dict set t kind project
+        dict set t name $name
+        dict set t pre  $pre
+        dict set t args {}
+        dict set t env  [FrontBaseEnv $root]
+        dict set t cwd  [file nativename $root]
+        dict set out $name $t
+    }
+    return $out
 }
 
 # GIT, AS THE COCKPIT COUNTS IT. Two commands per directory -- the branch and
@@ -623,7 +741,7 @@ proc ::machteld::FrontWithin {base candidate} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status}
+    set subs {roots which env tools run journal projects runtimes status in}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -686,6 +804,31 @@ proc ::machteld::front {args} {
     # What is here is exact: root, the `.z` directory's git state, and every
     # hosted project's. What is not here is ABSENT rather than guessed -- no
     # `mirror: null` pretending there is no report when there is one.
+    # `in <project> <name> ?args?` -- resolve and run a name IN a project's
+    # context rather than in the caller's. The project is found by name with the
+    # leading underscore optional and the comparison case-insensitive, which is
+    # z's rule; the command runs with the project root as its working directory,
+    # and with MT_PROJECT_ROOT / MT_PROJECT_NAME set to that project rather than
+    # to wherever the caller happens to be standing.
+    if {$sub eq "in"} {
+        if {[llength $args] < 3} {
+            Fail FRONT usage "usage: front in <project> <name> ?arg ...?"
+        }
+        set want [string trimleft [lindex $args 1] _]
+        set proj ""
+        foreach p [FrontProjects] {
+            if {[string equal -nocase [dict get $p name] $want]} { set proj $p ; break }
+        }
+        if {$proj eq ""} { Fail FRONT notfound "no hosted project named \"$want\"" }
+        set r [FrontResolve [lindex $args 2] [dict get $proj path]]
+        # The project root is the working directory unless the target named one
+        # of its own, which a project command does.
+        if {![dict exists $r cwd] || [dict get $r cwd] eq [file nativename [pwd]]} {
+            dict set r cwd [dict get $proj path]
+        }
+        return [FrontExec $r 1 [lrange $args 3 end]]
+    }
+
     if {$sub eq "status"} {
         set deep 0 ; set asjson 0
         foreach a [lrange $args 1 end] {

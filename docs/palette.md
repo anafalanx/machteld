@@ -459,6 +459,7 @@ front journal                      ;# open the workspace's record -> its path
 front projects ?-json?             ;# the hosted _projects
 front runtimes ?-json?             ;# the payloads under .z/r, and what aliases them
 front status ?-json?               ;# root, workspace git, every project's git
+front in els build                 ;# resolve and run a name in a project's context
 journal rows -live                 ;# what is running now
 journal rows -limit 20             ;# the last 20, newest first
 journal rows -name rg -project els -since $ms -failed
