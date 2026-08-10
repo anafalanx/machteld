@@ -196,6 +196,8 @@ typedef struct child_s {
      * come back NULL, which is the difference between tidy cleanup and a
      * use-after-free. */
     int             channels;    /* -channels was given */
+    int             inherit;     /* -inherit: stdio is the parent's, not pipes */
+    HANDLE          inherit_in, inherit_out, inherit_err;  /* BORROWED: ours, never closed here */
     HANDLE          inW;         /* stdin write end, kept open (channel mode) */
     char            chIn[24], chOut[24], chErr[24];
     /* A DEADLINE, IN TICKS, or 0 for none. `child start -timeout` was accepted
@@ -269,6 +271,7 @@ typedef struct {
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
     int                channels;   /* -channels: hand the pipes over as Tcl channels */
+    int                inherit;    /* -inherit: the child gets OUR stdio, not pipes */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -358,6 +361,12 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
     o->onout = NULL;
     o->onerr = NULL;
     o->channels = 0;
+    /* EVERY FIELD, EVERY TIME. `run_opts` is a stack struct and this is its only
+     * initialiser; a field added to the struct but not to this list holds
+     * whatever was on the stack. `inherit` was, briefly, and `child start` read
+     * garbage as "inherit stdio" -- so it created no pipes and channel mode
+     * dereferenced a NULL handle. A segfault, from one missing line. */
+    o->inherit = 0;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -420,6 +429,35 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = FALSE;
 
+    /* INHERIT MODE: the child gets OUR stdio, so it writes to the terminal the
+     * user is looking at -- colours, progress bars, a pager, Ctrl-C. Nothing is
+     * captured and nothing is read, because there is no pipe in between.
+     *
+     * This needs no change in the launcher: `wj_launch` duplicates whichever
+     * handles it is given into inheritable copies and restricts inheritance to
+     * exactly those, so handing it the parent's console handles gives the child
+     * the console with every supervision guarantee intact -- born in the job
+     * object, tree-killable, capped, deadline enforced.
+     *
+     * A handle can legitimately be absent (a GUI process has no console), and a
+     * NULL handle cannot be duplicated, so each stream falls back to NUL
+     * independently rather than the whole launch failing. */
+    if (o->inherit) {
+        HANDLE si = GetStdHandle(STD_INPUT_HANDLE);
+        HANDLE so = GetStdHandle(STD_OUTPUT_HANDLE);
+        HANDLE se = GetStdHandle(STD_ERROR_HANDLE);
+        if (si == INVALID_HANDLE_VALUE) si = NULL;
+        if (so == INVALID_HANDLE_VALUE) so = NULL;
+        if (se == INVALID_HANDLE_VALUE) se = NULL;
+        if (si == NULL || so == NULL || se == NULL) {
+            nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+            if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
+        }
+        c->inherit_in  = (si != NULL) ? si : nul;
+        c->inherit_out = (so != NULL) ? so : nul;
+        c->inherit_err = (se != NULL) ? se : nul;
+    } else {
     if (!CreatePipe(&c->outR, &outW, &sa, 0) || !CreatePipe(&c->errR, &errW, &sa, 0)) {
         *err = "CreatePipe failed";
         goto fail;
@@ -431,6 +469,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     } else {
         nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
         if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
+    }
     }
 
     c->job = wj_job_new(0, err);
@@ -452,7 +491,13 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         jobh[1] = wj_job_handle(c->job);
         njobs = 2;
     }
-    wj_stdio io = { (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
+    wj_stdio io;
+    if (o->inherit) {
+        io = (wj_stdio){ c->inherit_in, c->inherit_out, c->inherit_err };
+    } else {
+        io = (wj_stdio){ (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
+    }
+    c->inherit = o->inherit;
     if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err) != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
@@ -477,7 +522,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
      * buffer as "", so the result dict keeps its documented shape with `out` and
      * `err` simply empty -- one shape for the verb, which is what the contract
      * requires. */
-    if (!o->channels) {
+    if (!o->channels && !o->inherit) {
         size_t cap = 1u << 20;
         c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
         c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
@@ -793,9 +838,42 @@ static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
 static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
     run_opts o;
-    if (parse_opts(interp, "RUN", objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    /* `-inherit` is a FLAG, and parse_opts takes its options in pairs, so it is
+     * filtered out before the shared parser sees it -- the same treatment
+     * `child start -channels` gets, and for the same reason: the option table is
+     * shared with verbs that must not grow a flag they do not implement. */
+    Tcl_Obj *fobjv[128];
+    int fobjc = 0;
+    int want_inherit = 0;
+    if (objc > 128) return mt_error(interp, "RUN", "usage", "too many arguments");
+    fobjv[fobjc++] = objv[0];
+    int rk = 1;
+    for (; rk < objc; rk++) {
+        const char *a = Tcl_GetString(objv[rk]);
+        if (strcmp(a, "--") == 0) break;
+        if (a[0] != '-' || a[1] == '\0') break;
+        if (strcmp(a, "-inherit") == 0) { want_inherit = 1; continue; }
+        fobjv[fobjc++] = objv[rk];
+        if (rk + 1 < objc) fobjv[fobjc++] = objv[rk + 1];
+        rk++;
+    }
+    for (; rk < objc; rk++) fobjv[fobjc++] = objv[rk];
+
+    if (parse_opts(interp, "RUN", fobjc, fobjv, 1, &o) != TCL_OK) return TCL_ERROR;
+    o.inherit = want_inherit;
+    /* Inherit and capture are exclusive, for the reason channels and capture
+     * are: there is no pipe of ours to read, so a callback could never fire and
+     * `out` would always be empty. Refused rather than silently doing nothing. */
+    if (o.inherit && (o.onout != NULL || o.onerr != NULL)) {
+        return mt_error(interp, "RUN", "usage",
+                        "-inherit cannot be combined with -onout or -onerr: the child writes straight to our stdio");
+    }
+    if (o.inherit && o.stdin_text != NULL) {
+        return mt_error(interp, "RUN", "usage",
+                        "-inherit cannot be combined with -stdin: the child reads our stdin");
+    }
     int cargc = 0;
-    const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
+    const char **cargv = build_argv(interp, fobjc, fobjv, o.cmd_index, &cargc);
     if (cargv == NULL) return mt_error(interp, "RUN", "usage", "run ?-opt val ...? ?--? command ?arg ...?");
 
     wchar_t envbuf[32768];

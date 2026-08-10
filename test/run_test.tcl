@@ -1316,6 +1316,58 @@ check "a bad width surfaces as a pmap failure" [expr {
     [lrange [errcode_of {pmap {{op echo text a}} -width 0 -- $MT $PMW}] 0 1] eq {MACHTELD PMAP}}]
 file delete -force $PMW
 
+# --- run -inherit: the child gets OUR stdio, not a pipe -----------------------
+# A front door must hand the terminal to what it runs: colours, progress bars, a
+# pager, Ctrl-C. Every other launch path here exists to CAPTURE, which is the
+# opposite. This needed no change in the launcher -- it duplicates whichever
+# handles it is given and restricts inheritance to exactly those, so handing it
+# our own console handles gives the child the console with the job object, the
+# tree-kill and the deadline all still in force.
+check "run declares -inherit" [expr {"-inherit" in [dict get [manifest] run options]}]
+
+# PROVED, NOT ASSUMED. Asserting "out is empty" would also pass if the child
+# never ran. So an inner machteld runs the child with -inherit, and the OUTER
+# one captures: the marker can only reach this pipe by flowing through the inner
+# process's inherited stdout. It also keeps the child's output off this suite's
+# own stdout, which would otherwise interleave with the results.
+set inner [file join $HERE _inherit_fixture.tcl]
+set fh [open $inner w]
+puts $fh {run -inherit -- cmd /c "echo MARKER-THROUGH-INHERITED-STDOUT"}
+close $fh
+set r [run -timeout 30s -- $MT $inner]
+check "an inherited child's output reaches our stdout" [expr {
+    [string match "*MARKER-THROUGH-INHERITED-STDOUT*" [dict get $r out]]}]
+file delete -force $inner
+
+set r [run -inherit -- cmd /c "exit 7"]
+check "-inherit still reports the exit code"  [expr {[dict get $r exit] == 7}]
+check "-inherit captures nothing"             [expr {[dict get $r out] eq "" && [dict get $r err] eq ""}]
+check "-inherit keeps the documented shape"   [expr {
+    [lsort [dict keys $r]] eq {err exit out pid status truncated}}]
+
+# Supervision is not traded away for the terminal: the deadline still bites.
+# WITH ITS OWN FIXTURE. The first version reused `$spin` from the child block --
+# whose file is deleted 200 lines earlier, so the child died instantly and the
+# check reported `error` instead of `timeout`. It looked like a defect in inherit
+# mode and was a defect in the test: a block that borrows another block's fixture
+# silently changes meaning the day that block cleans up after itself.
+set ispin [file join $HERE _inherit_spin.tcl]
+set fh [open $ispin w]
+puts $fh {proc spin {} { while {1} { set x [expr {sqrt(2.0)}] } } ; spin}
+close $fh
+set t0 [clock milliseconds]
+set r [run -inherit -timeout 600ms -- $MT $ispin]
+set dt [expr {[clock milliseconds] - $t0}]
+check "-inherit is still supervised (timeout)" [expr {[dict get $r status] eq "timeout"}]
+check "-inherit's deadline fires on time"      [expr {$dt > 400 && $dt < 5000}]
+file delete -force $ispin
+
+# Exclusive with the capture path, refused rather than silently ignored.
+check "-inherit refuses -onout" [expr {
+    [errcode_of {run -inherit -onout {x} -- cmd /c echo hi}] eq {MACHTELD RUN usage}}]
+check "-inherit refuses -stdin" [expr {
+    [errcode_of {run -inherit -stdin text -- cmd /c echo hi}] eq {MACHTELD RUN usage}}]
+
 # --- cli duration: the palette's convention, available to its tools -----------
 # machteld refuses a bare number for a duration so `-timeout 100` can never
 # silently mean 100 seconds -- and then exposed no parser, so `life` and

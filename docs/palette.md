@@ -34,6 +34,22 @@ scope { child start db.exe ; run migrate.exe }    ;# children born inside die at
 detach -- watchdog.exe   → 8140               ;# fire-and-forget daemon; returns a pid
 ```
 
+```tcl
+run -inherit -- rg -n TODO .   ;# the child gets OUR terminal: colours, pager, Ctrl-C
+```
+
+**`-inherit` hands the child our stdio instead of a pipe.** Every other launch path here exists to
+*capture*; a front door needs the opposite, because `rg` should colour its output and a pager
+should page. Nothing is captured, so `out` and `err` come back empty and the result dict keeps its
+documented shape — the same bargain `-channels` makes, and exclusive with `-onout`, `-onerr` and
+`-stdin` for the same reason: there is no pipe of ours for a callback to read.
+
+It needed no change in the launcher. `wj_launch` duplicates whichever handles it is given into
+inheritable copies and restricts inheritance to exactly those, so handing it the parent's console
+handles gives the child the terminal with **every supervision guarantee intact** — born in the job
+object, tree-killable, capped, and its deadline still enforced. A stream with no handle (a GUI
+process has no console) falls back to `NUL` on its own rather than failing the launch.
+
 (Runtime semantics — linear + bounded lifetime — are in the [execution model](execution-model.md).)
 
 ### The two timeouts, and only one of them kills
