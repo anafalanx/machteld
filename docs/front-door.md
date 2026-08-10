@@ -102,10 +102,13 @@ Each ends in something that builds, passes, and is worth committing.
    (`which`, `env`, `projects`, `status`, `tools`, `runtimes`), leaving `mirror`, `ledger` and the
    shell shim — the three biggest — until the pattern is proven.
 
-## Step 1 is done: 273 of 273 agree
+## Step 1 is done: 275 of 275 agree
 
 `test/front_agree.tcl` asks both front doors to resolve every curated tool and diffs the answers:
-**273 / 273 agree, 0 differ, 0 refused, from the workspace root and from inside a project.** It
+**275 / 275 agree, 0 differ, 0 refused, from the workspace root and from inside a project.** It
+said **273 / 273** until step 4, and the two extra are the point: the list used to come from
+machteld and now comes from z. See step 4 below for the four tools that were missing behind that
+green number. It
 compares the executable, the environment overlay, the PATH the tool adds, and the prepended
 arguments — not the inherited PATH tail, which is the caller's, nor the caller's own arguments,
 which are not resolution.
@@ -230,7 +233,48 @@ does not return — the process *becomes* the script, taking its `argv0`, its `a
 and its exit code. Including a file in the program you are already running is Tcl's own `source`,
 and always was.
 
-**Next:** step 4 — strangle z command by command.
+## Step 4 has started: six commands, and two defects it uncovered
+
+**The commands are reachable by their bare names.** Resolution gained a tier between builtin verbs
+and curated tools, so `mt which rg`, `mt tools`, `mt projects`, `mt runtimes` work where
+`z which rg` and the rest did — a front door that needs a prefix is not a replacement for one that
+does not. It shadows nothing: all 21 of z's built-in names were checked against the 275 the
+workspace curates and not one collides, and the suite re-checks that because the workspace gains
+tools without asking anybody. The promoted set is read out of `front`'s own `set subs {...}` line,
+which is the same line the manifest reads.
+
+**The fidelity rule: the JSON must agree, the human text is ours.** `mt projects --json` and
+`mt runtimes --json` diff clean against z's, compared as decoded values so indentation and key
+order cannot lie. `which` and `tools` have no `--json` in z, so their plain text matches byte for
+byte and `-json` was added as the shape a script wants. Both spellings of the flag are accepted —
+the palette's `-json` and z's `--json` — which is what a strangler costs at the seam.
+
+**The rules came out of z's source, not out of its output**, for the reason step 1 established. It
+is not guessable that `runtimes` decides versioned-ness from a **hardcoded list of six names** in
+`runtimes_builtin.go`: `zig` and `winsdk` each have a single version-shaped subdirectory and are
+still reported unversioned.
+
+### Two defects, and the second one is about testing
+
+**machteld could not run four of the workspace's tools.** `EditPadPro8`, `RegexBuddy5`, `CSCSE5`
+and `FNSE3` are `.z/t/<name>/` directories the manifest never mentions, and z runs them because
+its inventory is *the `t/` directory scan* **∪** *the manifest's installed `exeFromRoot` entries*.
+machteld read only the manifest, so all four were `notfound`.
+
+It survived a month behind a green test. **`test/front_agree.tcl` enumerated `front tools` —
+machteld's own list — so a tool machteld did not know about was never asked for.** A verification
+that enumerates from the side under test can only find disagreements about things both sides
+already name; it is structurally blind to anything missing. The list now comes from `z tools`, and
+agreement went from **273 / 273** to **275 / 275** — a bigger denominator, which is the point.
+
+**`file normalize` follows links.** `.z/r/winsdk` is a junction into Program Files, so normalising
+the payload directory and a tool's executable put them in different trees and `signtool` stopped
+counting as a winsdk alias — one row of fourteen. z uses `filepath.Clean`, which is purely textual,
+and "is this path *written* underneath that one" is a question about names rather than about the
+disk. Containment is lexical now.
+
+**Next:** the rest of step 4 — `status`, `in`, `verify`, `scout`, then `mirror`, `ledger` and the
+shell shim.
 
 ## The risk, named
 

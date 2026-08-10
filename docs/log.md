@@ -8,6 +8,39 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-10 — step 4 begins, and finds four tools machteld could not run
+
+Six of z's commands are now reachable by their bare names — `mt which`, `mt env`, `mt tools`,
+`mt projects`, `mt runtimes`, plus `roots` and `journal` — through a resolution tier between
+builtin verbs and curated tools. Nothing is shadowed: all 21 of z's built-in names were checked
+against the 275 the workspace curates and none collides, and the suite re-checks it live.
+
+`projects` and `runtimes` are new; their `--json` diffs clean against z's, compared as decoded
+values so indentation and key order cannot lie. `which` and `tools` now print z's plain text byte
+for byte and gained a `-json` z never had. The rules came out of **z's source**: it is not
+guessable that `runtimes` decides versioned-ness from a hardcoded list of six names, and `zig` and
+`winsdk` each have a single version-shaped subdirectory and are reported unversioned anyway.
+
+**machteld could not run four of the workspace's tools.** `EditPadPro8`, `RegexBuddy5`, `CSCSE5`
+and `FNSE3` are `.z/t/<name>/` directories the manifest never mentions. z's inventory is the `t/`
+directory scan **∪** the manifest's installed `exeFromRoot` entries; machteld read only the
+manifest, so all four came back `notfound`.
+
+**It survived a month behind a green test, and the reason generalises.** `front_agree.tcl`
+enumerated `front tools` — *machteld's own list* — so a tool machteld did not know about was never
+asked for. A verification that enumerates from the side under test can only find disagreements
+about things both sides already name; it is structurally blind to anything missing. The list now
+comes from `z tools`: agreement went from 273/273 to **275/275**, and the larger denominator is
+the whole of the improvement.
+
+**`file normalize` follows links.** `.z/r/winsdk` is a junction into Program Files, so normalising
+a payload directory and a tool's executable put them in different trees, and `signtool` stopped
+counting as a winsdk alias — one row of fourteen. z uses `filepath.Clean`, which is purely
+textual. "Is this path *written* underneath that one" is a question about names, not about the
+disk; containment is lexical now.
+
+468 checks pass.
+
 ## 2026-08-10 — the front door was 40× slower than z, for one line
 
 `mt version` answered in **361 ms**; `z.exe version`, the Go front door it is replacing, answers in

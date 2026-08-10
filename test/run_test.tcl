@@ -1965,6 +1965,51 @@ file delete -force $VFILE
 
 check "tcl with no script is a usage error" [expr {
     [errcode_of {tcl}] eq {MACHTELD TCL usage}}]
+
+# --- step 4: z's commands, reachable by their bare names ---------------------
+# `mt projects`, not `mt front projects`, because these exist to be typed where
+# `z projects` was.
+foreach c {which env tools projects runtimes roots journal} {
+    check "$c is a front-door command" [expr {$c in [::machteld::FrontCommands]}]
+}
+# ONE DEFINITION. `FrontCommands` reads `front`'s own `set subs {...}` line, the
+# same line MtclFacts reads for the manifest; if they ever diverge, `mt X` and
+# `front X` disagree about what exists.
+check "the promoted set is front's own subcommand table" [expr {
+    [lsort [::machteld::FrontCommands]] eq
+    [lsort [dict keys [dict get [manifest] front subcommands]]]}]
+# NOTHING IS SHADOWED. z reserves its built-in names; here the check is live,
+# because the workspace gains tools without asking anybody.
+set shadowed {}
+foreach c [::machteld::FrontCommands] {
+    if {$c in [::machteld::FrontToolNames]} { lappend shadowed $c }
+}
+if {$shadowed ne ""} { puts "     front commands shadowing curated tools: $shadowed" }
+check "no front-door command shadows a curated tool" [expr {$shadowed eq ""}]
+check "a bare command name resolves in-process" [expr {
+    [dict get [valof {front env projects}] kind] eq "command"}]
+
+# THE `t/` DIRECTORY IS A SOURCE OF TOOLS, not just an override of manifest
+# entries. Four tools existed only as `.z/t/<name>/` directories and machteld
+# refused all four while z ran them -- invisible for a month because the
+# agreement test enumerated machteld's own list.
+set tdir [file join [dict get [front roots] home] t]
+set unlisted {}
+foreach d [glob -nocomplain -types d -directory $tdir *] {
+    set n [file tail $d]
+    if {![file exists [file join $d $n.exe]]} continue
+    if {$n ni [::machteld::FrontToolNames]} { lappend unlisted $n }
+}
+if {$unlisted ne ""} { puts "     installed in t/ but not curated: $unlisted" }
+check "every installed t/<name>/<name>.exe is a curated tool" [expr {$unlisted eq ""}]
+
+# `file normalize` FOLLOWS LINKS AND MUST NOT BE USED FOR THIS. `.z/r/winsdk` is
+# a junction into Program Files, so normalising both sides put them in different
+# trees and `signtool` stopped being a winsdk alias -- one row of fourteen.
+check "containment is lexical, not link-resolving" [expr {
+    [::machteld::FrontWithin {C:/x/link} {C:/x/link/sub/tool.exe}] &&
+    ![::machteld::FrontWithin {C:/x/link} {C:/x/linked/tool.exe}] &&
+    [::machteld::FrontClean {C:\a\.\b\..\c}] eq "C:/a/c"}]
 check "tcl on a missing script says so"     [expr {
     [errcode_of {tcl no_such_script_zzz.tcl}] eq {MACHTELD TCL notfound}}]
 

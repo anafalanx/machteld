@@ -52,11 +52,32 @@ proc path_head {p inherited} {
     return [lmap d $dirs {string tolower $d}]
 }
 
-# The curated inventory is the whole inventory again. For one day `front tools`
-# also listed five programs riding inside mt.exe, which z had never heard of and
-# which this had to filter out by hand; the tools were removed on 2026-08-10 and
-# the filter went with them.
-set names [front tools]
+# THE NAMES COME FROM z, NOT FROM machteld, and that is the whole difference
+# between a test and a mirror. This read `front tools` until 2026-08-10 and
+# reported 273 of 273 agreeing -- while z had 275 tools and machteld refused
+# four of them outright (`EditPadPro8`, `RegexBuddy5`, `CSCSE5`, `FNSE3`, all
+# `.z/t/` directories the manifest never mentions). A verification that
+# enumerates from the side under test can only find disagreements about things
+# both sides already name; it is structurally blind to anything missing.
+#
+# Taking the list from z means machteld's inventory is checked too: a name z
+# has and machteld cannot resolve now fails here, which is exactly how those
+# four were found.
+set names {}
+foreach line [split [string map {\r\n \n} [dict get [run -timeout 60s -- $zexe tools] out]] \n] {
+    set n [lindex [split $line \t] 0]
+    if {$n ne ""} { lappend names $n }
+}
+if {[llength $names] < 100} { error "front_agree: z listed only [llength $names] tools" }
+set mine [front tools -json]
+set mineNames [lmap r [json decode $mine] {dict get $r name}]
+set onlyZ [lmap n $names {expr {$n in $mineNames ? [continue] : $n}}]
+set onlyM [lmap n $mineNames {expr {$n in $names ? [continue] : $n}}]
+puts [format "inventory        : z %d, machteld %d" [llength $names] [llength $mineNames]]
+if {[llength $onlyZ] || [llength $onlyM]} {
+    puts "  only z has  : $onlyZ"
+    puts "  only mt has : $onlyM"
+}
 set agree 0 ; set differ {} ; set mine_refused {} ; set theirs_refused {}
 set inherited [expr {[info exists ::env(PATH)] ? $::env(PATH) : ""}]
 

@@ -256,12 +256,42 @@ proc ::machteld::FrontResolve {name} {
             return [dict create kind builtin name $name exe [info nameofexecutable] \
                         args [list $name] env [FrontBaseEnv] cwd [pwd]]
         }
+        # A FRONT-DOOR COMMAND, reachable by its bare name. `mt which rg`, not
+        # `mt front which rg` -- because these exist to be typed where `z which
+        # rg` was typed, and a front door that needs a prefix is not a
+        # replacement for one that does not.
+        #
+        # Below the palette, so a verb of the same name wins: `mt run` is the
+        # palette's `run`, and `front run` keeps its full spelling. That is one
+        # collision today and it is the right way round -- the palette is the
+        # older claim on the name.
+        #
+        # Safe to sit above curated tools because it shadows nothing: all 21 of
+        # z's built-in names were checked against the 273 the workspace curates
+        # and not one collides. The suite re-checks it, since the workspace
+        # gains tools without asking anybody.
+        if {$name in [FrontCommands]} {
+            return [dict create kind command name $name exe [info nameofexecutable] \
+                        args [list front $name] env [FrontBaseEnv] cwd [pwd]]
+        }
     }
 
     if {$only eq ""} {
         set m [FrontManifest]
-        if {[dict exists $m tools $name]} {
-            set t [dict get $m tools $name]
+        # THE `t/` DIRECTORY IS A SOURCE, NOT AN OVERRIDE. This was gated on
+        # `dict exists $m tools $name` until 2026-08-10, which made the manifest
+        # the whole inventory -- and it is not. A `t/<name>/` directory holding
+        # `<name>.exe` IS a curated tool whether or not the manifest has ever
+        # heard of it, which is how `EditPadPro8`, `RegexBuddy5`, `CSCSE5` and
+        # `FNSE3` are z tools and were, until now, names machteld refused.
+        #
+        # Step 1 reported 273 of 273 resolutions agreeing and could not have
+        # caught this: it iterated `front tools`, machteld's OWN list, so a tool
+        # machteld did not know about was never asked for. A verification that
+        # enumerates from the side under test can only find disagreements about
+        # things both sides already name.
+        if {[FrontSafeName $name]} {
+            set t [expr {[dict exists $m tools $name] ? [dict get $m tools $name] : {}}]
             # THE EXE, CHOSEN THE WAY THE WORKSPACE CHOOSES IT -- and the order
             # is the opposite of the obvious one. The `t/` directory scan comes
             # FIRST, and there `exe` is a FILENAME INSIDE t/<name>/, not a path;
@@ -282,9 +312,12 @@ proc ::machteld::FrontResolve {name} {
                 set cand [file join $FRONT_HOME [dict get $t exeFromRoot]]
                 if {[file exists $cand] && ![file isdirectory $cand]} { set exe $cand }
             }
-            if {$exe eq ""} {
+            # Catalogued but not installed is its own answer; never heard of is
+            # the generic one at the foot of this proc.
+            if {$exe eq "" && [dict exists $m tools $name]} {
                 Fail FRONT notfound "\"$name\" is catalogued but its executable is not installed"
             }
+            if {$exe ne ""} {
 
             # Arguments prepended before the caller's: the MT_HOME-relative ones
             # first, then the literal ones with their tokens expanded. An
@@ -331,14 +364,202 @@ proc ::machteld::FrontResolve {name} {
                        pre $pre args {} env $env cwd [file nativename [pwd]]]
             if {[dict exists $t arg0]} { dict set r arg0 [dict get $t arg0] }
             return $r
+            }
         }
     }
 
     Fail FRONT notfound "\"$name\" is not a builtin or a curated tool -- there is no PATH fallback"
 }
 
+# A NAME THAT MAY BE JOINED ONTO A PATH. `t/<name>/<name>.exe` puts a caller's
+# string into a filename, so `mt ../../x` must not become a directory lookup.
+# The curated names include `c++`, `go1.25` and `EditPadPro8`, so this cannot be
+# the tight `[a-z][a-z0-9]*` a shipped tool's name had to be -- it refuses the
+# separators and the dot-only forms, which is exactly what traversal needs.
+# EVERY NAME THE WORKSPACE CURATES, from BOTH sources and in z's order: the
+# `t/` directory scan first, then the manifest's `exeFromRoot` entries that are
+# actually installed. Listing only the manifest is what hid four real tools.
+proc ::machteld::FrontToolNames {} {
+    variable FRONT_HOME
+    FrontRoots
+    set m [FrontManifest]
+    set names {}
+    foreach d [glob -nocomplain -types d -directory [file join $FRONT_HOME t] *] {
+        set n [file tail $d]
+        set rel "$n.exe"
+        if {[dict exists $m tools $n exe]} { set rel [dict get $m tools $n exe] }
+        set cand [file join $d $rel]
+        if {[file exists $cand] && ![file isdirectory $cand]} { dict set names $n 1 }
+    }
+    if {[dict exists $m tools]} {
+        dict for {n spec} [dict get $m tools] {
+            if {[dict exists $names $n] || ![dict exists $spec exeFromRoot]} continue
+            set cand [file join $FRONT_HOME [dict get $spec exeFromRoot]]
+            if {[file exists $cand] && ![file isdirectory $cand]} { dict set names $n 1 }
+        }
+    }
+    return [lsort [dict keys $names]]
+}
+
+proc ::machteld::FrontSafeName {name} {
+    if {$name eq "" || $name eq "." || $name eq ".."} { return 0 }
+    if {[string first "/" $name] >= 0 || [string first "\\" $name] >= 0} { return 0 }
+    return 1
+}
+
+# WHAT `front` CAN BE ASKED, read out of `front`'s own table rather than listed
+# again here. Two copies of a command set is how `mt projects` starts working
+# and `front projects` stops, or the reverse; `MtclFacts` reads the same `set
+# subs {...}` line for the manifest, so this is the third reader of one truth
+# rather than a second copy of it. Cached: one regexp, once per process.
+proc ::machteld::FrontCommands {} {
+    variable FRONT_CMDS
+    if {![info exists FRONT_CMDS]} {
+        set FRONT_CMDS {}
+        regexp -line -- {^\s+set subs \{([^\}]*)\}} [info body ::machteld::front] -> FRONT_CMDS
+    }
+    return $FRONT_CMDS
+}
+
+# --- the workspace's own inventory -------------------------------------------
+#
+# THESE RULES WERE READ OUT OF z's SOURCE, not inferred from the output, for the
+# same reason resolution was in step 1: they are not guessable. `runtimes` looks
+# like "a directory scan of .z/r", and the thing that decides whether a payload
+# has versions under it is a HARDCODED LIST of six names in
+# `runtimes_builtin.go`. No amount of staring at `.z/r/` produces that -- `zig`
+# and `winsdk` have a single version-shaped subdirectory each and are still
+# reported unversioned.
+
+# A HOSTED PROJECT is a `_`-prefixed directory carrying the project file. Not
+# "a directory under the root", and not every `_` directory either: 23 of them
+# exist here and 11 are projects. The name drops the underscore.
+proc ::machteld::FrontProjects {} {
+    variable FRONT_ROOT ; variable FRONT_PROJFILES
+    FrontRoots
+    set out {}
+    foreach d [lsort [glob -nocomplain -types d -directory $FRONT_ROOT *]] {
+        set dir [file tail $d]
+        if {[string index $dir 0] ne "_" || [string length $dir] == 1} continue
+        set found 0
+        foreach pf $FRONT_PROJFILES { if {[file exists [file join $d $pf]]} { set found 1 ; break } }
+        if {!$found} continue
+        lappend out [dict create name [string range $dir 1 end] dir $dir \
+                         path [file nativename [file join $FRONT_ROOT $dir]]]
+    }
+    return [lsort -index 1 $out]
+}
+
+# WHICH PAYLOADS KEEP THEIR VERSIONS IN SUBDIRECTORIES. Copied from z rather
+# than derived, because in z it is a literal `switch` and there is nothing to
+# derive it from. When `.mt` becomes the workspace's own directory this belongs
+# in the manifest, where it can be read instead of restated.
+proc ::machteld::FrontVersioned {} { return {go node python sqlite tcltk twapi} }
+
+proc ::machteld::FrontRuntimes {} {
+    variable FRONT_HOME
+    FrontRoots
+    set root [file join $FRONT_HOME r]
+    if {![file isdirectory $root]} { return {} }
+    # Every tool resolved once, because an alias is "a curated tool whose
+    # executable, prepended argument or environment value lives under this
+    # payload" -- which is a fact about the RESOLVED target, not about the
+    # manifest text.
+    set targets {}
+    foreach n [FrontToolNames] {
+        if {[catch {FrontResolve $n} t]} continue
+        lappend targets [list $n $t]
+    }
+    set out {}
+    foreach d [lsort [glob -nocomplain -types d -directory $root *]] {
+        set name [file tail $d]
+        set vers {}
+        if {$name in [FrontVersioned]} {
+            foreach v [lsort [glob -nocomplain -types d -directory $d *]] {
+                if {[string index [file tail $v] 0] eq "."} continue
+                lappend vers [file tail $v]
+            }
+        }
+        if {![llength $vers]} {
+            lappend out [FrontRuntimeRow $name "" $d $targets]
+            continue
+        }
+        foreach v $vers { lappend out [FrontRuntimeRow $name $v [file join $d $v] $targets] }
+    }
+    return $out
+}
+
+# `aliases` and `version` are OMITTED when empty rather than emitted as an empty
+# list -- z's struct tags say `omitempty`, and the JSON has to agree key for key
+# and not merely carry the same information.
+proc ::machteld::FrontRuntimeRow {name version path targets} {
+    set row [dict create name $name]
+    if {$version ne ""} { dict set row version $version }
+    dict set row path [file nativename $path]
+    set a [FrontAliasesUnder $path $targets]
+    if {[llength $a]} { dict set row aliases $a }
+    return $row
+}
+
+proc ::machteld::FrontAliasesUnder {base targets} {
+    set out {}
+    foreach pair $targets {
+        lassign $pair n t
+        set cands {}
+        if {[dict exists $t exe]} { lappend cands [dict get $t exe] }
+        if {[dict exists $t pre]} { lappend cands {*}[dict get $t pre] }
+        if {[dict exists $t env]} { dict for {_ v} [dict get $t env] { lappend cands $v } }
+        foreach c $cands {
+            if {[FrontWithin $base $c]} { lappend out $n ; break }
+        }
+    }
+    return [lsort $out]
+}
+
+# `base` contains `candidate`, or is it. Case-insensitively, because Windows
+# paths are, and z compares them that way.
+proc ::machteld::FrontDictOr {d key default} {
+    if {[dict exists $d $key] && [dict get $d $key] ne ""} { return [dict get $d $key] }
+    return $default
+}
+
+# CLEANED LEXICALLY, NOT NORMALISED. `file normalize` FOLLOWS LINKS, and
+# `.z/r/winsdk` is a junction into Program Files -- so normalising the payload
+# directory and the tool's executable produced two paths in different trees and
+# `signtool` stopped counting as a winsdk alias. z uses `filepath.Clean`, which
+# is purely textual, and the question here is "is this path WRITTEN underneath
+# that one", which is a question about the names rather than about the disk.
+#
+# One row of fourteen differed, because exactly one payload is a junction.
+# Nothing about the shape of the code says which of the two is wrong.
+proc ::machteld::FrontClean {p} {
+    set segs [split [string map {\\ /} $p] /]
+    set lead ""
+    if {[llength $segs] > 2 && [lindex $segs 0] eq "" && [lindex $segs 1] eq ""} {
+        set lead "//" ; set segs [lrange $segs 2 end]        ;# a UNC share
+    } elseif {[lindex $segs 0] eq ""} {
+        set lead "/"  ; set segs [lrange $segs 1 end]
+    }
+    set out {}
+    foreach s $segs {
+        if {$s eq "" || $s eq "."} continue
+        if {$s eq ".." && [llength $out]} { set out [lrange $out 0 end-1] ; continue }
+        lappend out $s
+    }
+    return $lead[join $out /]
+}
+
+proc ::machteld::FrontWithin {base candidate} {
+    if {$base eq "" || $candidate eq ""} { return 0 }
+    set b [FrontClean $base]
+    set c [FrontClean $candidate]
+    if {[string equal -nocase $b $c]} { return 1 }
+    if {[string index $b end] ne "/"} { append b "/" }
+    return [string equal -nocase -length [string length $b] $c $b]
+}
+
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal}
+    set subs {roots which env tools run journal projects runtimes}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -347,7 +568,7 @@ proc ::machteld::front {args} {
     if {![llength $args]} {
         Fail FRONT usage "usage: front roots | front which name | front env name ?-json?\
                           | front tools ?pattern? | front run ?-inherit? ?--? name ?arg ...?\
-                          | front journal"
+                          | front journal | front projects ?-json? | front runtimes ?-json?"
     }
     set sub [lindex $args 0]
     if {$sub ni $subs} {
@@ -364,12 +585,64 @@ proc ::machteld::front {args} {
         return $d
     }
 
+    # `tools` PRINTS WHAT z PRINTS -- `name<TAB>exe`, one per line -- because the
+    # point of promoting it to `mt tools` is that it can be typed where `z tools`
+    # was. `-json` is the shape a script wants and the shape z never had; that is
+    # where the dict contract lives now.
     if {$sub eq "tools"} {
-        if {[llength $args] > 2} { Fail FRONT usage "usage: front tools ?pattern?" }
-        set pat [expr {[llength $args] == 2 ? [lindex $args 1] : "*"}]
-        set m [FrontManifest]
-        if {![dict exists $m tools]} { return {} }
-        return [lsort [lsearch -all -inline -glob [dict keys [dict get $m tools]] $pat]]
+        set asjson 0 ; set pat "*"
+        foreach a [lrange $args 1 end] {
+            if {$a in {-json --json}} { set asjson 1 ; continue }
+            if {$pat ne "*"} { Fail FRONT usage "usage: front tools ?pattern? ?-json?" }
+            set pat $a
+        }
+        set rows {}
+        foreach n [lsearch -all -inline -glob [FrontToolNames] $pat] {
+            set exe ""
+            if {![catch {FrontResolve $n} t] && [dict exists $t exe]} { set exe [dict get $t exe] }
+            lappend rows [dict create name $n exe $exe]
+        }
+        if {$asjson} { return [json encode $rows -list] }
+        set out {}
+        foreach r $rows { lappend out "[dict get $r name]\t[dict get $r exe]" }
+        return [join $out \n]
+    }
+
+    # `-json` AND `--json` BOTH, and that is not sloppiness. The palette's
+    # convention is one dash; z's is two, and these commands exist to be typed
+    # where `z projects --json` was typed. Accepting both is what a strangler
+    # costs at the seam -- one of the two spellings can go when z does.
+    if {$sub in {projects runtimes}} {
+        set asjson 0
+        foreach a [lrange $args 1 end] {
+            if {$a in {-json --json}} { set asjson 1 ; continue }
+            Fail FRONT usage "usage: front $sub ?-json?"
+        }
+        set rows [expr {$sub eq "projects" ? [FrontProjects] : [FrontRuntimes]}]
+        if {$asjson} { return [json encode $rows -list] }
+        if {![llength $rows]} { return "" }
+        set out {}
+        if {$sub eq "projects"} {
+            foreach r $rows { lappend out "[dict get $r name]\t[dict get $r path]" }
+            return [join $out \n]
+        }
+        # The human rendering is machteld's, not z's: aligned to the widest
+        # value rather than to a fixed column, and the aliases counted rather
+        # than truncated at eight with a "...(+204)". The -json form is the one
+        # that has to agree, and it does.
+        set w1 5 ; set w2 7
+        foreach r $rows {
+            set w1 [expr {max($w1, [string length [dict get $r name]])}]
+            set w2 [expr {max($w2, [string length [FrontDictOr $r version -]])}]
+        }
+        lappend out [format "%-*s  %-*s  %7s  %s" $w1 runtime $w2 version aliases path]
+        foreach r $rows {
+            set a [dict get $r aliases]
+            lappend out [format "%-*s  %-*s  %7s  %s" \
+                $w1 [dict get $r name] $w2 [FrontDictOr $r version -] \
+                [expr {[llength $a] ? [llength $a] : "-"}] [dict get $r path]]
+        }
+        return [join $out \n]
     }
 
     # ONE PLACE KNOWS THE FILENAME. `front run` opens the journal lazily and a
@@ -405,9 +678,18 @@ proc ::machteld::front {args} {
 
     if {[llength $args] < 2} { Fail FRONT usage "usage: front $sub name" }
     set r [FrontResolve [lindex $args 1]]
+    # `which` PRINTS WHAT z PRINTS: `name<TAB>kind<TAB>exe`, and the exe field
+    # is dropped when there is none -- which is what a builtin verb resolves to.
+    # It used to return the bare executable, which reads better in a script and
+    # is the wrong thing for a command whose whole purpose is being typed where
+    # `z which` was. A script wants `dict get [front env $n] exe` anyway: `env`
+    # is the dict, `which` is the line.
     if {$sub eq "which"} {
         if {[llength $args] != 2} { Fail FRONT usage "usage: front which name" }
-        return [dict get $r exe]
+        set exe [expr {[dict exists $r exe] ? [dict get $r exe] : ""}]
+        if {[dict get $r kind] eq "builtin" || [dict get $r kind] eq "command"} { set exe "" }
+        if {$exe eq ""} { return "[dict get $r name]\t[dict get $r kind]" }
+        return "[dict get $r name]\t[dict get $r kind]\t$exe"
     }
     # env
     set asjson 0
@@ -440,8 +722,11 @@ proc ::machteld::FrontExec {r inherit cargs} {
     # A builtin runs HERE. Re-spawning ourselves to reach a verb this exe already
     # has would pay 44 ms of process start to call a command that is already
     # loaded, and would hand the answer back through a pipe as text.
-    if {$kind eq "builtin"} {
-        return [uplevel #0 [list [dict get $r name] {*}$cargs]]
+    if {$kind in {builtin command}} {
+        # `args` rather than `name`, because the two kinds differ only in what
+        # they expand to: a builtin verb is itself, a front-door command is
+        # `front <name>`. Both run HERE, in this process.
+        return [uplevel #0 [list {*}[dict get $r args] {*}$cargs]]
     }
 
     if {[dict exists $r arg0]} {
