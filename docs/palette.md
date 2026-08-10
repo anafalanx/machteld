@@ -423,9 +423,13 @@ is inside a project — and the `Z_` spellings as well for as long as the worksp
 directory is still `.z`, so scripts written against the Go front door keep working.
 
 ```tcl
-front run rg -n TODO .             ;# resolve, run, and hand back the output as a dict
-front run -inherit rg -n TODO .    ;# resolve, run, and give the child the terminal
+front run -- rg -n TODO .          ;# resolve, run, and hand back the output as a dict
+front run -inherit -- rg -n TODO . ;# resolve, run, and give the child the terminal
 ```
+
+`--` ends `front`'s own options, the same guard `run`, `child start`, `pty spawn` and `detach`
+take. It is optional here — only the word directly after `run` is ever read as an option — but
+without it nothing on the line says whether `-n` belongs to `front` or to `rg`.
 
 **Two ways to run it, because a front door has two audiences.** A person at a prompt wants the
 terminal handed over — colour, a pager, Ctrl-C — while an *agent writing a Tcl script* wants the
@@ -448,6 +452,40 @@ a PATH fallback wearing different clothes. An unknown name exits **127**, the sh
 front door does not implement yet (`preFromRoot`, `pre`, `envFromRoot`, `arg0`) is an *error*,
 not a silent partial answer: the point of this stage is to be compared against `z`, and a
 confident wrong resolution is worse than a refusal that names what is missing.
+
+## Built — the front door's record
+
+```tcl
+front journal                      ;# open the workspace's record -> its path
+journal rows -live                 ;# what is running now
+journal rows -limit 20             ;# the last 20, newest first
+journal rows -name rg -project els -since $ms -failed
+journal stats                      ;# counts by status, and the row total
+journal prune $cutoffMs            ;# drop what is older than a cutoff
+```
+
+A front door sees every process the workspace starts, which nothing else does — a shell records
+the line you typed, not what it resolved to, how long it took, or whether it was killed.
+`front run` records around every spawn, so the record accrues without anyone remembering to ask.
+The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
+
+**`front journal` is how a reader gets in.** `journal` itself takes a path, and the recorder opens
+it lazily, so a script that only wants to *read* would have had to spell the filename — a second
+authority on where the record lives. This opens the same file and returns its path. Unlike the
+recorder, it does not swallow failure: a script asking for the journal wants to be told when there
+isn't one.
+
+**Its own connection and its own file** (`$MT_HOME/mt.db`), separate from `store`: one is a
+key/value surface over a database a script chose, the other is the front door's own record, and
+neither should be able to evict the other by both being "the" database.
+
+**Still no raw SQL.** `store` says it plainly and that refusal holds here: every statement is
+written out in the C and every caller value is **bound**, so a tool named `x'; DROP TABLE run; --`
+is a tool name and not a fragment of a query — which the suite checks by storing exactly that.
+
+**Recording never breaks the command it records.** No workspace, an unwritable directory, a
+database from a newer build: each is a reason the journal is off, and none is a reason a tool
+should refuse to run. The same bargain [`log`](#) already makes.
 
 ## Built — declaring a tool's arguments
 

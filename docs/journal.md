@@ -122,25 +122,46 @@ processes can give.
 
 ## Rules it inherits from the rest of the palette
 
-- **A journal write never breaks the command it is recording.** Same bargain `log` already makes: a
-  failure increments a counter that `journal stats` reports, and the run proceeds. A tool must not
-  fail because bookkeeping did.
+- **A journal write never breaks the command it is recording.** Every call from `front run` is
+  inside a `catch`: a journal that cannot open, cannot write, or is locked leaves no row and the
+  tool runs anyway. A tool must not fail because bookkeeping did. *(Built. The failure **counter**
+  this section originally promised is not: a swallowed write is currently silent, so
+  `journal stats` counts rows that exist, not writes that did not happen.)*
 - **No workspace, no journal.** If there is no `MT_HOME`, the front door still resolves and runs;
-  the journal is simply off. Recording is a service, not a precondition.
+  the journal is simply off. Recording is a service, not a precondition. *(Built.)*
 - **Retention is bounded and stated.** Rows older than 30 days are pruned, at most once per
   session, on the `started` index. An unbounded log on a daily-use front door is a slow leak.
+  *(`journal prune` is built and takes the cutoff; **nothing calls it yet** — the once-per-session
+  policy is not wired, so today the file grows.)*
 
 The file lives at `$MT_HOME/mt.db` — one database, beside the workspace it describes.
 
 ## Surface
 
 ```tcl
-journal live                       ;# what is running now, reconciled against the machine
-journal recent ?n?                 ;# the last n, newest first
-journal find -name rg -project els -since 1h -failed
-journal prune ?-keep 30d?
-journal stats                      ;# counts by tool and status; write failures
+front journal                      ;# open the workspace's own record -> its path
+journal open $path                 ;# create, set the pragmas, ensure the schema
+journal add $row                   ;# a process started -> its row id
+journal done $id ok 0              ;# that process ended; `ms` is computed from the row
+journal rows -live                 ;# what is running now
+journal rows -limit 20             ;# the last 20, newest first
+journal rows -name rg -project els -since $ms -failed
+journal prune $cutoff_ms           ;# drop rows older than a cutoff -> rows removed
+journal stats                      ;# counts by status, and the row total
+journal close
 ```
+
+**Three read verbs became one.** The design above this line proposed `live`, `recent` and `find`;
+what got built is `rows` with filters, because all three were the same SELECT with a different
+`WHERE`. Three entry points would have been three query builders to keep honest, and the second one
+written is where a caller's string stops being bound and starts being pasted. The filters AND, every
+value is bound, and the clause text is assembled from a fixed set of fragments — so `-name` can hold
+a quote, a semicolon or a `DROP TABLE` and it stays a tool name. `-live` is `live`, `-limit 20` is
+`recent 20`, and the rest is `find`.
+
+What `live` promised and `rows -live` does not do yet is the **reconciliation**: a row whose process
+died without its front door getting to write `done` still reads `running`. Closing that needs the
+`pid` at insert and an `mtps` sweep — designed above, not built.
 
 Recording happens inside `front run`, so nothing has to remember to call it. It is nonetheless
 reachable from a script — an agent that shells out to something machteld did not start can record

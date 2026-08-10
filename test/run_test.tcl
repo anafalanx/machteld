@@ -1409,6 +1409,50 @@ if {![catch {front roots} FR]} {
         [dict get [run -timeout 30s -- $MT version] exit] == 0}]
 }
 
+# --- the journal: what the front door did --------------------------------------
+# Its own connection and its own file, so `store` and the journal cannot evict
+# one another by both being "the" database.
+set jdb [file join $::env(TEMP) _journal_test_[pid].db]
+foreach x [list $jdb $jdb-wal $jdb-shm] { file delete -force $x }
+check "journal refuses before open" [expr {
+    [errcode_of {journal stats}] eq {MACHTELD JOURNAL notopen}}]
+journal open $jdb
+set jid [journal add [dict create session S name rg kind tool exe C:/rg.exe                           argv {["rg"]} cwd C:/dev project els pid 7 parent ""]]
+check "a row starts out running"  [expr {
+    [dict get [lindex [journal rows -live] 0] status] eq "running"}]
+check "a running row has no exit" [expr {
+    [dict get [lindex [journal rows -live] 0] exit] eq ""}]
+journal done $jid ok 0
+check "done records the status"   [expr {[dict get [lindex [journal rows] 0] status] eq "ok"}]
+check "done computes a duration"  [expr {[dict get [lindex [journal rows] 0] ms] ne ""}]
+check "and it is no longer live"  [expr {[llength [journal rows -live]] == 0}]
+check "filters by name"           [expr {
+    [llength [journal rows -name rg]] == 1 && [llength [journal rows -name zz]] == 0}]
+check "filters by project"        [expr {[llength [journal rows -project els]] == 1}]
+check "stats counts by status"    [expr {[dict get [journal stats] ok] == 1}]
+
+# EVERY VALUE IS BOUND, NEVER PASTED. A tool name is data; if it were spliced
+# into the statement text this would drop the table and the next check would
+# find nothing to count.
+journal add [dict create session S name {x'; DROP TABLE run; --} kind tool exe x                  argv {[]} cwd C:/ project "" pid "" parent ""]
+check "a name shaped like SQL stays data" [expr {[llength [journal rows]] == 2}]
+
+check "prune removes by age"      [expr {
+    [journal prune [expr {[clock milliseconds] + 1000}]] == 2 && [llength [journal rows]] == 0}]
+journal close
+check "and refuses again once closed" [expr {
+    [errcode_of {journal stats}] eq {MACHTELD JOURNAL notopen}}]
+foreach x [list $jdb $jdb-wal $jdb-shm] { file delete -force $x }
+
+# A READER NEEDS NO FILENAME. `front run` opens the record lazily, so a script
+# that only wants to read it would otherwise spell the path itself -- a second
+# authority on where the journal lives, and the first thing to go stale.
+check "front journal opens the workspace's own record" [expr {
+    [file tail [front journal]] eq "mt.db" && [file exists [front journal]]}]
+check "and the record is queryable straight after" [expr {
+    [dict exists [journal stats] rows]}]
+journal close
+
 # --- cli duration: the palette's convention, available to its tools -----------
 # machteld refuses a bare number for a duration so `-timeout 100` can never
 # silently mean 100 seconds -- and then exposed no parser, so `life` and
@@ -1708,12 +1752,31 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
 check "manifest marks C and Tcl verbs" [expr {
     [dict get $M run kind] eq "c" && [dict get $M wrap kind] eq "tcl"}]
+# EVERY C VERB CARRIES C FACTS. Those facts come from a build-time scan of
+# src/*.c, and until 2026-08-10 that scan worked off two hand-kept lists -- so a
+# new .c file could compile, link and run while the generator never read it.
+# `journal` did exactly that: a C command with seven subcommands and six
+# options, published as `kind tcl` with no domain and nothing else, because the
+# runtime's fallback for "no entry" was to call it Tcl. This asks the running
+# binary instead: anything under ::machteld:: that is not a Tcl proc is C, and a
+# C verb the generator never read has no domain to show.
+set unseen {}
+foreach cmd [lsort [info commands ::machteld::*]] {
+    set v [namespace tail $cmd]
+    if {[string match {[A-Z_]*} $v] || [llength [info procs $cmd]]} continue
+    if {![dict exists $M $v] || [dict get $M $v kind] ne "c"
+        || [dict get $M $v domain] eq "" || ![llength [dict get $M $v codes]]} {
+        lappend unseen $v
+    }
+}
+if {$unseen ne ""} { puts "     unread by genmanifest: $unseen" }
+check "every C verb was read by the manifest generator" [expr {$unseen eq ""}]
 # The manifest describes itself, which is the cheapest possible proof that
 # self-description is not special-cased.
 check "manifest describes itself" [expr {[dict get $M manifest kind] eq "tcl"}]
