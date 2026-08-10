@@ -41,7 +41,7 @@ set IMPL {
     WatchCmd  watch
     StoreCmd  store
     JsonCmd   json
-    PsCmd     ps
+    PsCmd     mtps
     HashCmd   hash
 }
 

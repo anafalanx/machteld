@@ -36,7 +36,7 @@
 
 static int ps_error(Tcl_Interp *interp, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg, -1));
-    Tcl_SetErrorCode(interp, "MACHTELD", "PS", code, (char *)NULL);
+    Tcl_SetErrorCode(interp, "MACHTELD", "MTPS", code, (char *)NULL);
     return TCL_ERROR;
 }
 
@@ -129,7 +129,7 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
  *
  * THE CORPSE CASE. TerminateProcess on a process that has ALREADY exited fails
  * with ERROR_ACCESS_DENIED -- indistinguishable, at the call site, from a
- * genuinely protected process. Taken at face value that makes `ps kill` tell you
+ * genuinely protected process. Taken at face value that makes `mtps kill` tell you
  * to re-run as administrator when the thing you aimed at simply finished on its
  * own, which is both wrong and the likeliest case in a task manager: you click
  * End Task on the row that was already on its way out. Windows keeps a pid
@@ -291,7 +291,7 @@ static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) 
 }
 
 int Machteldps_Init(Tcl_Interp *interp) {
-    Tcl_CreateObjCommand(interp, "::machteld::ps", PsCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::mtps", PsCmd, NULL, NULL);
     Tcl_PkgProvide(interp, "machteld::ps", "0.1");
     return TCL_OK;
 }

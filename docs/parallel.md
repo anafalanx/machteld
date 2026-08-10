@@ -96,7 +96,7 @@ these same alternatives further down.)*
 **The work it does not suit** — and the last row of the table is the one people get wrong:
 
 - **Anything a palette verb already does in-process.** Fourteen files hashed take 6 ms; spawning
-  fourteen workers to do it costs 364 ms in startup alone. `hash`, `json`, `ps` and `store` are C
+  fourteen workers to do it costs 364 ms in startup alone. `hash`, `json`, `mtps` and `store` are C
   in the same process. Parallelising them is pure loss.
 - **Items under ~30 ms.** Spawn dominates. Fine-grained data parallelism needs persistent workers,
   which needs `child send`.

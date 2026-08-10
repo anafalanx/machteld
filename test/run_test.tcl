@@ -376,11 +376,11 @@ for {set i 0} {$i < 60 && ![file exists $pidfile]} {incr i} { after 100 }
 set gp ""
 if {[file exists $pidfile]} { set fh [open $pidfile] ; set gp [string trim [read $fh]] ; close $fh }
 check "the worker really spawned a grandchild" [expr {
-    $gp ne "" && ![catch {ps info $gp}]}]
+    $gp ne "" && ![catch {mtps info $gp}]}]
 child kill $cc
 child wait $cc
 after 700
-check "child kill takes the grandchild too"    [expr {$gp eq "" || [catch {ps info $gp}]}]
+check "child kill takes the grandchild too"    [expr {$gp eq "" || [catch {mtps info $gp}]}]
 child close $cc
 file delete -force $pidfile $TREEW
 
@@ -772,13 +772,13 @@ file delete -force $WD
 # is running. That distinction is the whole reason the verb exists, so it is the
 # first thing checked: processes we did NOT start have to be visible.
 
-set PROCS [ps list]
-check "ps list returns many processes" [expr {[llength $PROCS] > 20}]
-check "ps list dwarfs our own child list" [expr {[llength $PROCS] > [llength [child list]] + 20}]
+set PROCS [mtps list]
+check "mtps list returns many processes" [expr {[llength $PROCS] > 20}]
+check "mtps list dwarfs our own child list" [expr {[llength $PROCS] > [llength [child list]] + 20}]
 
 set self {}
 foreach p $PROCS { if {[dict get $p pid] == [pid]} { set self $p ; break } }
-check "ps list contains our own pid" [expr {$self ne ""}]
+check "mtps list contains our own pid" [expr {$self ne ""}]
 check "ps row carries the full shape" [expr {[lsort [dict keys $self]] eq
     {access cpu exe mem name pid ppid private started threads}}]
 check "our own row is readable" [expr {[dict get $self access] == 1}]
@@ -788,8 +788,8 @@ check "our own start time is sane" [expr {
     [dict get $self started] > 1700000000 && [dict get $self started] <= [clock seconds] + 2}]
 
 # info and list must agree about the same process: two code paths, one answer.
-set inf [ps info [pid]]
-check "ps info agrees with ps list" [expr {
+set inf [mtps info [pid]]
+check "mtps info agrees with mtps list" [expr {
     [dict get $inf pid]  == [dict get $self pid] &&
     [dict get $inf name] eq [dict get $self name] &&
     [dict get $inf exe]  eq [dict get $self exe]}]
@@ -812,13 +812,13 @@ if {$unread ne ""} {
 
 check "cpu reads as an integer ms count" [string is integer -strict [dict get $self cpu]]
 
-# ps kills by pid. The only process a test may safely kill is one it started
+# mtps kills by pid. The only process a test may safely kill is one it started
 # itself -- which is also the sharpest check, since child can confirm the death.
 set victim [child start -- $MT $CHILD sleep 8000]
 set vpid   [dict get [child info $victim] pid]
-check "ps sees a process we launched" [expr {[dict get [ps info $vpid] pid] == $vpid}]
-check "ps kill reports one killed" [expr {[ps kill $vpid] == 1}]
-check "ps kill actually ended it" [expr {
+check "ps sees a process we launched" [expr {[dict get [mtps info $vpid] pid] == $vpid}]
+check "mtps kill reports one killed" [expr {[mtps kill $vpid] == 1}]
+check "mtps kill actually ended it" [expr {
     [dict get [child wait $victim] status] in {killed error}}]
 child close $victim
 
@@ -827,8 +827,8 @@ child close $victim
 set root [child start -- cmd /c "$MT $CHILD sleep 8000"]
 after 400
 set rpid [dict get [child info $root] pid]
-set n [ps kill $rpid -tree]
-check "ps kill -tree killed the root and its child" [expr {$n >= 2}]
+set n [mtps kill $rpid -tree]
+check "mtps kill -tree killed the root and its child" [expr {$n >= 2}]
 catch {child kill $root} ; catch {child wait $root} ; child close $root
 
 # A process that exited on its own, whose pid we still hold a handle to, must
@@ -839,23 +839,23 @@ catch {child kill $root} ; catch {child wait $root} ; child close $root
 set gone [child start -- $MT $CHILD exitcode 0]
 set gpid [dict get [child info $gone] pid]
 child wait $gone
-check "ps kill of an exited process => notfound, not denied" [expr {
-    [errcode_of {ps kill $gpid}] eq {MACHTELD PS notfound}}]
+check "mtps kill of an exited process => notfound, not denied" [expr {
+    [errcode_of {mtps kill $gpid}] eq {MACHTELD MTPS notfound}}]
 child close $gone
 
 # the error contract
-check "ps info on a missing pid => notfound" [expr {
-    [errcode_of {ps info 4000000}] eq {MACHTELD PS notfound}}]
-check "ps kill on a missing pid => notfound" [expr {
-    [errcode_of {ps kill 4000000}] eq {MACHTELD PS notfound}}]
+check "mtps info on a missing pid => notfound" [expr {
+    [errcode_of {mtps info 4000000}] eq {MACHTELD MTPS notfound}}]
+check "mtps kill on a missing pid => notfound" [expr {
+    [errcode_of {mtps kill 4000000}] eq {MACHTELD MTPS notfound}}]
 check "ps on a non-integer pid => badvalue" [expr {
-    [errcode_of {ps info notanumber}] eq {MACHTELD PS badvalue}}]
+    [errcode_of {mtps info notanumber}] eq {MACHTELD MTPS badvalue}}]
 check "ps on an out-of-range pid => badvalue" [expr {
-    [errcode_of {ps info 99999999999}] eq {MACHTELD PS badvalue}}]
-check "ps kill of the system process => denied" [expr {
-    [errcode_of {ps kill 4}] eq {MACHTELD PS denied}}]
-check "ps kill with an unknown option => usage" [expr {
-    [errcode_of {ps kill [pid] -nope}] eq {MACHTELD PS usage}}]
+    [errcode_of {mtps info 99999999999}] eq {MACHTELD MTPS badvalue}}]
+check "mtps kill of the system process => denied" [expr {
+    [errcode_of {mtps kill 4}] eq {MACHTELD MTPS denied}}]
+check "mtps kill with an unknown option => usage" [expr {
+    [errcode_of {mtps kill [pid] -nope}] eq {MACHTELD MTPS usage}}]
 
 # --- watch info / pty info: observe without consuming -------------------------
 # The cockpit needs to show what is pending. `watch read` DRAINS and `pty read`
@@ -1615,7 +1615,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help json log manifest pmap pool ps pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach front hash help json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }

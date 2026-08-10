@@ -121,14 +121,14 @@ guarded "newlines, quotes, unicode and empty strings in values" {
 
 puts "\n=== 7. no orphans after close ==="
 guarded "closing the pool ends every worker" {
-    set before [llength [lsearch -all -inline -index 5 [ps list] machteld.exe]]
+    set before [llength [lsearch -all -inline -index 5 [mtps list] machteld.exe]]
     set p [::pool::create $CMD 6]
     ::pool::submit $p [list [dict create id 1 op sum n 1000]]
     ::pool::wait $p
-    set during [llength [lsearch -all -inline -index 5 [ps list] machteld.exe]]
+    set during [llength [lsearch -all -inline -index 5 [mtps list] machteld.exe]]
     ::pool::close $p
     after 600
-    set after [llength [lsearch -all -inline -index 5 [ps list] machteld.exe]]
+    set after [llength [lsearch -all -inline -index 5 [mtps list] machteld.exe]]
     check "workers were actually running" [expr {$during > $before}]
     check "no workers survive close"      [expr {$after <= $before}]
     if {$after > $before} { puts "     leaked [expr {$after-$before}] processes" }

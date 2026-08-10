@@ -79,7 +79,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
 | `JSON` | `json` (all subcommands) |
-| `PS` | `ps` (all subcommands) |
+| `MTPS` | `mtps` (all subcommands) |
 | `WRAP` | `wrap` |
 | `HELP` | `help` |
 | `HASH` | `hash` (all subcommands) |
@@ -130,9 +130,9 @@ raiser, `Fail domain code msg`, mirroring the C's `mt_error`. A shared helper is
 domain to raise in (`_dur2ms PTY $v`), for the same reason the C option parser is: **the domain
 is the verb you called**, never the helper that happened to fail.
 
-`denied` is the one code that reports a *permission*, and it is confined to `ps`, because `ps`
+`denied` is the one code that reports a *permission*, and it is confined to `mtps`, because `mtps`
 is the one verb that reaches processes machteld did not start. Note what it does **not** cover:
-a process `ps list` cannot open is not an error at all — it comes back as a row with
+a process `mtps list` cannot open is not an error at all — it comes back as a row with
 `access 0` and its unreadable fields empty. Failing the whole listing over a process you may
 not inspect would make the verb useless on exactly the machines it is for.
 

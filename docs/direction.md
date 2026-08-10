@@ -51,7 +51,7 @@ measurement that says so.
 
 **5. Build to find out. Speculation is allowed; unexamined accumulation is not.**
 *Rewritten 2026-08-09; the demand-first version is retired.* It read "each domain gets built
-when a tool reaches for it", and it produced good practical design — `watch` and `ps` both
+when a tool reaches for it", and it produced good practical design — `watch` and `mtps` both
 arrived that way and both are better for it. It was also wrong often enough to matter. It
 forbids exploring, and exploring is how you find out what a verb's dict should look like; it
 also refuses the thing a personal toolkit is *for*. Twice it was softened and twice it bit
@@ -284,11 +284,11 @@ The remaining domains — `reg`, `svc`, `evt`, and the `net`/`host`/`user`/`wmi`
 wanted and none are scheduled. They get built **after the first tool, on demand**: that is also
 when you learn what each one's dict should look like.
 
-## After 0.3.0 — `ps`, on demand (2026-08-09)
+## After 0.3.0 — `mtps`, on demand (2026-08-09)
 
 The second tool was a **task manager**, and it did exactly what rule 5 predicts a tool should do:
 it named a capability that was missing. machteld could supervise processes it *started* and had
-no view of one it had not — `child list` returns its own tokens and nothing else. So **`ps`**
+no view of one it had not — `child list` returns its own tokens and nothing else. So **`mtps`**
 (`list` / `info` / `kill ?-tree?`) was built to fit the tool, not speculated first.
 
 Three shape decisions, each following an existing precedent rather than inventing one:
@@ -301,12 +301,12 @@ Three shape decisions, each following an existing precedent rather than inventin
    `access 0`, and every unreadable field is the **empty string** rather than `0` — so "denied"
    never reads as "using no memory". Half the processes on a non-elevated desktop are in this
    state; failing the listing over them would make the verb useless where it is needed.
-3. **`ps kill -tree` is best-effort and says so.** It walks one snapshot. For a tree machteld
+3. **`mtps kill -tree` is best-effort and says so.** It walks one snapshot. For a tree machteld
    started, `child kill` remains exact, because the job object holds the tree by identity rather
    than by pid. The palette documents the difference instead of blurring it.
 
-`denied` joins the registry as the one code that reports a permission, confined to `ps` because
-`ps` is the one verb that reaches outside machteld's own children.
+`denied` joins the registry as the one code that reports a permission, confined to `mtps` because
+`mtps` is the one verb that reaches outside machteld's own children.
 
 ## The store is not the parallelism mechanism (2026-08-09)
 
