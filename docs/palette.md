@@ -492,11 +492,10 @@ command-line tool has real stdio. It is not a PE byte-flip: a console host runni
 subsystem has no valid standard channels and `puts stdout` throws *"can not find channel named
 stdout"*.
 
-**It costs the front door 130 ms.** Carrying both hosts makes `mt.exe` 10.2 MB instead of 6.0, and
-a large appended archive measurably slows every startup — `mt version` goes from ~240 ms to ~370 ms,
-median of 40 runs, reproducible interleaved. Measured rather than assumed, and **not** an antivirus
-reaction to nested executables: 9.2 MB of random data in their place costs the same. Paid
-deliberately, so that one file is all there is.
+**It costs the front door about 13 ms**, and the first number published here said 130 — see
+[the log](log.md) for the correction. Carrying both hosts makes `mt.exe` 10.2 MB instead of 6.0,
+and a same-session A/B of the two builds puts the difference at ~13 ms of the ~25 ms `mt version`
+costs in total. Cheap, and worth it for one file that stamps anywhere.
 
 ## Built — naming a script
 

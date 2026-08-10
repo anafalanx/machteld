@@ -45,12 +45,48 @@ proc ::machteld::version {} {
 # Internal helpers are excluded by the naming convention this prelude already
 # follows: a leading underscore or capital (_dur2ms, PtyCore) means "not
 # palette".
+# IS THIS NAME A PALETTE VERB? One definition, because two would drift: the
+# manifest's own loop uses it below, and the front door's resolver asks it
+# instead of asking for the whole manifest. A leading capital or underscore is
+# a helper, by the convention the prelude already follows.
+proc ::machteld::PaletteVerb {v} {
+    if {[string match {[A-Z_]*} $v]} { return 0 }
+    return [expr {"::machteld::$v" in [info commands ::machteld::*]}]
+}
+
+# DERIVED ONCE PER PROCESS, NOT ONCE PER CALL. Deriving the Tcl half means
+# running MtclFacts over every Tcl-written verb, and MtclFacts follows helpers
+# transitively with a regexp per helper per body -- 316 ms for 13 verbs, on the
+# measurements in [the log](log.md).
+#
+# That was being paid by EVERY `mt <name>`, because the front door's resolver
+# opened with `dict exists [manifest] $name` to ask whether a name was a builtin.
+# A front door that rebuilds its own self-description before it can look
+# anything up is the whole of why this exe answered in 360 ms where z.exe
+# answers in 9.
+#
+# The cache is keyed on the command set, not on a flag: if a script defines a
+# new ::machteld:: command the answer must change, and comparing the sorted
+# name list costs ~0.1 ms against 316. Honest rather than merely fast.
 proc ::machteld::manifest {} {
+    variable MANIFEST
+    variable MANIFEST_CACHE
+    variable MANIFEST_CACHE_KEY
+    set key [info commands ::machteld::*]
+    if {[info exists MANIFEST_CACHE] && $MANIFEST_CACHE_KEY eq $key} {
+        return $MANIFEST_CACHE
+    }
+    set m [ManifestDerive]
+    set MANIFEST_CACHE $m
+    set MANIFEST_CACHE_KEY $key
+    return $m
+}
+proc ::machteld::ManifestDerive {} {
     variable MANIFEST
     set m $MANIFEST
     foreach cmd [lsort [info commands ::machteld::*]] {
         set v [namespace tail $cmd]
-        if {[string match {[A-Z_]*} $v]} continue
+        if {![PaletteVerb $v]} continue
         if {[dict exists $m $v]} {
             # A C verb the prelude re-presents as an ensemble: take the union,
             # so a subcommand added in Tcl is as visible as one written in C.

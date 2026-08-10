@@ -8,7 +8,56 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-10 — the front door was 40× slower than z, for one line
+
+`mt version` answered in **361 ms**; `z.exe version`, the Go front door it is replacing, answers in
+**9.9**. `mt front which rg` took **704 ms** against z's **31**. Both are now **25.6 ms** and
+**28.8 ms** — resolution is *faster* than z's — and the whole of it was one line.
+
+**Where the time actually went**, measured by building host variants that isolate each part:
+
+| | median |
+|---|---|
+| `tclsh90s`, a reference static Tcl, running a trivial script | 18.6 ms |
+| the same through a machteld host with an **empty** prelude | 22.6 ms |
+| ditto **with both basekits embedded** | 22.3 ms |
+| parsing the whole 101 KB prelude | **2.3 ms** |
+| reading and JSON-decoding the 162 KB workspace manifest | **1.5 ms** |
+| **`manifest` — deriving the palette's self-description** | **316 ms** |
+
+`FrontResolve` opened with `dict exists [manifest] $name`, to ask whether a name was a builtin.
+That is the right question asked in the most expensive possible way: `manifest`'s Tcl half runs
+`MtclFacts` over all 13 Tcl-written verbs, and `MtclFacts` follows helpers transitively with a
+regexp per helper per body. **Every `mt <name>` rebuilt the entire palette description before it
+could look anything up.**
+
+Two small changes. `manifest` memoises its derivation, keyed on the `::machteld::*` command set so
+a script that defines a new verb still gets a fresh answer rather than a stale one. And
+`FrontResolve` asks `PaletteVerb` — the same predicate `manifest`'s own loop uses, so there is
+still exactly one definition of what counts as a verb. Both are gated structurally rather than by
+timing: the suite fails if `FrontResolve`'s body mentions `manifest` again, and if `PaletteVerb`
+and the manifest's key set ever disagree.
+
+**A correction, because a wrong number was published.** The entry below reports the embedded
+basekits costing **130 ms**, with a table. That measurement was contaminated: it compared two
+builds that differed in more than their basekits, and attributed to file size a cost that was
+really `manifest`. A same-session A/B of two hosts built from the same prelude puts the basekits at
+**~13 ms**, and the conclusion drawn from the bad number — that a large appended archive slows
+startup as a step — is **withdrawn**: null-prelude hosts of 6.25 MB and 10.68 MB answer in 22.6 ms
+and 22.3 ms, which is no difference at all.
+
+What survives is the shape of the mistake, which is worth more than the number was: **a
+cross-build A/B is not an A/B.** Two artefacts differing in one *intended* way can differ in
+others, and the measurement will cheerfully attribute the whole gap to the thing you were thinking
+about when you made it.
+
+The 25.6 ms that remains is a Tcl interpreter starting up, and z.exe's 9.9 ms is a Go binary not
+having one. That gap is inherent, and small enough to stop looking at.
+
 ## 2026-08-10 — `wrap` comes back, and the front door pays 130 ms for it
+
+> **The 130 ms in this entry's title is wrong — it is ~13 ms.** See the entry above for the
+> measurement that corrected it and for what was actually slow.
 
 A receiver turned up, and it is the one the refusal said did not exist. At work, a small tool
 written in an afternoon has to reach colleagues through a shared SMB folder — machines with no Tcl,

@@ -242,7 +242,17 @@ proc ::machteld::FrontResolve {name} {
 
     if {$only in {"" z}} {
         # A builtin is a verb this exe already has: no process, no path.
-        if {[dict exists [manifest] $name]} {
+        #
+        # ASKED THE CHEAP WAY, and that is not a micro-optimisation. This line
+        # read `dict exists [manifest] $name` until 2026-08-10 -- the same
+        # question -- and so every single `mt <name>` derived the palette's
+        # entire self-description before it could look anything up: 316 ms of
+        # MtclFacts to answer yes or no. It was the whole of why this front door
+        # took 361 ms where z.exe takes 9.
+        #
+        # `PaletteVerb` is the very predicate `manifest`'s own loop uses, so
+        # there is still exactly one definition of what counts as a verb.
+        if {[PaletteVerb $name]} {
             return [dict create kind builtin name $name exe [info nameofexecutable] \
                         args [list $name] env [FrontBaseEnv] cwd [pwd]]
         }
