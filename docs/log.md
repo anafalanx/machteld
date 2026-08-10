@@ -33,6 +33,18 @@ Two things only building it could have shown:
   here. `mt life --seed 41 --grace 2s` opens a real window, runs 131 generations, detects stasis,
   prints its JSON death line and exits 0.
 
+**And the dispatcher lost its last heuristic.** Step 2 had kept a shape test — a first argument
+carrying a path separator or a `.tcl` extension was handed back to `Tcl_Main`, so `mt app.tcl` ran
+a script the way `tclsh app.tcl` does. It was deliberately not "does this file exist", but it was
+still a guess about what you meant made from how you spelled it, and putting five tools in the exe
+made its one ambiguous case concrete: a file named `changes` beside a shipped tool named `changes`.
+**The first argument is a name now, with no test at all**, and a script is named by a verb — `mt
+tcl test/run_test.tcl`. That cost one word at 71 call sites, once, and cost machteld the property
+of being drop-in wherever a `tclsh` is expected. `tcl` is an ordinary palette verb (domain `TCL`,
+in the manifest) that does not return: the process becomes the script, taking its `argv0`, `argv`,
+event loop and exit code. Typing the old spelling exits 127 and names the new one on the second
+line — the only place `file exists` appears, in the message and never in the decision.
+
 **A name is joined onto a directory here, which nothing else the front door resolves is** — every
 other name is a key in a dict the workspace wrote. The zipfs resolves `..` (checked: `file exists
 //zipfs:/app/tool/../tool/sums/main.tcl` is 1), so without a name check `mt ../tool/sums` would

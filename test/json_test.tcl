@@ -1,5 +1,5 @@
 # json_test.tcl -- ::machteld::json against nst/JSONTestSuite plus a mapping suite.
-#   machteld.exe test/json_test.tcl
+#   machteld.exe tcl test/json_test.tcl
 #
 # The suite is VENDORED, the parser is not: docs/ecosystem-policy.md prefers
 # owning a snapshot you can read, and for a parser the thing worth borrowing is

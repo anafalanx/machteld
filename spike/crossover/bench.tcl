@@ -1,9 +1,9 @@
 # bench.tcl -- where the crossover actually is: four ways to run the same items.
 #
-#   machteld.exe bench.tcl                     the whole thing
-#   machteld.exe bench.tcl --worker            one pool worker (arm C)
-#   machteld.exe bench.tcl --item  <file> <i>  one item      (arm B1)
-#   machteld.exe bench.tcl --chunk <file> <a> <b>  a slice   (arm B2)
+#   machteld.exe tcl bench.tcl                     the whole thing
+#   machteld.exe tcl bench.tcl --worker            one pool worker (arm C)
+#   machteld.exe tcl bench.tcl --item  <file> <i>  one item      (arm B1)
+#   machteld.exe tcl bench.tcl --chunk <file> <a> <b>  a slice   (arm B2)
 #
 # The item list lives in a FILE that every arm reads, so no arm gets its work
 # handed to it in a cheaper form than the others. Arm C reads it once per worker
@@ -98,7 +98,7 @@ proc ::bench::arm_child {items files width file exe self} {
             if {[lindex $items $next] eq "x"} {
                 set c [child start -- findstr /c:proc [lindex $files $next]]
             } else {
-                set c [child start -- $exe $self --item [lindex $items $next]]
+                set c [child start -- $exe tcl $self --item [lindex $items $next]]
             }
             dict set live $c $next
             incr next
@@ -126,7 +126,7 @@ proc ::bench::arm_chunk {items width file exe self} {
     set kids {}
     for {set a 0} {$a < $n} {incr a $per} {
         set b [expr {min($a + $per - 1, $n - 1)}]
-        lappend kids [list [child start -- $exe $self --chunk $file $a $b] $a $b]
+        lappend kids [list [child start -- $exe tcl $self --chunk $file $a $b] $a $b]
     }
     set out {}
     foreach k $kids {
@@ -147,7 +147,7 @@ proc ::bench::arm_pool {items files width exe self} {
             lappend reqs [list op burn n $n]
         }
     }
-    return [pmap $reqs -width $width -- $exe $self --worker]
+    return [pmap $reqs -width $width -- $exe tcl $self --worker]
 }
 
 # --- the harness -------------------------------------------------------------

@@ -85,6 +85,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CLI` | `cli` |
 | `LOG` | `log` (all subcommands) |
 | `FRONT` | `front` — the workspace front door |
+| `TCL` | `tcl` — run a script as this process's program |
 | `JOURNAL` | `journal` — the front door's record |
 | `WORKER` | `worker` (all subcommands) |
 | `POOL` | `pool` (all subcommands) |
@@ -147,3 +148,10 @@ try { wait child#99 }            trap {MACHTELD WAIT nohandle} {m opts} { … }
 vocabulary for Tcl's own failure modes is [creed](creed.md) 7 — extend the language, do not
 restate it. They are named here so the registry is complete about what a caller can see, not
 only about what machteld itself raises.
+
+**`MACHTELD TCL` and Tcl's own `TCL` are not the same thing, and cannot be confused by a trap.**
+The `tcl` verb raises in domain `TCL` because the rule is *the domain is the verb you called*, and
+the verb is called `tcl`. Tcl's own codes begin with `TCL` in the **first** position
+(`{TCL WRONGARGS}`); every machteld code begins with `MACHTELD` (`{MACHTELD TCL usage}`). A `trap`
+matches on a prefix of the list, so the two never overlap — but they read alike, which is why it is
+said here rather than left to be noticed.

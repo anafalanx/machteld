@@ -1,6 +1,6 @@
 # spike/pool/spike.tcl -- try to break the channel-based pool.
 #
-#   machteld.exe spike/pool/spike.tcl
+#   machteld.exe tcl spike/pool/spike.tcl
 #
 # Written to FAIL, not to pass. Each section attacks one of the hazards named in
 # docs/parallel.md, and the interesting outcome is a hang or a wrong count, not
@@ -9,7 +9,7 @@
 set HERE [file dirname [file normalize [info script]]]
 source [file join $HERE pool.tcl]
 set MT [info nameofexecutable]
-set CMD [list $MT [file join $HERE worker.tcl]]
+set CMD [list $MT tcl [file join $HERE worker.tcl]]
 
 set fails 0
 proc check {name ok} {

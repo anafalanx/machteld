@@ -59,6 +59,9 @@ namespace eval ::sums {
 # the zipfs or in a checkout. A child of mt.exe mounts the very same zipfs, so
 # the zipfs path is as reachable from the worker as it is from here.
 #
+# `mt tcl <script>`, not `mt <script>`: since 2026-08-10 the front door's first
+# argument is a NAME with no shape test, so a script is named by the `tcl` verb.
+#
 # What has NOT changed is the property the whole pool design rests on: the
 # worker is the same file the director is running. No second artefact to keep in
 # step, and no tclsh on the box.
@@ -66,8 +69,8 @@ proc ::sums::worker_command {} {
     variable SELF
     set exe [info nameofexecutable]
     if {$SELF eq ""} { return [list $exe sums --worker] }
-    if {[string match {//zipfs:*} $SELF]} { return [list $exe $SELF --worker] }
-    return [list $exe [file normalize $SELF] --worker]
+    if {[string match {//zipfs:*} $SELF]} { return [list $exe tcl $SELF --worker] }
+    return [list $exe tcl [file normalize $SELF] --worker]
 }
 
 # --- the worker side ---------------------------------------------------------

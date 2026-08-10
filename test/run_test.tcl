@@ -1,5 +1,5 @@
 # run_test.tcl -- end-to-end verification of ::machteld::run (M1).
-# Run under machteld.exe:   machteld.exe test/run_test.tcl
+# Run under machteld.exe:   machteld.exe tcl test/run_test.tcl
 # Spawns real child processes through the winjob substrate and checks the dicts.
 
 set MT   [info nameofexecutable]
@@ -59,7 +59,7 @@ check "exit 300 untruncated" [expr {[dict get $r exit] == 300}]
 check "nonzero => error"     [expr {[dict get $r status] eq "error"}]
 
 # 3. argv round-trip through real CreateProcess (EscapeArg quoting survives the kernel)
-set r [::machteld::run -- $MT $CHILD echoargv one "two three" {a"b} {c\d}]
+set r [::machteld::run -- $MT tcl $CHILD echoargv one "two three" {a"b} {c\d}]
 set lines [split [string trimright [dict get $r out] \n] \n]
 check "argv count 4"        [expr {[llength $lines] == 4}]
 check "argv plain"          [expr {[lindex $lines 0] eq "one"}]
@@ -69,7 +69,7 @@ check "argv with backslash" [expr {[lindex $lines 3] eq {c\d}}]
 
 # 4. -timeout tree-kills a slow child (proves born-in-job + TerminateJobObject)
 set t0 [clock milliseconds]
-set r [::machteld::run -timeout 500ms -- $MT $CHILD sleep 8000]
+set r [::machteld::run -timeout 500ms -- $MT tcl $CHILD sleep 8000]
 set dt [expr {[clock milliseconds] - $t0}]
 check "timeout => status timeout" [expr {[dict get $r status] eq "timeout"}]
 check "timeout killed fast (<4s)" [expr {$dt < 4000}]
@@ -145,7 +145,7 @@ check "child captured out" [string match "*async*" [dict get $r out]]
 ::machteld::child close $c
 
 # 7. child info reports running; kill flips status to "killed"
-set c [::machteld::child start -- $MT $CHILD sleep 8000]
+set c [::machteld::child start -- $MT tcl $CHILD sleep 8000]
 check "child info running"  [expr {[dict get [::machteld::child info $c] running] == 1}]
 ::machteld::child kill $c
 check "killed status"       [expr {[dict get [::machteld::child wait $c] status] eq "killed"}]
@@ -161,7 +161,7 @@ set spin [file join $HERE _spin.tcl]
 set f [open $spin w] ; puts $f {proc spin {} { while {1} { set x [expr {sqrt(2.0)}] } } ; spin} ; close $f
 
 set t0 [clock milliseconds]
-set c [child start -timeout 800ms -- $MT $spin]
+set c [child start -timeout 800ms -- $MT tcl $spin]
 # The outer bound is deliberate. `child wait` with no timeout of its own blocks
 # FOREVER on a spinner, so if the start deadline is ever lost this test would
 # hang the suite rather than fail it -- and a hang reports nothing at all. With
@@ -180,7 +180,7 @@ child close $c
 # `child start` is a contract the child was launched under, the one passed to
 # `wait` is only how long the CALLER is prepared to stand there.
 set t0 [clock milliseconds]
-set c [child start -- $MT $spin]
+set c [child start -- $MT tcl $spin]
 set r [child wait $c -timeout 800ms]
 set dt [expr {[clock milliseconds] - $t0}]
 check "child wait -timeout returns near time"   [expr {$dt > 500 && $dt < 4000}]
@@ -203,7 +203,7 @@ child close $c
 # watching Life windows run 148 seconds under a 25-second cap. Asking "are you
 # done?" is not waiting, and `-timeout` is a promise about the child.
 set t0 [clock milliseconds]
-set c [child start -timeout 600ms -- $MT $spin]
+set c [child start -timeout 600ms -- $MT tcl $spin]
 while {[clock milliseconds] - $t0 < 6000} {
     if {![dict get [child info $c] running]} break
     after 100
@@ -221,7 +221,7 @@ child close $c
 #
 # `child list` alone -- a supervisor that only ever asks "who is still here?".
 set t0 [clock milliseconds]
-set c [child start -timeout 600ms -- $MT $spin]
+set c [child start -timeout 600ms -- $MT tcl $spin]
 while {[clock milliseconds] - $t0 < 6000} {
     child list
     if {![dict get [child info $c] running]} break
@@ -236,8 +236,8 @@ child close $c
 # enforced this check must fail, not hang the suite, so the elapsed time is what
 # is asserted.
 set t0 [clock milliseconds]
-set c [child start -timeout 700ms -- $MT $spin]
-set d [child start -- $MT $spin]
+set c [child start -timeout 700ms -- $MT tcl $spin]
+set d [child start -- $MT tcl $spin]
 set woke [wait -any $c $d]
 set dt [expr {[clock milliseconds] - $t0}]
 check "wait -any returns when a cap fires" [expr {$dt > 500 && $dt < 5000}]
@@ -255,7 +255,7 @@ set ADVICE {if {[dict get [child wait $c -timeout 50ms] status] ne "running"} { 
 # something else entirely. Found by this check failing against a doc that plainly
 # contained the line.
 check "the palette still shows this loop" [expr {[string first $ADVICE [help palette]] >= 0}]
-set c [child start -- $MT $spin]
+set c [child start -- $MT tcl $spin]
 proc harvest {tok} { set ::harvested $tok }
 set ::harvested ""
 eval $ADVICE
@@ -271,7 +271,7 @@ child close $c
 # would get 30 more because someone waited generously. And when the START
 # deadline is the one that expires, it still kills -- that half was always right.
 set t0 [clock milliseconds]
-set c [child start -timeout 600ms -- $MT $spin]
+set c [child start -timeout 600ms -- $MT tcl $spin]
 set r [child wait $c -timeout 30s]
 set dt [expr {[clock milliseconds] - $t0}]
 check "the earlier of the two deadlines wins" [expr {$dt < 4000}]
@@ -308,7 +308,7 @@ fconfigure stdout -translation lf -buffering line
 while {[gets stdin l] >= 0} { if {$l eq "bye"} break ; puts "echo:$l" }}
 close $f
 
-set cc [child start -channels -- $MT $ECHOW]
+set cc [child start -channels -- $MT tcl $ECHOW]
 set ci [child info $cc]
 check "channel mode reports three channels" [expr {
     [dict exists $ci stdin] && [dict exists $ci stdout] && [dict exists $ci stderr]}]
@@ -324,7 +324,7 @@ check "child close releases the channels"   [expr {$cin ni [chan names]}]
 # The result dict MUST NOT fork: run and child wait share one builder and the
 # manifest derives `returns` from it, so channel mode keeps the documented shape
 # with out/err simply empty rather than growing a second shape behind one verb.
-set cc [child start -channels -- $MT $ECHOW]
+set cc [child start -channels -- $MT tcl $ECHOW]
 close [dict get [child info $cc] stdin]
 set cr [child wait $cc]
 check "channel mode keeps the result shape" [expr {[lsort [dict keys $cr]] eq
@@ -336,13 +336,13 @@ child close $cc
 
 # Capture and channels cannot both own a pipe.
 check "-channels refuses -onout" [expr {
-    [errcode_of {child start -channels -onout {puts} -- $MT $ECHOW}] eq {MACHTELD CHILD usage}}]
+    [errcode_of {child start -channels -onout {puts} -- $MT tcl $ECHOW}] eq {MACHTELD CHILD usage}}]
 check "-channels refuses -stdin" [expr {
-    [errcode_of {child start -channels -stdin x -- $MT $ECHOW}] eq {MACHTELD CHILD usage}}]
+    [errcode_of {child start -channels -stdin x -- $MT tcl $ECHOW}] eq {MACHTELD CHILD usage}}]
 
 # THE GUARANTEES. Each of these is why this is C and not a Tcl idiom.
 set t0 [clock milliseconds]
-set cc [child start -channels -timeout 800ms -- $MT $spin]
+set cc [child start -channels -timeout 800ms -- $MT tcl $spin]
 set cr [child wait $cc]
 check "channel mode: -timeout still kills" [expr {[dict get $cr status] eq "timeout"}]
 check "channel mode: and kills promptly"   [expr {[clock milliseconds]-$t0 < 4000}]
@@ -351,7 +351,7 @@ child close $cc
 set hog [file join $HERE _hog.tcl]
 set f [open $hog w] ; puts $f {proc hog {} { set L {} ; while {1} { lappend L [string repeat x 100000] } } ; hog} ; close $f
 set t0 [clock milliseconds]
-set cc [child start -channels -mem 64m -timeout 20s -- $MT $hog]
+set cc [child start -channels -mem 64m -timeout 20s -- $MT tcl $hog]
 set cr [child wait $cc]
 check "channel mode: -mem still caps"      [expr {[dict get $cr status] ne "timeout"}]
 check "channel mode: the cap bites fast"   [expr {[clock milliseconds]-$t0 < 10000}]
@@ -371,7 +371,7 @@ puts $f [string map [list @PIDFILE@ $pidfile] {
     set fh [open {@PIDFILE@} w] ; puts $fh $gp ; close $fh
     after 120000}]
 close $f
-set cc [child start -channels -- $MT $TREEW]
+set cc [child start -channels -- $MT tcl $TREEW]
 for {set i 0} {$i < 60 && ![file exists $pidfile]} {incr i} { after 100 }
 set gp ""
 if {[file exists $pidfile]} { set fh [open $pidfile] ; set gp [string trim [read $fh]] ; close $fh }
@@ -387,21 +387,21 @@ file delete -force $pidfile $TREEW
 # scope reaps a channel-mode child at the closing brace, like any other.
 set outer3 [child list]
 scope {
-    child start -channels -- $MT $ECHOW
-    child start -channels -- $MT $ECHOW
+    child start -channels -- $MT tcl $ECHOW
+    child start -channels -- $MT tcl $ECHOW
 }
 check "scope reaps channel-mode children" [expr {[child list] eq $outer3}]
 
 # `--` ends the option scan, so a command may take -channels as its OWN argument.
 set argw [file join $HERE _argw.tcl]
 set f [open $argw w] ; puts $f {puts "ARGV=$argv"} ; close $f
-set ar [run -- $MT $argw -channels]
+set ar [run -- $MT tcl $argw -channels]
 check "-- stops the -channels scan" [string match "*ARGV=-channels*" [dict get $ar out]]
 file delete -force $argw $ECHOW $spin
 
 # 8. wait -any returns whichever child finishes first
-set a [::machteld::child start -- $MT $CHILD sleep 200]
-set b [::machteld::child start -- $MT $CHILD sleep 8000]
+set a [::machteld::child start -- $MT tcl $CHILD sleep 200]
+set b [::machteld::child start -- $MT tcl $CHILD sleep 8000]
 check "wait -any first"     [expr {[::machteld::wait -any $a $b] eq $a}]
 ::machteld::child kill $b
 ::machteld::child close $a
@@ -410,8 +410,8 @@ check "wait -any first"     [expr {[::machteld::wait -any $a $b] eq $a}]
 # 9. scope tree-kills children born inside it, by the closing brace
 set outer [::machteld::child list]
 ::machteld::scope {
-    ::machteld::child start -- $MT $CHILD sleep 8000
-    ::machteld::child start -- $MT $CHILD sleep 8000
+    ::machteld::child start -- $MT tcl $CHILD sleep 8000
+    ::machteld::child start -- $MT tcl $CHILD sleep 8000
 }
 check "scope killed its children" [expr {[::machteld::child list] eq $outer}]
 
@@ -814,7 +814,7 @@ check "cpu reads as an integer ms count" [string is integer -strict [dict get $s
 
 # mtps kills by pid. The only process a test may safely kill is one it started
 # itself -- which is also the sharpest check, since child can confirm the death.
-set victim [child start -- $MT $CHILD sleep 8000]
+set victim [child start -- $MT tcl $CHILD sleep 8000]
 set vpid   [dict get [child info $victim] pid]
 check "ps sees a process we launched" [expr {[dict get [mtps info $vpid] pid] == $vpid}]
 check "mtps kill reports one killed" [expr {[mtps kill $vpid] == 1}]
@@ -824,7 +824,7 @@ child close $victim
 
 # -tree reaches past the root: cmd /c spawns the sleeper as its own child, so the
 # tree is two deep and a flat kill would leave the leaf running.
-set root [child start -- cmd /c "$MT $CHILD sleep 8000"]
+set root [child start -- cmd /c "$MT tcl $CHILD sleep 8000"]
 after 400
 set rpid [dict get [child info $root] pid]
 set n [mtps kill $rpid -tree]
@@ -836,7 +836,7 @@ catch {child kill $root} ; catch {child wait $root} ; child close $root
 # ERROR_ACCESS_DENIED for a corpse exactly as it does for a protected process, so
 # a naive reading tells the user to re-run elevated over something that simply
 # finished. The tasks tool showed that advice until the exit code was consulted.
-set gone [child start -- $MT $CHILD exitcode 0]
+set gone [child start -- $MT tcl $CHILD exitcode 0]
 set gpid [dict get [child info $gone] pid]
 child wait $gone
 check "mtps kill of an exited process => notfound, not denied" [expr {
@@ -1066,7 +1066,7 @@ worker on coded  {}                      { hash sum nosuchalg x }
 worker serve}
 close $f
 
-set wc [child start -channels -- $MT $WSRC]
+set wc [child start -channels -- $MT tcl $WSRC]
 set wi [child info $wc]
 set win [dict get $wi stdin] ; set wout [dict get $wi stdout]
 proc wask {req} { puts $::win [json encode $req] ; flush $::win ; return [json decode [gets $::wout]] }
@@ -1148,7 +1148,7 @@ proc pwait {args} {
 }
 
 # Correctness, and the ordering guarantee.
-set pp [pool create -width 6 -- $MT $PW]
+set pp [pool create -width 6 -- $MT tcl $PW]
 set pitems {}
 for {set i 0} {$i < 40} {incr i} { lappend pitems [dict create op echo text "item-$i"] }
 pool submit $pp $pitems
@@ -1167,7 +1167,7 @@ pool close $pp
 # THE PIPE-BUFFER HAZARD. A Windows pipe holds a few KB; replies far larger than
 # that must not wedge either end. This was the risk named as most likely to sink
 # the design, so it is checked against the real verb and not only in the spike.
-set pp [pool create -width 4 -- $MT $PW]
+set pp [pool create -width 4 -- $MT tcl $PW]
 set pitems {}
 foreach n {1 2 3 4} { lappend pitems [dict create op big bytes [expr {$n * 1048576}]] }
 pool submit $pp $pitems
@@ -1182,7 +1182,7 @@ pool close $pp
 # inherit stderr to the console, but a channel-mode child's stderr is a real
 # pipe, and a pipe nobody reads fills and blocks the worker mid-write -- a hang,
 # not an error. The pool drains it and keeps the tail.
-set pp [pool create -width 3 -- $MT $PW]
+set pp [pool create -width 3 -- $MT tcl $PW]
 set pitems {}
 for {set i 0} {$i < 12} {incr i} { lappend pitems [dict create op noise lines 3000] }
 pool submit $pp $pitems
@@ -1194,7 +1194,7 @@ pool close $pp
 
 # Errors cross the process boundary with their code, and the pool passes them
 # through rather than flattening them to prose.
-set pp [pool create -width 2 -- $MT $PW]
+set pp [pool create -width 2 -- $MT tcl $PW]
 pool submit $pp [list [dict create op boom] [dict create op echo text fine]]
 set pr [pwait $pp -timeout 60s]
 check "a failing item reports failure"  [expr {[dict get [lindex $pr 0] ok] == 0}]
@@ -1205,7 +1205,7 @@ pool close $pp
 
 # A worker dying mid-item: detected, its item requeued, and a poison item capped
 # rather than looping forever.
-set pp [pool create -width 3 -maxtries 2 -- $MT $PW]
+set pp [pool create -width 3 -maxtries 2 -- $MT tcl $PW]
 set pitems {}
 for {set i 0} {$i < 10} {incr i} { lappend pitems [dict create op echo text "e$i"] }
 lappend pitems [dict create op die]
@@ -1223,12 +1223,12 @@ pool close $pp
 # SUPERVISION -- the reason this is over `child start -channels` and not `open
 # |cmd r+`. Pool workers are ordinary children, so scope reaps them.
 set outer4 [child list]
-scope { pool create -width 3 -- $MT $PW }
+scope { pool create -width 3 -- $MT tcl $PW }
 check "scope reaps a pool's workers" [expr {[child list] eq $outer4}]
 
 # No orphans after an explicit close.
 set before4 [llength [child list]]
-set pp [pool create -width 5 -- $MT $PW]
+set pp [pool create -width 5 -- $MT tcl $PW]
 check "workers are tracked children"  [expr {[llength [child list]] == $before4 + 5}]
 pool close $pp
 check "close leaves no workers behind" [expr {[llength [child list]] == $before4}]
@@ -1239,12 +1239,12 @@ check "pool rejects an unknown subcommand" [expr {
 check "pool rejects a bad token"           [expr {
     [errcode_of {pool info nosuch#9}] eq {MACHTELD POOL nohandle}}]
 check "pool create rejects a bad width"    [expr {
-    [errcode_of {pool create -width 0 -- $MT $PW}] eq {MACHTELD POOL badvalue}}]
+    [errcode_of {pool create -width 0 -- $MT tcl $PW}] eq {MACHTELD POOL badvalue}}]
 check "pool create needs a command"        [expr {
     [errcode_of {pool create -width 2 --}] eq {MACHTELD POOL usage}}]
 check "pool submit needs an op per item"   [expr {
     [errcode_of {
-        set q [pool create -width 1 -- $MT $PW]
+        set q [pool create -width 1 -- $MT tcl $PW]
         catch {pool submit $q [list [dict create noop 1]]} m o
         pool close $q
         return -options $o $m}] eq {MACHTELD POOL badvalue}}]
@@ -1264,7 +1264,7 @@ close $f
 # that returned plausible strings would pass every structural check below.
 set pmpaths [lsort [glob -nocomplain [file join $HERE .. src *.c]]]
 set pmreqs [lmap pp $pmpaths {list op digest path $pp}]
-set pmgot [pmap $pmreqs -width 6 -timeout 120s -- $MT $PMW]
+set pmgot [pmap $pmreqs -width 6 -timeout 120s -- $MT tcl $PMW]
 check "pmap returns one result per request" [expr {[llength $pmgot] == [llength $pmpaths]}]
 check "pmap results match in-process"       [expr {
     $pmgot eq [lmap pp $pmpaths {hash file sha256 $pp}]}]
@@ -1273,7 +1273,7 @@ check "pmap returns plain results"          [expr {
 
 # ORDER. Results follow submission, not completion, so which answer is which does
 # not depend on which worker happened to finish first.
-set pmr [pmap [lmap i {0 1 2 3 4 5 6 7} {list op echo text "v$i"}] -width 4 -timeout 60s -- $MT $PMW]
+set pmr [pmap [lmap i {0 1 2 3 4 5 6 7} {list op echo text "v$i"}] -width 4 -timeout 60s -- $MT tcl $PMW]
 check "pmap preserves submission order" [expr {$pmr eq {v0 v1 v2 v3 v4 v5 v6 v7}}]
 
 # THE POINT OF THE VERB: a worker's failure is re-raised carrying THE WORKER'S
@@ -1281,17 +1281,17 @@ check "pmap preserves submission order" [expr {$pmr eq {v0 v1 v2 v3 v4 v5 v6 v7}
 # this were relabelled {MACHTELD PMAP ...} the only useful thing about it would
 # be gone.
 set pmc [errcode_of {pmap [list {op echo text a} {op boom} {op echo text c}] \
-                        -width 2 -timeout 60s -- $MT $PMW}]
+                        -width 2 -timeout 60s -- $MT tcl $PMW}]
 check "a worker failure keeps its own errorcode" [expr {$pmc eq {MACHTELD HASH badvalue}}]
 
 # A handler raising a plain `error` has errorcode NONE, which is not something a
 # caller can trap on; it becomes a pmap failure rather than being passed through
 # as a code that means nothing.
-set pmc [errcode_of {pmap [list {op plain}] -width 1 -timeout 60s -- $MT $PMW}]
+set pmc [errcode_of {pmap [list {op plain}] -width 1 -timeout 60s -- $MT tcl $PMW}]
 check "an uncoded worker error becomes a pmap failure" [expr {$pmc eq {MACHTELD PMAP failed}}]
 
 # -raw opts out of raising, for a caller that wants partial success.
-set pmraw [pmap [list {op echo text ok} {op boom}] -raw -width 2 -timeout 60s -- $MT $PMW]
+set pmraw [pmap [list {op echo text ok} {op boom}] -raw -width 2 -timeout 60s -- $MT tcl $PMW]
 check "-raw returns replies rather than raising" [expr {[llength $pmraw] == 2}]
 check "-raw shows which item failed"             [expr {
     [dict get [lindex $pmraw 0] ok] == 1 && [dict get [lindex $pmraw 1] ok] == 0}]
@@ -1299,22 +1299,22 @@ check "-raw shows which item failed"             [expr {
 # THE POOL IS ALWAYS CLOSED, including on the raising path. Four calls with three
 # chances to leak a pool of live processes is the reason this verb exists at all.
 set pmbefore [llength [child list]]
-catch {pmap [list {op boom}] -width 4 -timeout 60s -- $MT $PMW}
+catch {pmap [list {op boom}] -width 4 -timeout 60s -- $MT tcl $PMW}
 check "pmap closes its pool even when it raises" [expr {[llength [child list]] == $pmbefore}]
-set pmgot [pmap [list {op echo text x}] -width 3 -timeout 60s -- $MT $PMW]
+set pmgot [pmap [list {op echo text x}] -width 3 -timeout 60s -- $MT tcl $PMW]
 check "and on the happy path"                    [expr {[llength [child list]] == $pmbefore}]
 
-check "an empty request list does no work" [expr {[pmap {} -width 2 -- $MT $PMW] eq ""}]
+check "an empty request list does no work" [expr {[pmap {} -width 2 -- $MT tcl $PMW] eq ""}]
 
 # pmap's OWN failures are PMAP, because the domain is the verb you called.
 check "pmap rejects a missing command"  [expr {
     [errcode_of {pmap {{op echo text a}} -width 2 --}] eq {MACHTELD PMAP usage}}]
 check "pmap rejects an unknown option"  [expr {
-    [errcode_of {pmap {{op echo text a}} -nope 1 -- $MT $PMW}] eq {MACHTELD PMAP usage}}]
+    [errcode_of {pmap {{op echo text a}} -nope 1 -- $MT tcl $PMW}] eq {MACHTELD PMAP usage}}]
 check "pmap rejects a dangling option"  [expr {
     [errcode_of {pmap {{op echo text a}} -width}] eq {MACHTELD PMAP usage}}]
 check "a bad width surfaces as a pmap failure" [expr {
-    [lrange [errcode_of {pmap {{op echo text a}} -width 0 -- $MT $PMW}] 0 1] eq {MACHTELD PMAP}}]
+    [lrange [errcode_of {pmap {{op echo text a}} -width 0 -- $MT tcl $PMW}] 0 1] eq {MACHTELD PMAP}}]
 file delete -force $PMW
 
 # --- run -inherit: the child gets OUR stdio, not a pipe -----------------------
@@ -1335,7 +1335,7 @@ set inner [file join $HERE _inherit_fixture.tcl]
 set fh [open $inner w]
 puts $fh {run -inherit -- cmd /c "echo MARKER-THROUGH-INHERITED-STDOUT"}
 close $fh
-set r [run -timeout 30s -- $MT $inner]
+set r [run -timeout 30s -- $MT tcl $inner]
 check "an inherited child's output reaches our stdout" [expr {
     [string match "*MARKER-THROUGH-INHERITED-STDOUT*" [dict get $r out]]}]
 file delete -force $inner
@@ -1357,7 +1357,7 @@ set fh [open $ispin w]
 puts $fh {proc spin {} { while {1} { set x [expr {sqrt(2.0)}] } } ; spin}
 close $fh
 set t0 [clock milliseconds]
-set r [run -inherit -timeout 600ms -- $MT $ispin]
+set r [run -inherit -timeout 600ms -- $MT tcl $ispin]
 set dt [expr {[clock milliseconds] - $t0}]
 check "-inherit is still supervised (timeout)" [expr {[dict get $r status] eq "timeout"}]
 check "-inherit's deadline fires on time"      [expr {$dt > 400 && $dt < 5000}]
@@ -1398,7 +1398,7 @@ if {![catch {front roots} FR]} {
     # bare name means -- the same accident as a PATH fallback in other clothes.
     set sfix [file join $HERE _dispatch_fixture.tcl]
     set fh [open $sfix w] ; puts $fh {puts "SCRIPT-RAN [llength $argv]"} ; close $fh
-    set r [run -timeout 30s -- $MT $sfix a b]
+    set r [run -timeout 30s -- $MT tcl $sfix a b]
     check "a .tcl path still runs as a script" [expr {
         [string match "*SCRIPT-RAN 2*" [dict get $r out]]}]
     file delete -force $sfix
@@ -1773,7 +1773,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker}}]
+    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -1900,7 +1900,7 @@ foreach t {changes tasks sums life lifelab} {
     set TOOL [file join $HERE .. tool $t]
     if {![file isdirectory $TOOL]} { continue }
     check "$t passes its own selftest" [expr {
-        ![catch {run -timeout 60s -- $MT [file join $TOOL main.tcl] --selftest} tr]
+        ![catch {run -timeout 60s -- $MT tcl [file join $TOOL main.tcl] --selftest} tr]
         && [dict get $tr exit] == 0}]
 }
 
@@ -1944,12 +1944,55 @@ foreach bad {tool/sums a/b . SUMS} {
         [errcode_of {front which $bad}] ne ""}]
 }
 
+# --- `tcl`: the first argument is a NAME, and a script is named --------------
+# The dispatcher used to hand anything shaped like a path back to Tcl_Main, so
+# `mt app.tcl` ran app.tcl. That shape test is gone; these hold the replacement
+# to what it claims, from a real child process rather than in-process, because
+# the claim is about what the EXE does with its command line.
+set TSCRIPT [file join $env(TEMP) mt_tcltest_[pid].tcl]
+set fh [open $TSCRIPT w] ; fconfigure $fh -translation lf
+puts $fh {puts "argv0=[file tail $argv0] argv=$argv" ; exit 7}
+close $fh
+
+set tr [run -timeout 30s -- $MT tcl $TSCRIPT a "b c"]
+check "mt tcl runs a script"             [expr {[dict get $tr exit] == 7}]
+check "and the script owns argv0/argv"   [expr {
+    [string match "*argv0=[file tail $TSCRIPT]*" [dict get $tr out]]
+    && [string match "*argv=a {b c}*" [dict get $tr out]]}]
+
+# THE OLD SPELLING IS GONE, and says so usefully. A bare path is now a name that
+# nobody curates -- but being told "not a builtin, a shipped tool or a curated
+# tool" when you plainly typed a filename is unhelpful, so the second line names
+# the new spelling.
+set tr [run -timeout 30s -- $MT $TSCRIPT]
+check "a bare script path is no longer run" [expr {[dict get $tr exit] == 127}]
+check "and the error names `mt tcl`"        [expr {
+    [string match "*mt tcl*" [dict get $tr err]]}]
+file delete -force $TSCRIPT
+
+# `file exists` is allowed in that message and nowhere near the decision: what
+# `mt` runs must not depend on what happens to be in the working directory.
+# `version` is a builtin, and stays one even standing next to a file called
+# `version`.
+set VFILE [file join $env(TEMP) mt_tcltest_[pid]]
+file mkdir $VFILE
+set fh [open [file join $VFILE version] w] ; puts $fh "not a program" ; close $fh
+set tr [run -timeout 30s -dir $VFILE -- $MT version]
+check "a file of the same name does not shadow a verb" [expr {
+    [dict get $tr exit] == 0 && [string match "0.*" [string trim [dict get $tr out]]]}]
+file delete -force $VFILE
+
+check "tcl with no script is a usage error" [expr {
+    [errcode_of {tcl}] eq {MACHTELD TCL usage}}]
+check "tcl on a missing script says so"     [expr {
+    [errcode_of {tcl no_such_script_zzz.tcl}] eq {MACHTELD TCL notfound}}]
+
 # The window tests are separate FILES because they need a real mapped window, but
 # they are driven from here so they cannot become tests nobody runs -- which is
 # exactly what happened to `tasks --selftest`. Discovered by glob, so a new
 # *_ui.tcl is picked up without anyone remembering to add it.
 foreach uitest [lsort [glob -nocomplain -directory $HERE *_ui.tcl]] {
-    set r [run -timeout 120s -- $MT $uitest]
+    set r [run -timeout 120s -- $MT tcl $uitest]
     check "[file tail $uitest] passes" [expr {[dict get $r exit] == 0}]
     if {[dict get $r exit] != 0} {
         puts "     [string trim [dict get $r out]]"
@@ -1972,7 +2015,7 @@ if {[file exists $TASKS]} {
         "--interval below the floor" {--interval 5}
         "an unknown argument"        {--nonsense}
     } {
-        set r [run -timeout 30s -- $MT $TASKS {*}$argl]
+        set r [run -timeout 30s -- $MT tcl $TASKS {*}$argl]
         check "tasks rejects $label" [expr {[dict get $r exit] == 2}]
         check "tasks explains $label" [expr {
             [string match "*tasks:*" [dict get $r err]] ||
@@ -1980,9 +2023,9 @@ if {[file exists $TASKS]} {
     }
     # A valid value must survive the parser AND still reach the mode: validation
     # runs before --selftest is honoured, so this exercises both.
-    set r [run -timeout 60s -- $MT $TASKS --interval 500 --selftest]
+    set r [run -timeout 60s -- $MT tcl $TASKS --interval 500 --selftest]
     check "tasks accepts a valid --interval" [expr {[dict get $r exit] == 0}]
-    set r [run -timeout 30s -- $MT $TASKS --interval bogus --selftest]
+    set r [run -timeout 30s -- $MT tcl $TASKS --interval bogus --selftest]
     check "a bad --interval is caught even in selftest mode" [expr {[dict get $r exit] == 2}]
 }
 

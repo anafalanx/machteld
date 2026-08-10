@@ -8,7 +8,7 @@
 # takes different paths through the geometry manager, so testing a hidden window
 # proves something about a program nobody runs.
 #
-#   machteld.exe test/tasks_ui.tcl
+#   machteld.exe tcl test/tasks_ui.tcl
 
 set HERE [file dirname [file normalize [info script]]]
 set MAIN [file join $HERE .. tool tasks main.tcl]
@@ -109,7 +109,7 @@ set SLEEPER [file join $::env(TEMP) tm_sleeper.tcl]
 set fh [open $SLEEPER w] ; puts $fh {after 30000} ; close $fh
 
 # A departed process must leave the widget. Start one, see it, kill it, tick.
-set victim [child start -- [info nameofexecutable] $SLEEPER]
+set victim [child start -- [info nameofexecutable] tcl $SLEEPER]
 set vpid   [dict get [child info $victim] pid]
 ::tm::tick ; update
 check "a newly started process appears" [expr {[lsearch -exact [.m.tv children {}] $vpid] >= 0}]
@@ -120,7 +120,7 @@ check "a departed process disappears"   [expr {[lsearch -exact [.m.tv children {
 
 # End Task through the button's own code path, with the confirm dialog stubbed --
 # the dialog is Tk's, not ours, and blocking a test on a modal is not a test.
-set victim2 [child start -- [info nameofexecutable] $SLEEPER]
+set victim2 [child start -- [info nameofexecutable] tcl $SLEEPER]
 set vpid2   [dict get [child info $victim2] pid]
 ::tm::tick ; update
 .m.tv selection set $vpid2
