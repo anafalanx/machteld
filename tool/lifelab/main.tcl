@@ -324,7 +324,7 @@ if {![file exists $wscript]} {
     catch {puts stderr "lifelab: cannot find the life window at $wscript"}
     exit 2
 }
-set ::lab::cmd [list [info nameofexecutable] $wscript]
+set ::lab::cmd [list [info nameofexecutable] tcl $wscript]
 set ::lab::cell [dict get $opt cellsize]
 
 set ::lab::out [dict get $opt out]

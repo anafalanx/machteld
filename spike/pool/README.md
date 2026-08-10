@@ -14,7 +14,7 @@ channels rather than spawned-per-item processes. Before writing any C for it, is
 **Answer: yes — after two bugs, neither of which was where I was looking.**
 
 ```
-machteld.exe spike/pool/spike.tcl
+machteld.exe tcl spike/pool/spike.tcl
 ```
 
 - `worker.tcl` — the far side: read a JSON line, dispatch, write a JSON line.

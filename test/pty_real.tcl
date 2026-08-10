@@ -1,6 +1,6 @@
 # pty_real.tcl -- interactive pty flow on a REAL terminal (send / capture /
 # expect), logged to a file so Claude can read the result. Run from
-# C:\dev\_machteld:   build\machteld.exe test\pty_real.tcl
+# C:\dev\_machteld:   build\machteld.exe tcl test\pty_real.tcl
 # Then tell Claude; it reads C:\dev\_machteld\pty_real.txt. The headless CI sandbox
 # cannot route a child through a pseudo-console, so this interactive path is
 # verified here. Host reaping is covered separately by pty_reap.tcl.

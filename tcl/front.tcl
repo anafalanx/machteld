@@ -552,32 +552,39 @@ proc ::machteld::FrontShippedDone {jid cmd op} {
     catch {journal done $jid [expr {$code == 0 ? "ok" : "error"}] $code}
 }
 
-# RUN A SHIPPED TOOL IN THIS PROCESS. It is sourced here, in the prelude, and
-# then this takes over the two jobs `Tcl_Main` would have done for a script named
-# on the command line: run the event loop, and exit.
+# BECOME A SCRIPT. The process stops being a front door and starts being that
+# program: its `argv0`, its `argv`, its event loop, its exit code. Used by the
+# `tcl` verb and by every shipped tool, which is the same act named two ways.
 #
-# HANDING IT BACK TO Tcl_Main WOULD HAVE BEEN NEATER, AND DOES NOT WORK.
-# `Tcl_Main` reads its startup script into a local before it calls AppInit --
-# which is what sources this prelude -- so by the time the front door knows that
-# `sums` means a script, the decision about what to evaluate has been taken.
-# Setting `argv0` afterwards changes the variable and nothing else: the process
-# still tries to read a file called "sums", and says so.
+# IT TAKES OVER TWO JOBS Tcl_Main WOULD HAVE DONE for a script named on the
+# command line, and it has to, because Tcl_Main is no longer going to do them:
 #
-# THE EVENT LOOP IS THE PART THAT MUST BE REPLACED, not skipped. Four of the five
-# tools are Tk and not one calls `vwait`: under `tclsh`, `package require Tk`
-# hands Tk_MainLoop to Tcl_SetMainLoop and Tcl_Main runs it after the script
-# returns. Source a windowed tool with nothing after it and it builds its
-# window, returns, and the process ends before one event is dispatched.
-# `tkwait window .` is that loop for these programs -- Tk_MainLoop runs while a
-# main window exists, and every one of them has exactly the one.
-proc ::machteld::FrontShippedRun {r cargs} {
+# 1. HANDING THE SCRIPT BACK TO Tcl_Main WOULD BE NEATER, AND DOES NOT WORK.
+#    Tcl_Main reads its startup script into a local before it calls AppInit --
+#    which is what sources this prelude -- so by the time the front door knows
+#    what to run, the decision about what to evaluate has been taken. Setting
+#    `argv0` afterwards changes the variable and nothing else: the process still
+#    tries to read a file called "sums", and says so.
+#
+# 2. THE EVENT LOOP MUST BE REPLACED, NOT SKIPPED. Four of the five shipped
+#    tools are Tk and not one calls `vwait`: under `tclsh`, `package require Tk`
+#    hands Tk_MainLoop to Tcl_SetMainLoop and Tcl_Main runs it AFTER the script
+#    returns. Source a windowed program with nothing after it and it builds its
+#    window, returns, and the process ends before one event is dispatched.
+#    `tkwait window .` is that loop here -- Tk_MainLoop runs while a main window
+#    exists, and these programs have exactly the one.
+#
+# The error path prints `-errorinfo`, because that is what Tcl_Main prints and a
+# script that fails should not become harder to debug for being named rather
+# than passed as a path.
+proc ::machteld::FrontBecome {script cargs {label ""}} {
     global argv argv0
-    set script [dict get $r script]
-    FrontShippedRecord $r $cargs
     set argv0 $script
     set argv $cargs
     if {[catch {uplevel #0 [list source $script]} e opts]} {
-        catch {puts stderr "mt: [dict get $r name]: $e"}
+        set who [expr {$label eq "" ? "mt" : "mt: $label"}]
+        catch {puts stderr "$who: $e"}
+        catch {puts stderr [dict get $opts -errorinfo]}
         exit 1
     }
     if {[info exists ::tk_version] && [llength [info commands ::winfo]]
@@ -587,14 +594,52 @@ proc ::machteld::FrontShippedRun {r cargs} {
     exit 0
 }
 
+proc ::machteld::FrontShippedRun {r cargs} {
+    FrontShippedRecord $r $cargs
+    FrontBecome [dict get $r script] $cargs [dict get $r name]
+}
+
+# tcl: run a Tcl script as this process's program.
+#
+#   tcl <script.tcl> ?arg ...?
+#
+# THIS EXE IS A FRONT DOOR, NOT AN INTERPRETER YOU POINT AT A FILE. Until
+# 2026-08-10 `mt app.tcl` ran app.tcl, because the dispatcher let through
+# anything that LOOKED like a path -- a separator, or a `.tcl` extension -- and
+# handed it to Tcl_Main. That worked, and it was a shape test: a heuristic
+# deciding what kind of thing you meant. `argv0` is a NAME now, always, with no
+# test of any kind, and this verb is how a script is named instead.
+#
+# IT DOES NOT RETURN, and that is the point rather than a limitation: the process
+# BECOMES the script. To *include* a file in the program you are already
+# running, that is Tcl's own `source`, and always was.
+proc ::machteld::tcl {args} {
+    if {![llength $args]} { Fail TCL usage "usage: tcl <script.tcl> ?arg ...?" }
+    set script [lindex $args 0]
+    if {![file exists $script]} { Fail TCL notfound "tcl: no such script \"$script\"" }
+    FrontBecome $script [lrange $args 1 end]
+}
+
 # THE ARGV DISPATCHER. `Tcl_Main` calls AppInit -- which sources this prelude --
 # before it looks at argv, so the front door can take a name over from here with
 # no C at all.
 #
-# The rule is deliberately not "does this file exist": that would let a stray file
-# in the working directory change what `mt rg` means, which is the same class of
-# accident as a PATH fallback. A first argument is a SCRIPT if it looks like one
-# (a path separator, or a .tcl extension) and a NAME otherwise.
+# THE RULE IS ONE LINE LONG: the first argument is a NAME. Not a name unless it
+# looks like a path; not a name unless a file of that name exists; a name.
+#
+# It used to be two lines. Until 2026-08-10 anything carrying a path separator or
+# a `.tcl` extension was handed back to Tcl_Main as a script, so `mt app.tcl`
+# ran app.tcl the way `tclsh app.tcl` does. That was never "does this file
+# exist" -- which would have let a stray file change what `mt rg` means, the
+# same accident as a PATH fallback -- but it was still a SHAPE TEST, a heuristic
+# guessing which of two kinds of thing you meant from how the word was spelled.
+# And it left one case genuinely ambiguous: a file named `changes`, no
+# extension, beside a shipped tool named `changes`.
+#
+# A script is named now: `mt tcl app.tcl`. That costs a word at every call site
+# -- 71 of them in this repo -- and buys a dispatcher with no heuristic in it at
+# all, which is [the creed](creed.md)'s "determinism over cleverness" applied to
+# the one place the front door was still guessing.
 proc ::machteld::FrontDispatch {} {
     global argv argv0
     if {![info exists argv0]} return
@@ -611,18 +656,23 @@ proc ::machteld::FrontDispatch {} {
     if {[string equal -nocase [file normalize $name]                               [file normalize [info nameofexecutable]]]} return
     if {[string index $name 0] eq "-"} return         ;# Tcl_Main's options; `-` is stdin
 
-    # A SCRIPT IF IT LOOKS LIKE ONE, deliberately not "if the file exists": that
-    # would let a stray file in the working directory change what `mt rg` means,
-    # which is the same accident as a PATH fallback wearing different clothes.
-    if {[string match "*/*" $name] || [string match {*\*} $name]
-        || [string tolower [file extension $name]] eq ".tcl"} return
-
     # No workspace, no front door: leave argv alone rather than failing an
     # invocation that never wanted one.
     if {[catch {FrontRoots}]} return
 
     if {[catch {FrontResolve $name} r]} {
         catch {puts stderr "mt: $r"}
+        # THE OLD SPELLING, ANSWERED RATHER THAN MERELY REFUSED. `mt app.tcl`
+        # ran a script until 2026-08-10 and now names a tool nobody curates,
+        # which is an unhelpful thing to be told when you plainly typed a
+        # filename. `file exists` appears HERE and only here -- in the message,
+        # never in the decision -- so what `mt` runs still cannot depend on what
+        # happens to be in the working directory.
+        if {[string match "*/*" $name] || [string match {*\\*} $name]
+            || [string tolower [file extension $name]] eq ".tcl"
+            || [file exists $name]} {
+            catch {puts stderr "mt: that looks like a script -- name it: mt tcl $name ..."}
+        }
         exit 127                                      ;# the shell's "no such command"
     }
 

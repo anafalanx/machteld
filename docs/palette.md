@@ -468,6 +468,48 @@ the line you typed, not what it resolved to, how long it took, or whether it was
 `front run` records around every spawn, so the record accrues without anyone remembering to ask.
 The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
 
+## Built — naming a script
+
+```tcl
+tcl app.tcl arg1 arg2              ;# this process becomes app.tcl
+```
+
+**The first argument to `mt` is a name. Always, with no test of any kind.** Until 2026-08-10 the
+dispatcher handed anything that *looked like* a path — a separator, or a `.tcl` extension — back to
+`Tcl_Main` as a script, so `mt app.tcl` ran app.tcl the way `tclsh app.tcl` does. That was never
+"does this file exist", which would have let a stray file change what `mt rg` means. It was still a
+**shape test**: a heuristic guessing which of two kinds of thing you meant from how you spelled the
+word. And it left one case honestly ambiguous — a file named `changes`, no extension, beside a
+shipped tool named `changes`.
+
+So a script is named now, and the dispatcher has no heuristic left in it:
+
+```bash
+mt tcl test/run_test.tcl
+```
+
+That cost a word at 71 call sites in this repo, once. What it bought is a rule one line long, which
+is [the creed](creed.md)'s *determinism over cleverness* applied to the last place the front door
+was still guessing.
+
+**`tcl` does not return, and that is the point.** The process *becomes* the script: its `argv0`,
+its `argv`, its event loop, its exit code. To **include** a file in the program you are already
+running, that is Tcl's own `source`, and always was. The two are different acts and now have
+different names.
+
+**It runs the event loop, because `Tcl_Main` no longer will.** Under `tclsh`, `package require Tk`
+hands `Tk_MainLoop` to `Tcl_SetMainLoop` and `Tcl_Main` runs it *after* the script returns — so a
+windowed program that never calls `vwait` still works. Sourced from the prelude with nothing after
+it, that same program builds its window, returns, and the process dies before one event is
+dispatched. `tcl` waits on the main window instead, which is the same loop for a program that has
+one.
+
+**Typing the old spelling tells you the new one.** `mt app.tcl` now names a tool nobody curates, so
+it exits 127 — but if what you typed looks like a filename, or is one, the second line of the error
+says `mt tcl app.tcl`. That check is the one place `file exists` appears; it is in the *message*,
+never in the decision, so what `mt` runs still cannot depend on what happens to be in the working
+directory.
+
 **`front journal` is how a reader gets in.** `journal` itself takes a path, and the recorder opens
 it lazily, so a script that only wants to *read* would have had to spell the filename — a second
 authority on where the record lives. This opens the same file and returns its path. Unlike the

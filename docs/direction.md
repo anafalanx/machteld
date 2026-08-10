@@ -535,3 +535,38 @@ state is per-interpreter, so a cockpit over the current session **cannot** be a 
 would enumerate its own children, which is nothing. It would have shipped as Tcl for lack of an
 alternative rather than as a choice, and then it was removed anyway. The identity question stays
 open for the first tool that could genuinely go either way.
+
+## The first argument is a name — no shape test (2026-08-10)
+
+**`mt app.tcl` no longer runs a script; `mt tcl app.tcl` does.** This reverses part of the dispatch
+rule step 2 shipped and this document endorsed, so it is recorded here for the same reason the
+entry above it is.
+
+**What step 2 built.** `Tcl_Main` treats a non-dash first argument as a script path, which leaves
+no unclaimed spelling for a tool name. Step 2 carved one out by asking what the argument *looks
+like*: a path separator, or a `.tcl` extension, means a script; anything else is a name. It was
+carefully **not** "does this file exist" — that would let a stray file in the working directory
+change what `mt rg` means, which is a `PATH` fallback in different clothes — and it broke no
+invocation anyone actually writes.
+
+**Why it went anyway.** It was still a heuristic: a guess about which of two kinds of thing you
+meant, made from spelling. Two things followed from that, and the second is the one that decided it:
+
+- One case stayed genuinely ambiguous — a file named `changes`, no extension, standing beside a
+  shipped tool named `changes`. Step 3 made that concrete rather than theoretical by putting five
+  tools in the exe.
+- **Rule 3 of the creed is *determinism over cleverness*,** and the dispatcher was the last place in
+  the front door still guessing. A rule you can state in a sentence — *the first argument is a
+  name* — is worth more than a rule with an exception list, in the one component every single
+  invocation passes through.
+
+**What it cost, stated plainly rather than minimised.** 71 call sites, changed once. And machteld
+stops being drop-in wherever a `tclsh` is expected, because pointing an interpreter at a file is
+the convention it just gave up. That was weighed: almost nothing here relied on it, and the front
+door is no longer trying to be an interpreter.
+
+**What keeps it honest.** `mt app.tcl` exits 127 and its second line names the new spelling, so the
+old habit teaches rather than merely fails. `file exists` appears in that message and nowhere near
+the decision — what `mt` runs still cannot depend on what happens to be in the working directory,
+which was the property the original refusal existed to protect and which is *stronger* now, not
+weaker.

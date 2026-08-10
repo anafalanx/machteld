@@ -51,15 +51,21 @@ opposite: **be a script host**, because projects need helper scripts (`tools/tas
 like) and a workspace director is where they belong.
 
 The dispatch rule, in the prelude rather than the C, because `Tcl_Main` calls `AppInit` before it
-looks at `argv`:
+looks at `argv`. As planned:
 
 - `machteld` with no arguments → the shell, as `z` does today.
 - first argument is an **existing file** → run it as a Tcl script (helper scripts, the suite).
 - first argument starts with `-` → left alone; Tcl_Main's own options, and `-` is stdin.
 - first argument is a **bare word** → a front-door name, resolved and spawned.
 
-Nothing else changes behaviour, so every existing invocation keeps working while the front door
-grows underneath it.
+> **What was actually built is shorter, and the middle line is why.** "Is an existing file" was
+> refused in step 2 — it would let a stray file in the working directory change what `mt rg` means,
+> which is a `PATH` fallback wearing different clothes — and replaced by a **shape** test: a
+> separator or a `.tcl` extension means a script. Step 3 removed that too. **The first argument is
+> a name. There is no test.** A script is named with the `tcl` verb: `mt tcl app.tcl`.
+
+Every existing invocation kept working until step 3, which broke exactly one of them — `mt app.tcl`
+— deliberately, once, at 71 call sites.
 
 ## Resolution, kept identical to z's
 
@@ -124,12 +130,13 @@ so there is now **no name that resolves two ways**. Its error domain moved with 
 
 **Step 2 is done too.** `front run ?-inherit?`, builtins in-process, and the argv dispatcher:
 `mt rg --version` prints `ripgrep 15.1.0`, `mt version` answers `0.3.0` without spawning anything,
-an unknown name exits 127, and a `.tcl` path still runs as a script.
+an unknown name exits 127, and a `.tcl` path still ran as a script -- that last part until step 3, see below.
 
 The one thing only running it could have shown: by the time AppInit executes, `Tcl_Main` has
 **already taken the first argument as the script name** — it is in `argv0`, with the rest in
 `argv`. Reading `argv[0]` made the front door resolve the first *argument* of every command, so
 `mt script.tcl a b` went looking for a tool called "a".
+(That spelling is `mt tcl script.tcl a b` now; the point about `argv0` is unchanged.)
 
 **The [journal](journal.md) is built and recording.** `front run` writes a row before the spawn and
 closes it after, in `$MT_HOME/mt.db`; `front journal` opens it for a reader, `journal rows` queries
@@ -180,6 +187,36 @@ and is not in that answer is a name nobody can discover.
 being quietly contradicted: shipping tools inside the exe was refused on 2026-08-09, on the grounds
 that `argv[1]` is fully allocated by `Tcl_Main` and the benefits had no receiver. The dispatcher
 built in step 2 answered the first, and the front door itself is the receiver.
+
+### And then the dispatcher lost its last heuristic
+
+Step 2's rule kept a shape test: a first argument carrying a path separator or a `.tcl` extension
+was handed back to `Tcl_Main` as a script, so `mt app.tcl` worked the way `tclsh app.tcl` does.
+That was deliberately *not* "does this file exist" — but it was still a guess about which of two
+kinds of thing you meant, made from how the word was spelled, and it left one case honestly
+ambiguous: a file named `changes`, no extension, beside a shipped tool named `changes`.
+
+**The first argument is now a name, with no test of any kind**, and a script is named by a verb:
+
+```bash
+mt tcl test/run_test.tcl
+```
+
+The cost was one word at **71 call sites**, paid once. What it bought is a dispatcher rule a
+sentence long, which is the creed's *determinism over cleverness* reaching the last place the front
+door was still guessing. Two consequences worth stating:
+
+- **`mt app.tcl` no longer runs a script**, so machteld is no longer drop-in wherever a `tclsh` is
+  expected. That was weighed and accepted: almost nothing here relied on it, and the property being
+  bought is worth more than the one being given up.
+- **Typing the old spelling teaches the new one.** `mt app.tcl` exits 127, and if what you typed
+  looks like a filename — or is one — a second line says `mt tcl app.tcl`. That is the only place
+  `file exists` appears, and it is in the message, never in the decision.
+
+`tcl` is a palette verb like any other: in the manifest, with domain `TCL` and its own codes. It
+does not return — the process *becomes* the script, taking its `argv0`, its `argv`, its event loop
+and its exit code. Including a file in the program you are already running is Tcl's own `source`,
+and always was.
 
 **Next:** step 4 — strangle z command by command.
 
