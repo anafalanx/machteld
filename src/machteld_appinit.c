@@ -23,6 +23,9 @@ extern int Machteldjson_Init(Tcl_Interp *interp); /* src/json.c */
 #ifdef MACHTELD_PS
 extern int Machteldps_Init(Tcl_Interp *interp); /* src/ps.c */
 #endif
+#ifdef MACHTELD_JOURNAL
+extern int Machteldjournal_Init(Tcl_Interp *interp); /* src/journal.c */
+#endif
 #ifdef MACHTELD_HASH
 extern int Machteldhash_Init(Tcl_Interp *interp); /* src/hash.c */
 #endif
@@ -66,6 +69,14 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     Tcl_StaticLibrary(interp, "machteldps", Machteldps_Init, NULL);
 #endif
 
+#ifdef MACHTELD_JOURNAL
+    /* the front door's own record of what it started: its own connection and its
+     * own file, so `store` and the journal cannot evict one another. */
+    if (Machteldjournal_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldjournal", Machteldjournal_Init, NULL);
+#endif
 #ifdef MACHTELD_HASH
     /* digests, HMAC and cryptographic random over CNG -- the one stdlib category
      * machteld had entirely empty. */

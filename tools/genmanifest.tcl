@@ -28,22 +28,20 @@ proc slurp {path} {
     return $t
 }
 
-# Which C function implements which palette verb. This is the one mapping the
-# scanner cannot derive (a function name is not a command name); everything else
-# below is read out of the source. Tcl_CreateObjCommand tells us the verb names,
-# and this says which body to attribute facts to.
-set IMPL {
-    RunCmd    run
-    ChildCmd  child
-    WaitCmd   wait
-    DetachCmd detach
-    PtyCmd    pty
-    WatchCmd  watch
-    StoreCmd  store
-    JsonCmd   json
-    PsCmd     mtps
-    HashCmd   hash
-}
+# WHICH C FUNCTION IMPLEMENTS WHICH VERB IS DERIVED TOO -- see the scan below
+# `functions`. It was a hand-kept table here until 2026-08-10, sitting beside a
+# hand-kept list of source files, under a comment claiming it was the one
+# mapping the scanner could not derive. It was derivable all along:
+# Tcl_CreateObjCommand names the command and the function on the SAME LINE, and
+# the block that followed already read the verb names out of exactly that call
+# -- and then threw them away, unused.
+#
+# `journal` is what the two lists cost. journal.c compiled, linked and ran, and
+# neither list named it, so the manifest never saw the verb: `manifest` fell
+# through to `kind tcl` with no domain, no codes, and none of its six options.
+# That is the same under-reporting the unattributed-option check at the bottom
+# of this file exists to prevent, reached by a road no check watched -- and it
+# surfaced only because a doc happened to mention an option, three steps away.
 
 # NOTE ON TCL REGEXPS HERE: Tcl's ARE takes its greediness for the WHOLE
 # expression from the FIRST quantifier, so a leading `\s*` makes a later `.*?`
@@ -75,36 +73,66 @@ proc functions {text} {
     return $out
 }
 
-set proc_c  [slurp [file join $SRC proc.c]]
-set store_c [slurp [file join $SRC store.c]]
-set json_c  [slurp [file join $SRC json.c]]
-set ps_c    [slurp [file join $SRC ps.c]]
-set hash_c  [slurp [file join $SRC hash.c]]
-set fns     [functions $proc_c]
-# store.c and json.c implement exactly one verb each, so the whole file is that
-# verb's body -- otherwise `notopen`, raised in the needDb helper rather than in
-# StoreCmd, would be invisible to a per-function scan.
-#
-# Their individual functions are ALSO indexed, because a whole-file body has no
-# structure to follow: `hash`'s -binary lives in the helper `want_binary`, which
-# is defined ABOVE the dispatcher and therefore sits outside every `idx ==`
-# region. Indexed as a function, it can be followed from the branch that calls
-# it; left as anonymous file text, it is invisible to attribution and the option
-# is lost. Merged UNDER the whole-file entries so those still win for the verb.
-set fns [dict merge [functions $store_c] [functions $json_c] \
-                    [functions $ps_c] [functions $hash_c] $fns]
-dict set fns StoreCmd $store_c
-dict set fns JsonCmd  $json_c
-dict set fns PsCmd    $ps_c
-dict set fns HashCmd  $hash_c
-
-# ---- verbs the C actually registers ---------------------------------------
-set verbs {}
-foreach t [list $proc_c $store_c] {
-    foreach {_ v} [regexp -all -inline {Tcl_CreateObjCommand\(interp,\s*"::machteld::(\w+)"} $t] {
-        lappend verbs $v
+# ---- the sources, and the verbs they register ------------------------------
+# EVERY .c IN THE DIRECTORY, not a list. A file that registers no
+# ::machteld:: command contributes no verb and costs nothing to read, so
+# `glob` cannot under-report the way a list can.
+set FILETEXT {}   ;# path -> its text
+set FILEFNS  {}   ;# path -> {function body ...}, indexed per file
+set VERBSOF  {}   ;# path -> the verbs that file registers
+set REG      {}   ;# verb -> the file that registers it
+set IMPL     {}   ;# C function -> verb
+foreach path [lsort [glob -directory $SRC *.c]] {
+    set text [slurp $path]
+    dict set FILETEXT $path $text
+    dict set FILEFNS  $path [functions $text]
+    foreach {_ v fn} [regexp -all -inline \
+            {Tcl_CreateObjCommand\(interp,\s*"::machteld::(\w+)",\s*(\w+)} $text] {
+        dict set REG $v $path
+        dict lappend VERBSOF $path $v
+        dict set IMPL $fn $v
     }
 }
+if {![dict size $IMPL]} { error "genmanifest: no ::machteld:: commands found under $SRC" }
+
+proc srcfile {name} {
+    global FILETEXT
+    foreach p [dict keys $FILETEXT] { if {[file tail $p] eq $name} { return $p } }
+    error "genmanifest: there is no $name under the source directory"
+}
+
+# FUNCTIONS ARE INDEXED PER FILE, not merged into one flat namespace: store.c
+# and journal.c both define a static `fail_code`, and one index would let either
+# file's helper answer for the other file's verb. Attribution follows the
+# compiler's own rule -- a static function belongs to its translation unit.
+#
+# A file that registers EXACTLY ONE verb is that verb's body in full, because
+# a whole-file body is the only way to see what the dispatcher does not hold:
+# `notopen` is raised in store.c's needDb and journal.c's need_db, neither of
+# which is the dispatcher. Its individual functions are indexed as well, so
+# attribution can still follow a helper called from one branch -- `hash`'s
+# -binary lives in `want_binary`, defined above the dispatcher and therefore
+# outside every `idx ==` region.
+proc verb_body {verb} {
+    global REG FILETEXT FILEFNS VERBSOF IMPL
+    set path [dict get $REG $verb]
+    if {[llength [dict get $VERBSOF $path]] == 1} { return [dict get $FILETEXT $path] }
+    set fns [dict get $FILEFNS $path]
+    foreach {fn v} $IMPL {
+        if {$v eq $verb && [dict exists $fns $fn]} { return [dict get $fns $fn] }
+    }
+    error "genmanifest: $verb is registered in [file tail $path] but its\
+           implementation was not found -- see `functions`"
+}
+proc verb_fns {verb} {
+    global REG FILEFNS
+    return [dict get $FILEFNS [dict get $REG $verb]]
+}
+
+# proc.c by name, and only here: the shared option parser and the codes that
+# travel in a variable are facts about THAT file, not about the palette.
+set proc_c [dict get $FILETEXT [srcfile proc.c]]
+set fns    [dict get $FILEFNS  [srcfile proc.c]]
 
 # ---- the shared option parser, and which verbs reach it --------------------
 # parse_opts serves four verbs; each passes its own domain, so the call sites
@@ -168,16 +196,20 @@ proc opts_in {region shared {fns {}}} {
 
 set manifest {}
 foreach {fn verb} $IMPL {
-    if {![dict exists $fns $fn]} { continue }
-    set body [dict get $fns $fn]
+    set body [verb_body $verb]
+    set vfns [verb_fns $verb]
 
     # domain: whatever this body passes to mt_error / fail_code / fail
     set domain ""
     if {[regexp {mt_error\(interp,\s*"([A-Z]+)"} $body -> d]} { set domain $d }
-    # The raw form, for a file with no error helper of its own.
+    # The raw form, for a file with no error helper of its own -- and the form
+    # every single-domain file ends at, since its raiser spells the domain once.
+    # There used to be a third rule here: "a body calling fail_code is STORE".
+    # It was dead the day it was written (store.c spells STORE in the line
+    # above) and it was a trap for the next file, which was journal.c -- whose
+    # raiser is also called fail_code and whose domain is not STORE.
     if {$domain eq "" &&
         [regexp {Tcl_SetErrorCode\(interp,\s*"MACHTELD",\s*"([A-Z]+)"} $body -> d]} { set domain $d }
-    if {$domain eq "" && [regexp {fail(_code)?\(interp,} $body]} { set domain STORE }
 
     # subcommands: the Tcl_GetIndexFromObj table. A negated class, not `.*?` --
     # see the greediness note above.
@@ -223,7 +255,7 @@ foreach {fn verb} $IMPL {
     # accepts anywhere, helpers included. It is always published, even for verbs
     # with subcommands, because it is the only claim the derivation can actually
     # stand behind.
-    dict set entry options [opts_in $body $shared_opts $fns]
+    dict set entry options [opts_in $body $shared_opts $vfns]
     if {[llength $subs] != 0} {
         # Split the body at each branch marker (`idx == NAME` or `case NAME:`)
         # and attribute what follows to that subcommand.
@@ -302,7 +334,9 @@ foreach {fn verb} $IMPL {
 # branch had no marker. Both produced a manifest that looked plausible and was
 # wrong. A generator that cannot see something must SAY so, not omit it.
 foreach {fn verb} $IMPL {
-    if {![dict exists $fns $fn] || ![dict exists $manifest $verb]} { continue }
+    if {![dict exists $manifest $verb]} {
+        error "genmanifest: $verb is registered in C but no entry was derived for it"
+    }
     set entry [dict get $manifest $verb]
     set declared {}
     if {[dict exists $entry options]} { set declared [dict get $entry options] }
@@ -311,11 +345,14 @@ foreach {fn verb} $IMPL {
             if {[dict exists $sm options]} { set declared [concat $declared [dict get $sm options]] }
         }
     }
-    set found [opts_in [dict get $fns $fn] $shared_opts $fns]
+    set found [opts_in [verb_body $verb] $shared_opts [verb_fns $verb]]
     foreach o $found {
         if {$o ni $declared} {
             error "genmanifest: $verb accepts $o but the manifest does not declare it"
         }
+    }
+    if {[dict get $entry domain] eq ""} {
+        error "genmanifest: $verb declares no domain -- every palette verb raises in one"
     }
 }
 

@@ -103,11 +103,14 @@ run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src json.c] -o [Rp build json.o] -
 puts "cc   ps.c  (machine-wide process view, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src ps.c] -o [Rp build ps.o] -I$inc
 
+puts "cc   journal.c  (the front door's record, over SQLite, c23)"
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src journal.c] -o [Rp build journal.o] -I$inc -I$sqliteSrc
+
 puts "cc   hash.c  (digests + HMAC + CSPRNG over CNG, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src hash.c] -o [Rp build hash.o] -I$inc
 
 puts "cc   machteld_appinit.c  (shared native-lib + prelude registration, c23)"
-run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON -DMACHTELD_PS -DMACHTELD_HASH \
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_JOURNAL \
     -c [Rp src machteld_appinit.c] -o [Rp build machteld_appinit.o] -I$inc
 
 puts "cc   machteld_main.c  (console host, c23)"
@@ -118,7 +121,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare.exe  (console subsystem)"
 set bare [Rp build machteld-bare.exe]
 run $gcc -municode -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] \
+    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $bare
@@ -134,7 +137,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
 set baregui [Rp build machteld-bare-gui.exe]
 run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] \
+    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $baregui

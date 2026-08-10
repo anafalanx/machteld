@@ -80,7 +80,14 @@ proc ::machteld::manifest {} {
             }
             continue
         }
-        set entry [dict create kind tcl]
+        # KIND IS READ, NOT ASSUMED. A command with no entry used to be called
+        # `kind tcl` outright, which made a C verb the build-time generator
+        # never saw indistinguishable from a prelude verb -- and that is exactly
+        # what happened to `journal`: a C command with six options, described as
+        # a Tcl verb with none. If it is not a proc it is C, and a C entry
+        # carrying no domain is the generator having missed a file, which the
+        # suite fails on rather than publishing.
+        set entry [dict create kind [expr {[llength [info procs $cmd]] ? "tcl" : "c"}]]
         if {[llength [info procs $cmd]]} {
             dict set entry args [info args $cmd]
             set entry [dict merge $entry [MtclFacts $cmd]]

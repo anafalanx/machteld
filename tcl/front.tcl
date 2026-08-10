@@ -49,6 +49,27 @@ namespace eval ::machteld {
     # A directory is a PROJECT if it carries one of these. Same transition
     # order: machteld's own file wins, the Go front door's is still honoured.
     variable FRONT_PROJFILES {mt.json z.json}
+
+    variable FRONT_JOURNAL ""   ;# "" untried, "on" open, "off" unavailable
+    variable FRONT_SESSION ""   ;# this front door invocation
+}
+
+# THE JOURNAL IS A SERVICE, NOT A PRECONDITION. It is opened lazily, once, and
+# every failure to do so is final and silent: no workspace, an unwritable
+# directory, a database from a newer build -- none of those are reasons a tool
+# should refuse to run. Same bargain `log` makes, for the same reason. A command
+# must never fail because bookkeeping did.
+proc ::machteld::FrontJournal {} {
+    variable FRONT_JOURNAL ; variable FRONT_HOME ; variable FRONT_SESSION
+    if {$FRONT_JOURNAL ne ""} { return [expr {$FRONT_JOURNAL eq "on"}] }
+    set FRONT_JOURNAL off
+    if {[catch {FrontRoots}]} { return 0 }
+    if {[catch {journal open [file join $FRONT_HOME mt.db]}]} { return 0 }
+    # One id per front-door invocation, so the rows of one command can be told
+    # from another's even though every `mt <name>` is a separate process.
+    set FRONT_SESSION "[pid]-[clock milliseconds]"
+    set FRONT_JOURNAL on
+    return 1
 }
 
 # WHERE THE WORKSPACE IS. Found from the EXECUTABLE, not the working directory: a
@@ -300,10 +321,16 @@ proc ::machteld::FrontResolve {name} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run}
-    set opts {-json}
+    set subs {roots which env tools run journal}
+    # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
+    # an option the palette denies having. `-inherit` was missing: `front run
+    # -inherit` worked, the manifest said `front` took only -json, and the docs
+    # gate called the working example a typo.
+    set opts {-inherit -json}
     if {![llength $args]} {
-        Fail FRONT usage "usage: front roots | front which name | front env name ?-json? | front tools ?pattern?"
+        Fail FRONT usage "usage: front roots | front which name | front env name ?-json?\
+                          | front tools ?pattern? | front run ?-inherit? ?--? name ?arg ...?\
+                          | front journal"
     }
     set sub [lindex $args 0]
     if {$sub ni $subs} {
@@ -328,10 +355,34 @@ proc ::machteld::front {args} {
         return [lsort [lsearch -all -inline -glob [dict keys [dict get $m tools]] $pat]]
     }
 
+    # ONE PLACE KNOWS THE FILENAME. `front run` opens the journal lazily and a
+    # reader could not: it would have to spell `[file join ... mt.db]` itself,
+    # which is a second authority on where the record lives and the first thing
+    # that goes stale. This opens the same file the recorder writes and hands
+    # back the path -- and, unlike the recorder, it does NOT swallow failure: a
+    # script asking for the journal wants to be told there isn't one.
+    if {$sub eq "journal"} {
+        if {[llength $args] != 1} { Fail FRONT usage "usage: front journal" }
+        variable FRONT_HOME ; variable FRONT_SESSION ; variable FRONT_JOURNAL
+        FrontRoots
+        set db [file join $FRONT_HOME mt.db]
+        journal open $db
+        if {$FRONT_SESSION eq ""} { set FRONT_SESSION "[pid]-[clock milliseconds]" }
+        set FRONT_JOURNAL on
+        return $db
+    }
+
     if {$sub eq "run"} {
+        # `--` ENDS FRONT'S OPTIONS -- the same guard `run`, `child start`,
+        # `pty spawn` and `detach` all take. The parser never needed it (only
+        # the word right after `run` is read as an option), but a reader does:
+        # in `front run rg -n TODO .` nothing on the line says whose flag `-n`
+        # is. It stays optional, because the everyday path is `mt rg -n TODO .`,
+        # where the tool name is argv0 and there is nothing to disambiguate.
         set inherit 0 ; set i 1
-        if {[lindex $args 1] eq "-inherit"} { set inherit 1 ; set i 2 }
-        if {[llength $args] <= $i} { Fail FRONT usage "usage: front run ?-inherit? name ?arg ...?" }
+        if {[lindex $args $i] eq "-inherit"} { set inherit 1 ; incr i }
+        if {[lindex $args $i] eq "--"} { incr i }
+        if {[llength $args] <= $i} { Fail FRONT usage "usage: front run ?-inherit? ?--? name ?arg ...?" }
         return [FrontExec [FrontResolve [lindex $args $i]] $inherit [lrange $args [expr {$i + 1}] end]]
     }
 
@@ -388,10 +439,25 @@ proc ::machteld::FrontExec {r inherit cargs} {
     if {[dict exists $r pre]} { lappend argv {*}[dict get $r pre] }
     lappend argv {*}$cargs
 
-    if {$inherit} {
-        return [run -inherit -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+    # Recorded around the run, and every journal call is caught: see FrontJournal.
+    variable FRONT_SESSION
+    set jid ""
+    if {[FrontJournal]} {
+        catch {
+            set jid [journal add [dict create                 session $FRONT_SESSION parent "" pid ""                 name [dict get $r name] kind [dict get $r kind]                 exe [dict get $r exe] argv [json encode $argv -list]                 cwd [dict get $r cwd]                 project [expr {[dict exists $r env MT_PROJECT_NAME]
+                               ? [dict get $r env MT_PROJECT_NAME] : ""}]]]
+        }
     }
-    return [run -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+
+    if {$inherit} {
+        set res [run -inherit -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+    } else {
+        set res [run -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+    }
+    if {$jid ne ""} {
+        catch {journal done $jid [dict get $res status] [dict get $res exit]}
+    }
+    return $res
 }
 
 # THE ARGV DISPATCHER. `Tcl_Main` calls AppInit -- which sources this prelude --

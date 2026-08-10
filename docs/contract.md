@@ -86,6 +86,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CLI` | `cli` |
 | `LOG` | `log` (all subcommands) |
 | `FRONT` | `front` — the workspace front door |
+| `JOURNAL` | `journal` — the front door's record |
 | `WORKER` | `worker` (all subcommands) |
 | `POOL` | `pool` (all subcommands) |
 | `PMAP` | `pmap` — its own failures only; a worker's failure keeps its own domain |
