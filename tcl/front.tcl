@@ -5,6 +5,7 @@
 #   front env rg               ;# exe, args, env, cwd -- everything, as a dict
 #   front env rg -json         ;# the same, on the wire
 #   front tools ?pattern?      ;# what the workspace curates
+#   front run ?-inherit? rg -n TODO .     ;# resolve, then actually run it
 #
 # THE FRONT DOOR'S ONE JOB is to turn a name into something runnable under a
 # controlled environment: an executable, its arguments, the variables it should
@@ -24,9 +25,13 @@
 # is what was vendored, not what happens to be installed on the machine -- and it
 # is the one rule here worth breaking a caller over.
 #
-# Read-only, deliberately. Nothing in this file spawns anything; that is the next
-# step. Resolution can therefore be checked against the live `z` for agreement
-# before anything depends on it.
+# Resolution is checked against the live `z` for agreement on every curated tool
+# (`test/front_agree.tcl`) -- 273 of 273 -- so what this runs is what the
+# workspace would have run.
+#
+# LOADED LAST in the prelude, after the derived manifest: a builtin is "a verb the
+# manifest knows", so the dispatcher at the foot of this file cannot resolve
+# anything until that exists.
 
 namespace eval ::machteld {
     variable FRONT_ROOT ""      ;# MT_ROOT -- the workspace, where the exe lives
@@ -295,7 +300,7 @@ proc ::machteld::FrontResolve {name} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools}
+    set subs {roots which env tools run}
     set opts {-json}
     if {![llength $args]} {
         Fail FRONT usage "usage: front roots | front which name | front env name ?-json? | front tools ?pattern?"
@@ -323,6 +328,13 @@ proc ::machteld::front {args} {
         return [lsort [lsearch -all -inline -glob [dict keys [dict get $m tools]] $pat]]
     }
 
+    if {$sub eq "run"} {
+        set inherit 0 ; set i 1
+        if {[lindex $args 1] eq "-inherit"} { set inherit 1 ; set i 2 }
+        if {[llength $args] <= $i} { Fail FRONT usage "usage: front run ?-inherit? name ?arg ...?" }
+        return [FrontExec [FrontResolve [lindex $args $i]] $inherit [lrange $args [expr {$i + 1}] end]]
+    }
+
     if {[llength $args] < 2} { Fail FRONT usage "usage: front $sub name" }
     set r [FrontResolve [lindex $args 1]]
     if {$sub eq "which"} {
@@ -338,3 +350,96 @@ proc ::machteld::front {args} {
     if {$asjson} { return [json encode $r] }
     return $r
 }
+
+# --- running what was resolved ------------------------------------------------
+
+# ONE RESOLUTION, TWO WAYS TO RUN IT, because the front door has two audiences.
+#
+# A person at a prompt wants the terminal handed over: `rg` in colour, a pager
+# that pages, Ctrl-C reaching the right process. An AGENT writing a Tcl script
+# wants the output back as data to parse. Those are opposite requirements, so
+# `-inherit` selects between them rather than one of them being wrong: capture is
+# the default because a script is the case that needs a value returned, and the
+# argv dispatcher passes -inherit because a terminal is the case that needs the
+# terminal.
+#
+# Either way the child is supervised: born in the job object, tree-killable, and
+# dying with this process. That is the whole reason the front door spawns through
+# the palette instead of exec'ing.
+proc ::machteld::FrontExec {r inherit cargs} {
+    set kind [dict get $r kind]
+
+    # A builtin runs HERE. Re-spawning ourselves to reach a verb this exe already
+    # has would pay 44 ms of process start to call a command that is already
+    # loaded, and would hand the answer back through a pipe as text.
+    if {$kind eq "builtin"} {
+        return [uplevel #0 [list [dict get $r name] {*}$cargs]]
+    }
+
+    if {[dict exists $r arg0]} {
+        # The one tool in the workspace that asks for it (`make`). Refused rather
+        # than run without it: the program would see a different argv[0] than the
+        # workspace intends, which is a silent difference, and this file's whole
+        # standard is that a wrong answer is worse than a refusal.
+        Fail FRONT unsupported "\"[dict get $r name]\" needs arg0, which the front door cannot set yet"
+    }
+
+    set argv [list [dict get $r exe]]
+    if {[dict exists $r pre]} { lappend argv {*}[dict get $r pre] }
+    lappend argv {*}$cargs
+
+    if {$inherit} {
+        return [run -inherit -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+    }
+    return [run -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+}
+
+# THE ARGV DISPATCHER. `Tcl_Main` calls AppInit -- which sources this prelude --
+# before it looks at argv, so the front door can take a name over from here with
+# no C at all.
+#
+# The rule is deliberately not "does this file exist": that would let a stray file
+# in the working directory change what `mt rg` means, which is the same class of
+# accident as a PATH fallback. A first argument is a SCRIPT if it looks like one
+# (a path separator, or a .tcl extension) and a NAME otherwise.
+proc ::machteld::FrontDispatch {} {
+    global argv argv0
+    if {![info exists argv0]} return
+
+    # THE NAME IS IN argv0, NOT argv[0]. By the time AppInit runs, `Tcl_Main` has
+    # already taken the first argument as the script to run and left the rest in
+    # `argv` -- so for `mt rg --version` the candidate is argv0="rg" with
+    # argv={--version}. Reading argv[0] instead made the front door resolve the
+    # first ARGUMENT of every command: `mt script.tcl a b` went looking for a
+    # tool called "a". Only running it showed that.
+    set name $argv0
+
+    # No script argument at all: argv0 is this executable. That is the shell.
+    if {[string equal -nocase [file normalize $name]                               [file normalize [info nameofexecutable]]]} return
+    if {[string index $name 0] eq "-"} return         ;# Tcl_Main's options; `-` is stdin
+
+    # A SCRIPT IF IT LOOKS LIKE ONE, deliberately not "if the file exists": that
+    # would let a stray file in the working directory change what `mt rg` means,
+    # which is the same accident as a PATH fallback wearing different clothes.
+    if {[string match "*/*" $name] || [string match {*\*} $name]
+        || [string tolower [file extension $name]] eq ".tcl"} return
+
+    # No workspace, no front door: leave argv alone rather than failing an
+    # invocation that never wanted one.
+    if {[catch {FrontRoots}]} return
+
+    if {[catch {FrontResolve $name} r]} {
+        catch {puts stderr "mt: $r"}
+        exit 127                                      ;# the shell's "no such command"
+    }
+    if {[catch {FrontExec $r 1 $argv} res]} {
+        catch {puts stderr "mt: $res"}
+        exit 126                                      ;# found, could not run
+    }
+    if {[dict exists $res exit]} { exit [dict get $res exit] }
+    if {$res ne ""} { catch {puts $res} }
+    exit 0
+}
+
+# The front door takes over argv here, at the very foot of the prelude.
+::machteld::FrontDispatch

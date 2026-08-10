@@ -1368,6 +1368,47 @@ check "-inherit refuses -onout" [expr {
 check "-inherit refuses -stdin" [expr {
     [errcode_of {run -inherit -stdin text -- cmd /c echo hi}] eq {MACHTELD RUN usage}}]
 
+# --- the front door dispatches argv ------------------------------------------
+# `mt rg --version` has to run ripgrep. The dispatch lives in the prelude because
+# `Tcl_Main` calls AppInit before it looks at argv -- and the name it takes as
+# the script is in **argv0**, with the rest in `argv`. Reading argv[0] instead
+# made the front door resolve the first ARGUMENT of every command, so
+# `mt script.tcl a b` went looking for a tool called "a". Only running it showed
+# that, which is why these drive the real exe rather than calling a proc.
+if {![catch {front roots} FR]} {
+    set r [run -timeout 30s -- $MT rg --version]
+    check "mt <tool> runs the curated tool" [expr {
+        [dict get $r exit] == 0 && [string match "ripgrep*" [dict get $r out]]}]
+
+    set r [run -timeout 30s -- $MT rg --no-such-flag-at-all]
+    check "and hands back its exit code"    [expr {[dict get $r exit] != 0}]
+
+    set r [run -timeout 30s -- $MT version]
+    check "a builtin answers in-process"    [expr {
+        [string trim [dict get $r out]] eq [version]}]
+
+    set r [run -timeout 30s -- $MT nosuchtool-zzz]
+    check "an unknown name exits 127"       [expr {[dict get $r exit] == 127}]
+    check "and says there is no PATH fallback" [expr {
+        [string match "*no PATH fallback*" [dict get $r err]]}]
+
+    # A SCRIPT IS STILL A SCRIPT. The rule is "looks like a path", not "the file
+    # exists", so a stray file in the working directory cannot change what a
+    # bare name means -- the same accident as a PATH fallback in other clothes.
+    set sfix [file join $HERE _dispatch_fixture.tcl]
+    set fh [open $sfix w] ; puts $fh {puts "SCRIPT-RAN [llength $argv]"} ; close $fh
+    set r [run -timeout 30s -- $MT $sfix a b]
+    check "a .tcl path still runs as a script" [expr {
+        [string match "*SCRIPT-RAN 2*" [dict get $r out]]}]
+    file delete -force $sfix
+
+    # And the workspace's own facts survive the round trip.
+    check "the dispatcher found the workspace" [expr {[dict exists $FR root]}]
+} else {
+    check "no workspace: dispatch stays out of the way" [expr {
+        [dict get [run -timeout 30s -- $MT version] exit] == 0}]
+}
+
 # --- cli duration: the palette's convention, available to its tools -----------
 # machteld refuses a bare number for a duration so `-timeout 100` can never
 # silently mean 100 seconds -- and then exposed no parser, so `life` and

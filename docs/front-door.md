@@ -122,7 +122,17 @@ curates. Renaming removes the collision entirely rather than settling it with a 
 so there is now **no name that resolves two ways**. Its error domain moved with it, `PS` → `MTPS`
 — caught by the registry gate, which failed the build until the contract was updated.
 
-**Next:** step 2, spawning and the argv dispatcher.
+**Step 2 is done too.** `front run ?-inherit?`, builtins in-process, and the argv dispatcher:
+`mt rg --version` prints `ripgrep 15.1.0`, `mt version` answers `0.3.0` without spawning anything,
+an unknown name exits 127, and a `.tcl` path still runs as a script.
+
+The one thing only running it could have shown: by the time AppInit executes, `Tcl_Main` has
+**already taken the first argument as the script name** — it is in `argv0`, with the rest in
+`argv`. Reading `argv[0]` made the front door resolve the first *argument* of every command, so
+`mt script.tcl a b` went looking for a tool called "a".
+
+**Next:** the [journal](journal.md), then step 3 — retire `wrap` and the two embedded bare hosts,
+which halves the exe.
 
 ## The risk, named
 

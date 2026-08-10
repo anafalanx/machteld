@@ -422,7 +422,29 @@ two front doors exist they cannot disagree about what a name means. Every resolu
 is inside a project — and the `Z_` spellings as well for as long as the workspace's private
 directory is still `.z`, so scripts written against the Go front door keep working.
 
-**Read-only for now, and it refuses rather than guesses.** A manifest entry using a key the
+```tcl
+front run rg -n TODO .             ;# resolve, run, and hand back the output as a dict
+front run -inherit rg -n TODO .    ;# resolve, run, and give the child the terminal
+```
+
+**Two ways to run it, because a front door has two audiences.** A person at a prompt wants the
+terminal handed over — colour, a pager, Ctrl-C — while an *agent writing a Tcl script* wants the
+output back as data to parse. Capture is the default, since a script is the case that needs a
+value returned; the argv dispatcher passes `-inherit`, since a terminal is the case that needs the
+terminal. Either way the child is supervised: born in the job object, tree-killable, dying with
+this process.
+
+**A builtin runs in-process.** Re-spawning this exe to reach a verb it already has would pay 44 ms
+of process start to call a loaded command and hand the answer back through a pipe as text.
+
+**And the exe dispatches its own argv**, so `mt rg -n TODO .` works. The rule, applied in the
+prelude because `Tcl_Main` calls AppInit before it reads argv: no arguments is the shell; a
+leading `-` belongs to Tcl; something that *looks like a path* (a separator, or a `.tcl`
+extension) is a script; anything else is a name to resolve. Deliberately **not** "if the file
+exists" — that would let a stray file in the working directory change what `mt rg` means, which is
+a PATH fallback wearing different clothes. An unknown name exits **127**, the shell's convention.
+
+**Read-only? No longer, and it still refuses rather than guesses.** A manifest entry using a key the
 front door does not implement yet (`preFromRoot`, `pre`, `envFromRoot`, `arg0`) is an *error*,
 not a silent partial answer: the point of this stage is to be compared against `z`, and a
 confident wrong resolution is worse than a refusal that names what is missing.
