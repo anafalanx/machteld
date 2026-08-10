@@ -88,21 +88,41 @@ Each ends in something that builds, passes, and is worth committing.
    (`which`, `env`, `projects`, `status`, `tools`, `runtimes`), leaving `mirror`, `ledger` and the
    shell shim — the three biggest — until the pattern is proven.
 
-## Where this stands (end of 2026-08-10)
+## Step 1 is done: 273 of 273 agree
 
-Step 1 is in and measured against the live workspace:
+`test/front_agree.tcl` asks both front doors to resolve every curated tool and diffs the answers:
+**273 / 273 agree, 0 differ, 0 refused, from the workspace root and from inside a project.** It
+compares the executable, the environment overlay, the PATH the tool adds, and the prepended
+arguments — not the inherited PATH tail, which is the caller's, nor the caller's own arguments,
+which are not resolution.
 
-- Roots discovery, project detection, manifest reading, resolution, `front roots|which|env|tools`.
-- **226 of 273 curated tools resolve to an executable that is really on disk.** Zero resolve to a
-  path that does not exist — the failures are all refusals, not wrong answers.
-- The 47 that refuse do so by naming the manifest key they need:
-  `preFromRoot` 13, `pre` 12, `envFromRoot` 21, `arg0` 1. That list *is* the remaining work for
-  step 1, and it is small.
-- Spot checks agree with the workspace's own layout: `rg` → `.z/t/rg/rg.exe`,
-  `gcc` → `.z/r/msys2/ucrt64/bin/gcc.exe`.
+That agreement was bought by reading the workspace's resolver instead of inferring from key names,
+and **five of the rules are the opposite of what the names suggest**:
 
-**Next, in order:** finish those four keys; then diff every resolution against `z env --json`
-for all 273 and make the agreement a gate; then step 2 (spawning and the argv dispatcher).
+- `toolEnv` is called with **home**, not root — every relative path in a tool entry is
+  `MT_HOME`-relative, including `envFromRoot`.
+- The **`t/` directory scan wins over `exeFromRoot`**, and there `exe` is a *filename inside*
+  `t/<name>/`, not a path.
+- A tool whose executable is **not on disk does not resolve at all** — so a catalogued but
+  uninstalled tool is a clean not-found rather than a phantom path.
+- `path` entries are **filtered by existence** and deduped case-insensitively before being
+  prepended.
+- Only the **bracketed** token forms expand (`${Z_HOME}`, `$(Z_HOME)`, `%Z_HOME%`) — never the
+  bare word, which the first version substituted and would have corrupted any argument merely
+  containing those letters. And when expansion lands inside the workspace the **whole** path is
+  normalised, which exactly one tool of 273 (`glow`) noticed.
+
+A project is likewise **not** "a directory under the root": it is the nearest ancestor carrying a
+project file, and its name drops a leading underscore (`_els` → `els`). The first version claimed
+a project wherever it stood, and the diff caught it.
+
+**`ps` is renamed `mtps`.** It was the only name in the workspace where a palette verb and a
+curated tool collided, and the front door should hand `ps` to the MSYS2 tool the workspace
+curates. Renaming removes the collision entirely rather than settling it with a precedence rule,
+so there is now **no name that resolves two ways**. Its error domain moved with it, `PS` → `MTPS`
+— caught by the registry gate, which failed the build until the contract was updated.
+
+**Next:** step 2, spawning and the argv dispatcher.
 
 ## The risk, named
 

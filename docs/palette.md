@@ -117,10 +117,10 @@ namespace eval ::mytool { namespace path ::machteld }
 ## Built — the machine's processes
 
 ```tcl
-ps list                            ;# every process on the box: a list of dicts
-ps info 4796                       ;# one of them
-ps kill 4796                       ;# terminate it
-ps kill 4796 -tree                 ;# and everything it started
+mtps list                            ;# every process on the box: a list of dicts
+mtps info 4796                       ;# one of them
+mtps kill 4796                       ;# terminate it
+mtps kill 4796 -tree                 ;# and everything it started
 ```
 
 A row is `{pid ppid name exe mem private cpu threads started access}`. `mem` is the working set
@@ -128,8 +128,8 @@ and `private` the private commit, both in bytes; `started` is Unix epoch seconds
 `clock format` reads it directly; `threads` is the thread count.
 
 **This is the half `child` is not.** `child list` enumerates the processes *machteld started* and
-holds them in a job object, so `child kill` is exact. `ps` reaches everything else — and pays for
-it in precision: `ps kill -tree` walks a single snapshot, so a tree that is still forking can
+holds them in a job object, so `child kill` is exact. `mtps` reaches everything else — and pays for
+it in precision: `mtps kill -tree` walks a single snapshot, so a tree that is still forking can
 outrun it. Use `child`/`scope` for anything you launched yourself.
 
 **`cpu` is cumulative milliseconds, not a percentage.** A percentage is a rate, and a rate needs
@@ -143,7 +143,7 @@ from the snapshot, `access 0`, and every other field the **empty string** rather
 "we were denied" never reads as "it is using no memory". Failing the whole listing over a process
 you may not inspect would make the verb useless on exactly the machines it is for.
 
-`ps kill` raises `denied` for a process you lack the rights to end, and `notfound` both for a pid
+`mtps kill` raises `denied` for a process you lack the rights to end, and `notfound` both for a pid
 that never existed and for one that has already exited — Windows reports `ERROR_ACCESS_DENIED`
 for a corpse, and reporting that as `denied` would advise elevation over a process that simply
 finished.
@@ -519,7 +519,7 @@ The machine-control **domains** `reg` / `svc` / `evt`, and later `net` / `wmi` /
 [ecosystem policy](ecosystem-policy.md)). Also deferred: the `say` / `csv` / `fs` / `clock`
 conveniences — Tcl's own `file` / `env` / `clock` cover much of that today.
 
-None of these is scheduled. `watch` and `ps` both arrived because a tool asked — the
+None of these is scheduled. `watch` and `mtps` both arrived because a tool asked — the
 change-viewer needed live file events, the task manager needed a view of processes machteld did
 not start — and that remains the best reason to build one, because it is also when the dict shape
 stops being a guess. It is no longer the *only* reason: [rule 5](direction.md) was rewritten on

@@ -51,7 +51,7 @@ proc ::tm::sample {} {
     variable prevms
     variable ncpu
 
-    set now  [ps list]
+    set now  [mtps list]
     set nowms [clock milliseconds]
     set dt   [expr {$nowms - $prevms}]
     set cur  {}
@@ -314,7 +314,7 @@ proc ::tm::kill_selected {tree} {
             -message "End $what?\n\nUnsaved work in that process is lost."] ne "yes"} {
         return
     }
-    if {[catch {expr {$tree ? [ps kill $sel -tree] : [ps kill $sel]}} m opts]} {
+    if {[catch {expr {$tree ? [mtps kill $sel -tree] : [mtps kill $sel]}} m opts]} {
         # The error contract is the UI here: `denied` has a specific remedy and
         # `notfound` is not really a failure, so they get different words rather
         # than one generic "could not end task".

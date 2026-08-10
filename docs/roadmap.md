@@ -31,8 +31,8 @@ The two `info` subcommands stay because they closed a real asymmetry — `child`
 other handle verbs returned bare tokens — and because non-destructive observation is the right
 primitive with or without a window. See [direction](direction.md).
 
-✅ **`ps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
-(`ps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
+✅ **`mtps`** and **`tasks`** landed 2026-08-09 — machine-wide process enumeration
+(`mtps list` / `info` / `kill ?-tree?`) and the task manager built on it (`tool/tasks`, wrapped to
 `tasks.exe`). The tool was written, it named a capability machteld did not have — it
 could supervise processes it *started* but could not see one it did not — and that capability was
 built to fit. That was rule 5 as it then stood; the rule has since been rewritten so a domain no
@@ -83,7 +83,7 @@ worker script on disk. It also exercises `wrap --console`.
 
 ## Later
 
-- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `ps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
+- **Machine-control domains** — `reg`, `svc`, `evt`, then `net` / `host` / `user` / `wmi`. All wanted, none scheduled. A tool asking is still the best reason to build one, as it was for `watch` and `mtps`, but since [rule 5](direction.md) was rewritten it is not the only one: building a domain to find out what its dict wants to be is now reason enough. Our own C; TWAPI a quarry for WMI/COM only ([ecosystem policy](ecosystem-policy.md)).
 - **An object layer over TclOO** — deferred, not refused.
 - **The chrome console** — a Tk cockpit. The read-only version was tried and removed: a window
   that only *observes* the session freezes during exactly the blocking calls it exists to show.
