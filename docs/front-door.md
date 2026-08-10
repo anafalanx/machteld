@@ -336,8 +336,30 @@ comparison case-insensitive), resolve in *that* project's context, run from its 
 fewer than twenty of the latter — a count that silently drops to zero is the failure mode this
 whole step keeps rediscovering.
 
-**Next:** `verify`, `scout`, `logs`, then `mirror` and `ledger` — after which `status` finishes
-itself.
+### `verify`, and the one thing it must not match
+
+`mt verify` reports the workspace's structural problems, and its list diffs **byte for byte**
+against z's: the workspace root is meant to hold the front door, its private directory and hosted
+projects, and nothing else. Five entries drift there today and both front doors name the same five.
+
+It also reports what only the project tier could: a project command with an empty command line, a
+command whose `argv[0]` is neither a curated tool nor a path, and a project defining a **reserved**
+name. All three are *reported* rather than silently resolved one way — a name that means two things
+is a bug in the workspace, not a precedence puzzle for the front door.
+
+**The counts footer deliberately does not match**, and this is the first command where the fidelity
+rule bites. z's footer counts its 21 built-ins; machteld's counts its own front-door commands, and
+those are different sets on purpose. Matching it would mean claiming a builtin set machteld does
+not have. The problems are the substance and they agree exactly; the tally is a footer and it is
+ours. `-json` carries both, and z has no `--json` here at all.
+
+**Both front doors are accepted at the root.** z flags anything it does not recognise, which will
+include `mt.exe` the day it lands beside `z.exe`. For a while `z verify` will therefore report a
+problem `mt verify` does not — that difference is the transition, not a defect in either, and it is
+gated so it cannot be quietly lost.
+
+**Next:** `scout`, `logs`/`follow`, `cdirs`, `init`, then `mirror` and `ledger` — after which both
+halves of `status --deep` exist and `status` finishes itself.
 
 ## The risk, named
 

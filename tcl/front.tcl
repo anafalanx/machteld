@@ -518,7 +518,9 @@ proc ::machteld::FrontProjects {} {
 #
 # The working directory is the project root, which is what makes the rest of the
 # argv able to be project-relative.
-proc ::machteld::FrontProjectCommands {root} {
+proc ::machteld::FrontProjectCommands {root {probVar ""}} {
+    if {$probVar ne ""} { upvar 1 $probVar probs }
+    set probs {}
     variable FRONT_PROJFILES
     set spec {}
     foreach f $FRONT_PROJFILES {
@@ -535,7 +537,10 @@ proc ::machteld::FrontProjectCommands {root} {
     set out {}
     foreach name [lsort [dict keys $spec]] {
         set argv [dict get $spec $name]
-        if {![llength $argv]} continue                    ;# `z verify` calls this a problem
+        if {![llength $argv]} {
+            lappend probs "project command \"$name\" has an empty command line"
+            continue
+        }
         set a0 [lindex $argv 0]
         set t ""
         if {![catch {FrontResolve "z:$a0"} r] && [dict get $r kind] eq "tool"} {
@@ -553,7 +558,8 @@ proc ::machteld::FrontProjectCommands {root} {
                        exe [file nativename [FrontClean [file join $root $a0]]] \
                        pre {} env [FrontBaseEnv $root]]
         } else {
-            continue                                      ;# neither a tool nor a path: dropped
+            lappend probs "project command \"$name\": \"$a0\" is neither a z tool nor a path"
+            continue                                      ;# dropped -- never a PATH lookup
         }
         set pre [expr {[dict exists $t pre] ? [dict get $t pre] : {}}]
         lappend pre {*}[lrange $argv 1 end]
@@ -566,6 +572,36 @@ proc ::machteld::FrontProjectCommands {root} {
         dict set out $name $t
     }
     return $out
+}
+
+# WHAT THE WORKSPACE ROOT MAY CONTAIN: the front door itself, its private
+# directory, and hosted projects. Anything else is reported -- this is a
+# workspace whose root is meant to be almost empty, and drift there is the kind
+# that goes unnoticed for years.
+#
+# BOTH FRONT DOORS ARE ACCEPTED while both exist. z flags anything it does not
+# recognise, which will include `mt.exe` the day it lands beside `z.exe` -- so
+# for a while `z verify` will report a problem that `mt verify` does not, and
+# that difference is the transition rather than a defect in either.
+proc ::machteld::FrontLayoutProblems {} {
+    variable FRONT_ROOT ; variable FRONT_HOME ; variable FRONT_DIRS
+    FrontRoots
+    set probs {}
+    if {![file isdirectory $FRONT_HOME]} {
+        lappend probs "missing z home directory [file nativename $FRONT_HOME]"
+    }
+    if {[catch {glob -nocomplain -directory $FRONT_ROOT * .*} entries]} {
+        return [list "cannot read workspace root [file nativename $FRONT_ROOT]"]
+    }
+    foreach e $entries {
+        set n [file tail $e]
+        if {$n eq "." || $n eq ".."} continue
+        if {[string equal -nocase $n z.exe] || [string equal -nocase $n mt.exe]} continue
+        if {$n in $FRONT_DIRS} continue
+        if {[file isdirectory $e] && [string index $n 0] eq "_" && [string length $n] > 1} continue
+        lappend probs "unexpected workspace-root entry [file nativename [file join $FRONT_ROOT $n]]"
+    }
+    return [lsort $probs]
 }
 
 # GIT, AS THE COCKPIT COUNTS IT. Two commands per directory -- the branch and
@@ -741,7 +777,7 @@ proc ::machteld::FrontWithin {base candidate} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in}
+    set subs {roots which env tools run journal projects runtimes status in verify}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -827,6 +863,57 @@ proc ::machteld::front {args} {
             dict set r cwd [dict get $proj path]
         }
         return [FrontExec $r 1 [lrange $args 3 end]]
+    }
+
+    # `verify` -- the structural problems, which must agree with z's exactly.
+    # The COUNTS line does not and cannot: z counts its 21 built-ins, machteld
+    # counts its own front-door commands, and those are different sets on
+    # purpose. The problems are the substance; the tally is a footer.
+    if {$sub eq "verify"} {
+        set asjson 0
+        foreach a [lrange $args 1 end] {
+            if {$a in {-json --json}} { set asjson 1 ; continue }
+            Fail FRONT usage "usage: front verify ?-json?"
+        }
+        set problems [FrontLayoutProblems]
+        set p [FrontProject]
+        set pcmds {}
+        if {[dict size $p]} {
+            set pcmds [FrontProjectCommands [dict get $p root] pprobs]
+            lappend problems {*}$pprobs
+            # A PROJECT MAY NOT SHADOW THE KIT. Reported rather than silently
+            # resolved one way, because a name that means two things is a bug in
+            # the workspace and not a precedence puzzle for the front door.
+            foreach n [lsort [dict keys $pcmds]] {
+                if {$n in [FrontCommands] || $n in [FrontToolNames]} {
+                    lappend problems "project defines reserved name \"$n\" (a z tool or built-in)"
+                }
+            }
+        }
+        # The kit defining one name twice: a front-door command that is also a
+        # curated tool. Gated in the suite as well, because the workspace gains
+        # tools without asking anybody.
+        foreach n [FrontCommands] {
+            if {$n in [FrontToolNames]} {
+                lappend problems "kit defines \"$n\" in multiple places: builtin, tool"
+            }
+        }
+        set problems [lsort -unique $problems]
+        set d [dict create problems $problems ambiguous {} \
+                   counts [dict create builtins [llength [FrontCommands]] \
+                               tools [llength [FrontToolNames]] scripts 0 \
+                               project [dict size $pcmds]]]
+        if {$asjson} { return [json encode $d] }
+        set out {}
+        if {[llength $problems]} {
+            lappend out "problems:"
+            foreach x $problems { lappend out "  - $x" }
+        } else {
+            set c [dict get $d counts]
+            lappend out "ok: [dict get $c builtins] commands, [dict get $c tools] tools,\
+                         [dict get $c project] project commands; no collisions"
+        }
+        return [join $out \n]
     }
 
     if {$sub eq "status"} {
