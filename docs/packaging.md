@@ -1,33 +1,64 @@
 ---
 type: concept
-title: Packaging — the tool factory
-description: How machteld turns a pure-Tcl/Tk program into a standalone, signable exe with no compiler.
-tags: [machteld, packaging, wrap, starpack, tclkit, signing]
-timestamp: 2026-07-09
+title: Packaging — one exe, and what rides inside it
+description: How machteld is assembled, how its tools ride along, and why the tool factory was retired.
+tags: [machteld, packaging, zipfs, starpack, tclkit, signing]
+timestamp: 2026-08-10
 ---
 
-# Packaging — the tool factory
+# Packaging — one exe, and what rides inside it
 
-machteld is a **personal tclkit**: one compiled runtime that stamps out standalone tool exes with **no compiler in the loop**.
+`mt.exe` is a single file: a compiled host with a zip archive appended after its PE image, which
+`TclZipfs_AppHook` mounts at startup. Everything the front door needs is in that archive.
 
-## `wrap`
-
-```tcl
-wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?
+```
+//zipfs:/app/tcl_library/        the Tcl core script library
+//zipfs:/app/tk_library/         the Tk core script library
+//zipfs:/app/machteld.tcl        the prelude, with the derived manifest appended
+//zipfs:/app/docs/               the docs bundle, which `help` serves
+//zipfs:/app/tool/<name>/main.tcl  the tools it ships
 ```
 
-`<tooldir>` holds the tool's Tcl — its entry is `main.tcl`, auto-run by `TclZipfs_AppHook` — plus any resources. `wrap` copies the Tcl/Tk script libraries, the [prelude](palette.md) (unless `--no-prelude`), and the tool's files into a staging tree, then appends that tree onto a **basekit** via `zipfs lmkimg` (the els/starpack overlay). The result is a single exe that *is* the tool.
+The prelude is deliberately **not** named `main.tcl`: `TclZipfs_AppHook` auto-runs an archive-root
+`main.tcl`, and this exe must reach [its dispatcher](front-door.md) instead. The tools are nested
+one directory down for the same reason — `tools/package.tcl` fails the build if a tool ever lands
+at the root.
 
-## Self-contained
+## The tools ride along; they are not stamped
 
-Everything `wrap` needs rides **inside `machteld.exe`**: the Tcl/Tk libraries, the prelude, and **both** basekits — `basekit/console.exe` and `basekit/gui.exe` — compressed in its own zipfs. `wrap` extracts the right basekit for the chosen subsystem and appends onto it. No external toolchain, no `sdx`, no Tcl install. (A wrapped tool carries no basekits, so only `machteld.exe` can `wrap`.)
+`mt sums .` sources `//zipfs:/app/tool/sums/main.tcl` **in this process**. No exe on disk, no
+manifest entry, no process to start — the same argument that makes a builtin verb run in-process,
+applied to a program instead of a command.
 
-## Console vs GUI — two bares, one difference
+The front door replaces the two jobs `Tcl_Main` would have done for a script named on the command
+line: it runs the event loop and it exits. Handing the script back to `Tcl_Main` would have been
+neater and does not work — `Tcl_Main` reads its startup script into a local *before* it calls
+`AppInit`, which is what sources the prelude, so by the time the front door knows that `sums` means
+a script, the decision about what to evaluate has been taken.
 
-The two basekits are built from the **same object files** — the whole [machine-control library](palette.md) and the shared `Machteld_RegisterLibs` — linked against different entry points: a console `Tcl_Main` host and a GUI `WinMain` (`-mwindows`) host. So a GUI tool shows no console window, a console tool has real stdio, and **a C library added to the shared AppInit lands in both bares** with no duplication.
+## What was here before: `wrap`
 
-The subsystem is *compiled in*, not a PE byte-flip: a console host run in a GUI subsystem has no valid standard channels — `puts stdout` throws *"can not find channel named stdout"* — so the proper `WinMain` host is used, the way els / tclkit (`tclkit` vs `tclkitsh`) have always done it.
+Until 2026-08-10 this page described a **tool factory**. `wrap <tooldir> -o <out.exe>` copied the
+Tcl/Tk libraries, the prelude and a tool's files into a staging tree and appended it onto a
+**basekit** with `zipfs lmkimg` — the els/starpack overlay — producing a standalone exe that *was*
+the tool, with no compiler in the loop. Two basekits rode inside `machteld.exe` for it, built from
+the same objects against different entry points: a console `Tcl_Main` host and a GUI `WinMain`
+(`-mwindows`) host, because the subsystem is compiled in rather than flipped — a console host in a
+GUI subsystem has no valid standard channels and `puts stdout` throws *"can not find channel named
+stdout"*.
+
+It worked, and it was retired because **machteld stopped being a thing that makes exes**. The whole
+mechanism cost 4.7 MB inside `machteld.exe` and produced five 5.9 MB artefacts to ship five files
+of Tcl. Dropping it took the exe from **10.2 MB to 6.0 MB** and the build from six link steps to
+one.
+
+The GUI host went with it. There is no double-clickable tool exe left for a GUI subsystem to serve:
+a tool is reached as `mt life`, typed into a shell that already has a console. Tk works from a
+console host — the window opens and the terminal stays. When `mt --gui` lands it will make that
+choice once, at startup, rather than once per tool.
 
 ## Signing
 
-`wrap` produces an **unsigned** exe; sign it last (**append-then-sign**). The appended tool payload is inside the Authenticode hash, so the tool's own code is covered by the signature — wrap onto an unsigned basekit and sign the result.
+`zipfs lmkimg` appends **after** the PE image, so a baked-in icon or manifest survives, and the
+appended payload is inside the Authenticode hash. Sign last: **append-then-sign**, so the archive —
+prelude, docs and tools — is covered by the signature.

@@ -6,9 +6,10 @@
 # icon/manifest survives). The prelude is deliberately NOT named main.tcl: the C
 # host sources it explicitly and leaves Tcl_Main's REPL/script handling intact.
 #
-#   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> --out <exe>
+#   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> \
+#           --out <exe> ?--docs <dir>? ?--tools <dir>?
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --embed-console "" --embed-gui "" --docs ""}
+array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --tools "" --docs ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {[info exists opt($a)]} {
@@ -86,15 +87,18 @@ if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
     copy_tree $opt(--docs) [file join $stage docs]
 }
 
-# Embed the bare basekits so the packaged machteld can stamp tools self-contained
-# -- the `wrap` verb extracts the right one from //zipfs:/basekit/.
-if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
-    file mkdir [file join $stage basekit]
-    if {$opt(--embed-console) ne ""} {
-        file copy -force $opt(--embed-console) [file join $stage basekit console.exe]
-    }
-    if {$opt(--embed-gui) ne ""} {
-        file copy -force $opt(--embed-gui) [file join $stage basekit gui.exe]
+# The tools machteld ships, at //zipfs:/app/tool/<name>/main.tcl -- NESTED, never
+# at the archive root, because TclZipfs_AppHook auto-runs a root main.tcl and
+# this exe must land in its dispatcher instead.
+#
+# This replaced //zipfs:/basekit/, which carried a console and a GUI copy of the
+# bare host so `wrap` could stamp a standalone exe per tool. Five tools cost five
+# 5.9 MB exes and 4.7 MB of basekit inside machteld.exe -- to ship five files of
+# Tcl. They are scripts again, and the front door runs them by name.
+if {$opt(--tools) ne "" && [file isdirectory $opt(--tools)]} {
+    copy_tree $opt(--tools) [file join $stage tool]
+    if {[file exists [file join $stage tool main.tcl]]} {
+        error "package.tcl: a tool named main.tcl would be auto-run by AppHook"
     }
 }
 

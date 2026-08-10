@@ -44,25 +44,29 @@ namespace eval ::sums {
 
     # WHERE THIS TOOL LIVES, captured while it is being sourced -- `info script`
     # answers "" once loading is over, so asking at request time would be too
-    # late. Wrapped, it is a path inside the exe's own zipfs; run as a script
-    # under machteld.exe, it is a file on disk. That difference decides how a
-    # worker is spawned, and it is the only place the two cases differ.
+    # late. Shipped inside mt.exe it is a path in that exe's own zipfs; run from
+    # a checkout it is a file on disk. Both are paths the same exe can source.
     variable SELF [info script]
 }
 
 # The command that starts a copy of this tool as a worker.
 #
-# Wrapped, the exe IS the tool: `sums.exe --worker` re-enters this same file with
-# a different argv, which is the arrangement the whole pool design rests on --
-# one artefact, no tclsh, no worker script to keep in step. Run as a script under
-# machteld.exe the exe is the interpreter, so the script has to be named too, or
-# `machteld.exe --worker` would go looking for a file called --worker.
+# ONE SPELLING, since `wrap` was retired. There used to be two: a wrapped
+# sums.exe re-entered itself as `sums.exe --worker`, because there the exe WAS
+# the tool and its main.tcl was auto-run; a script under machteld.exe had to
+# name the script as well. Only the second case is left -- mt.exe is the
+# interpreter and the tool is a script it sources, whether that script sits in
+# the zipfs or in a checkout. A child of mt.exe mounts the very same zipfs, so
+# the zipfs path is as reachable from the worker as it is from here.
+#
+# What has NOT changed is the property the whole pool design rests on: the
+# worker is the same file the director is running. No second artefact to keep in
+# step, and no tclsh on the box.
 proc ::sums::worker_command {} {
     variable SELF
     set exe [info nameofexecutable]
-    if {$SELF eq "" || [string match {//zipfs:*} $SELF]} {
-        return [list $exe --worker]
-    }
+    if {$SELF eq ""} { return [list $exe sums --worker] }
+    if {[string match {//zipfs:*} $SELF]} { return [list $exe $SELF --worker] }
     return [list $exe [file normalize $SELF] --worker]
 }
 

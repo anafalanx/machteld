@@ -637,7 +637,7 @@ if {![file isdirectory $SRC]} {
     #
     # Phase 0 of the stdlib plan closed the hole this used to merely count: the
     # prelude raised eleven bare `return -code error` with no code at all, which
-    # put `wrap` and `help` outside the registry entirely. It is a GATE now, not a
+    # put its two verbs of the time outside the registry entirely. It is a GATE now, not a
     # note, because the standard library lands in the prelude and an uncoded error
     # would otherwise become the norm there rather than the exception.
     set TCLSRC [file join $HERE .. tcl]
@@ -967,8 +967,9 @@ log info "second run"
 check "reconfiguring the same file appends" [expr {
     [string match "*first run*" [logfile]] && [string match "*second run*" [logfile]]}]
 
-# THE PROPERTY THE WHOLE VERB RESTS ON: a failed write never throws. A wrapped
-# GUI exe has no standard channels, so `puts stderr` raises there -- and a log
+# THE PROPERTY THE WHOLE VERB RESTS ON: a failed write never throws. A process
+# with no standard channels -- a GUI host, a detached child -- makes `puts
+# stderr` raise, and a log
 # call that can throw kills the program at whatever arbitrary point it was asked
 # to record something.
 logreset
@@ -1687,52 +1688,72 @@ check "bad token => nohandle"         [expr {
 
 # --- the manifest describes TCL verbs as fully as C ones ----------------------
 # Phase 0 of the stdlib plan. A Tcl verb used to report `kind tcl` plus `info
-# args` and nothing else, so `wrap` and `help` had no domain, no codes and no
+# args` and nothing else, so the prelude's verbs had no domain, no codes and no
 # options in the dict whose whole purpose is describing the palette. These check
 # the derivation actually derives -- a MtclFacts that quietly returned nothing
 # would leave every assertion below trivially true, which is the failure mode
 # three gates already had today.
 set M0 [manifest]
-foreach v {wrap help} {
+foreach v {front help} {
     check "manifest gives $v a domain" [expr {[dict exists $M0 $v domain]}]
     check "manifest gives $v codes"    [expr {
         [dict exists $M0 $v codes] && [llength [dict get $M0 $v codes]] >= 2}]
 }
-check "manifest gives wrap its options" [expr {
-    [dict exists $M0 wrap options] &&
-    [lsort [dict get $M0 wrap options]] eq {--console --gui --no-prelude -o}}]
+check "manifest gives front its options" [expr {
+    [dict exists $M0 front options] &&
+    [lsort [dict get $M0 front options]] eq {-inherit -json}}]
 check "a verb that cannot fail has no domain" [expr {
     ![dict exists $M0 version domain] && ![dict exists $M0 vtstrip domain]}]
 
 # The codes a Tcl verb declares must be codes it really raises.
 foreach {label script want} {
-    "wrap with no arguments"   {wrap}                        {MACHTELD WRAP usage}
-    "wrap with a stray arg"    {wrap a b c}                  {MACHTELD WRAP usage}
-    "wrap on a dir with no main.tcl" {wrap $env(TEMP) -o x}  {MACHTELD WRAP notfound}
-    "help on a missing topic"  {help nosuch_topic_zzz}       {MACHTELD HELP notfound}
+    "front with no arguments"   {front}                      {MACHTELD FRONT usage}
+    "front with a bad subcommand" {front nosuch}             {MACHTELD FRONT usage}
+    "front run with no name"    {front run}                  {MACHTELD FRONT usage}
+    "help on a missing topic"   {help nosuch_topic_zzz}      {MACHTELD HELP notfound}
 } {
     check "$label => [lindex $want 2]" [expr {[errcode_of $script] eq $want}]
 }
-foreach v {wrap help} {
+foreach v {front help} {
     foreach c [expr {[dict exists $M0 $v codes] ? [dict get $M0 $v codes] : {}}] {
         check "$v declares $c, which is in the registry" [expr {[dict exists $documented $c]}]
     }
 }
 
-# Every option the PRELUDE parses must be declared, the mirror of the C check.
-set fh [open [file join $HERE .. tcl machteld.tcl] r] ; set ptext [read $fh] ; close $fh
-if {[regexp {proc ::machteld::wrap \{args\} \{(.*?)
-\}} $ptext -> wbody]} {
-    set inTcl {}
-    foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $wbody] {
-        lappend inTcl $o
+# EVERY OPTION A TCL VERB PARSES MUST BE IN ITS DECLARED TABLE -- the mirror of
+# the C check, and of the bug that made it worth writing. A `set opts {...}`
+# table wins outright in MtclFacts, so it IS the manifest's answer: `front`
+# declared {-json} while `front run -inherit` plainly worked, and the manifest
+# therefore denied an option the verb accepted. A table that omits something is
+# not a smaller answer, it is a wrong one.
+#
+# An EMPTY table is exempt, because it is a different claim: `set opts {}` says
+# "no options of my own", and `cli` really does compare against `--help` while
+# parsing some other program's argv. Read out of the live interpreter, so it
+# covers the whole prelude rather than one file.
+set undeclared {}
+set scanned 0
+foreach v [lsort [dict keys $M0]] {
+    if {[dict get $M0 $v kind] ne "tcl"} continue
+    if {![llength [info procs ::machteld::$v]]} continue
+    set body [info body ::machteld::$v]
+    if {![regexp -line -- {^\s+set opts \{([^\}]*)\}} $body -> table]} continue
+    if {[string trim $table] eq ""} continue
+    incr scanned
+    set found {}
+    foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $body] {
+        lappend found $o
     }
-    set declared [expr {[dict exists $M0 wrap options] ? [dict get $M0 wrap options] : {}}]
-    set miss [lsort -unique [lmap o $inTcl {expr {$o in $declared ? [continue] : $o}}]]
-    check "every option wrap parses is in the manifest" [expr {$miss eq ""}]
-    if {$miss ne ""} { puts "     undeclared: $miss" }
-    check "the prelude option scan found something" [expr {[llength $inTcl] >= 3}]
+    foreach {_ o} [regexp -all -inline -- {eq\s+"(--?[a-z][-a-z0-9]*)"} $body] {
+        lappend found $o
+    }
+    foreach o [lsort -unique $found] {
+        if {$o ni $table} { lappend undeclared "$v $o" }
+    }
 }
+if {$undeclared ne ""} { puts "     parsed but undeclared: $undeclared" }
+check "every option a Tcl verb parses is in its declared table" [expr {$undeclared eq ""}]
+check "the prelude option scan found tables to check" [expr {$scanned >= 3}]
 
 # A Tcl subcommand behind a C verb is as visible as a C one: `pty expect` is
 # written in the prelude, and the manifest used to be silent about both the
@@ -1752,12 +1773,12 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker wrap}}]
+    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store version vtstrip wait watch worker}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
 check "manifest marks C and Tcl verbs" [expr {
-    [dict get $M run kind] eq "c" && [dict get $M wrap kind] eq "tcl"}]
+    [dict get $M run kind] eq "c" && [dict get $M front kind] eq "tcl"}]
 # EVERY C VERB CARRIES C FACTS. Those facts come from a build-time scan of
 # src/*.c, and until 2026-08-10 that scan worked off two hand-kept lists -- so a
 # new .c file could compile, link and run while the generator never read it.
@@ -1868,7 +1889,7 @@ store close
 file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 
 # --- the shipped tools, self-testing -----------------------------------------
-# Each tool is pure Tcl/Tk stamped by wrap, and each carries a --selftest that
+# Each tool is pure Tcl/Tk shipped inside mt.exe, and each carries a --selftest that
 # exercises its model with no window -- a hidden Tk window drops events and would
 # be testing something other than the program.
 #
@@ -1888,6 +1909,40 @@ foreach t {changes tasks sums life lifelab} {
 set known {changes tasks sums life lifelab}
 set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
 check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
+
+# --- and the same tools, reached BY NAME -------------------------------------
+# The checkout runs above; this runs what SHIPPED. `wrap` used to stamp each
+# tool into its own exe and the build proved the stamping by doing it; the tools
+# ride in this exe's zipfs now, so the equivalent proof is that `mt <name>`
+# finds them there. A tool present in tool/ but missing from the package would
+# otherwise pass every check above and not exist in the product.
+foreach t $known {
+    check "$t resolves as a shipped tool" [expr {
+        [valof {dict get [front env $t] kind}] eq "script"}]
+    check "$t is listed by front tools"   [expr {$t in [front tools]}]
+    check "front which $t names the script, not the exe" [expr {
+        [string match "*/tool/$t/main.tcl" [valof {front which $t}]]}]
+}
+# By name, through the argv dispatcher, in a real child: the whole path.
+check "a shipped tool runs by name" [expr {
+    ![catch {run -timeout 60s -- $MT sums --selftest} tr] && [dict get $tr exit] == 0}]
+# A NAME IS NOT A PATH, and here that is load-bearing rather than tidy. Every
+# other name the front door resolves is a key in a dict the workspace wrote;
+# this one is JOINED ONTO A DIRECTORY, and the string comes from argv.
+#
+# THE ZIPFS RESOLVES `..`. Checked, not assumed: `file exists
+# //zipfs:/app/tool/../tool/sums/main.tcl` is 1. So without the name check the
+# spellings below would resolve to a real shipped tool, and enough of them in a
+# row would walk out of the archive and onto the disk. Every one must be refused
+# by the name, before any file is looked at.
+foreach bad {../tool/sums sums/../sums ../../app/tool/sums} {
+    check "a traversal that WOULD find a tool is refused ($bad)" [expr {
+        [errcode_of {front which $bad}] eq {MACHTELD FRONT notfound}}]
+}
+foreach bad {tool/sums a/b . SUMS} {
+    check "a shipped-tool name may not be \"$bad\"" [expr {
+        [errcode_of {front which $bad}] ne ""}]
+}
 
 # The window tests are separate FILES because they need a real mapped window, but
 # they are driven from here so they cannot become tests nobody runs -- which is

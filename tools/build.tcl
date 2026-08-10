@@ -127,21 +127,13 @@ run $gcc -municode -static-libgcc -Wl,--gc-sections \
     {*}$syslibs -o $bare
 catch {run $strip $bare}
 
-# GUI-subsystem sibling bare (WinMain, -mwindows): same objects, different entry,
-# so windowed tools packaged on it show no console window. Shares machteld_appinit.o.
-puts "cc   machteld_gui_main.c  (GUI host, c23)"
-run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
-    -ffunction-sections -fdata-sections \
-    -c [Rp src machteld_gui_main.c] -o [Rp build machteld_gui_main.o] -I$inc
-
-puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
-set baregui [Rp build machteld-bare-gui.exe]
-run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
-    [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
-    [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
-    {*}$syslibs -o $baregui
-catch {run $strip $baregui}
+# ONE HOST, CONSOLE SUBSYSTEM. There used to be a -mwindows sibling built from
+# the same objects, embedded alongside this one so `wrap` could stamp a windowed
+# tool with no console. Both are gone with `wrap`: a tool is reached as
+# `mt life` now, typed into a shell that already has a console, so there is no
+# double-clickable exe left for a GUI subsystem to serve. Tk works fine from a
+# console host -- the window opens, the terminal stays. When `mt --gui` lands it
+# decides once, at startup, rather than per tool.
 
 # The manifest is DERIVED from the C, then appended to the prelude, so the exe
 # ships a self-description that cannot disagree with the code it describes
@@ -165,26 +157,11 @@ close $fo
 puts "pkg  append machteld zipfs"
 run $tclshs [Rp tools package.tcl] \
     --tcltk $TCLTK --prelude $staged --wrapper $bare --out $out \
-    --embed-console $bare --embed-gui $baregui --docs [Rp docs]
+    --docs [Rp docs] --tools [Rp tool]
 
 puts "built [file nativename $out] ([file size $out] bytes)"
 
-# The tools machteld ships are built by machteld, with the exe just produced --
-# which is also the standing proof that `wrap` works on the artefact we are
-# about to release, not on the one from last time.
-foreach {tooldir toolexe subsystem} [list \
-        [Rp tool changes] [Rp build changes.exe] --gui \
-        [Rp tool tasks]   [Rp build tasks.exe]   --gui \
-        [Rp tool sums]    [Rp build sums.exe]    --console \
-        [Rp tool life]    [Rp build life.exe]    --gui \
-        [Rp tool lifelab] [Rp build lifelab.exe] --gui] {
-    if {![file isdirectory $tooldir]} continue
-    set script [Rp build .wrap.tcl]
-    set fh [open $script w]
-    puts $fh [list ::machteld::wrap $tooldir -o $toolexe $subsystem]
-    puts $fh "exit 0"
-    close $fh
-    run $out $script
-    file delete $script
-    puts "built [file nativename $toolexe] ([file size $toolexe] bytes)"
-}
+# NOTHING IS STAMPED HERE ANY MORE. The build used to end by running the exe it
+# had just produced five times, to `wrap` five tool directories into five
+# standalone exes of 5.9 MB each. The tools ride inside this one now, and the
+# front door runs them by name -- so the build ends when the exe is built.

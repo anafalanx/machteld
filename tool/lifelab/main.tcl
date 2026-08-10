@@ -307,23 +307,24 @@ if {[catch {::machteld::cli duration [dict get $opt grace]} ::lab::gracems]} {
     exit 2
 }
 
-# The window exe sits beside this one when both are wrapped, and beside the
-# script when this is run as a script. Resolved rather than assumed, because a
-# director that cannot find its windows should say so now and not in 250 ms.
+# THE WINDOW IS THIS DIRECTOR'S SIBLING, one directory over: tool/lifelab and
+# tool/life sit side by side, in the checkout and inside mt.exe's zipfs alike.
+# Found rather than assumed, because a director that cannot find its windows
+# should say so now and not in 250 ms.
+#
+# It used to look for a `life.exe` beside itself first, from when `wrap` stamped
+# each tool into its own exe. There are no tool exes any more -- mt.exe is the
+# interpreter and the window is a script it sources, which is what the second
+# branch always did. Same distinction `sums` no longer has to make either.
 set here [file dirname [info nameofexecutable]]
-set wexe [file join $here life.exe]
-if {[file exists $wexe]} {
-    set ::lab::cmd [list $wexe]                       ;# wrapped: the exe is the window
-} else {
-    # Run as a script: the exe is the interpreter, so the window's script has to
-    # be named too. Same distinction `sums` makes, for the same reason.
-    set alt [file join [file dirname [file dirname [file normalize [info script]]]] life main.tcl]
-    if {![file exists $alt]} {
-        catch {puts stderr "lifelab: cannot find life.exe beside $here, nor $alt"}
-        exit 2
-    }
-    set ::lab::cmd [list [info nameofexecutable] $alt]
+set self [info script]
+if {![string match {//zipfs:*} $self]} { set self [file normalize $self] }
+set wscript [file join [file dirname [file dirname $self]] life main.tcl]
+if {![file exists $wscript]} {
+    catch {puts stderr "lifelab: cannot find the life window at $wscript"}
+    exit 2
 }
+set ::lab::cmd [list [info nameofexecutable] $wscript]
 set ::lab::cell [dict get $opt cellsize]
 
 set ::lab::out [dict get $opt out]

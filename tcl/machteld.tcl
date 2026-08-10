@@ -101,15 +101,16 @@ proc ::machteld::manifest {} {
 #
 # The C half of the manifest is derived from src/*.c at build time; this is the
 # same trick applied to the prelude, and until Phase 0 it did not exist -- a Tcl
-# verb reported `kind tcl` plus `info args` and nothing else, so `wrap` and
-# `help` had no domain, no codes and no options in the very dict whose purpose is
-# describing the palette. Tolerable for two verbs; not tolerable for the standard
-# library ([stdlib](stdlib.md)), which lands here and would have left creed 4
-# covering barely half the palette.
+# verb reported `kind tcl` plus `info args` and nothing else, so the two verbs
+# written in Tcl at the time (`help`, and `wrap`, since retired) had no domain,
+# no codes and no options in the very dict whose purpose is describing the
+# palette. Tolerable for two verbs; not tolerable for the standard library
+# ([stdlib](stdlib.md)), which lands here and would have left creed 4 covering
+# barely half the palette.
 #
 # `info body` is the source rather than a table, so this cannot drift: it reads
-# the body of the actual command in the actual interpreter, wrapped tools
-# included.
+# the body of the actual command in the actual interpreter -- including one
+# sourced out of the exe's own zipfs, which is how every shipped tool runs.
 proc ::machteld::MtclFacts {cmd} {
     set body [info body $cmd]
     set domain ""
@@ -251,9 +252,9 @@ proc ::machteld::vtstrip {s} {
 # means the same thing whether the verb was written in C or here.
 #
 # The prelude used to raise eleven bare `return -code error` with no code at all,
-# which put `wrap` and `help` outside the error registry entirely -- nothing to
-# document, and nothing a scan could find. That was survivable while the prelude
-# held two verbs. It stops being survivable as the standard library lands here,
+# which put its two verbs of the time (`help`, and `wrap`, since retired) outside
+# the error registry entirely -- nothing to document, and nothing a scan could
+# find. That was survivable while the prelude held two verbs. It stops being survivable as the standard library lands here,
 # which is why this is Phase 0 of [the standard library](stdlib.md) rather than
 # a cleanup to get to later.
 #
@@ -336,93 +337,6 @@ if {[info commands ::machteld::pty] ne ""} {
     }
 }
 
-# wrap: stamp a pure-Tcl/Tk tool into a standalone exe, fully self-contained --
-# the Tcl/Tk script libraries, the prelude, and BOTH basekits (console + GUI) ride
-# inside this machteld.exe, so no external toolchain or payload is needed. Zero
-# compiler (pure zipfs, the els/starpack overlay). Named `wrap`, not `package`,
-# because Tcl core owns the command `package`. Sign the result: append-then-sign.
-#   wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?
-# <tooldir> must contain main.tcl (the tool's entry, auto-run by AppHook).
-proc ::machteld::_copy_tree {src dst} {
-    file mkdir $dst
-    foreach item [glob -nocomplain [file join $src *]] {
-        set target [file join $dst [file tail $item]]
-        if {[file isdirectory $item]} {
-            ::machteld::_copy_tree $item $target
-        } else {
-            file copy -force $item $target
-        }
-    }
-}
-proc ::machteld::_zip_entries {root {rel ""}} {
-    set out {}
-    foreach item [glob -nocomplain [file join $root $rel *]] {
-        set name [file tail $item]
-        set zrel [expr {$rel eq "" ? $name : [file join $rel $name]}]
-        if {[file isdirectory $item]} {
-            lappend out {*}[::machteld::_zip_entries $root $zrel]
-        } else {
-            lappend out $item [string map {\\ /} $zrel]
-        }
-    }
-    return $out
-}
-proc ::machteld::wrap {args} {
-    set gui 0; set out ""; set with_prelude 1; set tool ""
-    for {set i 0} {$i < [llength $args]} {incr i} {
-        set a [lindex $args $i]
-        switch -- $a {
-            --gui        { set gui 1 }
-            --console    { set gui 0 }
-            --no-prelude { set with_prelude 0 }
-            -o           { incr i; set out [lindex $args $i] }
-            default {
-                if {$tool eq ""} {
-                    set tool $a
-                } else {
-                    Fail WRAP usage "wrap: unexpected argument \"$a\""
-                }
-            }
-        }
-    }
-    if {$tool eq "" || $out eq ""} {
-        Fail WRAP usage "usage: wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?"
-    }
-    if {![file exists [file join $tool main.tcl]]} {
-        Fail WRAP notfound "wrap: \"$tool\" has no main.tcl (the tool's entry point)"
-    }
-    # Locate our own mounted payload (the Tcl/Tk libs + the embedded basekits).
-    set root ""
-    foreach _m [dict keys [zipfs mount]] {
-        if {[file isdirectory $_m/tcl_library] && [file isdirectory $_m/basekit]} {
-            set root $_m; break
-        }
-    }
-    if {$root eq ""} {
-        Fail WRAP unsupported "wrap: this machteld carries no embedded payload (run the packaged machteld.exe)"
-    }
-    set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
-    if {![file exists $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
-
-    set work [file tempdir]
-    try {
-        set stage [file join $work stage]
-        file mkdir $stage
-        ::machteld::_copy_tree [file join $root tcl_library] [file join $stage tcl_library]
-        ::machteld::_copy_tree [file join $root tk_library]  [file join $stage tk_library]
-        if {$with_prelude && [file exists [file join $root machteld.tcl]]} {
-            file copy -force [file join $root machteld.tcl] [file join $stage machteld.tcl]
-        }
-        ::machteld::_copy_tree $tool $stage
-        set tmpbare [file join $work bare.exe]
-        file copy -force $bare $tmpbare
-        file delete -force $out
-        zipfs lmkimg $out [::machteld::_zip_entries $stage] {} $tmpbare
-    } finally {
-        catch {file delete -force $work}
-    }
-    return $out
-}
 
 # help: machteld ships its own docs -- the OKF bundle rides in the appended zipfs
 # at //zipfs:/docs/, so the tool serves its own spec (no external lookup, and an
