@@ -54,6 +54,12 @@ about when you made it.
 The 25.6 ms that remains is a Tcl interpreter starting up, and z.exe's 9.9 ms is a Go binary not
 having one. That gap is inherent, and small enough to stop looking at.
 
+**And the suite went from 38.3 s to 24.5 s**, medians of three runs, measured the same way — by
+reintroducing the one line, rebuilding, and timing both. Almost every check spawns a child through
+`mt tcl <script>`, and every one of those children was deriving the palette description before it
+could work out that `tcl` was a verb. A third of the suite's wall-clock was the front door
+introducing itself to itself, once per process.
+
 ## 2026-08-10 — `wrap` comes back, and the front door pays 130 ms for it
 
 > **The 130 ms in this entry's title is wrong — it is ~13 ms.** See the entry above for the
