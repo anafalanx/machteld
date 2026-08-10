@@ -1989,6 +1989,34 @@ check "no front-door command shadows a curated tool" [expr {$shadowed eq ""}]
 check "a bare command name resolves in-process" [expr {
     [dict get [valof {front env projects}] kind] eq "command"}]
 
+# --- status: the part that is here, and the part that is refused -------------
+# `status` is a COCKPIT -- it aggregates the mirror report, the mirror run state
+# and (under -deep) `verify` and `ledger check`, three of which the plan defers
+# to last. So it lands half-built on purpose, and the half that is missing is
+# ABSENT rather than guessed: no `mirror: null` claiming there is no report when
+# there is one.
+set st [valof {json decode [front status -json]}]
+check "status reports root and the workspace git" [expr {
+    [dict exists $st root] && [dict exists $st zGit ok] && [dict exists $st zGit branch]}]
+check "status counts git the way the cockpit does" [expr {
+    [lsort [dict keys [dict get $st zGit counts]]] eq {deleted modified other untracked}}]
+# `front projects` renders TEXT; the count has to come from the -json form.
+# Comparing against `llength` of the rendering counted words, not projects.
+check "status covers every hosted project" [expr {
+    [llength [dict get $st projects]]
+        == [llength [valof {json decode [front projects -json]}]]
+    && [llength [dict get $st projects]] > 0}]
+check "every project row carries a git summary" [expr {
+    [llength [lmap p [dict get $st projects] {expr {[dict exists $p git ok] ? [continue] : $p}}]] == 0}]
+# NOT FAKED. A key machteld cannot fill is one it does not emit -- so a caller
+# diffing against z sees a missing key, which is true, rather than a null that
+# would be a claim.
+foreach k {mirror mirrorState deep} {
+    check "status does not invent `$k`" [expr {![dict exists $st $k]}]
+}
+check "status -deep is refused, not approximated" [expr {
+    [errcode_of {front status -deep}] eq {MACHTELD FRONT unsupported}}]
+
 # THE `t/` DIRECTORY IS A SOURCE OF TOOLS, not just an override of manifest
 # entries. Four tools existed only as `.z/t/<name>/` directories and machteld
 # refused all four while z ran them -- invisible for a month because the

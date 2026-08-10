@@ -273,8 +273,31 @@ counting as a winsdk alias — one row of fourteen. z uses `filepath.Clean`, whi
 and "is this path *written* underneath that one" is a question about names rather than about the
 disk. Containment is lexical now.
 
-**Next:** the rest of step 4 — `status`, `in`, `verify`, `scout`, then `mirror`, `ledger` and the
-shell shim.
+### `status` is a cockpit, so it cannot come first
+
+The plan lists `status` in step 4's read-only batch. **The code says otherwise**, and this is the
+kind of ordering error only building it finds. `z status` aggregates four things, and three belong
+to commands the plan defers to last:
+
+| field | needs |
+|---|---|
+| `root`, `zGit`, `projects[].git` | git, and the project discovery already built — **done** |
+| `mirror` | the mirror artefact index, keyed by physical directory identity, read through reparse-point-safe opens |
+| `mirrorState` | the mirror run-state file and its process-liveness check |
+| `deep` | `verify` and `ledger check`, neither of which exists yet |
+
+So `mt status` lands **half built, and says so**. `root`, `zGit` and every project's git summary
+diff clean against z — including the count rules, which are exact and slightly surprising: `??` is
+tested first so an untracked file is never counted as anything else, then a `D` anywhere in the
+two-character prefix, then an `M`, then `other`. A `MD` line is a deletion, not a modification.
+
+**The missing keys are ABSENT, not null.** A caller diffing against z sees a key that is not there,
+which is true, rather than a `mirror: null` that would be a claim — and there IS a report here, so
+that claim would be false. `mt status -deep` is refused outright with `{MACHTELD FRONT unsupported}`
+naming what it needs, the same way an `arg0` manifest entry is refused rather than approximated.
+
+**Next:** `in`, `verify`, `scout`, `logs`, then `mirror` and `ledger` — after which `status`
+finishes itself.
 
 ## The risk, named
 
