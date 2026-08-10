@@ -16,27 +16,26 @@ timestamp: 2026-08-10
 //zipfs:/app/tk_library/         the Tk core script library
 //zipfs:/app/machteld.tcl        the prelude, with the derived manifest appended
 //zipfs:/app/docs/               the docs bundle, which `help` serves
-//zipfs:/app/tool/<name>/main.tcl  the tools it ships
 ```
 
-The prelude is deliberately **not** named `main.tcl`: `TclZipfs_AppHook` auto-runs an archive-root
-`main.tcl`, and this exe must reach [its dispatcher](front-door.md) instead. The tools are nested
-one directory down for the same reason — `tools/package.tcl` fails the build if a tool ever lands
-at the root.
+That is the whole of it: the libraries the interpreter needs, the prelude, and the exe's own
+documentation. The prelude is deliberately **not** named `main.tcl`, because `TclZipfs_AppHook`
+auto-runs an archive-root `main.tcl` and this exe must reach [its dispatcher](front-door.md)
+instead.
 
-## The tools ride along; they are not stamped
+## No applications ride inside it
 
-`mt sums .` sources `//zipfs:/app/tool/sums/main.tcl` **in this process**. No exe on disk, no
-manifest entry, no process to start — the same argument that makes a builtin verb run in-process,
-applied to a program instead of a command.
+Two arrangements for shipping programs lived here and both are gone, five days and one day
+respectively. What replaced them is nothing: **`mt.exe` resolves names and supervises what it
+starts, and the programs live wherever their authors keep them** — run with `mt tcl app.tcl`, or
+curated into the workspace like any of the other 273 tools.
 
-The front door replaces the two jobs `Tcl_Main` would have done for a script named on the command
-line: it runs the event loop and it exits. Handing the script back to `Tcl_Main` would have been
-neater and does not work — `Tcl_Main` reads its startup script into a local *before* it calls
-`AppInit`, which is what sources the prelude, so by the time the front door knows that `sums` means
-a script, the decision about what to evaluate has been taken.
+The reasoning is one line: a front door that also hosts the applications is two things at once, and
+the second one grows without limit. Every program added would have been another 5.9 MB artefact
+(under `wrap`) or another name in the resolution order competing with the workspace's own (under
+the zipfs arrangement), and neither cost has an end.
 
-## What was here before: `wrap`
+## What was here before: `wrap`, and then the zipfs tools
 
 Until 2026-08-10 this page described a **tool factory**. `wrap <tooldir> -o <out.exe>` copied the
 Tcl/Tk libraries, the prelude and a tool's files into a staging tree and appended it onto a
@@ -52,10 +51,21 @@ mechanism cost 4.7 MB inside `machteld.exe` and produced five 5.9 MB artefacts t
 of Tcl. Dropping it took the exe from **10.2 MB to 6.0 MB** and the build from six link steps to
 one.
 
-The GUI host went with it. There is no double-clickable tool exe left for a GUI subsystem to serve:
-a tool is reached as `mt life`, typed into a shell that already has a console. Tk works from a
-console host — the window opens and the terminal stays. When `mt --gui` lands it will make that
-choice once, at startup, rather than once per tool.
+The GUI host went with it. Nothing double-clickable is produced here any more for a GUI subsystem
+to serve, and a script that opens a window works from a console host — the window opens, the
+terminal stays. When `mt --gui` lands it will make that choice once, at startup.
+
+**Then the tools themselves went, the next day.** For one day the five rode in the archive at
+`//zipfs:/app/tool/<name>/main.tcl`, with a resolution tier above the curated tools so `mt sums .`
+found them. That was cheaper than `wrap` in every measurable way and it did not survive contact
+with the question `wrap`'s retirement had actually raised: not *how* should this exe carry
+applications, but *should it*. It should not.
+
+Two things were learned building it that outlived it, and both are why
+[`tcl`](palette.md) works the way it does: `Tcl_Main` reads its startup script into a local
+**before** it calls `AppInit`, so a dispatcher cannot hand a script back to it; and a Tk program
+that never calls `vwait` relies on `Tcl_Main` running `Tk_MainLoop` *after* the script returns, so
+anything sourcing such a program must run that loop itself.
 
 ## Signing
 

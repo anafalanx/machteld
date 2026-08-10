@@ -493,10 +493,25 @@ could work. `tcl/mt.tcl` is in the history at `98bc96e` if that is ever built.
 
 ## Shipping tools inside the exe — refused, with one exception that is not one (2026-08-09)
 
-> **REVERSED 2026-08-10.** The five tools now ride inside the exe at
-> `//zipfs:/app/tool/<name>/main.tcl` and `mt sums .` runs one. What follows is what was argued,
-> and then what actually changed — because a register exists to make a reversal deliberate, not to
-> be quietly contradicted by the next commit.
+> **REVERSED, THEN REINSTATED — both on 2026-08-10.** The five tools moved into the exe at
+> `//zipfs:/app/tool/<name>/main.tcl`, `mt sums .` ran one, and later the same day all five were
+> deleted from the tree. **The original refusal stands, for a reason nobody argued at the time.**
+>
+> The reversal below is left in full rather than edited out, because the mistake is the useful
+> part: every step of it was locally sound. The mechanical objection really had been answered, the
+> receiver really had arrived, and the cost really had moved. What none of it examined was whether
+> a front door should host applications *at all* — and the entry's own closing paragraph had
+> already said that was the question. Answering a question the register told you not to ask is a
+> failure mode worth recognising by name.
+
+**The answer, given plainly: no.** A front door resolves names and supervises what it starts.
+Hosting the applications as well makes it two things at once, and the second one grows without
+limit — every program added is another name in the resolution order competing with the workspace's
+own inventory, forever. `changes`, `tasks`, `sums`, `life` and `lifelab` are not *machteld*; they
+are programs that were written to exercise machteld, and they did that job. They live in git
+history, the palette they motivated is still here, and what they found is in [the log](log.md).
+
+`mt.exe` ships: the Tcl/Tk libraries, the prelude, and its own docs. Nothing else.
 
 **Bundling wrapped GUI tools into `machteld.exe` is refused.** Argued three ways and attacked by
 nine critics; every affirmative case failed. `argv[1]` is fully allocated by `Tcl_Main` — non-dash
@@ -505,8 +520,8 @@ works, which rule 2 already forbids, or depends on the working directory. The cl
 have no receiver: nothing here is signed, nothing is on PATH, and the author wrote both tools
 himself. Recorded so it is not relitigated.
 
-**What changed, point by point.** Not a change of mind — a change of premises, two of them by
-building the thing the argument said could not be built:
+**What changed, point by point** *(the reversal's reasoning, kept as written)*. Not a change of mind
+— a change of premises, two of them by building the thing the argument said could not be built:
 
 - *"`argv[1]` is fully allocated."* It was, for a toolkit. It is not for a **front door**, whose
   entire job is turning a name into something runnable. `mt rg -n TODO .` was built in step 2 of
@@ -521,8 +536,11 @@ building the thing the argument said could not be built:
   bare hosts inside the exe: 4.7 MB of payload and five 5.9 MB artefacts, to ship five files of
   Tcl. Retiring it took the exe from 10.2 MB to 6.0 MB.
 
-The correction below turned out to be the load-bearing part, and it is what actually decided this:
-the question was never "may the exe contain tools".
+The correction below turned out to be the load-bearing part — and the reversal cited it while
+getting it backwards. It says the question is not "may the exe contain tools" but **"may the
+palette contain applications"**, and then treated the front door's arrival as an answer. It was
+not; it was a change of subject. The question is about identity, it was asked properly the next
+time, and the answer was no.
 
 **But the question was framed wrongly, and the correction matters more than the answer.** The
 argument was about packaging *programs*; machteld already ships *code* — the prelude — and a third

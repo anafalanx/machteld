@@ -22,6 +22,6 @@ Linking those against the shared core yields two **bares**: `machteld-bare.exe` 
 
 ## The exe
 
-`machteld.exe` is the console host with an appended zipfs carrying the Tcl/Tk script libraries, the prelude (`machteld.tcl`), the docs bundle, and the tools it ships (`tool/<name>/main.tcl`). Until 2026-08-10 it also carried two bare hosts, console and GUI, so the retired `wrap` verb could stamp standalone tool exes; dropping them took the exe from 10.2 MB to 6.0 MB. See [packaging](packaging.md).
+`machteld.exe` is the console host with an appended zipfs carrying the Tcl/Tk script libraries, the prelude (`machteld.tcl`) and the docs bundle. Nothing else: until 2026-08-10 it also carried two bare hosts, console and GUI, so the retired `wrap` verb could stamp standalone tool exes, and then briefly the five tools themselves as scripts. Both are gone and the exe went from 10.2 MB to 6.0 MB. See [packaging](packaging.md).
 
-`TclZipfs_AppHook` self-mounts the appended zip at startup. The prelude is named `machteld.tcl`, not `main.tcl`, so it is *not* auto-run — machteld reaches its [dispatcher](front-door.md), which resolves the first argument as a NAME -- a script is named with the `tcl` verb (`mt tcl app.tcl`) -- and with no arguments drops to its REPL. The shipped tools sit one directory down for the same reason: a `main.tcl` at the archive root would be auto-run, and the build fails if one ever lands there.
+`TclZipfs_AppHook` self-mounts the appended zip at startup. The prelude is named `machteld.tcl`, not `main.tcl`, so it is *not* auto-run — machteld reaches its [dispatcher](front-door.md), which resolves the first argument as a NAME -- a script is named with the `tcl` verb (`mt tcl app.tcl`) -- and with no arguments drops to its REPL. 

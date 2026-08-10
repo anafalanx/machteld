@@ -7,9 +7,9 @@
 # host sources it explicitly and leaves Tcl_Main's REPL/script handling intact.
 #
 #   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> \
-#           --out <exe> ?--docs <dir>? ?--tools <dir>?
+#           --out <exe> ?--docs <dir>?
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --tools "" --docs ""}
+array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --docs ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {[info exists opt($a)]} {
@@ -87,20 +87,16 @@ if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
     copy_tree $opt(--docs) [file join $stage docs]
 }
 
-# The tools machteld ships, at //zipfs:/app/tool/<name>/main.tcl -- NESTED, never
-# at the archive root, because TclZipfs_AppHook auto-runs a root main.tcl and
-# this exe must land in its dispatcher instead.
+# NOTHING ELSE RIDES IN HERE. Two things did, and both are gone:
 #
-# This replaced //zipfs:/basekit/, which carried a console and a GUI copy of the
-# bare host so `wrap` could stamp a standalone exe per tool. Five tools cost five
-# 5.9 MB exes and 4.7 MB of basekit inside machteld.exe -- to ship five files of
-# Tcl. They are scripts again, and the front door runs them by name.
-if {$opt(--tools) ne "" && [file isdirectory $opt(--tools)]} {
-    copy_tree $opt(--tools) [file join $stage tool]
-    if {[file exists [file join $stage tool main.tcl]]} {
-        error "package.tcl: a tool named main.tcl would be auto-run by AppHook"
-    }
-}
+# - `//zipfs:/basekit/`, a console and a GUI copy of the bare host, so the `wrap`
+#   verb could stamp a standalone exe per tool. 4.7 MB, retired with `wrap`.
+# - `//zipfs:/app/tool/<name>/main.tcl`, five programs the front door could run
+#   by name. That lasted a day: a front door resolves names, and hosting the
+#   applications too made it two things at once.
+#
+# What is left is what the exe needs to be itself: the script libraries, the
+# prelude, and the docs `help` serves.
 
 file delete -force $OUT
 set entries [zip_entries $stage]

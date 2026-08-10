@@ -1888,62 +1888,6 @@ check "store put/get round-trips"    [expr {[store put a b] eq "" && [store get 
 store close
 file delete -force [file join $env(TEMP) mt_regtest.sqlite]
 
-# --- the shipped tools, self-testing -----------------------------------------
-# Each tool is pure Tcl/Tk shipped inside mt.exe, and each carries a --selftest that
-# exercises its model with no window -- a hidden Tk window drops events and would
-# be testing something other than the program.
-#
-# Driven by a LIST rather than one hardcoded call: `tasks` shipped with its
-# selftest unwired, so the tool had a passing test nothing ever ran. A gate that
-# covers the first tool and not the second is how that happens twice.
-foreach t {changes tasks sums life lifelab} {
-    set TOOL [file join $HERE .. tool $t]
-    if {![file isdirectory $TOOL]} { continue }
-    check "$t passes its own selftest" [expr {
-        ![catch {run -timeout 60s -- $MT tcl [file join $TOOL main.tcl] --selftest} tr]
-        && [dict get $tr exit] == 0}]
-}
-
-# Every tool directory in tool/ must be covered by the loop above -- otherwise
-# adding a third tool silently adds an untested one.
-set known {changes tasks sums life lifelab}
-set present [lmap d [glob -nocomplain -types d -directory [file join $HERE .. tool] *] {file tail $d}]
-check "every tool in tool/ is selftested" [expr {[lsort $present] eq [lsort $known]}]
-
-# --- and the same tools, reached BY NAME -------------------------------------
-# The checkout runs above; this runs what SHIPPED. `wrap` used to stamp each
-# tool into its own exe and the build proved the stamping by doing it; the tools
-# ride in this exe's zipfs now, so the equivalent proof is that `mt <name>`
-# finds them there. A tool present in tool/ but missing from the package would
-# otherwise pass every check above and not exist in the product.
-foreach t $known {
-    check "$t resolves as a shipped tool" [expr {
-        [valof {dict get [front env $t] kind}] eq "script"}]
-    check "$t is listed by front tools"   [expr {$t in [front tools]}]
-    check "front which $t names the script, not the exe" [expr {
-        [string match "*/tool/$t/main.tcl" [valof {front which $t}]]}]
-}
-# By name, through the argv dispatcher, in a real child: the whole path.
-check "a shipped tool runs by name" [expr {
-    ![catch {run -timeout 60s -- $MT sums --selftest} tr] && [dict get $tr exit] == 0}]
-# A NAME IS NOT A PATH, and here that is load-bearing rather than tidy. Every
-# other name the front door resolves is a key in a dict the workspace wrote;
-# this one is JOINED ONTO A DIRECTORY, and the string comes from argv.
-#
-# THE ZIPFS RESOLVES `..`. Checked, not assumed: `file exists
-# //zipfs:/app/tool/../tool/sums/main.tcl` is 1. So without the name check the
-# spellings below would resolve to a real shipped tool, and enough of them in a
-# row would walk out of the archive and onto the disk. Every one must be refused
-# by the name, before any file is looked at.
-foreach bad {../tool/sums sums/../sums ../../app/tool/sums} {
-    check "a traversal that WOULD find a tool is refused ($bad)" [expr {
-        [errcode_of {front which $bad}] eq {MACHTELD FRONT notfound}}]
-}
-foreach bad {tool/sums a/b . SUMS} {
-    check "a shipped-tool name may not be \"$bad\"" [expr {
-        [errcode_of {front which $bad}] ne ""}]
-}
-
 # --- `tcl`: the first argument is a NAME, and a script is named --------------
 # The dispatcher used to hand anything shaped like a path back to Tcl_Main, so
 # `mt app.tcl` ran app.tcl. That shape test is gone; these hold the replacement
@@ -1986,48 +1930,6 @@ check "tcl with no script is a usage error" [expr {
     [errcode_of {tcl}] eq {MACHTELD TCL usage}}]
 check "tcl on a missing script says so"     [expr {
     [errcode_of {tcl no_such_script_zzz.tcl}] eq {MACHTELD TCL notfound}}]
-
-# The window tests are separate FILES because they need a real mapped window, but
-# they are driven from here so they cannot become tests nobody runs -- which is
-# exactly what happened to `tasks --selftest`. Discovered by glob, so a new
-# *_ui.tcl is picked up without anyone remembering to add it.
-foreach uitest [lsort [glob -nocomplain -directory $HERE *_ui.tcl]] {
-    set r [run -timeout 120s -- $MT tcl $uitest]
-    check "[file tail $uitest] passes" [expr {[dict get $r exit] == 0}]
-    if {[dict get $r exit] != 0} {
-        puts "     [string trim [dict get $r out]]"
-        puts "     [string trim [dict get $r err]]"
-    }
-}
-check "there are window tests to run" [expr {
-    [llength [glob -nocomplain -directory $HERE *_ui.tcl]] >= 1}]
-
-# --- tools reject bad arguments instead of dying in a timer -------------------
-# `tasks --interval` with nothing after it set the interval to the empty string;
-# `after ""` then threw out of tick, so the tool died at startup -- or, worse, if
-# it was already running, stopped refreshing while still showing a list that
-# looked live. The next button in that window is End Task.
-set TASKS [file join $HERE .. tool tasks main.tcl]
-if {[file exists $TASKS]} {
-    foreach {label argl} {
-        "--interval with no value"   {--interval}
-        "--interval with a non-number" {--interval abc}
-        "--interval below the floor" {--interval 5}
-        "an unknown argument"        {--nonsense}
-    } {
-        set r [run -timeout 30s -- $MT tcl $TASKS {*}$argl]
-        check "tasks rejects $label" [expr {[dict get $r exit] == 2}]
-        check "tasks explains $label" [expr {
-            [string match "*tasks:*" [dict get $r err]] ||
-            [string match "*tasks:*" [dict get $r out]]}]
-    }
-    # A valid value must survive the parser AND still reach the mode: validation
-    # runs before --selftest is honoured, so this exercises both.
-    set r [run -timeout 60s -- $MT tcl $TASKS --interval 500 --selftest]
-    check "tasks accepts a valid --interval" [expr {[dict get $r exit] == 0}]
-    set r [run -timeout 30s -- $MT tcl $TASKS --interval bogus --selftest]
-    check "a bad --interval is caught even in selftest mode" [expr {[dict get $r exit] == 2}]
-}
 
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"

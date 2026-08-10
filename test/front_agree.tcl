@@ -52,18 +52,11 @@ proc path_head {p inherited} {
     return [lmap d $dirs {string tolower $d}]
 }
 
-# THE COMPARISON IS OVER THE CURATED INVENTORY, which is the only inventory the
-# two front doors share. `front tools` also lists the tools that ride inside
-# mt.exe, and z has never heard of those -- counting them as "z refused" would
-# report five deliberate differences as five surprises, every run, and hide a
-# real one among them.
-set shipped {}
-foreach n [front tools] {
-    if {[dict get [front env $n] kind] eq "script"} { lappend shipped $n }
-}
-set names [lmap n [front tools] {expr {$n in $shipped ? [continue] : $n}}]
-puts [format "shipped by mt    : %d (%s) -- not compared, z has no such names" \
-          [llength $shipped] [join $shipped " "]]
+# The curated inventory is the whole inventory again. For one day `front tools`
+# also listed five programs riding inside mt.exe, which z had never heard of and
+# which this had to filter out by hand; the tools were removed on 2026-08-10 and
+# the filter went with them.
+set names [front tools]
 set agree 0 ; set differ {} ; set mine_refused {} ; set theirs_refused {}
 set inherited [expr {[info exists ::env(PATH)] ? $::env(PATH) : ""}]
 

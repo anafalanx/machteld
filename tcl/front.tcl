@@ -50,7 +50,6 @@ namespace eval ::machteld {
     # order: machteld's own file wins, the Go front door's is still honoured.
     variable FRONT_PROJFILES {mt.json z.json}
 
-    variable FRONT_SHIPPED ""   ;# "" untried, a zipfs dir, or "none"
     variable FRONT_JOURNAL ""   ;# "" untried, "on" open, "off" unavailable
     variable FRONT_SESSION ""   ;# this front door invocation
 }
@@ -224,36 +223,13 @@ proc ::machteld::FrontBaseEnv {} {
 # NAME -> SOMETHING RUNNABLE. Resolution order is the workspace's: a builtin
 # first, then a curated tool. `z:name` restricts to the front door's own, the way
 # `z` qualifies a collision.
-# The tools this exe ships, at //zipfs:/app/tool/<name>/main.tcl. Found by
-# looking for the mount that has them rather than by naming `//zipfs:/app`,
-# which is a mount point the host chooses and not a constant.
 #
-# THE NAME IS CHECKED BEFORE IT IS JOINED. Everything else the front door
-# resolves is a key in a dict the workspace wrote; this one is joined onto a
-# path, and the string comes from argv. `mt ../../../etc/x` must not become a
-# file lookup, so a shipped tool's name is letters and digits, or it is not one.
-proc ::machteld::FrontShippedRoot {} {
-    variable FRONT_SHIPPED
-    if {$FRONT_SHIPPED eq ""} {
-        set FRONT_SHIPPED none
-        foreach m [dict keys [zipfs mount]] {
-            if {[file isdirectory [file join $m tool]]} {
-                set FRONT_SHIPPED [file join $m tool]
-                break
-            }
-        }
-    }
-    return [expr {$FRONT_SHIPPED eq "none" ? "" : $FRONT_SHIPPED}]
-}
-proc ::machteld::FrontShipped {name} {
-    set root [FrontShippedRoot]
-    if {$root eq ""} { return "" }
-    if {![regexp {^[a-z][a-z0-9]*$} $name]} { return "" }
-    set p [file join $root $name main.tcl]
-    if {[file exists $p]} { return $p }
-    return ""
-}
-
+# THERE WAS BRIEFLY A THIRD TIER between those two, for tools riding inside this
+# exe's own zipfs (`mt sums .`), and it lasted a day. Five programs shipped that
+# way and all five were removed on 2026-08-10: a front door resolves names, and
+# hosting the applications as well made it two things at once. Every name the
+# front door resolves is now a key in a dict somebody else wrote -- which is
+# also why nothing here joins a caller's string onto a path.
 proc ::machteld::FrontResolve {name} {
     variable FRONT_HOME
     FrontRoots
@@ -269,17 +245,6 @@ proc ::machteld::FrontResolve {name} {
         if {[dict exists [manifest] $name]} {
             return [dict create kind builtin name $name exe [info nameofexecutable] \
                         args [list $name] env [FrontBaseEnv] cwd [pwd]]
-        }
-        # A SHIPPED TOOL is a program machteld carries -- Tcl, inside this exe's
-        # own zipfs, with no file on disk and no entry in anyone's manifest.
-        # Above curated tools on purpose: these are the front door's own, the
-        # way a builtin verb is, and none of the five collides with any of the
-        # 273 the workspace curates.
-        set script [FrontShipped $name]
-        if {$script ne ""} {
-            return [dict create kind script name $name exe [info nameofexecutable] \
-                        script $script pre [list $script] args {} \
-                        env [FrontBaseEnv] cwd [file nativename [pwd]]]
         }
     }
 
@@ -359,8 +324,7 @@ proc ::machteld::FrontResolve {name} {
         }
     }
 
-    Fail FRONT notfound "\"$name\" is not a builtin, a shipped tool or a curated tool\
-                         -- there is no PATH fallback"
+    Fail FRONT notfound "\"$name\" is not a builtin or a curated tool -- there is no PATH fallback"
 }
 
 proc ::machteld::front {args} {
@@ -393,20 +357,9 @@ proc ::machteld::front {args} {
     if {$sub eq "tools"} {
         if {[llength $args] > 2} { Fail FRONT usage "usage: front tools ?pattern?" }
         set pat [expr {[llength $args] == 2 ? [lindex $args 1] : "*"}]
-        # THE SHIPPED TOOLS ARE LISTED TOO. `front tools` answers "what can I
-        # run"; a name that resolves and is not in that answer is a name nobody
-        # can discover. They come first because that is the order resolution
-        # takes them in.
-        set names {}
-        set sroot [FrontShippedRoot]
-        if {$sroot ne ""} {
-            foreach d [glob -nocomplain -types d -directory $sroot *] {
-                if {[file exists [file join $d main.tcl]]} { lappend names [file tail $d] }
-            }
-        }
         set m [FrontManifest]
-        if {[dict exists $m tools]} { lappend names {*}[dict keys [dict get $m tools]] }
-        return [lsearch -all -inline -glob [lsort -unique $names] $pat]
+        if {![dict exists $m tools]} { return {} }
+        return [lsort [lsearch -all -inline -glob [dict keys [dict get $m tools]] $pat]]
     }
 
     # ONE PLACE KNOWS THE FILENAME. `front run` opens the journal lazily and a
@@ -444,11 +397,6 @@ proc ::machteld::front {args} {
     set r [FrontResolve [lindex $args 1]]
     if {$sub eq "which"} {
         if {[llength $args] != 2} { Fail FRONT usage "usage: front which name" }
-        # A SHIPPED TOOL IS ITS SCRIPT, not the exe that sources it. `which`
-        # answers "what will run", and for these the exe is the interpreter --
-        # `which changes` and `which life` would both say machteld.exe, which
-        # is true and tells you nothing.
-        if {[dict exists $r script]} { return [dict get $r script] }
         return [dict get $r exe]
     }
     # env
@@ -519,60 +467,28 @@ proc ::machteld::FrontExec {r inherit cargs} {
     return $res
 }
 
-# A shipped tool run in-process still belongs in the record, but closing its row
-# is a different problem from closing a child's: there is no `wait` to come back
-# from, because the tool IS this process. `exit` is the hook -- it is where a
-# program ends and Tcl lets it be traced.
-#
-# WHAT THIS DOES NOT CATCH, said plainly: a tool that ends by falling off the end
-# of its script exits through Tcl_Main's own C path, which never runs the Tcl
-# `exit` command, so its row stays `running`. That is the same reconciliation gap
-# [the journal](journal.md) already names for a child whose front door died, and
-# the same `mtps` sweep closes both.
-proc ::machteld::FrontShippedRecord {r cargs} {
-    variable FRONT_SESSION
-    if {![FrontJournal]} return
-    set jid ""
-    catch {
-        set jid [journal add [dict create \
-            session $FRONT_SESSION parent "" pid [pid] \
-            name [dict get $r name] kind [dict get $r kind] \
-            exe [dict get $r script] argv [json encode $cargs -list] \
-            cwd [dict get $r cwd] \
-            project [expr {[dict exists $r env MT_PROJECT_NAME]
-                           ? [dict get $r env MT_PROJECT_NAME] : ""}]]]
-    }
-    if {$jid ne ""} {
-        catch {trace add execution ::exit enter [list ::machteld::FrontShippedDone $jid]}
-    }
-}
-proc ::machteld::FrontShippedDone {jid cmd op} {
-    set code [expr {[llength $cmd] > 1 ? [lindex $cmd 1] : 0}]
-    if {![string is integer -strict $code]} { set code 1 }
-    catch {journal done $jid [expr {$code == 0 ? "ok" : "error"}] $code}
-}
-
 # BECOME A SCRIPT. The process stops being a front door and starts being that
-# program: its `argv0`, its `argv`, its event loop, its exit code. Used by the
-# `tcl` verb and by every shipped tool, which is the same act named two ways.
+# program: its `argv0`, its `argv`, its event loop, its exit code.
 #
 # IT TAKES OVER TWO JOBS Tcl_Main WOULD HAVE DONE for a script named on the
 # command line, and it has to, because Tcl_Main is no longer going to do them:
 #
 # 1. HANDING THE SCRIPT BACK TO Tcl_Main WOULD BE NEATER, AND DOES NOT WORK.
 #    Tcl_Main reads its startup script into a local before it calls AppInit --
-#    which is what sources this prelude -- so by the time the front door knows
-#    what to run, the decision about what to evaluate has been taken. Setting
+#    which is what sources this prelude -- so by the time the prelude has a
+#    script to name, the decision about what to evaluate has been taken. Setting
 #    `argv0` afterwards changes the variable and nothing else: the process still
-#    tries to read a file called "sums", and says so.
+#    tries to read a file called "app.tcl", and says so.
 #
-# 2. THE EVENT LOOP MUST BE REPLACED, NOT SKIPPED. Four of the five shipped
-#    tools are Tk and not one calls `vwait`: under `tclsh`, `package require Tk`
-#    hands Tk_MainLoop to Tcl_SetMainLoop and Tcl_Main runs it AFTER the script
-#    returns. Source a windowed program with nothing after it and it builds its
-#    window, returns, and the process ends before one event is dispatched.
-#    `tkwait window .` is that loop here -- Tk_MainLoop runs while a main window
-#    exists, and these programs have exactly the one.
+# 2. THE EVENT LOOP MUST BE REPLACED, NOT SKIPPED. Under `tclsh`, `package
+#    require Tk` hands Tk_MainLoop to Tcl_SetMainLoop and Tcl_Main runs it AFTER
+#    the script returns -- which is why a Tk program that never calls `vwait`
+#    works there. Source one from here with nothing after it and it builds its
+#    window, returns, and the process ends before a single event is dispatched.
+#    `tkwait window .` is that loop for a program with one main window, which is
+#    what a Tk program written this way has. Found by running the Life windows
+#    that used to ship here, back when there were tools inside the exe to find
+#    it with.
 #
 # The error path prints `-errorinfo`, because that is what Tcl_Main prints and a
 # script that fails should not become harder to debug for being named rather
@@ -594,11 +510,6 @@ proc ::machteld::FrontBecome {script cargs {label ""}} {
     exit 0
 }
 
-proc ::machteld::FrontShippedRun {r cargs} {
-    FrontShippedRecord $r $cargs
-    FrontBecome [dict get $r script] $cargs [dict get $r name]
-}
-
 # tcl: run a Tcl script as this process's program.
 #
 #   tcl <script.tcl> ?arg ...?
@@ -609,6 +520,9 @@ proc ::machteld::FrontShippedRun {r cargs} {
 # handed it to Tcl_Main. That worked, and it was a shape test: a heuristic
 # deciding what kind of thing you meant. `argv0` is a NAME now, always, with no
 # test of any kind, and this verb is how a script is named instead.
+#
+# This is also what a project's helper scripts are run with, which was the
+# reason the front door had to be a script host at all: `mt tcl tools/build.tcl`.
 #
 # IT DOES NOT RETURN, and that is the point rather than a limitation: the process
 # BECOMES the script. To *include* a file in the program you are already
@@ -633,13 +547,13 @@ proc ::machteld::tcl {args} {
 # exist" -- which would have let a stray file change what `mt rg` means, the
 # same accident as a PATH fallback -- but it was still a SHAPE TEST, a heuristic
 # guessing which of two kinds of thing you meant from how the word was spelled.
-# And it left one case genuinely ambiguous: a file named `changes`, no
-# extension, beside a shipped tool named `changes`.
+# `mt rg` beside a file called `rg` is the case it could not answer, and there
+# are 273 curated names for such a file to be named after.
 #
-# A script is named now: `mt tcl app.tcl`. That costs a word at every call site
-# -- 71 of them in this repo -- and buys a dispatcher with no heuristic in it at
-# all, which is [the creed](creed.md)'s "determinism over cleverness" applied to
-# the one place the front door was still guessing.
+# A script is named now: `mt tcl app.tcl`. That cost a word at every call site
+# -- 71 of them in this repo -- and bought a dispatcher with no heuristic in it
+# at all, which is [the creed](creed.md)'s "determinism over cleverness" applied
+# to the one place the front door was still guessing.
 proc ::machteld::FrontDispatch {} {
     global argv argv0
     if {![info exists argv0]} return
@@ -676,7 +590,6 @@ proc ::machteld::FrontDispatch {} {
         exit 127                                      ;# the shell's "no such command"
     }
 
-    if {[dict get $r kind] eq "script"} { FrontShippedRun $r $argv }
 
     if {[catch {FrontExec $r 1 $argv} res]} {
         catch {puts stderr "mt: $res"}
