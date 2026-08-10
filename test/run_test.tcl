@@ -1801,6 +1801,43 @@ check "every C verb was read by the manifest generator" [expr {$unseen eq ""}]
 # The manifest describes itself, which is the cheapest possible proof that
 # self-description is not special-cased.
 check "manifest describes itself" [expr {[dict get $M manifest kind] eq "tcl"}]
+
+# --- the front door must not derive the manifest to resolve a name -----------
+# Deriving the Tcl half runs MtclFacts over every Tcl verb, and MtclFacts
+# follows helpers transitively with a regexp per helper per body: 316 ms,
+# measured. `FrontResolve` opened with `dict exists [manifest] $name` to ask
+# whether a name was a builtin, so EVERY `mt <name>` paid it -- 361 ms against
+# z.exe's 9. Structural rather than timed, because a timing gate on a shared
+# machine fails for reasons that have nothing to do with the code.
+# COMMENTS STRIPPED FIRST: the proc explains what it used to do, and quoting the
+# old line is not doing it. A gate that cannot tell code from prose about code
+# fails on its own documentation, which is how a true gate gets deleted.
+set frbody ""
+foreach line [split [info body ::machteld::FrontResolve] \n] {
+    if {[string index [string trim $line] 0] eq "#"} continue
+    append frbody $line \n
+}
+# `string first`, NOT `string match`. In a match pattern `[manifest]` is a
+# CHARACTER CLASS -- any one of m,a,n,i,f,e,s,t -- so `*[manifest]*` matches
+# essentially every string, and this gate passed and failed for reasons
+# unrelated to what it claims to check. The same trap caught the palette-advice
+# gate once already; a literal search is the answer both times.
+check "FrontResolve does not derive the manifest" [expr {
+    [string first {[manifest]} $frbody] < 0}]
+# THE PREDICATE AND THE MANIFEST MUST AGREE, since the point of using the cheap
+# one is that it answers the same question. If they ever diverge, `mt foo` and
+# `dict keys [manifest]` disagree about what a verb is.
+set pverbs {}
+foreach cmd [info commands ::machteld::*] {
+    set v [namespace tail $cmd]
+    if {[::machteld::PaletteVerb $v]} { lappend pverbs $v }
+}
+check "PaletteVerb agrees with the manifest's keys" [expr {
+    [lsort $pverbs] eq [lsort [dict keys $M]]}]
+# And the derivation is memoised, so a caller that asks twice pays once.
+set t0 [clock microseconds] ; manifest ; manifest ; manifest
+check "manifest is derived once, not once per call" [expr {
+    ([clock microseconds] - $t0) / 1000 < 100}]
 # subcommands: ask the binary by provoking the index error, then compare.
 foreach v {child pty store watch} {
     catch {::machteld::$v __nosuch__} m

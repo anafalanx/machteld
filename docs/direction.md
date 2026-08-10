@@ -628,3 +628,26 @@ worth 130 ms. Recorded with the number so the trade stays visible rather than be
 **`wrap` is a capability, not an application**, and that is what distinguishes this from the five
 tools deleted the same day. A verb hands the caller an exe of their own; an application would be an
 exe machteld keeps. The front door still hosts nothing.
+
+## Correction: the basekits cost ~13 ms, not 130 (2026-08-10)
+
+The entry above reports a table putting the embedded basekits at **+130 ms per invocation**, and
+decides to pay it. **The number is wrong and the decision is unaffected** — the true cost is about
+**13 ms**, so the thing that was chosen is cheaper than it was chosen at.
+
+The bad measurement compared `mt-nobasekit.exe`, a build made *before* `wrap` was restored, against
+the current `machteld.exe`. Those two differ in their basekits and in their prelude, and the
+prelude was where the cost really lived: `FrontResolve` was calling `manifest`, which derives the
+palette's self-description at 316 ms a time. A same-session A/B of two hosts packaged from the
+*same* prelude puts the basekits at ~13 ms, and two hosts with an *empty* prelude — 6.25 MB and
+10.68 MB — answer in 22.6 ms and 22.3 ms, which is no difference at all.
+
+**The withdrawn claim:** that a large appended archive slows startup as a step, and that the
+archive's size rather than its contents was responsible. Neither is supported. The random-data
+control that seemed to confirm it was measuring `manifest` too.
+
+**The rule this earns**, because the mistake was not carelessness but a plausible-looking method:
+**a cross-build A/B is not an A/B.** Two artefacts that differ in one *intended* way will differ in
+others, and a measurement will attribute the entire gap to whichever difference you had in mind.
+Vary one thing, from one source, in one session — and when a number is surprising, that is a reason
+to isolate further rather than to write it down.

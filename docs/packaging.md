@@ -45,12 +45,11 @@ The subsystem is *compiled in*, not a PE byte-flip: a console host run in a GUI 
 valid standard channels and `puts stdout` throws *"can not find channel named stdout"*. Two hosts,
 the way tclkit has always done it (`tclkit` vs `tclkitsh`).
 
-**It costs the front door 130 ms per invocation**, and that was measured rather than assumed. See
-[the register](direction.md) for the table; the short version is that a large appended archive
-slows startup as a step — `mt version` goes from ~240 ms at 6.0 MB to ~370 ms at 10.2 MB — and it
-is the archive's *size*, not the fact that executables are nested inside one, because the same
-weight of random data costs the same. Paid deliberately, in exchange for one file that can stamp
-anywhere.
+**It costs the front door about 13 ms per invocation**, on a same-session A/B of the two builds:
+6.0 MB answers `mt version` in ~22 ms with a trivial prelude, 10.2 MB in ~22 ms too, and the whole
+difference shows up in the mount. The first measurement published here said 130 ms and was wrong —
+it compared two builds that differed in more than their basekits, and the real cost was hiding
+somewhere else entirely. [The log](log.md) has the correction and what was actually slow.
 
 ## No applications ride inside it
 
