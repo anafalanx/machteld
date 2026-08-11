@@ -293,6 +293,63 @@ puts [format "ledger bytes     : %d file(s) byte-identical to z's%s" $lproven \
           [expr {[llength $lunprovable] ? "; NOT PROVABLE for [join $lunprovable {, }]\
                  (z calls it stale, so the file on disk is not z's output)" : ""}]]
 
+# --- and the mirror dry run, which is the whole command minus the writing -----
+#
+# OFF BY DEFAULT, AND SAID SO RATHER THAN SKIPPED SILENTLY. Two reasons, and
+# neither is "it is slow", though it is: each side runs `robocopy /L` over
+# ~300,000 files, so the pair costs minutes, and BOTH sides write real log files
+# and a real report into the workspace's log directory. A verification that
+# leaves artefacts behind every time the suite runs is a verification that
+# changes what it measures. Run it with `--mirror`.
+#
+# COUNTS ARE NOT COMPARED, and that is not laxity. The two dry runs happen
+# minutes apart on a live tree; between them a build writes object files and a
+# log directory gains two logs, so `files total=` genuinely differs and a
+# byte-diff of the numbers would fail for a true reason and teach nobody
+# anything. What must agree is the STRUCTURE -- the section headings, the link
+# list (which is a fact about the tree, not about the run), the summary's field
+# names, and the exit-code class.
+set MIRROR_RUN [expr {[lsearch -exact $argv --mirror] >= 0}]
+set mbad 0
+if {!$MIRROR_RUN} {
+    puts "mirror dry run   : not run (--mirror; each side runs robocopy /L over ~300k files\
+                                      and writes logs into the workspace log directory)"
+} else {
+    proc mirrorSections {text} {
+        set out {}
+        foreach l [split [string map {\r\n \n} [string trimright $text]] \n] {
+            # The first line names which front door produced it, deliberately.
+            if {$l eq "z mirror" || $l eq "mt mirror"} continue
+            # A run id is in every artefact path and is unique per run.
+            if {[string match "Dry run complete. Report: *" $l]} { lappend out "REPORT-LINE" ; continue }
+            # The numbers drift between the two runs; the FIELD NAMES must not.
+            if {[regexp {^  (dirs|files|bytes) } $l]} {
+                lappend out [regsub -all {=[0-9]+} $l "=N"] ; continue
+            }
+            if {[string match "  ended *" $l]} { lappend out "  ended TIME" ; continue }
+            lappend out $l
+        }
+        return $out
+    }
+    set zm [mirrorSections [dict get [run -timeout 1800s -- $zexe mirror --dry-run] out]]
+    # `[info nameofexecutable]` RATHER THAN $MTEXE, which is set eighty lines
+    # BELOW this point. Using it here failed the whole file with "no such
+    # variable" instead of failing the comparison -- the same forward-reference
+    # trap the suite hoisted `errcode_of` to the top for.
+    set mm [mirrorSections [dict get [run -timeout 1800s -- [info nameofexecutable] \
+                                          mirror --dry-run] out]]
+    puts [format "mirror dry run   : z %d line(s), machteld %d" [llength $zm] [llength $mm]]
+    if {$zm ne $mm} {
+        set mbad 1
+        puts "  only z       :"
+        foreach l [lmap x $zm {expr {$x in $mm ? [continue] : $x}}] { puts "    $l" }
+        puts "  only machteld:"
+        foreach l [lmap x $mm {expr {$x in $zm ? [continue] : $x}}] { puts "    $l" }
+    } else {
+        puts "                 : identical apart from the heading, the counts and the run id"
+    }
+}
+
 # --- and the scout table, line for line --------------------------------------
 # Each side's own first line differs (it names which front door produced it) and
 # z prints a trailing hint of its own; everything between must be identical.
@@ -590,7 +647,7 @@ puts [format "cdirs extras     : %d probed, %d phantom, %d ms%s" [llength $cdext
           [llength $cdphantom] [expr {[clock milliseconds] - $cdt0}] \
           [expr {$CDIRS_DEEP ? "" : "  (--deep for the full walk)"}]]
 
-if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20 || $vbad || $sbad || $cbad || $lbad} {
+if {[llength $differ] || [llength $mine_refused] || [llength $pbad] || $ptotal < 20 || $vbad || $sbad || $cbad || $lbad || $mbad} {
     puts "DISAGREEMENT"
     exit 1
 }

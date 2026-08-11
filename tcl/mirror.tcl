@@ -138,11 +138,44 @@ proc ::machteld::MirrorAbs {p} { return [file nativename [FrontClean [file join 
 # the OS, and any missing suffix is projected beneath it. The directory is
 # never created here.
 #
-# IDENTITY IS `dev` AND `ino` FROM `file stat`, which on Windows are the volume
-# serial number and the NTFS file index -- the same pair z reads from
-# GetFileInformationByHandle. Verified rather than assumed: two names for one
-# file report the same `ino`, which is what the `links -hardlinks` fixture
-# checks from the other side.
+# !!! THIS LAYER IS NOT SOUND. DO NOT LIFT THE DESTRUCTIVE REFUSAL. !!!
+#
+# The two paragraphs above describe what this code is FOR. What it actually
+# does is weaker, in two measured ways, and both were found by adversarial
+# review after the port was written and committed.
+#
+# 1. `file normalize` DOES NOT RESOLVE A REPARSE POINT THAT IS THE FINAL
+#    COMPONENT. Measured on the winsdk junction: `file normalize
+#    C:/dev/.z/r/winsdk/10.0.26100.0` returns the junction's own path, while
+#    normalising one component deeper follows it. Go's
+#    `mirrorCanonicalExistingDirectory` opens the directory WITHOUT
+#    FILE_FLAG_OPEN_REPARSE_POINT and calls GetFinalPathNameByHandleW, so it
+#    always gets the target. `MirrorResolveDir` walks up to the nearest EXISTING
+#    component, which for `--dest <a junction>` is the junction itself -- so
+#    `physical` is not physical, and every containment clause below is handed a
+#    path that is nowhere near the source. Reproduced end to end: a destination
+#    junction pointing into the source tree passed every check, and robocopy's
+#    own /L verdict reported a file INSIDE THE SOURCE as a destination extra --
+#    which is to say, a real /MIR would have deleted it.
+#
+# 2. `dev` IS NOT THE VOLUME SERIAL NUMBER. It is the drive-letter index --
+#    every path on C: reports `dev=2`, where the volume serial is 0xEB960D30.
+#    And `file stat` on a junction returns the JUNCTION's identity, not the
+#    target's (measured: 2/26741 against 2/53249), so the identity layer -- which
+#    exists precisely because "a junction can make two different names one
+#    directory" -- is blind to junctions as well.
+#
+# The internal use of identity is still sound: two names for one file report the
+# same `ino`, which is what the `links -hardlinks` fixture checks from the other
+# side. What is NOT sound is (a) comparing a junction against its target and
+# (b) any claim that these numbers match z's -- they do not, which is also why
+# the state and artefact files land at a filename z never reads.
+#
+# THE FIX IS ONE C PRIMITIVE, not more Tcl: a verb returning the canonical path,
+# volume serial and 64-bit file index from a followed handle
+# (GetFinalPathNameByHandleW + GetFileInformationByHandle). Until that exists,
+# the destructive refusal in MirrorRun is the only thing standing between this
+# file and data loss, and it is load-bearing rather than merely tidy.
 proc ::machteld::MirrorIdentity {path} {
     if {[catch {file stat $path st}]} { return "" }
     return [list [dict get [array get st] dev] [dict get [array get st] ino]]
@@ -297,11 +330,28 @@ proc ::machteld::MirrorRecheck {plan forcedest} {
 proc ::machteld::MirrorShellCache {root} {
     return [file nativename [file join $root .z cache shell]]
 }
+
+# `<root>\.z\mirror-links.json`, NOT `<root>\.z-mirror-links.json`. The first
+# version guessed the latter and the guess was live in the dry run twice over:
+# `/XF` excluded a file that does not exist while failing to exclude z's real
+# reserved manifest, so a source z had mirrored showed spurious drift; and the
+# reserved-extra correction looked for the destination copy at the wrong path,
+# never fired, and reported an extra file and a set `extras` bit that z
+# suppresses -- which is the precise misreport the correction exists to prevent.
 proc ::machteld::MirrorLinkManifestPath {root} {
-    return [file nativename [file join $root .z-mirror-links.json]]
+    return [file nativename [file join $root .z mirror-links.json]]
 }
+
+# A SIBLING OF THE DESTINATION, NOT A FILE INSIDE IT, and the difference is the
+# whole point of the record. z spells it `filepath.Clean(dest) + suffix` -- string
+# concatenation with no separator -- so `...\z-backup` becomes
+# `...\z-backup.z-mirror-owner.json`, one level up. `file join` put it INSIDE the
+# destination, where it is a file with no source counterpart, which is to say a
+# destination extra, which is to say the first thing `/MIR` deletes. The guard
+# would have deleted its own authorisation record. This file's own header said
+# "beside the destination" while the code said "inside".
 proc ::machteld::MirrorOwnerPath {root} {
-    return [file nativename [file join $root .z-mirror-owner.json]]
+    return [file nativename "[FrontClean $root].z-mirror-owner.json"]
 }
 
 # --- robocopy ----------------------------------------------------------------

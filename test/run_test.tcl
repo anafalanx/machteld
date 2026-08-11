@@ -3960,12 +3960,30 @@ check "the cdirs fixture tore down completely" [expr {![file exists $CDOUT]}]
 # MR1: THE REFUSAL THAT MATTERS MOST. A real /MIR run deletes destination
 # extras; the ownership record z gates that on is not ported, so the destructive
 # path must refuse -- and the refusal must be UNCONDITIONAL, not a flag away.
+#
+# AIMED AT A THROWAWAY DESTINATION, NOT AT THE LIVE BACKUP. The first version of
+# these three checks ran bare `front mirror`, which resolves OneDrive and heads
+# for the real `z-backup`. That is safe only while the refusal WORKS: the moment
+# it regresses -- which is the single thing these checks exist to detect -- each
+# of the three would sail past it and `file mkdir` the OneDrive log directory,
+# walk all of C:\dev, write a link manifest into OneDrive and launch robocopy
+# with a one-hour timeout. Three times. A test whose failure mode is "spend ten
+# minutes writing into the user's backup directory" is a test that punishes the
+# regression it was written to find.
+set MRDEST [file join [file dirname $FX] mt_mirror_never z-backup]
+proc MirrorRefused {args} {
+    global MRDEST
+    return [errcode_of {front mirror --dest $MRDEST {*}$args}]
+}
 check "mirror refuses a destructive run" [expr {
-    [errcode_of {front mirror}] eq {MACHTELD MIRROR unsupported}}]
+    [MirrorRefused] eq {MACHTELD MIRROR unsupported}}]
 check "mirror refuses it with --force-dest too" [expr {
-    [errcode_of {front mirror --force-dest}] eq {MACHTELD MIRROR unsupported}}]
+    [MirrorRefused --force-dest] eq {MACHTELD MIRROR unsupported}}]
 check "mirror refuses it with --adopt-dest too" [expr {
-    [errcode_of {front mirror --adopt-dest}] eq {MACHTELD MIRROR unsupported}}]
+    [MirrorRefused --adopt-dest] eq {MACHTELD MIRROR unsupported}}]
+# AND THE REFUSAL LEAVES NOTHING BEHIND. If it ever starts happening after the
+# first write rather than before it, this is what says so.
+check "the refusal writes nothing" [expr {![file exists [file dirname $MRDEST]]}]
 
 # MR2: option parsing, including the two combinations z refuses.
 check "mirror parses z's short dry-run flag" [expr {
