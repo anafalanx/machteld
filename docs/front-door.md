@@ -386,8 +386,9 @@ The probes are **supervised children** — born in the job object, tree-killable
 front door, each carrying its own deadline — so a `git` that wedges on one repository cannot hang
 the command or leak a process. That is the palette's own argument, applied to the front door's work.
 
-`test/front_agree.tcl` now diffs four things: **275 tools, 135 project commands, 5 verify problems,
-29 scout lines.**
+`test/front_agree.tcl` now diffs five things: **275 tools, 135 project commands, the verify
+problems, 29 scout lines** — and `cdirs`, which is the one entry that deliberately does not assert
+equality. Its shape is in the `cdirs` section below.
 
 ### What is left, and what will not be built
 
@@ -400,14 +401,6 @@ but not implemented yet"*. There is nothing to strangle.
 artefacts, through the same OneDrive resolution and artefact index that `status`'s missing half
 needs. They land when `mirror` does, not before.
 
-**`cdirs` is not becoming Tcl**, and that is measured rather than asserted — see
-[the register](direction.md). On `C:\dev`, warm: z walks 21,765 directories in 1.5 s; a Tcl walker
-manages 96% of them in 12.2 s, seven to eight times slower, and is *still wrong* after three
-attempts, each failing silently in a different way (`glob *` misses dot-names; `glob -- * .*`
-matches them twice and overcounts by 77%; deduplicating loses them again). A directory walker looks
-like the simplest possible program and on Windows it is reparse-point classification, dot-name
-semantics and case-insensitive identity. It wants a C verb or it stays outside machteld.
-
 **`help` and `version` already exist** as machteld's own, answering about machteld rather than
 about z, which is correct and not a gap.
 
@@ -417,6 +410,117 @@ plan always meant to do last — plus `logs`/`follow` and `status --deep` behind
 **Next:** `ledger`, which is the smallest of the three and the only one that does not touch the
 replica.
 
+### `cdirs`, and the first command that must NOT agree with z
+
+**This section replaced a refusal.** It used to say `cdirs` "wants a C verb **or** it stays outside
+machteld", and the register said the same in more detail: a Tcl walker managed 96% of `C:\dev` in
+12.2 s against z's 1.5 s, wrong three times in three different silent ways. That reasoning was
+sound and it has been overtaken twice — first by `src/dirs.c`, which is the C verb the first branch
+named, and then by a decision that quality matters more than conformance with z. Both halves of the
+old sentence are now false, so the sentence is gone rather than left standing beside the command it
+denies. A shipped doc refusing something the shipped binary does is exactly the drift these files
+are gated against, and [the suite](../test/run_test.tcl) now fails if that sentence comes back while
+`cdirs` is a promoted command.
+
+```
+mt cdirs                           # the workspace, into $MT_HOME/cache/mt/dirs/<slug>.txt
+mt cdirs C:/Users/anafa            # any root you name
+front cdirs $d -depth 3 -prune {node_modules .git} -out list.txt
+```
+
+**`cdirs` was deferred once more after `dirs` landed, and the reason was a doctrine.** The register
+put it plainly: `mt cdirs` "would also have had to default to `C:/`, where the surrogate rule makes
+machteld and z disagree by design, against a doctrine that says machteld earns each command by
+agreeing with z on it first." That doctrine has served every command up to here — 275 tool
+resolutions, 135 project commands, 5 verify problems, 29 scout lines, all agreeing exactly — and it
+is now **overruled for this one command**, for two reasons. Agreement was only ever a proxy for
+correctness; and where the two disagree, it is measured that machteld is right.
+
+**The measurement, on this machine, both walkers reading the same disk minutes apart:**
+
+| | directories | wall (warm) |
+|---|---|---|
+| `z cdirs --root C:\Users\anafa` | 112,018 | 13.3 s |
+| `mt cdirs C:/Users/anafa` | 236,162 | 21.8 s |
+| only in `mt` | 124,144 | every one under `C:/Users/anafa/OneDrive` |
+| only in `z` | 0 | |
+
+236,162 − 112,018 = 124,144, and only-in-z is 0: **the four numbers are one measurement and they
+add up.** The version this table replaced did not — 236,150 − 112,007 is 124,143 against a
+published 124,144 — which is the wrong error for an entry whose thesis is "measured rather than
+asserted". Both walks are warm repeats, each after a discarded first run, minutes apart. The totals
+move a little between runs because a home tree churns; the 124,144 has not moved in any run.
+
+Every one of the 124,144 extra directories is under **one** reparse point,
+`C:/Users/anafa/OneDrive`, tag `0x9000701a`, surrogate bit clear — a Files-On-Demand root, which
+virtualises file *contents* and not folders. They are real local directories. z omits them because
+it refuses to descend anything carrying `FILE_ATTRIBUTE_REPARSE_POINT`; `dirs` refuses only *name
+surrogates*, which junctions and symlinks set and a cloud root does not.
+
+**The defect is not that z stops. It is that z's report cannot tell you it mattered.** Its stats
+line says `12 links skipped` and names none of the twelve; eleven of them are junctions where
+stopping is right and one of them is more than half the home tree. So `cdirs` is the first command
+where the fidelity rule inverts: **the JSON must not agree, and the report is the point.** A
+refusal the walker made is NAMED, a refusal the caller asked for is COUNTED, and `[COMPLETE]` or
+`[PARTIAL]` sits on the first line beside the count so the count cannot be read alone. The full
+shape is in [the palette](palette.md).
+
+**And "the report is the point" is a claim that has to be met, not asserted.** The first version of
+it named the place and gave no number — *named, magnitude invisible*, which is worth what z's
+*counted, consequence invisible* is worth — and it printed `Everything under it IS in the count
+above` unconditionally, including on the `-depth 3` walk where ~124,000 directories under that very
+row are absent. A report telling a reader the list is complete below a place where it is not is
+this project's own failure shape, in the mechanism built to end it. Both are fixed: every `entered`
+row now carries how much of the answer came from under it, and the completeness sentence is
+conditional on nothing having been pruned, cut or refused below that row.
+
+**Two more deliberate divergences, both of which would be silent if they were not written down.**
+The default root is `MT_ROOT` and not `C:\` — the front door's subject is the workspace, and it
+puts the zero-argument form on the one root where machteld and z *do* agree exactly (21,804
+against 21,804 on `C:/dev`, an active build tree whose count moves while the agreement does not),
+so the disagreement only ever happens in a request somebody typed. And
+the default output path is `$MT_HOME/cache/mt/dirs/<slug>.txt`, never z's
+`cache/cdirs/c-drive-dirs.txt`: during the transition `MT_HOME` *is* `.z`, the lists are
+forward-slashed where z's are backslashed, and writing 2.1× as many lines into the file z's own
+cache readers open would be the silent substitution this command exists to end.
+
+**`test/front_agree.tcl` therefore gained its first entry that asserts something other than
+equality** — a superset with a named cause, on two subjects, because either alone is satisfiable by
+a defect. On `C:/dev`, where no non-surrogate reparse point exists, the two rules coincide and the
+lists must be **equal both ways**: that is the bound, and a walker that descended junctions would
+pass every superset clause and fail here. On the home tree the claim is z ⊆ machteld, the excess
+non-empty, every extra below a directory machteld itself classified `surrogate 0, descended`, and
+every extra probed for existence with Tcl's own `stat` — a third implementation, asked one path at
+a time, because set arithmetic between two walkers is equally satisfied by a walker that *invents*
+paths.
+
+**And the oracle had to be fixed before it could be believed.** `z cdirs --stdout` read back through
+`run` is capped at 1 MiB (`src/proc.c`, `size_t cap = 1u << 20`) and truncates in **silence**:
+measured here, `--max-depth 6` printed 16,817 lines and `run` returned 16,423, exit 0, with
+`truncated` set to `out` and nobody looking. The 394 lost lines come back as 394 extras
+attributable to nothing — and truncation makes a *superset* gate pass **harder**, which is this
+project's recurring failure shape in its purest form: a gate strengthened by its own bug. z's list
+is read from `--out FILE` now, and the line count is cross-checked against the count in z's own
+stats line.
+
+### And the front door's own commands, since they are what `mt` answers
+
+```
+mt roots                           # where the workspace is, and which private directory was found
+mt which rg                        # name, kind, executable
+mt env rg                          # the whole resolution as a dict; -json for the wire
+mt tools ?pattern?                 # what the workspace curates
+mt projects  ·  mt runtimes  ·  mt status  ·  mt verify  ·  mt scout  ·  mt journal
+mt in els build                    # resolve and run a name in a project's context
+mt cdirs                           # the directory index
+```
+
+`mt roots` was the first of these to exist and the last to be written down here, which is how the
+suite came to gain a gate for it: the doc-accuracy check runs doc → code and nothing ran
+code → doc, so a promoted command could ship undocumented and nothing said so. It fails now if any
+name in `front`'s own `set subs {...}` line is missing from this file. `run` is deliberately not in
+that list — see the resolution section above.
+
 ## The risk, named
 
 **z.exe is the front door.** Rewriting what you use to enter the workspace, while using it daily,
@@ -425,5 +529,11 @@ independent, so this strangles rather than switches; and z already ships `verify
 `mirror-restore` and `mirror-rehearsal` — the machinery for recovering this environment already
 exists and is exercised.
 
-Until step 4 finishes, `z.exe` stays exactly where it is and keeps working. machteld earns each
-command by agreeing with z on it first.
+Until step 4 finishes, `z.exe` stays exactly where it is and keeps working.
+
+**machteld earned every command up to `cdirs` by agreeing with z on it first, and that rule is now
+retired rather than quietly broken.** Agreement was only ever a proxy for correctness, and `cdirs`
+is where the proxy and the thing part company: 124,144 real local directories that z's rule omits
+and z's stats line cannot mention. The gate that replaced it is stronger, not weaker — a superset
+with a named cause, on two subjects, one of which still demands exact equality both ways. Where a
+command *can* agree with z it still must, and `front_agree.tcl` fails if it stops.

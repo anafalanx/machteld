@@ -559,6 +559,219 @@ the line you typed, not what it resolved to, how long it took, or whether it was
 `front run` records around every spawn, so the record accrues without anyone remembering to ask.
 The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
 
+## Built — the directory index
+
+```tcl
+front cdirs                        ;# the workspace, to $MT_HOME/cache/mt/dirs/<slug>.txt
+front cdirs C:/Users/anafa         ;# any root you name
+front cdirs $d -depth 3 -prune {node_modules .git}
+front cdirs $d -out list.txt       ;# a file of your choosing, report beside it as list.json
+front cdirs $d -stdout             ;# paths on stdout, report on stderr, no files at all
+front cdirs $d -json               ;# the report as JSON instead of as text
+```
+
+`cdirs` is [the `dirs` verb](#) with the policy on top: C for the walk, Tcl for where the answer
+goes and what it means. It is a **front-door command**, so `mt cdirs` works as a bare name, and it
+is the command `z cdirs` is being replaced by.
+
+**One positional and four options, where z has twelve.** The root is a positional because that is
+how `dirs` spells its own subject, and a command built over a verb must not respell the verb's
+grammar. Gone, each for a reason: `--slash` (there is one spelling, and it is forward), `--tree`
+(a second output grammar that cannot be grepped, cannot be diffed, and has nowhere to put the
+disposition markers this command exists for), `--safe` (z's own help calls it a no-op),
+`--follow-links` (the verb has no descent-policy lever, and building one in the prelude means
+canonicalisation, containment and volume+file-id identity — a subsystem), `--flush` (nothing is
+written until the walk is complete), `--progress` (the verb reports none, and the honest
+consequence is stated below), `--quiet`, `--gc`, `max stack` and `outside root`.
+
+**And no `-cloud` / `-nocloud`.** It would be a switch whose only purpose is to reproduce the
+behaviour measured below as wrong — and, decisively, it *cannot be built here*: skipping is a veto
+**inside** the walk, the verb exposes no hook for one, so a Tcl-side `-cloud` could only
+post-filter a list it had already paid the full 22 seconds to build. A shorter answer at full cost,
+wearing the appearance of a skip.
+
+**`-prune OneDrive` is a way to skip a place cheaply, and it is not a way to get z's answer.** The
+veto is in the verb and the time is genuinely saved — 8.2 s against 22.4 s on the home tree — and
+the report gives the **count** and the **patterns**, which is all the verb offers. What it does not
+do is reproduce z, and both directions of that are worth writing down because only one of them is
+obvious. It matches a **name** and not a tag, so a tenant folder called `OneDrive - Contoso` is
+*missed* without `-prune {OneDrive*}` — and on this machine the *over*-match is what actually
+fires. Measured: `-prune OneDrive` hits **four** places, not one —
+
+```
+C:/Users/anafa/OneDrive
+C:/Users/anafa/AppData/Local/OneDrive
+C:/Users/anafa/AppData/Local/Microsoft/OneDrive
+C:/Users/anafa/AppData/Local/Microsoft/Office/SolutionPackages/.../assets/assets/onedrive
+```
+
+— so the answer is 111,899 directories against z's 112,015, and it is not a subset: it **drops 126
+directories z lists**, 124 of them the entirely unrelated `AppData/Local/Microsoft/OneDrive`
+subtree. There is no option here that reproduces z's descent policy, and none is planned; z ships
+`--follow-links` as its lever in the opposite direction and machteld ships none in either.
+
+A pruned reparse directory is a refusal the **caller** asked for, so it is counted and not named,
+and `"entered":[]` after `-prune OneDrive` is correct rather than a lost disclosure: naming it
+would put one place in two accounts and break the arithmetic below. The caller who typed the word
+already knows.
+
+**The default root is the workspace, not `C:/`, and that is a deliberate divergence from z.** The
+front door's subject is `MT_ROOT` — `tools`, `projects`, `scout`, `verify` and `status` all answer
+about it without being told — and a bare `mt cdirs` walking the whole drive would be the only
+front-door command silently widening past the workspace, at the highest cost in the set. The
+argument that actually decides is that a default should be the root where the answer is
+*checkable*: on `C:/dev` machteld and z agree exactly, 21,804 against 21,804 (an active build tree,
+so the number itself moves between runs; what does not move is that the two agree both ways); under
+`C:/` they disagree by design. Making the wide walk something you opt into by naming it puts the
+disagreement in a request somebody typed.
+
+**The default output path is `$MT_HOME/cache/mt/dirs/<slug>.txt`, and never z's.** During the
+transition `MT_HOME` *is* `.z`, so writing to `cache/cdirs/c-drive-dirs.txt` would overwrite the
+live cache of the front door still in daily use — with a forward-slashed list that is also scoped
+differently. z's fixed name means `z cdirs --root C:\dev` writes the workspace into a file called
+`c-drive-dirs.txt`, overwriting the drive index.
+
+**The slug is derived from the normalised root, and it says when it could not be.** `C:/dev` →
+`c-dev`, `C:/Users/anafa` → `c-users-anafa`, `//srv/share/x` → `srv-share-x`. The squash to
+`[a-z0-9]` is **many-to-one**, so it is only used where it is reversible: the name is reconstructed
+back into a root, and if that does not reproduce the root exactly the file gets an
+`--<8 hex of sha256>` tail instead — `C:/dev/_x`, `C:/dev-x`, `C:/dev.x` and `C:/dev x` therefore
+key four different files where they once keyed one. A slug over 64 characters is truncated and
+gets the same tail. **Two different roots cannot collide**, and that sentence is load-bearing
+rather than decorative: it shipped false, and two genuine pairs were already colliding among the
+real indices on this machine (`.codex/.tmp` against `.codex/tmp`, `OneDrive/_LIVE` against
+`OneDrive/live`), while any root whose last component is entirely non-ASCII squashed to its parent
+and overwrote it.
+
+**The report is written beside the list, always, as `<name>.json`.** It is the whole report rather
+than z's errors-only sidecar, so its presence is unambiguous — z creates its `.errors.txt`
+unconditionally and mentions it only sometimes, which makes absence mean either "clean" or "the
+run died". The list file stays pure paths, one per line, UTF-8, LF, no BOM and no header, because
+a header stops it being greppable.
+
+**A present report means the list beside it is whole.** Both files are written to `.tmp` and
+renamed; the old report is moved aside rather than deleted, so a publish that cannot replace the
+list puts it back and the previous run survives intact, and a publish that replaces the list but
+cannot write the report leaves the report **absent** rather than stale — a report describing a
+list it was never a report of is the one state the ordering exists to make impossible. A walk that
+raises writes nothing at all rather than replacing a good cache with a short one. `-out` naming an
+existing **directory** is an `oserror` and not a success, and so is a directory standing where the
+`<name>.json` sidecar would go: `file rename` moves a file *into* a directory target, and the
+sidecar's publish step would otherwise remove whatever stood in its way.
+
+### What the report says, and why z's line is not enough
+
+> A refusal the **walker** made is NAMED. A refusal the **caller** asked for is COUNTED. And the
+> completeness verdict is on the first line, beside the count, so the count cannot be read alone.
+
+Real output, `mt cdirs C:/Users/anafa`, with nine of the eleven junction rows cut for width and
+nothing else altered:
+
+```
+cdirs [PARTIAL]  236,169 directories under C:/Users/anafa in 24.7s
+list             C:/dev/.z/cache/mt/dirs/c-users-anafa.txt  (22.3 MB)
+report           C:/dev/.z/cache/mt/dirs/c-users-anafa.json
+
+refused          11 places. The walk stopped at each; what is inside is not in
+                 the list, and how much is there cannot be known from here.
+  junction       C:/Users/anafa/PrintHood
+  junction       C:/Users/anafa/Recent
+
+entered          1 reparse directory that is content, not a second name for
+                 somewhere else, and everything under it IS in the count above.
+  cloud          C:/Users/anafa/OneDrive                            tag 0x9000701a
+                 124,144 of the 236,169 directories above -- 52.6% of this answer -- are under it
+```
+
+The total moves between runs — a home tree churns, and 236,159 / 236,169 / 236,162 are three real
+answers within an hour. The 124,144 under the cloud root did not move in any of them.
+
+**Named rather than counted, because for `refused` the number cannot be had.** The size of what
+lies behind a place the walk did not enter is not knowable *without entering it* — that is what
+not entering means, not a gap in the implementation. So the one honest disclosure available there
+is the **place**, and it is affordable exactly where it matters: eleven such places in the whole
+home tree, two in the workspace. z's line says `12 links skipped` and names none of the twelve; on
+this machine one of them hid 124,144 directories and the other eleven hid a few hundred between
+them, and the integer cannot tell them apart.
+
+**Named *and* counted for `entered`, because there the number CAN be had, and this is where the
+first version of this command repeated z's mistake with the terms swapped.** The walk *did* enter,
+the paths are in hand, and a prefix count over them is sub-second against a twenty-second walk. A
+row that says only `cloud  C:/Users/anafa/OneDrive` is true and hides that **half the answer came
+from that one line** — *named, magnitude invisible*, which is worth exactly as much as z's
+*counted, consequence invisible*. Every `entered` row therefore carries `below`, in the text and in
+the JSON.
+
+**And the completeness sentence is conditional.** `everything under it IS in the count above` is
+printed only when nothing was pruned, no `-depth` cut fired, and no refusal lies below that row;
+otherwise it says what is under it is only *partly* in the count. Unconditional, it was false on
+every `mt cdirs C:/Users/anafa -depth 3` — telling the reader the list is complete below a place
+where ~124,000 directories are missing, which is the one direction this command exists to prevent.
+
+**Counted rather than named for `-prune` and `-depth`**, because the caller already knows the
+criterion, and because the verb offers integers there and not path lists. The wording does not
+overclaim: those *count refusals, not elisions*, and a leaf with nothing under it is counted too.
+
+**A reparse directory the walk ENTERED is disclosed as well**, since the reverse silence is just as
+possible: a reader expecting z's semantics gets more than twice the lines and no way to learn why.
+A descended *surrogate* can only ever be the root you named, and it gets its own block saying so —
+every path in that answer is a second name for a tree living somewhere else, which is precisely
+the disclosure `dirs`'s own review found missing from the verb.
+
+`COMPLETE` requires `refused`, `pruned` and `depthlimited` all empty or zero; anything else is
+`PARTIAL`. The verdict is deliberately conservative — a depth-limited walk whose cut points are
+all leaves reports `PARTIAL` although nothing was lost — because for a cache index "you may not
+have everything" is the safe direction to err in. **`PARTIAL` still exits 0**: every walk of any
+real tree refuses something, so a nonzero exit would fire on essentially every invocation and
+train exactly the reflex this report is fighting. A script that cares reads `complete` from the
+JSON.
+
+Tag naming is policy, so it is Tcl: `junction` `0xa0000003`, `symlink` `0xa000000c`, `dfs`
+`0x8000000a`, `dfsr` `0x80000012`, `cloud` for the family `tag & 0xffff0fff == 0x9000001a`
+(`IO_REPARSE_TAG_CLOUD_1` through `_F`, of which only `0x9000701a` has been observed on this
+machine — said out loud for the same reason `dirs.c` says it of its DFS pair), `reparse` for a tag that
+reads 0 through a handle, and otherwise the hex verbatim. The table names **only** what `dirs.c`
+itself names, because a wider one would be the front door asserting knowledge the C's own veto rule
+does not have, and the two would drift with nothing to notice.
+
+**`-stdout` and `-json` are orthogonal**: `-stdout` chooses where the *list* goes, `-json` the
+*format of the report*. All four combinations mean something, so there is nothing to refuse.
+`-out` with `-stdout` **is** refused — they are two dispositions named at once, and silently
+letting one win would be the command ignoring what the caller wrote.
+
+**Three honest costs, stated rather than hidden.** There is no progress output, so
+`mt cdirs C:/Users/anafa` prints nothing for ~22 seconds and then prints everything at once. The
+list is forward-slashed where z's is backslashed, so **anything reading z's cache file byte-wise
+will not read this one** — the other half of why the default path is not z's. And the third belongs
+to whoever *consumes* the list: **52.6% of the lines are inside a Files-On-Demand root**, where the
+folders are local but some of the files are dehydrated placeholders — 67 of the first 4,000 files
+sampled under it carry `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` (`0x400000`). A backup, an indexer or
+a `grep -r` fed this list will touch content that z's list would never have named, and can trigger
+downloads. Descending is still right — the folders are real, and z's silence about them is the
+defect this command exists for — but "more complete" and "cheaper to consume" are not the same
+property, and only the first was ever written down.
+
+**Every timing on this page is WARM**, a repeat walk on the same day. Costs are not labelled that
+way by accident elsewhere in this file (`~1-2 s warm` for the workspace) and the omission matters
+most here: the OneDrive subtree is precisely the part that is not touched daily, so a first walk
+after a boot is materially more expensive than 22 s. A cold first-of-the-day walk was observed at
+52 s during review and has not been reproduced here, which is said rather than published as a
+figure.
+
+Failures re-raise in `FRONT`, because the domain is the verb you called: `notfound` for a root that
+is not there or is not a directory, `badvalue` for a root or option value the verb refuses,
+`oserror` for a list or report that cannot be written, `usage` for the rest. The inner message is
+kept verbatim — `dirs` says which spelling of a bad root works, and that sentence is the useful
+part.
+
+**An empty value is a value, not an absence.** `-depth ""` is refused exactly as `dirs` refuses it,
+an empty root is refused exactly as `dirs` refuses it, `-out ""` is refused rather than quietly
+becoming the default cache path, and two empty roots are still two roots. All four used to be read
+as "not given" — so `mt cdirs $root -depth $limit` with an empty `$limit` became a full walk whose
+report did not even record that a limit had been asked for. `-out` must also still name a file
+after `..` is resolved: a path that climbs above the root of the drive is a `badvalue`, not a
+filename relative to wherever the command happened to be run.
+
 ## Built — a tool of your own, with no compiler
 
 ```tcl

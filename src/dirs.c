@@ -991,6 +991,35 @@ static int DirsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         }
         CloseHandle(rrh);
     }
+    /* AND IF THE HANDLE SAYS "NOT A REPARSE POINT", ASK THE PARENT'S SCAN --
+     * FOR THE DISCLOSURE ONLY, NEVER FOR THE VETO. This file's rule at the top
+     * is that the handle's answer vetoes descent and never authorises it, and
+     * the measurement it rests on is exactly this case: the OneDrive root reads
+     * 0x9000701a from the directory scan and tag 0 through a handle, because the
+     * cloud filter consumes its own reparse point on open. Applied to CHILDREN
+     * that rule is complete. Applied to the ROOT it was silent: `dirs
+     * C:/Users/anafa/OneDrive` came back with `links` EMPTY, so narrowing a walk
+     * to the divergent subtree was the one invocation that LOST the disclosure,
+     * while `dirs C:/Users/anafa` named the same directory as content. The
+     * junction root was fixed once already for the same shape of silence.
+     *
+     * Nothing here can authorise a descent: the veto is `it.noenter &&
+     * it.depth > 0`, so the root is entered either way -- you named it, so you
+     * get it. All this can do is add a row. FindFirstFileW fails on a drive root
+     * and on a UNC share root, which have no parent entry to read; those are not
+     * reparse points, and a failure leaves the answer exactly as it was. */
+    if (!rootreparse) {
+        WIN32_FIND_DATAW rfd;
+        HANDLE rfh = FindFirstFileW(rootw, &rfd);
+        if (rfh != INVALID_HANDLE_VALUE) {
+            if ((rfd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                && (rfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                rootreparse = 1;
+                roottag = rfd.dwReserved0;
+            }
+            FindClose(rfh);
+        }
+    }
     /* "Could not be classified" is not "is not a reparse point". A row, so the
      * one case where `links` may be silent about the root says so itself. */
     if (rootclassfail != 0) dirs_fault(&w, rootw, rootclassfail);
