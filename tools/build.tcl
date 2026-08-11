@@ -109,8 +109,18 @@ run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src journal.c] -o [Rp build journa
 puts "cc   hash.c  (digests + HMAC + CSPRNG over CNG, c23)"
 run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -c [Rp src hash.c] -o [Rp build hash.o] -I$inc
 
+# -Wall -Wextra ON THIS LINE AND NOT THE OTHERS, which is a deliberate asymmetry.
+# dirs.c was reviewed as "zero warnings under -Wall -Wextra" and that was a
+# MANUAL result the build did not reproduce, so the claim could rot without
+# anyone noticing -- the same shape as a gate that cannot fail. Measured before
+# turning it on here: dirs.c 0, and 1 warning each in json.c and proc.c, which
+# is why it is not switched on globally in the same change that has not read
+# them.
+puts "cc   dirs.c  (directory walk, c23)"
+run $gcc -std=c23 -O2 -Wall -Wextra -DSTATIC_BUILD=1 -c [Rp src dirs.c] -o [Rp build dirs.o] -I$inc
+
 puts "cc   machteld_appinit.c  (shared native-lib + prelude registration, c23)"
-run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_JOURNAL \
+run $gcc -std=c23 -O2 -DSTATIC_BUILD=1 -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_JOURNAL -DMACHTELD_DIRS \
     -c [Rp src machteld_appinit.c] -o [Rp build machteld_appinit.o] -I$inc
 
 puts "cc   machteld_main.c  (console host, c23)"
@@ -121,7 +131,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare.exe  (console subsystem)"
 set bare [Rp build machteld-bare.exe]
 run $gcc -municode -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
+    [Rp build machteld_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] [Rp build dirs.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $bare
@@ -143,7 +153,7 @@ run $gcc -std=c23 -O2 -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 \
 puts "ld   machteld-bare-gui.exe  (GUI subsystem)"
 set baregui [Rp build machteld-bare-gui.exe]
 run $gcc -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] \
+    [Rp build machteld_gui_main.o] [Rp build machteld_appinit.o] [Rp build store.o] [Rp build sqlite3.o] [Rp build json.o] [Rp build ps.o] [Rp build hash.o] [Rp build journal.o] [Rp build dirs.o] \
     [Rp build winjob_cmdline.o] [Rp build winjob_job.o] [Rp build winjob_launch.o] [Rp build proc.o] \
     [file join $libd libtcl9tk90.a] [file join $libd libtcl90.a] [file join $libd libtclstub.a] \
     {*}$syslibs -o $baregui

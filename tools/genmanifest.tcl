@@ -388,6 +388,45 @@ if {[dict exists $fns child_dict]} {
     }
 }
 
+# A SINGLE-VERB FILE NAMES ITS RESULT BUILDER AFTER ITS VERB: `dirs` answers with
+# the dict built by `dirs_dict`. That is a naming CONVENTION, stated here because
+# here is where it is read -- rename the function and this derivation stops
+# seeing it. It is not free-floating taste: the closure walk below is the same
+# one `child_dict` gets, and without it a data verb whose dict the manifest
+# cannot describe is creed 4 decaying by one verb per verb.
+#
+# TWO RULES FOR THE NEXT SINGLE-VERB FILE, both of which the derivation depends
+# on and neither of which the compiler enforces:
+#   - build the result dict with LITERAL Tcl_NewStringObj("key", -1) calls
+#     inside <verb>_dict; routing them through a dict_put_str(d, k, v) helper
+#     (ps.c:61) hides the literal and derives an empty shape;
+#   - do not call the row builders FROM <verb>_dict. The closure follows callees,
+#     so a row builder's own keys -- `path`, `tag`, `reason` -- would be published
+#     as phantom keys of the top-level result.
+# The `error` below is the same one the child_dict block ends with, for the same
+# reason it gives: a derivation that reports nothing when the code moves is worse
+# than one that reports nothing at all, because it looks like an answer.
+foreach {fn verb} $IMPL {
+    if {[dict exists $manifest $verb returns]} continue
+    set vfns [verb_fns $verb]
+    if {![dict exists $vfns ${verb}_dict]} continue
+    set keys {} ; set todo [list ${verb}_dict] ; set seen {}
+    while {[llength $todo]} {
+        set f [lindex $todo 0] ; set todo [lrange $todo 1 end]
+        if {$f in $seen || ![dict exists $vfns $f]} continue
+        lappend seen $f
+        set b [dict get $vfns $f]
+        foreach {_ k} [regexp -all -inline {Tcl_NewStringObj\("(\w+)", *-1\)} $b] { lappend keys $k }
+        foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $b] {
+            if {[dict exists $vfns $callee]} { lappend todo $callee }
+        }
+    }
+    if {![llength $keys]} {
+        error "genmanifest: derived an empty result shape from ${verb}_dict"
+    }
+    dict set manifest $verb returns [lsort -unique $keys]
+}
+
 # ---- emit ------------------------------------------------------------------
 set f [open $OUT w]
 fconfigure $f -translation lf

@@ -1773,7 +1773,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
+    {child cli detach dirs front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -1874,7 +1874,16 @@ if {[file isdirectory $SRC]} {
         }
     }
     set inC {}
-    foreach f [list [file join $SRC proc.c] [file join $SRC store.c] [file join $SRC json.c] [file join $SRC ps.c]] {
+    # EVERY .c, FOUND RATHER THAN LISTED -- the same fix the registry scan above
+    # already got, and for the same reason. The four-file list left hash.c (one
+    # option-shaped strcmp) and journal.c (six) outside this gate entirely, one
+    # gate below the comment saying a gate that can be silently emptied is worse
+    # than no gate. A new source file was outside it too until somebody
+    # remembered, which is exactly how `watch` came to claim it had no options.
+    set optsrc [lsearch -all -inline -not [lsearch -all -inline -not \
+        [lsort [glob -nocomplain -directory $SRC *.c]] *sqlite3.c] *sqlite3ext*]
+    check "the option scan covers every source file" [expr {[llength $optsrc] >= 8}]
+    foreach f $optsrc {
         set fh [open $f r] ; set text [read $fh] ; close $fh
         foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $text] { lappend inC $o }
     }
@@ -2199,6 +2208,707 @@ if {[file isdirectory $WTOOL]} {
         [dict get $wr exit] != 127}]
     file delete -force $WOUT $WMARK
 }
+
+# --- `dirs`: the directory tree, and the silences it must make impossible -----
+#
+# THESE GATES ARE AIMED AT THE C WALKER, NOT AT THE `glob` WALKERS IT REPLACES.
+# That distinction is the whole methodology. It is easy to write a suite that
+# fires on the three prelude attempts recorded in direction.md -- 786 short, 77%
+# over, deduplicated back to 786 short -- and such a suite proves the last war
+# was won. The break-tests each gate below is written against are defects of the
+# implementation that actually shipped: emitting in NTFS enumeration order,
+# treating every reparse point as a surrogate the way z does, refusing to descend
+# a root that is itself a junction, counting at push instead of at pop,
+# converting names with CP_ACP instead of CP_UTF8, and losing the \\?\ prefix.
+# Every one of those is silent, and silence is the reason this verb is in C.
+#
+# THE EXPECTATION IS DERIVED FROM THE LITERAL SHAPE, never from a second walk.
+# An expectation built with `glob` is two implementations of the same misreading
+# checked against each other, which is exactly how three attempts in a row
+# reported a plausible number and a wrong list.
+set FX  [string map {\\ /} $env(TEMP)]/mt_dirs_[pid]
+set FXO [string map {\\ /} $env(TEMP)]/mt_dirs_out_[pid]
+proc DirsNat {p} { return [file nativename $p] }
+proc DirsWipe {p} {
+    if {![file exists $p]} return
+    # JUNCTIONS FIRST, and that ordering is most of why teardown used to be slow.
+    # `icacls /reset /t` FOLLOWS a junction, so `linkup` -- which points at the
+    # fixture root -- sends it round the whole tree again: measured, ~64 levels of
+    # linkup\linkup\... before MAX_PATH stops it, every teardown doing ~64x the
+    # ACL work it needs to. `rmdir` on a junction removes the LINK and never the
+    # target, so this is safe to do first. Only the top level is scanned, which is
+    # where this fixture's three junctions live.
+    foreach q [glob -nocomplain -types d -directory $p *] {
+        if {![catch {file link $q}]} { catch {exec cmd /c rmdir [DirsNat $q]} }
+    }
+    # `icacls /reset` BEFORE the rmdir, and this is not belt-and-braces. Measured:
+    # with a deny ACE in place `rmdir /s /q` prints "Access is denied", EXITS 0,
+    # and leaves the directory behind -- so a teardown that trusts the exit code
+    # leaves a fixture that the next run cannot rebuild and cannot remove either,
+    # and every subsequent run fails for a reason that has nothing to do with the
+    # code.
+    catch {exec cmd /c icacls [DirsNat $p] /reset /t /q /c}
+    catch {exec cmd /c rmdir /s /q [DirsNat $p]}
+}
+# EVERY LEFTOVER FIXTURE, NOT THIS RUN'S. The on-entry wipe used to be
+# `DirsWipe $FX`, and its comment said it existed "because the run that leaves
+# the mess is the one that was killed" -- but $FX carries THIS process's pid, so
+# a fresh run's path can never be a killed run's path and nothing ever collected
+# anything. Measured: %TEMP% held four abandoned mt_dirs_* trees from killed
+# runs, each with a `locked` subdirectory still carrying its deny ACE, which a
+# later plain `rmdir /s /q` calls "not empty", exits 0 on, and leaves for good.
+foreach stale [glob -nocomplain -directory [string map {\\ /} $env(TEMP)] mt_dirs_*] {
+    DirsWipe $stale
+}
+
+# The sibling tree a junction points OUT of the root at.
+file mkdir [file join $FXO ochild]
+
+file mkdir $FX
+# A dot-name that is ALSO hidden is the real-world case: `.git` is both, and the
+# 786 missing directories were hidden, not dotted. The two are separated here so
+# a fixture cannot pass by getting one of them right.
+foreach d {.dotname .dothidden hiddenattr} { file mkdir [file join $FX $d] }
+file mkdir [file join $FX hiddenattr inside]
+catch {exec cmd /c attrib +h [DirsNat [file join $FX .dothidden]]}
+catch {exec cmd /c attrib +h +s [DirsNat [file join $FX hiddenattr]]}
+file mkdir [file join $FX {has space}]
+file mkdir [file join $FX {quote'n[brace]}]
+file mkdir [file join $FX target tchild]
+file mkdir [file join $FX locked lchild]
+# A FILE, which must never appear in the answer.
+set fh [open [file join $FX afile.txt] w] ; puts $fh x ; close $fh
+
+# Forty levels, every one of them called `d`: a walker keyed on a base name
+# rather than a path collapses this to one.
+set DEEPN 40
+set p [file join $FX deep]
+for {set i 0} {$i < $DEEPN} {incr i} { set p [file join $p d] }
+file mkdir $p
+
+# PAST MAX_PATH, and it takes a detour to build. Measured: Tcl's own `file
+# mkdir` gives up at 256 characters, `cmd /c mkdir` is MAX_PATH-bound, the chdir
+# trick fails because the current directory is MAX_PATH-bound too, and Tcl's
+# path parser silently mangles a \\?\ prefix -- `file mkdir` on one returns
+# success and creates nothing. .NET's Directory.CreateDirectory takes the prefix
+# straight through, which is the only route from here that works.
+set LONGSEG {}
+for {set i 0} {$i < 12} {incr i} { lappend LONGSEG [string repeat x 24]$i }
+set longnat [DirsNat [file join $FX deeplong]]
+foreach s $LONGSEG { append longnat "\\" $s }
+catch {exec powershell -NoProfile -Command \
+    "\[System.IO.Directory\]::CreateDirectory('\\\\?\\$longnat') | Out-Null"} psmsg
+check "the fixture reaches past MAX_PATH" [expr {
+    [string length $longnat] > 300 && [file isdirectory [file join $FX deeplong]]}]
+
+# Three junctions: one inside the root, one out of it, and one AT the root. The
+# third is the canary -- a walker that descends surrogates does not fail on it,
+# it recurses until the path runs out.
+foreach {name tgt} [list linkin [file join $FX target] \
+                         linkout $FXO \
+                         linkup $FX] {
+    catch {exec cmd /c mklink /J [DirsNat [file join $FX $name]] [DirsNat $tgt]}
+}
+check "the fixture has its three junctions" [expr {
+    [file isdirectory [file join $FX linkin]] && [file isdirectory [file join $FX linkout]]
+    && [file isdirectory [file join $FX linkup]]}]
+
+# Sibling order, and the two orderings that are NOT it. `AB aa Zz _z b1`
+# separates code-point order from NTFS's case-insensitive upcase collation
+# (measured: NTFS enumerates them aa AB b1 Zz _z, completely disjoint from the
+# sorted order). U+E000 against U+1F600 separates UTF-8 code-point order from
+# UTF-16 code-unit order -- the emoji's lead surrogate 0xD83D sorts BEFORE
+# U+E000 as UTF-16 and AFTER it as code points. Written as escapes rather than
+# as bytes so this file's own encoding cannot be what is under test.
+#
+# U+E001 SITS BESIDE U+E000 TO FEED GATE 2, and it is one token that turns a
+# real gate into a reachable one. "dirs lists nothing twice" was written against
+# duplication and could not fire on the one defect in the shipped code that
+# PRODUCES a duplicate: convert with CP_ACP instead of CP_UTF8 and two distinct
+# names collapse to the same bytes. Measured on the CP_ACP build with the old
+# list, every name still mapped to something distinct -- e9, ???, ?, ?? -- so
+# gate 2 stayed silent and only gate 1 fired. Two adjacent private-use
+# characters both become `?`, which is the collision, and it is also the only
+# subject in this file that reaches the WC_ERR_INVALID_CHARS decision the source
+# calls "the point".
+set ORDER [list AB Zz _z aa b1 \u00e9 \u65e5\u672c\u8a9e \ue000 \ue001 \U0001F600]
+file mkdir [file join $FX order]
+foreach n $ORDER { file mkdir [file join $FX order $n] }
+check "the fixture carries non-ASCII names" [expr {
+    [file isdirectory [file join $FX order \u65e5\u672c\u8a9e]] &&
+    [file isdirectory [file join $FX order \U0001F600]]}]
+
+catch {exec cmd /c icacls [DirsNat [file join $FX locked]] /deny "$env(USERNAME):(OI)(CI)(RD)"}
+
+# GATE 0, THE CANARY, IN A CHILD PROCESS. `linkup` points at the fixture root:
+# a walker that descends surrogates does not return a wrong answer here, it does
+# not return. In-process that hangs the suite with no output; as a supervised
+# child with a timeout it is a failed check and the rest of the run continues.
+# (With \\?\ the path is bounded at 32,767 characters, so such a walk terminates
+# after some thousands of levels rather than never -- the timeout is what
+# protects the suite, not the arithmetic.)
+# In %TEMP%, not in the repo's own test/ directory. It was written beside this
+# file and deleted only on the success path, so an abort at gate 0 left a stray
+# .tcl in the source tree -- and $HERE is also shared by concurrent runs, which
+# this fixture otherwise keys on the pid to avoid.
+set DCANARY [file join [string map {\\ /} $env(TEMP)] mt_dirs_canary_[pid].tcl]
+set fh [open $DCANARY w] ; fconfigure $fh -translation lf
+puts $fh {set r [dirs [lindex $argv 0]] ; puts "CANARY [dict get $r dirs]"}
+close $fh
+set dcr [run -timeout 90s -- $MT tcl $DCANARY $FX]
+check "dirs terminates on a junction pointing at its own root" [expr {
+    [dict get $dcr status] eq "ok" && [string match "*CANARY*" [dict get $dcr out]]}]
+file delete -force $DCANARY
+
+set R [dirs $FX]
+set GOT [dict get $R paths]
+
+# Whether the deny ACE actually took. FILE_FLAG_BACKUP_SEMANTICS is mandatory to
+# open a directory at all, and with SeBackupPrivilege it BYPASSES the ACE -- so
+# on an elevated run `locked/lchild` is readable and the expectation below has to
+# change. The suite already carries this scar for `mtps`; the wrong response to
+# a red gate here is to weaken the gate, so the condition is probed and said out
+# loud instead.
+#
+# THE PROBE IS EXTERNAL, not the walker's own output. It used to be
+# `[file join $FX locked lchild] ni $GOT` -- the verb under test asked whether
+# the verb under test was right, which is the self-referential shape gate 8's
+# comment explicitly rejects two hundred lines below. It happened to
+# self-correct, because gate 9 also demands exactly one errors row; it was still
+# the wrong oracle. `glob` reads the directory through the same ACL and answers
+# from outside: measured, it raises "permission denied" on the denied directory
+# and returns cleanly (empty) on a readable empty one, so a `catch` separates
+# them without needing the walker to agree.
+set DENIED [catch {glob -nocomplain -directory [file join $FX locked] *}]
+if {!$DENIED} { puts "     NOTE: elevated -- the deny ACE did not take, gates 1/9 relaxed" }
+
+set EXPECT [list $FX]
+lappend EXPECT [file join $FX .dothidden] [file join $FX .dotname] [file join $FX deep]
+set p [file join $FX deep]
+for {set i 0} {$i < $DEEPN} {incr i} { set p [file join $p d] ; lappend EXPECT $p }
+lappend EXPECT [file join $FX deeplong]
+set p [file join $FX deeplong]
+foreach s $LONGSEG { set p [file join $p $s] ; lappend EXPECT $p }
+lappend EXPECT [file join $FX {has space}] [file join $FX hiddenattr] \
+               [file join $FX hiddenattr inside] \
+               [file join $FX linkin] [file join $FX linkout] [file join $FX linkup] \
+               [file join $FX locked]
+if {!$DENIED} { lappend EXPECT [file join $FX locked lchild] }
+lappend EXPECT [file join $FX order]
+foreach n $ORDER { lappend EXPECT [file join $FX order $n] }
+lappend EXPECT [file join $FX {quote'n[brace]}] [file join $FX target] \
+               [file join $FX target tchild]
+
+# GATE 1: the exact set, BOTH DIRECTIONS. Not a count -- the recorded failures
+# were 786 short AND 16,504 over, and a walker can be both at once while landing
+# on a total that looks right.
+set missing {} ; set extra {}
+foreach e $EXPECT { if {$e ni $GOT} { lappend missing $e } }
+foreach g $GOT    { if {$g ni $EXPECT} { lappend extra $g } }
+check "dirs lists exactly the tree that is there" [expr {$missing eq "" && $extra eq ""}]
+# THE DIAGNOSTIC IS WRAPPED, and that is not defensive habit. A walker that
+# converts names with CP_ACP instead of CP_UTF8 hands back byte strings that are
+# not valid UTF-8; this gate fired on it correctly, and then `puts` threw trying
+# to render one -- so the run aborted here and every check after it silently
+# never ran, which is the failure `valof` was added to this file to stop. The
+# count survives even when the paths cannot be printed.
+if {$missing ne ""} {
+    if {[catch {puts "     missing: [lrange $missing 0 9]"}]} { puts "     missing: [llength $missing] (unprintable)" }
+}
+if {$extra ne ""} {
+    if {[catch {puts "     extra:   [lrange $extra 0 9]"}]} { puts "     extra:   [llength $extra] (unprintable)" }
+}
+
+# GATE 2: nothing twice -- a SEPARATE gate, because a set difference cannot see
+# a duplicate. `glob -- * .*` walked every dot-directory twice, terminated
+# normally, and every one of its duplicates was a real path.
+set seen {} ; set dups {}
+foreach g $GOT { if {[dict exists $seen $g]} { lappend dups $g } ; dict set seen $g 1 }
+check "dirs lists nothing twice" [expr {$dups eq ""}]
+if {$dups ne ""} {
+    if {[catch {puts "     duplicated: [lrange $dups 0 9]"}]} { puts "     duplicated: [llength $dups] (unprintable)" }
+}
+
+# GATE 3: the ORDER, against the literal. Ordering is contract (a cache file
+# gets diffed), and pushing children in enumeration order is invisible to every
+# other gate here: same set, same count, different bytes.
+check "dirs emits depth-first, siblings in code-point order" [expr {$GOT eq $EXPECT}]
+if {$GOT ne $EXPECT} {
+    for {set i 0} {$i < [llength $GOT] && $i < [llength $EXPECT]} {incr i} {
+        if {[lindex $GOT $i] ne [lindex $EXPECT $i]} {
+            if {[catch {puts "     first divergence at $i: got [lindex $GOT $i] want [lindex $EXPECT $i]"}]} {
+                puts "     first divergence at $i (unprintable)"
+            }
+            break
+        }
+    }
+}
+check "the root is listed, and first" [expr {[lindex $GOT 0] eq $FX}]
+check "dirs counts what it listed" [expr {[dict get $R dirs] == [llength $GOT]}]
+
+# GATE 4: the individual name classes, so a failure says which one broke.
+check "a dot-name is listed"            [expr {[file join $FX .dotname] in $GOT}]
+check "a hidden dot-name is listed"     [expr {[file join $FX .dothidden] in $GOT}]
+check "a hidden+system name is listed"  [expr {[file join $FX hiddenattr] in $GOT}]
+check "and its child too"               [expr {[file join $FX hiddenattr inside] in $GOT}]
+check "a name with a space is listed"   [expr {[file join $FX {has space}] in $GOT}]
+check "a name with quotes/brackets too" [expr {[file join $FX {quote'n[brace]}] in $GOT}]
+check "a FILE is never listed"          [expr {[file join $FX afile.txt] ni $GOT}]
+
+# GATE 5: non-ASCII round-trips. Two conversions stand between a UTF-16 name and
+# a Tcl string, and CP_ACP in place of CP_UTF8 passes every other gate in this
+# block -- the names still sort, still count, still differ from one another.
+foreach n $ORDER {
+    check "a non-ASCII sibling survives the walk ([string length $n] chars)" \
+        [expr {[file join $FX order $n] in $GOT}]
+}
+check "40 directories all called d survive" [expr {
+    [llength [lsearch -all -inline $GOT [file join $FX deep]/*]] == $DEEPN}]
+# `==`, not `>=`. The one-sided form passes when the whole computation is
+# replaced by `w->maxdepth = 9999` -- measured -- so it constrained nothing above
+# the true answer. `deep` is depth 1 and carries 40 levels of `d`, so 41 is the
+# number and there is no reason to accept a larger one.
+check "maxdepth reports the deepest reached" [expr {[dict get $R maxdepth] == $DEEPN + 1}]
+check "a path past MAX_PATH is listed"      [expr {
+    [lindex $EXPECT [expr {[lsearch -exact $EXPECT [file join $FX deeplong]] + 12}]] in $GOT}]
+
+# GATE 6: reparse points are LISTED and NOT DESCENDED, and the rows are named.
+# Counting them would be a count agreeing by accident; the tag and the
+# disposition are what make the classification auditable.
+foreach n {linkin linkout linkup} {
+    check "$n is listed"          [expr {[file join $FX $n] in $GOT}]
+    check "nothing under $n"      [expr {[lsearch -glob $GOT [file join $FX $n]/*] < 0}]
+}
+# THE SUBJECT IS THE BASENAME THAT ONLY EXISTS OUTSIDE, not the outside path.
+# This used to read `lsearch -glob $GOT $FXO*`, which can never match whatever
+# the walker does: every path is built LEXICALLY by joining a name onto the
+# root's own prefix, and a link target is never resolved, so descending
+# `linkout` emits $FX/linkout/ochild and not $FXO/ochild. The pattern could only
+# fire if the ROOT were $FXO. `ochild` exists nowhere under $FX, so seeing it at
+# all means the walk left the tree it was given.
+check "nothing outside the root leaked in" [expr {[lsearch -glob $GOT */ochild] < 0}]
+set LROWS {}
+foreach l [dict get $R links] { dict set LROWS [dict get $l path] $l }
+check "every junction has a links row" [expr {
+    [dict exists $LROWS [file join $FX linkin]] && [dict exists $LROWS [file join $FX linkout]]
+    && [dict exists $LROWS [file join $FX linkup]]}]
+# `dict exists` GUARDING THE `dict get`s. Stubbing the mklink out of the fixture
+# does not degrade this block, it CRASHES it: `dict get` on a missing key throws
+# "key not known in dictionary", the run aborts here, and gates 7-15 plus BOTH
+# DirsWipe calls never execute -- so a fixture that failed to build also leaks
+# itself permanently, deny ACE and all. Measured.
+check "and the row carries the tag and the disposition" [expr {
+    [dict exists $LROWS [file join $FX linkin]] &&
+    [dict get $LROWS [file join $FX linkin] tag] eq "0xa0000003" &&
+    [dict get $LROWS [file join $FX linkin] surrogate] == 1 &&
+    [dict get $LROWS [file join $FX linkin] action] eq "nofollow"}]
+check "no ordinary directory produced a links row" [expr {[llength [dict get $R links]] == 3}]
+
+# GATE 7: a root that is ITSELF a junction is descended. You named it, so you
+# get it -- and a walker that classifies the root the way it classifies a child
+# returns the root alone and passes every other gate in this file.
+set RL [valof {dirs [file join $FX linkin]}]
+check "a junction root is descended, not refused" [expr {
+    [file join $FX linkin/tchild] in [dict get $RL paths] && [dict get $RL dirs] == 2}]
+# AND IT SAYS SO. Descending a named junction root is right; being SILENT about
+# it is the failure this verb exists to abolish, appearing in the mechanism built
+# to prevent it. Measured on the first implementation: root came back as the
+# junction's own path, `paths` held the target's tree, `errors` was empty and
+# `links` was EMPTY TOO -- so nothing in the answer disclosed that every path
+# returned is a second name for a tree living somewhere else, and a caller
+# auditing containment got a clean, plausible, false negative. The cause was
+# structural rather than a slip: the classification block is gated on depth > 0
+# because the root is exempt from the VETO, which made it exempt from being
+# DESCRIBED, and the root's validation handle FOLLOWS the reparse point so its
+# tag reads 0. Both the source and palette.md promise "every reparse directory
+# gets a row"; gate 7 checked only `paths` and `dirs`, so 576 checks passed over
+# it.
+set RLROW ""
+foreach l [dict get $RL links] { if {[dict get $l path] eq [file join $FX linkin]} { set RLROW $l } }
+check "a junction ROOT still gets its links row" [expr {
+    $RLROW ne "" && [dict get $RLROW tag] eq "0xa0000003" &&
+    [dict get $RLROW surrogate] == 1 && [dict get $RLROW action] eq "descended"}]
+check "and the same root spelled with a trailing separator too" [expr {
+    [llength [dict get [valof {dirs [file join $FX linkin]/}] links]] == 1}]
+# An ordinary root must NOT acquire one, or the row means nothing.
+check "an ordinary root produces no links row of its own" [expr {
+    ![dict exists $LROWS $FX]}]
+
+# GATE 8: THE DIVERGENCE FROM z, which is the one decision here that is not
+# inherited. z refuses to descend anything carrying FILE_ATTRIBUTE_REPARSE_POINT;
+# this refuses only NAME SURROGATES (tag & 0x20000000), so a cloud placeholder,
+# a DEDUP store or a WIM projection is walked instead of silently omitted --
+# 124,145 directories under one OneDrive root, measured.
+#
+# THE SUBJECT IS FOUND WITH fsutil, NOT WITH `dirs`. The first version of this
+# gate scanned the verb's own `links` rows for one with `surrogate 0` and
+# skipped when it found none. That is the shape that empties itself under
+# exactly the defect it exists to catch, and it was not a theoretical worry: a
+# build patched to use z's blanket rule marks every reparse point a surrogate,
+# emits no such row, the gate skipped -- and NOTHING ELSE in this file fired
+# either. Measured, 0 failures out of 576 checks. So the oracle is external, and
+# its absence is SAID rather than passed over, because a non-surrogate reparse
+# point cannot be created here without either elevation or FSCTL_SET_REPARSE_POINT.
+set HOMEDIR [string map {\\ /} $env(USERPROFILE)]
+set NONSURR "" ; set NONTAG ""
+foreach cand [glob -nocomplain -types d -directory $HOMEDIR *] {
+    if {[catch {exec fsutil reparsepoint query [DirsNat $cand]} q]} continue
+    if {![regexp {Reparse Tag Value\s*:\s*(0x[0-9a-fA-F]+)} $q -> t]} continue
+    if {($t & 0x20000000) == 0} { set NONSURR $cand ; set NONTAG $t ; break }
+}
+if {$NONSURR eq ""} {
+    puts "     SKIP non-surrogate reparse descent: fsutil found no such directory under $HOMEDIR"
+    puts "          (the surrogate rule is then exercised against junctions only)"
+} else {
+    set HOMEW [valof {dirs $HOMEDIR -depth 2}]
+    set nrow ""
+    foreach l [dict get $HOMEW links] { if {[dict get $l path] eq $NONSURR} { set nrow $l } }
+    check "a non-surrogate reparse directory is classified as such" [expr {
+        $nrow ne "" && [dict get $nrow surrogate] == 0
+        && [dict get $nrow tag] == $NONTAG && [dict get $nrow action] eq "descended"}]
+    check "and it is DESCENDED, where z would stop" [expr {
+        [lsearch -glob [dict get $HOMEW paths] $NONSURR/*] >= 0}]
+    if {$nrow eq ""} { puts "     no links row at all for $NONSURR (tag $NONTAG)" }
+}
+
+# GATE 9: unreadable is COUNTED, never fatal. contract.md confines `denied` to
+# `mtps`; a subdirectory you may not open is a row, because failing the whole
+# listing would make the verb useless on exactly the machines it is for.
+check "an unreadable directory is still listed" [expr {[file join $FX locked] in $GOT}]
+if {$DENIED} {
+    check "but its child is not"      [expr {[file join $FX locked lchild] ni $GOT}]
+    set erows {}
+    foreach e [dict get $R errors] { dict set erows [dict get $e path] $e }
+    check "and it has exactly one errors row" [expr {
+        [llength [dict get $R errors]] == 1 && [dict exists $erows [file join $FX locked]]}]
+    if {[dict exists $erows [file join $FX locked]]} {
+        set er [dict get $erows [file join $FX locked]]
+        check "the row carries a raw win32 code"  [expr {[dict get $er win32] != 0}]
+        check "and a reason, without a line break" [expr {
+            [dict get $er reason] ne "" &&
+            [dict get $er reason] eq [string trim [dict get $er reason]]}]
+    }
+}
+
+# GATE 10: THE ACCOUNTING INVARIANT, which is the reason the result dict has the
+# shape it has: every directory under the root is either in `paths`, or its
+# absence is attributable to exactly one counted cause. Three prelude walkers
+# went missing silently; this is the arithmetic that makes silence impossible.
+#
+# THE PREVIOUS VERSION OF THIS GATE COULD NOT FIRE, and its three defects are
+# worth naming because each is a shape that recurs.
+#   - `if {$absent in $GOT} continue` skipped any probe the walker HAD listed.
+#     Over-listing -- descending a junction, which is exactly what this gate
+#     exists to catch -- therefore emptied it. Measured: a build whose surrogate
+#     veto reads `depth > 1` instead of `depth > 0` descends all three junctions,
+#     and the old gate passed with every one of its four probes skipped.
+#   - It modelled two of the four counted causes. `pruned` and `depthlimited`
+#     were absent from the model and it was never run against a -prune or -depth
+#     result anyway, so half the arithmetic was never checked at all.
+#   - Its four probes duplicated gate 6 and gate 9.
+# So: absence is now REQUIRED as well as accounted, the model carries all four
+# causes, and it runs against three different walks of the same fixture.
+proc DirsDepth {root p} {
+    if {$p eq $root} { return 0 }
+    return [llength [split [string trimleft [string range $p [string length $root] end] /] /]]
+}
+# Every stopping cause this result declares, keyed by the directory it stopped
+# AT. `-depth` and `-prune` leave no row -- they are counters plus the option the
+# caller passed -- so they are reconstructed from the option, which is precisely
+# what a caller closing the arithmetic has to do.
+proc DirsStops {r cap prune} {
+    set stopped {}
+    foreach e [dict get $r errors] { dict set stopped [dict get $e path] errors }
+    foreach l [dict get $r links] {
+        if {[dict get $l action] ne "descended"} { dict set stopped [dict get $l path] links }
+    }
+    set root [dict get $r root]
+    foreach q [dict get $r paths] {
+        if {$cap >= 0 && [DirsDepth $root $q] >= $cap} { dict set stopped $q depthlimited }
+        foreach pat $prune {
+            if {[string match -nocase $pat [file tail $q]]} { dict set stopped $q pruned }
+        }
+    }
+    return $stopped
+}
+# How many ancestors of $p stopped the walk. Exactly one is the invariant: zero
+# means it vanished with nothing saying why, and the nearest one is the answer.
+proc DirsAccounts {r p {cap -1} {prune {}}} {
+    set stopped [DirsStops $r $cap $prune]
+    set nc 0
+    set anc [file dirname $p]
+    while {[string length $anc] > 3} {
+        if {[dict exists $stopped $anc]} { incr nc }
+        set nx [file dirname $anc]
+        if {$nx eq $anc} break
+        set anc $nx
+    }
+    return $nc
+}
+# The directories that GENUINELY EXIST under the root and are deliberately not
+# listed -- through the junctions and behind the deny ACE. Written from the
+# literal fixture, never from a second walk.
+set ABSENT [list [file join $FX linkin tchild] [file join $FX linkout ochild]]
+foreach n {.dotname .dothidden deep deeplong {has space} hiddenattr linkin linkout \
+           linkup locked order {quote'n[brace]} target} {
+    lappend ABSENT [file join $FX linkup $n]
+}
+if {$DENIED} { lappend ABSENT [file join $FX locked lchild] }
+set overlisted {} ; set unaccounted {}
+foreach absent $ABSENT {
+    if {$absent in $GOT} { lappend overlisted $absent ; continue }
+    if {[DirsAccounts $R $absent] != 1} { lappend unaccounted $absent }
+}
+check "nothing behind a refused descent was listed anyway" [expr {$overlisted eq ""}]
+if {$overlisted ne ""} { puts "     over-listed: [lrange $overlisted 0 9]" }
+check "every absent directory is attributable to exactly one counted cause" [expr {
+    $unaccounted eq ""}]
+if {$unaccounted ne ""} { puts "     unaccounted: $unaccounted" }
+# The other two causes, each against a walk that actually produces it.
+set ACCP [valof {dirs $FX -prune deep}]
+set ACCD [valof {dirs $FX -depth 1}]
+check "a pruned subtree is attributable too" [expr {
+    [file join $FX deep d] ni [dict get $ACCP paths] &&
+    [DirsAccounts $ACCP [file join $FX deep d] -1 deep] == 1}]
+check "and a depth-limited one" [expr {
+    [file join $FX deep d] ni [dict get $ACCD paths] &&
+    [DirsAccounts $ACCD [file join $FX deep d] 1 {}] == 1}]
+
+# GATE 11: -depth. The cap is checked AFTER emission, so -depth 0 is the root
+# alone and -depth 1 is the root plus its children. `0` never means unlimited --
+# unlimited is spelled by leaving the option out, because a sentinel that turns
+# a typo into a thousand-fold difference in the answer is the `-timeout 100`
+# mistake and the answer here is a whole drive.
+set D0 [valof {dirs $FX -depth 0}]
+set D1 [valof {dirs $FX -depth 1}]
+set D3 [valof {dirs $FX -depth 3}]
+check "-depth 0 is the root alone" [expr {[dict get $D0 paths] eq [list $FX]}]
+check "-depth 0 counts one refusal" [expr {[dict get $D0 depthlimited] == 1}]
+check "-depth 1 is the root and its children" [expr {
+    [dict get $D1 dirs] == 14 && [dict get $D1 depthlimited] == 13}]
+# The root is depth 0, so under -depth 3 the deepest thing listed is
+# deep/d/d -- deep is 1, deep/d is 2, deep/d/d is 3 and is refused descent.
+check "-depth 3 stops at three" [expr {
+    [file join $FX deep/d/d] in [dict get $D3 paths] &&
+    [file join $FX deep/d/d/d] ni [dict get $D3 paths]}]
+check "a deeper limit is a superset of a shallower one" [expr {
+    [llength [lmap p [dict get $D1 paths] {expr {$p in [dict get $D3 paths] ? [continue] : $p}}]] == 0}]
+check "and unlimited is a superset of both" [expr {
+    [dict get $R dirs] > [dict get $D3 dirs] && [dict get $R depthlimited] == 0}]
+# `depthlimited` COUNTS REFUSALS, NOT ELISIONS, and that is written down here
+# because the accounting story invites the opposite reading. Every directory at
+# the cap is counted, INCLUDING a leaf with nothing underneath it -- so a nonzero
+# `depthlimited` does not mean anything was actually omitted, and it is not the
+# number of elided subtrees. `target` holds one leaf, `tchild`, and nothing else:
+# under -depth 1 the count is 1 and the answer is nonetheless complete.
+set DLEAF [valof {dirs [file join $FX target] -depth 1}]
+check "depthlimited counts refusals, leaves included" [expr {
+    [dict get $DLEAF dirs] == 2 && [dict get $DLEAF depthlimited] == 1}]
+
+# GATE 12: -prune. It speaks Tcl's own `string match` -- no private pattern
+# dialect, which is what `glob`'s did -- matched case-insensitively against the
+# base name. A pruned directory is LISTED and not descended, so pruning is a
+# descent decision like every other one here.
+set P1 [valof {dirs $FX -prune deep}]
+check "-prune lists the match and not its contents" [expr {
+    [file join $FX deep] in [dict get $P1 paths] &&
+    [file join $FX deep/d] ni [dict get $P1 paths] && [dict get $P1 pruned] == 1}]
+check "-prune is case-insensitive" [expr {[dict get [valof {dirs $FX -prune DEEP}] pruned] == 1}]
+check "-prune takes a glob pattern" [expr {[dict get [valof {dirs $FX -prune deep*}] pruned] == 2}]
+check "-prune takes several patterns" [expr {
+    [dict get [valof {dirs $FX -prune {deep target}}] pruned] == 2}]
+check "the root is never pruned" [expr {
+    [dict get [valof {dirs $FX -prune [file tail $FX]}] dirs] == [dict get $R dirs]}]
+
+# GATE 13: how the root is spelled must not change what comes back, and a
+# spelling that hides process state is refused rather than honoured.
+#
+# THE cd IS RESTORED EVEN WHEN THE CHECK RAISES. Measured: with `dirs target`
+# made to raise, the run aborted with the process cwd still INSIDE the fixture,
+# teardown never ran, and the fixture leaked -- a directory nothing can remove
+# while a process is sitting in it.
+set here [pwd]
+set RELROOT "" ; set DOTROOT ""
+try {
+    cd $FX
+    set RELROOT [dict get [valof {dirs target}] root]
+    set DOTROOT [dict get [valof {dirs .}] root]
+} finally {
+    cd $here
+}
+check "a relative root resolves"  [expr {$RELROOT eq [file join $FX target]}]
+check "and so does ."             [expr {$DOTROOT eq $FX}]
+# BOTH HALVES, because the count alone tests nothing here. Measured: disabling
+# the entire trailing-separator strip in dirs_prefix leaves every check in this
+# block green, since dirs_join independently suppresses a doubled separator when
+# the parent already ends in one. The regression is in the REPORTED ROOT --
+# the broken build answers `C:/dev/_machteld/docs/` -- and the neighbouring
+# "comes back normalised" check only ever ran against $R, whose root was spelled
+# without a separator.
+set TSEP [valof {dirs $FX/}]
+check "a trailing separator changes nothing" [expr {
+    [dict get $TSEP dirs] == [dict get $R dirs] && [dict get $TSEP root] eq $FX}]
+check "the root comes back normalised, forward-slashed, unprefixed" [expr {
+    [dict get $R root] eq $FX && [string first "?" [dict get $R root]] < 0}]
+
+# GATE 13b: THE ROOT SPELLINGS THAT HAD NO GATE AT ALL. All of these were
+# sabotaged in one build and the suite reported ALL PASS -- every one is a real,
+# user-visible regression that nothing here could see.
+#
+# One key of one result, or "" if the call raised or the key is absent. `valof`
+# stops a regression that makes `dirs` RAISE from aborting the run; it does not
+# stop the `dict get` that follows it from aborting on the "" it returns, which
+# is the same crash one line later.
+proc DirsKey {script key} {
+    if {[catch {uplevel 1 $script} r]} { return "" }
+    if {![dict exists $r $key]} { return "" }
+    return [dict get $r $key]
+}
+check "a drive root is the root DIRECTORY, not the volume device" [expr {
+    [DirsKey {dirs C:/ -depth 0} root] eq "C:/"}]
+# \\?\C:\ is the same claim in the spelling that turns normalisation OFF, and it
+# is the one the code got wrong: the drive-root exemption tested `fl == 3 &&
+# full[1] == ':'`, which is written for C:\ and misses the prefixed form, where
+# the colon sits at index 5. The trailing backslash was stripped and the walk was
+# handed \\?\C: -- the volume DEVICE its own comment warns about -- so a drive
+# root that plainly exists came back `notfound`, in the only spelling that
+# reaches the names refused by gate 13d.
+check "and so is the prefixed spelling of it" [expr {
+    [DirsKey {dirs \\\\?\\C:\\ -depth 0} root] eq "C:/"}]
+check "a prefixed root is taken as given" [expr {
+    [DirsKey {dirs \\\\?\\[DirsNat $FX]} dirs] == [dict get $R dirs]}]
+# The forward-slash spelling of the prefix is not the backslash test, and
+# GetFullPathNameW rewrites it into one -- after which the leading \\ was read as
+# a UNC name and \\?\UNC\?\C:\... was built, a path that has never existed,
+# refused as `notfound`. A wrong path silently constructed, not a rejected
+# spelling.
+check "and its forward-slash spelling resolves to the same tree" [expr {
+    [DirsKey {dirs //?/$FX} dirs] == [dict get $R dirs]}]
+check "a device path is refused" [expr {
+    [errcode_of {dirs //./PhysicalDrive0}] eq {MACHTELD DIRS badvalue} &&
+    [errcode_of {dirs \\\\.\\PhysicalDrive0}] eq {MACHTELD DIRS badvalue}}]
+check "an empty root is refused" [expr {[errcode_of {dirs {}}] eq {MACHTELD DIRS badvalue}}]
+check "a malformed -prune list is refused" [expr {
+    [errcode_of {dirs $FX -prune \{}] eq {MACHTELD DIRS badvalue}}]
+
+# GATE 13c: UNC. The whole `unc` branch -- eight characters of prefix standing in
+# for two, undone again on the way out -- had no gate: a build with it broken
+# answers `root UNC/localhost/C$/...` and emits every path under a prefix that
+# does not exist. An admin share is not guaranteed to be reachable, so the
+# subject is probed and its absence is SAID rather than passed over.
+set UNCFX //localhost/[string index $FX 0]\$[string range $FX 2 end]
+if {[catch {dirs $UNCFX} UR]} {
+    puts "     SKIP UNC root: $UNCFX is not reachable ([lindex [errcode_of {dirs $UNCFX}] 2])"
+} else {
+    check "a UNC root round-trips as //server/share/..." [expr {[dict get $UR root] eq $UNCFX}]
+    check "and lists the same tree the drive spelling does" [expr {
+        [dict get $UR dirs] == [dict get $R dirs]}]
+    # Past the leading `//`, which is the UNC spelling and not a doubled
+    # separator -- the failure this looks for is \\?\UNC\server\share\\child,
+    # which the join is what prevents.
+    check "with no doubled separator anywhere in it" [expr {
+        [lsearch -glob [lmap p [dict get $UR paths] {string range $p 2 end}] *//*] < 0}]
+}
+
+# GATE 13d: A COMPONENT WIN32 WOULD SILENTLY REWRITE IS REFUSED, NOT HONOURED.
+# GetFullPathNameW trims trailing dots and spaces, so `X/...` collapses to `X`:
+# measured on the first implementation, `dirs X/...` returned the PARENT's tree
+# -- root reported as X, six directories, no error and no row -- while
+# `X/trailspace ` and `X/traildot.` failed with `notfound`, which is luck rather
+# than design. The walker CREATES and LISTS all four of these happily, so it was
+# the verb's own output failing to round-trip, in the one spelling that is silent
+# about it. `.` and `..` are the two components where trailing dots are the whole
+# meaning; they stay exempt, and the two checks above this one hold them.
+foreach n [list ... "trailspace " "traildot." "dots.."] {
+    check "a root component normalisation would rewrite is refused (<$n>)" [expr {
+        [errcode_of {dirs $FX/$n}] eq {MACHTELD DIRS badvalue}}]
+}
+check "and the prefixed spelling is the escape hatch that still works" [expr {
+    [DirsKey {dirs \\\\?\\[DirsNat $FX]\\deep} dirs] == $DEEPN + 1}]
+
+# GATE 14: the error contract. Every code is one contract.md already carries --
+# `denied` stays confined to `mtps` and `depth` means C recursion, which an
+# iterative walk over a heap stack cannot do.
+check "a missing root => notfound"    [expr {[errcode_of {dirs $FX/nope_zzz}] eq {MACHTELD DIRS notfound}}]
+check "a FILE as root => notfound"    [expr {
+    [errcode_of {dirs [file join $FX afile.txt]}] eq {MACHTELD DIRS notfound}}]
+check "-depth nope => badvalue"       [expr {[errcode_of {dirs $FX -depth nope}] eq {MACHTELD DIRS badvalue}}]
+check "-depth -1 => badvalue"         [expr {[errcode_of {dirs $FX -depth -1}] eq {MACHTELD DIRS badvalue}}]
+check "a drive-relative root => badvalue" [expr {[errcode_of {dirs C:}] eq {MACHTELD DIRS badvalue}}]
+check "an unknown option => usage"    [expr {[errcode_of {dirs $FX -nosuch v}] eq {MACHTELD DIRS usage}}]
+check "an option with no value => usage" [expr {[errcode_of {dirs $FX -depth}] eq {MACHTELD DIRS usage}}]
+check "no argument => Tcl's own WRONGARGS" [expr {[lindex [errcode_of {dirs}] 0] eq "TCL"}]
+check "dirs raises in its own domain" [expr {[lindex [errcode_of {dirs $FX -nosuch v}] 1] eq "DIRS"}]
+
+# GATE 14b: A FAILING CALL COSTS NOTHING THAT IS NOT GIVEN BACK. The three
+# result lists are created before the root is even parsed and are adopted only by
+# the result dict, so every error return had to free them by hand and eight did
+# not: measured on the shipped exe, 144 bytes a call -- exactly 3 x
+# sizeof(Tcl_Obj) in Tcl 9 -- linear over 200,000 calls with no plateau, against
+# a success path that plateaus at zero after the first batch.
+#
+# It is gated rather than merely fixed because the suite exercises each error
+# code ONCE, which is the one call count at which an unbounded leak is invisible,
+# and because `notfound` is what a directory that vanished between two walks
+# answers: `foreach p $roots {catch {dirs $p}}` is the ordinary way to probe
+# candidates and the host is a long-lived front door. The bound is deliberately
+# loose -- 20,000 calls leaked 2.8 MB, so anything under 1 MB is a fix and not a
+# smaller leak, and the allocator's own first-touch growth is warmed off first.
+proc DirsMem {} {
+    foreach p [mtps list] { if {[dict get $p pid] == [pid]} { return [dict get $p mem] } }
+    return 0
+}
+foreach i {1 2 3} { catch {dirs $FX/nope_zzz} ; catch {dirs $FX -nosuch v} }
+set LEAKN 20000
+set memA [DirsMem]
+for {set i 0} {$i < $LEAKN} {incr i} { catch {dirs $FX/nope_zzz} }
+set memB [DirsMem]
+for {set i 0} {$i < $LEAKN} {incr i} { catch {dirs $FX -depth nope} }
+set memC [DirsMem]
+check "a failing dirs does not leak its result lists" [expr {
+    $memB - $memA < 1048576 && $memC - $memB < 1048576}]
+if {$memB - $memA >= 1048576 || $memC - $memB >= 1048576} {
+    puts [format "     notfound: %+d bytes over %d calls (%.1f/call);\
+ badvalue: %+d (%.1f/call)" [expr {$memB-$memA}] $LEAKN \
+        [expr {($memB-$memA)/double($LEAKN)}] [expr {$memC-$memB}] \
+        [expr {($memC-$memB)/double($LEAKN)}]]
+}
+
+# GATE 15: the manifest against the running verb, not against the source that
+# was scanned to build it.
+set MD [manifest]
+check "manifest dirs returns matches reality" [expr {
+    [lsort [dict keys $R]] eq [lsort [dict get $MD dirs returns]]}]
+check "manifest dirs declares its options" [expr {
+    [lsort [dict get $MD dirs options]] eq {-depth -prune}}]
+check "a declared option is accepted" [expr {[errcode_of {dirs $FX -prune {}}] eq ""}]
+check "dirs is a C verb, with no Tcl proc behind it" [expr {
+    [dict get $MD dirs kind] eq "c" && ![llength [info procs ::machteld::dirs]]}]
+# THE CODES, WHICH WERE OUTSIDE THIS GATE AND SHOULD NOT HAVE BEEN. Fixing the
+# result-list leak by folding free-and-raise into one helper --
+# `dirs_bail(interp, &w, "usage", msg)` -- moved the code literal out of the
+# second argument position, which is where genmanifest.tcl's
+# `\w+_error\(interp,\s*"([a-z]+)"` looks for it. The build reported
+# `dirs domain=DIRS codes=1` against a truth of four, every one of the 600
+# checks below still passed, and `manifest dirs codes` quietly became a lie.
+# Creed 4 is the palette describing ITSELF; a generator that can be blinded by a
+# refactor needs a gate that notices, in the file whose whole subject is a
+# regression nothing announces.
+check "manifest dirs declares every code it can throw" [expr {
+    [lsort [dict get $MD dirs codes]] eq {badvalue notfound oserror usage}}]
+set DTHREW {}
+foreach s {{dirs $FX/nope_zzz} {dirs [file join $FX afile.txt]} {dirs $FX -depth nope}
+           {dirs C:} {dirs {}} {dirs $FX -nosuch v} {dirs $FX -depth}} {
+    set c [lindex [errcode_of $s] 2]
+    if {$c ne ""} { dict set DTHREW $c 1 }
+}
+check "and every code it actually threw is declared" [expr {
+    [llength [lmap c [dict keys $DTHREW] {
+        expr {$c in [dict get $MD dirs codes] ? [continue] : $c}}]] == 0}]
+
+DirsWipe $FX
+DirsWipe $FXO
+check "the fixture tore down completely" [expr {![file exists $FX] && ![file exists $FXO]}]
 
 file delete $CHILD
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
