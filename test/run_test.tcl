@@ -1701,7 +1701,7 @@ foreach v {front help} {
 }
 check "manifest gives front its options" [expr {
     [dict exists $M0 front options] &&
-    [lsort [dict get $M0 front options]] eq {-inherit -json}}]
+    [lsort [dict get $M0 front options]] eq {-depth -inherit -json -out -prune -stdout}}]
 check "a verb that cannot fail has no domain" [expr {
     ![dict exists $M0 version domain] && ![dict exists $M0 vtstrip domain]}]
 
@@ -2569,7 +2569,34 @@ if {$NONSURR eq ""} {
     check "and it is DESCENDED, where z would stop" [expr {
         [lsearch -glob [dict get $HOMEW paths] $NONSURR/*] >= 0}]
     if {$nrow eq ""} { puts "     no links row at all for $NONSURR (tag $NONTAG)" }
+    # AND WHEN IT IS THE ROOT ITSELF. The root's tag is read through a handle,
+    # and a cloud filter CONSUMES its own reparse point on open -- the top of
+    # dirs.c records exactly this measurement -- so the root of such a tree read
+    # back as an ordinary directory and `links` came back EMPTY. Narrowing a walk
+    # to the divergent subtree was therefore the one invocation that lost the
+    # disclosure, while naming the parent kept it. That is the junction-root
+    # silence this verb was already fixed for once, in the other spelling; the
+    # parent's scan supplies the row now, for disclosure only and never for the
+    # veto.
+    set NROOTW [valof {dirs $NONSURR -depth 1}]
+    set nrrow ""
+    foreach l [valof {dict get $NROOTW links}] {
+        if {[dict get $l path] eq $NONSURR} { set nrrow $l }
+    }
+    check "a non-surrogate reparse point NAMED AS THE ROOT is disclosed too" [expr {
+        $nrrow ne "" && [dict get $nrrow surrogate] == 0
+        && [dict get $nrrow tag] == $NONTAG && [dict get $nrrow action] eq "descended"}]
+    # AND THE DISCLOSURE DOES NOT AUTHORISE ANYTHING. The veto is `noenter &&
+    # depth > 0`, so a root is entered whatever its tag says -- you named it, so
+    # you get it -- and a fallback that changed that would turn `dirs <junction>`
+    # into a one-line answer.
+    check "and naming such a root still enters it" [expr {
+        [dict get $NROOTW dirs] > 1}]
 }
+# AND AN ORDINARY DIRECTORY IS STILL NOT A REPARSE POINT, or the fallback above
+# would be manufacturing rows: the scan is consulted only when the handle said no.
+check "an ordinary root produces no links row of its own" [expr {
+    [dict get [valof {dirs $FX/target -depth 0}] links] eq ""}]
 
 # GATE 9: unreadable is COUNTED, never fatal. contract.md confines `denied` to
 # `mtps`; a subdirectory you may not open is a row, because failing the whole
@@ -2905,6 +2932,948 @@ foreach s {{dirs $FX/nope_zzz} {dirs [file join $FX afile.txt]} {dirs $FX -depth
 check "and every code it actually threw is declared" [expr {
     [llength [lmap c [dict keys $DTHREW] {
         expr {$c in [dict get $MD dirs codes] ? [continue] : $c}}]] == 0}]
+
+# --- `cdirs`: the front-door command over the `dirs` verb ---------------------
+#
+# THE VERB IS GATED IN THE 102 CHECKS ABOVE; WHAT IS NEW HERE IS POLICY. Where
+# the file goes, when a report is written, what the report SAYS -- and every one
+# of those is a silence when it is wrong: a list written to the wrong place, a
+# stale report read as current, a consequence not disclosed. z's own stats line
+# is the shape being replaced, and it is worth stating exactly what is wrong
+# with it, because these gates are aimed at that: "12 links skipped" is
+# arithmetically true, names none of the twelve, and on this machine one of them
+# hid 124,144 directories while the other eleven hid a few hundred between them.
+#
+# The subject is the `mt_dirs_[pid]` fixture the block above already erected --
+# reused rather than rebuilt, since building a second one would double the
+# slowest setup in this file and prove nothing the first does not.
+set CDOUT [file join [string map {\\ /} $env(TEMP)] mt_cdirs_[pid]]
+file delete -force $CDOUT
+file mkdir $CDOUT
+# THE BARE NAME, NOT `front cdirs`, and the difference is not cosmetic. `mt
+# cdirs` goes through the argv dispatcher, `FrontResolve` and `FrontExec` before
+# reaching the command -- which is how a person types it, and which is also the
+# path that exposed the empty-list encoding defect these gates now carry: the
+# same build wrote `"entered":{}` through the dispatcher and `"entered":[]`
+# through `front cdirs`, because the two paths leave Tcl's shared empty-string
+# literal in different states. Testing the shorter spelling would have been
+# testing the path where the bug was invisible.
+proc CdirsRun {args} {
+    set r [run -timeout 300s -- $::MT cdirs {*}$args]
+    return [list [dict get $r exit] [dict get $r out] [dict get $r err]]
+}
+proc CdirsLines {f} {
+    if {![file exists $f]} { return "" }
+    set fh [open $f r] ; fconfigure $fh -encoding utf-8 -translation lf
+    set t [read $fh] ; close $fh
+    set l {}
+    foreach x [split [string trimright $t \n] \n] { if {$x ne ""} { lappend l $x } }
+    return $l
+}
+# A `dirs` RESULT WITHOUT A DISK. `FrontDirsReport` is a pure dict->dict
+# function, and that is the whole reason it is a separate proc from the renderer:
+# the verdict logic and the errors/links join can be pointed at situations this
+# machine cannot be made to produce -- a DFS tag, a reparse point that failed to
+# open, a cloud root beside a junction -- instead of only at the ones a fixture
+# happens to reach. The review of `dirs` itself found FIVE gates that could not
+# fail, every one of them aimed at a subject incapable of showing the defect.
+proc CdirsFake {args} {
+    set d [dict create root C:/fx paths [list C:/fx] dirs 1 maxdepth 0 \
+               links {} errors {} pruned 0 depthlimited 0]
+    foreach {k v} $args { dict set d $k $v }
+    return $d
+}
+proc CdirsLink {path tag surrogate action} {
+    return [dict create path $path tag $tag surrogate $surrogate action $action]
+}
+
+# CD1: the slug, which is the whole defence against z's naming defect. `z cdirs
+# --root C:\dev` writes 21,804 workspace directories into a file called
+# `c-drive-dirs.txt`, overwriting the drive index -- a name that lies, and a
+# species of lie this project has spent a lot of its history removing. Four
+# shapes of root, and the long one because AppData/Local/Packages paths on this
+# machine really do exceed the cap.
+check "the slug of a drive root"   [expr {[::machteld::FrontDirsSlug C:/] eq "c"}]
+check "the slug of the workspace"  [expr {[::machteld::FrontDirsSlug C:/dev] eq "c-dev"}]
+check "the slug of a deep root"    [expr {
+    [::machteld::FrontDirsSlug C:/Users/anafa] eq "c-users-anafa"}]
+check "the slug of a UNC root"     [expr {
+    [::machteld::FrontDirsSlug //srv/share/x] eq "srv-share-x"}]
+set CDLONG "C:/Users/anafa/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/uv"
+set CDSLUG [::machteld::FrontDirsSlug $CDLONG]
+check "a long root is capped and gets a hash tail" [expr {
+    [string length $CDSLUG] == 64 && [regexp -- {-[0-9a-f]{8}$} $CDSLUG]}]
+# DETERMINISTIC, or the cache never hits and every run leaves another file.
+check "and the same root slugs the same way twice" [expr {
+    $CDSLUG eq [::machteld::FrontDirsSlug $CDLONG]}]
+# TWO ROOTS SHARING A 55-CHARACTER PREFIX MUST NOT COLLIDE, which is exactly
+# what the cap would cause without the hash -- and AppData is full of siblings
+# that long.
+check "two long roots with the same prefix do not collide" [expr {
+    [::machteld::FrontDirsSlug $CDLONG/python/cpython-3.12] ne
+    [::machteld::FrontDirsSlug $CDLONG/python/cpython-3.14]}]
+# AND THE SHORT ONES, WHICH IS WHERE THE OLD GATE WAS POINTED AWAY FROM. The
+# collision check above tests only the >64-character case -- i.e. exactly the
+# branch where the hash makes the guarantee hold -- while the squash
+# `[^a-z0-9]+ -> -` is many-to-one precisely among the SHORT, ordinary roots.
+# Two of these pairs were found colliding among the real indices on this machine,
+# not invented: `.codex/.tmp` against `.codex/tmp`, and `OneDrive/_LIVE` against
+# `OneDrive/live`. `C:/dev/_x` is a real directory here too.
+foreach {cda cdb} [list \
+        C:/dev/_x                  C:/dev-x \
+        C:/dev.x                   C:/dev/x \
+        "C:/dev x"                 C:/dev/_x \
+        //a/b                      A:/b \
+        C:/Users/anafa/.codex/.tmp C:/Users/anafa/.codex/tmp \
+        C:/Users/anafa/OneDrive/_LIVE C:/Users/anafa/OneDrive/live] {
+    check "`$cda` and `$cdb` do not slug to one file" [expr {
+        [::machteld::FrontDirsSlug $cda] ne [::machteld::FrontDirsSlug $cdb]}]
+}
+# THE SHARPEST CASE: a component that survives the squash as NOTHING makes a root
+# slug to its PARENT, so `C:/Users/anafa/<non-ASCII>` wrote itself over
+# `c-users-anafa.txt` -- the home index, the flagship artefact of this command.
+check "a root whose last component is non-ASCII does not slug to its parent" [expr {
+    [::machteld::FrontDirsSlug C:/Users/anafa/\u00c4] ne
+    [::machteld::FrontDirsSlug C:/Users/anafa]}]
+# AND THE READABLE NAMES ARE NOT PAID FOR THIS. A hash on every root would make
+# the four checks above pass and every cache file unreadable; the four at the top
+# of this block are what stops that, and this one says the discrimination is the
+# point rather than a side effect.
+check "a lossy root is marked as lossy, and a clean one is not" [expr {
+    [regexp -- {--[0-9a-f]{8}$} [::machteld::FrontDirsSlug C:/dev/_x]]
+    && ![regexp -- {--} [::machteld::FrontDirsSlug C:/dev/x]]}]
+
+# CD2: the tag table. `dfs` and `dfsr` are the rows that matter here: they are
+# vetoed by `dirs.c` although they do NOT set the surrogate bit, they have never
+# been observed on this machine, and no fixture can create one -- so a unit
+# check on the naming function is the only place they are reachable at all.
+foreach {tag want} {0xa0000003 junction 0xa000000c symlink 0x8000000a dfs
+                    0x80000012 dfsr 0x9000701a cloud 0x9000001a cloud
+                    0x9000f01a cloud 0x00000000 reparse} {
+    check "tag $tag is named `$want`" [expr {[::machteld::FrontDirsTag $tag] eq $want}]
+}
+# THE EMPTY-LIST FORM, in this process. Said plainly rather than oversold: this
+# check was written believing it was the deterministic one and it is NOT -- with
+# the helper deliberately broken to `return {}` it stayed GREEN here, because
+# whether a bare empty string encodes as `[]`, `{}` or `""` depends on what the
+# rest of the interpreter did to Tcl's single shared empty-string object, and
+# this suite's own process happened to have left it list-shaped. The claim is
+# carried by the WIRE checks further down, which read the bytes a real run wrote
+# in its own process. This one stays because it is free and states the intent.
+check "the empty-list form is an empty list, and encodes as an array here" [expr {
+    [llength [::machteld::FrontEmptyList]] == 0
+    && [json encode [dict create k [::machteld::FrontEmptyList]]] eq {{"k":[]}}}]
+# AND AN UNKNOWN TAG IS NOT GUESSED AT. A table of half-remembered reparse
+# constants would be the front door asserting knowledge the C's veto rule does
+# not have, and the two would drift with nothing to notice.
+check "an unrecognised tag comes back as its own hex" [expr {
+    [::machteld::FrontDirsTag 0x12345678] eq "0x12345678"}]
+
+# CD3: THE VERDICT AND THE JOIN, on synthesised results.
+set CDR [::machteld::FrontDirsReport [CdirsFake] 5 "" {}]
+check "a walk that refused nothing is COMPLETE" [expr {
+    [dict get $CDR complete] == 1 && [dict get $CDR refused] eq ""
+    && [dict get $CDR entered] eq ""}]
+set CDR [::machteld::FrontDirsReport [CdirsFake links \
+    [list [CdirsLink C:/fx/j 0xa0000003 1 nofollow]]] 5 "" {}]
+check "one nofollow link makes it PARTIAL, with the place NAMED" [expr {
+    [dict get $CDR complete] == 0 && [llength [dict get $CDR refused]] == 1
+    && [dict get [lindex [dict get $CDR refused] 0] path] eq "C:/fx/j"
+    && [dict get [lindex [dict get $CDR refused] 0] why] eq "junction"}]
+set CDR [::machteld::FrontDirsReport [CdirsFake errors \
+    [list [dict create path C:/fx/locked win32 5 reason "Access is denied."]]] 5 "" {}]
+check "an unreadable directory is named, with its raw win32 code" [expr {
+    [dict get $CDR complete] == 0 && [llength [dict get $CDR refused]] == 1
+    && [dict get [lindex [dict get $CDR refused] 0] why] eq "unreadable"
+    && [dict get [lindex [dict get $CDR refused] 0] win32] == 5}]
+# THE JOIN, WHICH IS THE EASIEST THING HERE TO GET WRONG. A `failed` link always
+# has an `errors` row beside it -- the descent was attempted and the open failed
+# -- so concatenating the two lists reports one place TWICE and makes the
+# headline count disagree with the rows printed under it.
+set CDR [::machteld::FrontDirsReport [CdirsFake \
+    links  [list [CdirsLink C:/fx/j 0xa0000003 1 failed]] \
+    errors [list [dict create path C:/fx/j win32 5 reason "Access is denied."]]] 5 "" {}]
+check "a failed link is ONE row carrying both its tag and its win32" [expr {
+    [llength [dict get $CDR refused]] == 1
+    && [dict get [lindex [dict get $CDR refused] 0] tag] eq "0xa0000003"
+    && [dict get [lindex [dict get $CDR refused] 0] win32] == 5
+    && [dict get [lindex [dict get $CDR refused] 0] why] eq "junction"}]
+# A CALLER'S OWN REFUSAL IS COUNTED, NEVER NAMED -- and the link rows carrying
+# those actions must not reach `refused`, because `dirs.c` has ALREADY counted
+# them in the integers. Counting them twice breaks the arithmetic the palette
+# guarantees: every absent directory attributable to exactly one cause.
+set CDR [::machteld::FrontDirsReport [CdirsFake pruned 4 depthlimited 7 links \
+    [list [CdirsLink C:/fx/p 0xa0000003 1 pruned] \
+          [CdirsLink C:/fx/q 0xa0000003 1 depthlimited]]] 5 3 {node_modules}]
+check "prune and depth refusals are counted, and add nothing to refused" [expr {
+    [dict get $CDR complete] == 0 && [dict get $CDR refused] eq ""
+    && [dict get $CDR pruned] == 4 && [dict get $CDR depthlimited] == 7}]
+# ONE SUBJECT PER TERM, because the verdict is a THREE-TERM CONJUNCTION and the
+# subject above sets both counters at once -- so either term could be deleted
+# outright and the other still returned 0. Measured: both deletions left all 701
+# checks green, on a build whose headline then read `[COMPLETE]` above a body
+# saying `9 directories at the -depth 1 limit`. A headline contradicting its own
+# body, on the fail-dangerous side, with nothing red.
+set CDR [::machteld::FrontDirsReport [CdirsFake pruned 4] 5 "" {node_modules}]
+check "`pruned` alone is enough to make the verdict PARTIAL" [expr {
+    [dict get $CDR complete] == 0 && [dict get $CDR depthlimited] == 0}]
+set CDR [::machteld::FrontDirsReport [CdirsFake depthlimited 7] 5 1 {}]
+check "`depthlimited` alone is enough to make the verdict PARTIAL" [expr {
+    [dict get $CDR complete] == 0 && [dict get $CDR pruned] == 0}]
+# THE REVERSE SILENCE. A reader expecting z's semantics gets more than twice the
+# lines and no way to learn why; a descended non-surrogate is disclosed too.
+proc CdirsCloud {args} {
+    return [CdirsFake dirs 3 paths [list C:/fx C:/fx/cloud C:/fx/cloud/a] \
+                links [list [CdirsLink C:/fx/cloud 0x9000701a 0 descended]] {*}$args]
+}
+set CDR [::machteld::FrontDirsReport [CdirsFake links \
+    [list [CdirsLink C:/fx/cloud 0x9000701a 0 descended]]] 5 "" {}]
+check "a descended non-surrogate is disclosed, and is not a refusal" [expr {
+    [dict get $CDR complete] == 1 && [llength [dict get $CDR entered]] == 1
+    && [dict get [lindex [dict get $CDR entered] 0] why] eq "cloud"
+    && [dict get [lindex [dict get $CDR entered] 0] surrogate] == 0}]
+# THE MAGNITUDE, WHICH IS THE HALF THAT SHIPPED MISSING. z's defect is "counted,
+# consequence invisible"; a report that names the place and gives no number is
+# the same failure with the terms swapped, and on the real home tree that one row
+# accounts for 124,144 of 236,162 lines. Counted by PREFIX over the walk's own
+# paths, so a renderer that lost the count cannot be papered over by the row.
+set CDR [::machteld::FrontDirsReport [CdirsCloud] 5 "" {}]
+# `dict exists` FIRST, not a bare `dict get`. Measured while break-testing this
+# very block: the version without it RAISED on the build with `below` removed,
+# the run aborted at that line, and the two hundred checks after it silently
+# never ran -- the failure `valof` exists in this file to stop, met again.
+check "and it carries how much of the answer came from under it" [expr {
+    [dict exists [lindex [dict get $CDR entered] 0] below]
+    && [dict get [lindex [dict get $CDR entered] 0] below] == 1}]
+# A DESCENDED SURROGATE IS THE ROOT, so `below` is the whole list by
+# construction; asserted rather than assumed, because the two arms are different
+# code.
+set CDR [::machteld::FrontDirsReport [CdirsFake dirs 3 \
+    paths [list C:/fx C:/fx/a C:/fx/b] links \
+    [list [CdirsLink C:/fx 0xa0000003 1 descended]]] 5 "" {}]
+check "a descended surrogate root counts the whole list below it" [expr {
+    [dict exists [lindex [dict get $CDR entered] 0] below]
+    && [dict get [lindex [dict get $CDR entered] 0] below] == 2}]
+# THE RENDERED TEXT, AND NOT ONLY THE JSON. Only the JSON array (CD12) and the
+# SURROGATE paragraph below were gated, so the whole non-surrogate block could be
+# deleted from `FrontDirsText` with all 701 checks green -- measured. That is the
+# paragraph answering "why 236,162 where z says 112,018", i.e. this command's
+# entire reason for existing, able to vanish from the human output in silence.
+set CDR [::machteld::FrontDirsReport [CdirsCloud] 5 "" {}]
+set CDTEXT [valof {::machteld::FrontDirsText $CDR}]
+check "the text says the entered place is content, names it, and sizes it" [expr {
+    [string match "*content, not a second name for*" $CDTEXT]
+    && [string match "*C:/fx/cloud*" $CDTEXT]
+    && [string match "*tag 0x9000701a*" $CDTEXT]
+    && [string match "*1 of the 3 directories above*" $CDTEXT]}]
+# AND THE COMPLETENESS SENTENCE IS CONDITIONAL. `Everything under it IS in the
+# count above` used to print unconditionally -- including under `-depth 3` on the
+# home tree, where ~124,000 directories below that very row are NOT in the count.
+# A report telling the reader the list is complete below a place where it is not,
+# in the one direction this command exists to prevent, with no gate reading the
+# string.
+check "a clean walk keeps the strong completeness sentence" [expr {
+    [string match "*everything under it IS in the count above*" $CDTEXT]}]
+foreach {cdlabel cdsub} [list \
+        "a -depth limit"  [CdirsCloud depthlimited 1] \
+        "a -prune"        [CdirsCloud pruned 1] \
+        "a refusal below the entered place" \
+            [CdirsCloud errors [list [dict create path C:/fx/cloud/a win32 5 \
+                                          reason "Access is denied."]]]] {
+    set cdt [valof {::machteld::FrontDirsText \
+                    [::machteld::FrontDirsReport $cdsub 5 "" {}]}]
+    check "$cdlabel withdraws it" [expr {
+        ![string match "*everything under it IS in the count*" $cdt]
+        && [string match "*only PARTLY in the count above*" $cdt]}]
+}
+# AND A REFUSAL SOMEWHERE ELSE ENTIRELY DOES NOT, or the sentence would be
+# withdrawn on every real walk and mean nothing.
+set cdt [valof {::machteld::FrontDirsText [::machteld::FrontDirsReport \
+    [CdirsCloud errors [list [dict create path C:/fx/other win32 5 \
+                                  reason "Access is denied."]]] 5 "" {}]}]
+check "a refusal outside the entered place leaves it standing" [expr {
+    [string match "*everything under it IS in the count above*" $cdt]}]
+# A SURROGATE THAT WAS DESCENDED CAN ONLY BE THE ROOT YOU NAMED, and the verb's
+# own review found this exact disclosure missing: a junction root produced no
+# `links` row at all, so nothing anywhere said every path returned was a second
+# name for a tree living elsewhere, and 576 checks passed over it.
+set CDR [::machteld::FrontDirsReport [CdirsFake links \
+    [list [CdirsLink C:/fx 0xa0000003 1 descended]]] 5 "" {}]
+# `valof`, because the renderer is the thing under test and a regression in it
+# raises rather than returning something wrong. Measured while break-testing this
+# block: a broken `FrontDirsReport` made `FrontDirsText` throw here, the run
+# aborted at this line, and the forty checks after it silently never ran -- the
+# exact failure `valof` exists in this file to stop, met for the fourth time.
+set CDTEXT [valof {::machteld::FrontDirsText $CDR}]
+check "a junction ROOT is disclosed as a second name for somewhere else" [expr {
+    [llength [dict get $CDR entered]] == 1
+    && [string match "*NAMED it*" $CDTEXT]
+    && [string match "*second name for a tree living elsewhere*" $CDTEXT]}]
+
+# CD4: the list file. ORDER INCLUDED -- a count would let an emission-order
+# change through, and the order is contract because this file gets diffed
+# against yesterday's.
+set CDOUT1 [file join $CDOUT list1.txt]
+lassign [CdirsRun $FX -out $CDOUT1] cdex cdout cderr
+check "cdirs writes its list"        [expr {$cdex == 0 && [file exists $CDOUT1]}]
+check "and the list is dirs' answer, order included" [expr {
+    [CdirsLines $CDOUT1] eq [dict get $R paths]}]
+check "one line per path, and no header" [expr {
+    [llength [CdirsLines $CDOUT1]] == [dict get $R dirs]}]
+# LF AND UTF-8 AND NO BOM, none of which is Tcl's default on Windows: `auto`
+# translation emits CRLF, and the fixture's own names are why the encoding
+# matters -- U+E000 beside U+E001 is in the tree three hundred lines above
+# precisely because CP_ACP collapses them.
+set cdfh [open $CDOUT1 rb] ; set cdraw [read $cdfh] ; close $cdfh
+check "the list is LF-terminated, with no CR anywhere" [expr {
+    [string first "\r" $cdraw] < 0 && [string index $cdraw end] eq "\n"}]
+check "and carries no BOM" [expr {[string range $cdraw 0 2] ne "\xef\xbb\xbf"}]
+check "and is forward-slashed, like the verb's own answer" [expr {
+    [string first "\\" $cdraw] < 0}]
+check "a non-ASCII name survives the round trip through the file" [expr {
+    [file join $FX order \ue000] in [CdirsLines $CDOUT1]
+    && [file join $FX order \ue001] in [CdirsLines $CDOUT1]}]
+
+# CD5: THE REPORT SIDECAR IS ALWAYS WRITTEN, and that is the deliberate
+# difference from z. z creates `<out>.errors.txt` unconditionally and mentions it
+# only sometimes, so its presence says nothing and its absence has two meanings:
+# clean run, or the run died before it got there. Here the sidecar is the WHOLE
+# report, so its presence is unambiguous -- and the list file stays pure paths,
+# because a header would stop it being greppable.
+set CDREP1 [file join $CDOUT list1.json]
+check "a report sidecar is written beside the list, always" [expr {[file exists $CDREP1]}]
+# `valof` around the decode, and `dict exists` in the checks: the SUBJECT of
+# these gates is a file that stops existing when the thing under test regresses,
+# so a missing sidecar has to make them FAIL rather than abort the run at this
+# line and silently skip the forty checks below. Measured while break-testing --
+# deleting the sidecar write took the whole block out and reported one failure
+# where there should have been several.
+set CDJ [valof {json decode [lindex [CdirsLines $CDREP1] 0]}]
+check "the sidecar is the report, and names both files" [expr {
+    [dict exists $CDJ list] && [dict get $CDJ list] eq $CDOUT1
+    && [dict get $CDJ report] eq $CDREP1
+    && [dict get $CDJ dirs] == [dict get $R dirs]
+    && [dict get $CDJ bytes] == [file size $CDOUT1]}]
+# `paths` IS DELIBERATELY NOT IN THE REPORT. The list is the file; a JSON
+# document carrying 236,150 strings is not what any caller of a cache-building
+# command wants, and `-stdout` is how you ask for the paths.
+check "the report does not carry the paths" [expr {
+    [dict exists $CDJ dirs] && ![dict exists $CDJ paths]}]
+# EVERY REFUSAL SURVIVES THE WIRE AS AN OBJECT WITH A PATH.
+#
+# THIS REPLACED A VACUOUS GATE, and the replacement is the point. What stood here
+# first asserted that a clean walk encodes `refused` as `[]` and not `{}` --
+# a real hazard, since `json encode` decides array-versus-object from a value's
+# internal representation. It could not fail. The verdict computation calls
+# `llength` on the same list two lines earlier, which shimmers it to a list
+# object, so `set refused {}` and `set refused [list]` and even `expr {... : ""}`
+# all encoded as `[]`. Proved by breaking it three different ways and watching
+# nothing go red. (The prelude now says `lrange` there, so the shape is a
+# guarantee rather than a side effect of where `llength` happens to sit.)
+#
+# What is checked instead has a live failure mode: flatten the rows -- the
+# obvious wrong way to build `refused` -- and the elements stop being objects.
+set cdshape [expr {[dict exists $CDJ refused] ? "" : "no refused key at all"}]
+foreach r [valof {dict get $CDJ refused}] {
+    if {![string is list $r] || [llength $r] % 2 || ![dict exists $r path]
+        || ![dict exists $r why]} { lappend cdshape $r }
+}
+check "every refusal reaches the wire as an object with a path and a reason" [expr {
+    [dict exists $CDJ refused] && [llength [dict get $CDJ refused]] >= 2
+    && $cdshape eq ""}]
+lassign [CdirsRun [file join $FX target] -out [file join $CDOUT clean.txt] -json] cdex cdjs cderr
+set cdclean [valof {json decode $cdjs}]
+check "a walk that refused nothing still carries both keys" [expr {
+    [dict exists $cdclean refused] && [dict exists $cdclean entered]
+    && [llength [dict get $cdclean refused]] == 0
+    && [llength [dict get $cdclean entered]] == 0}]
+# AND THEY ARE EMPTY ARRAYS ON THE WIRE, NOT EMPTY OBJECTS -- asserted on the
+# RAW TEXT, because `json decode` turns `{}` and `[]` into the same
+# zero-length Tcl value and a gate written with `llength` cannot tell them
+# apart. That is not a hypothetical distinction: it shipped. The sidecar of a
+# clean run carried `"entered":{}` and `"prune":{}` while the -json form of the
+# same run carried `[]`, because `json encode` reads the value's internal
+# representation and Tcl's empty string is ONE SHARED OBJECT per interpreter --
+# so the answer depended on what an unrelated line had done to that literal
+# earlier in the process. A consumer looping over `report.refused` breaks on
+# `{}`, and the common case is exactly the one that produced it.
+#
+# TWO SUBJECTS, AND THE SECOND IS THE ONE THAT CATCHES IT. A walk with nothing
+# refused anywhere was green on the broken build; the walk that reproduced the
+# defect had a NON-EMPTY `refused` beside an empty `entered`, which is the
+# ordinary shape of a real run and the shape the fixture has. Checking only the
+# all-empty case is checking the case where the bug hides.
+foreach {cdwhere cdtext} [list \
+        "the -json form of a clean walk" $cdjs \
+        "a clean walk's sidecar"     [lindex [CdirsLines [file join $CDOUT clean.json]] 0] \
+        "a sidecar with refusals in it" [lindex [CdirsLines $CDREP1] 0]] {
+    set cdobj {}
+    set cddec [valof {json decode $cdtext}]
+    foreach k {refused entered prune} {
+        if {![dict exists $cddec $k]} { lappend cdobj "$k missing" ; continue }
+        if {[llength [dict get $cddec $k]]} continue      ;# non-empty renders fine
+        if {[string first "\"$k\":\[\]" $cdtext] < 0} { lappend cdobj $k }
+    }
+    check "$cdwhere spells an empty list as an ARRAY" [expr {$cdobj eq ""}]
+    if {$cdobj ne ""} { puts "     not an array in $cdwhere: $cdobj" }
+}
+
+# CD6: THE DEFAULT PATH IS DERIVED FROM MT_HOME, and this proves it WITHOUT ever
+# writing to the real one. `FrontRoots` honours MT_ROOT/MT_HOME when both are set
+# and MT_HOME exists, so the whole workspace is redirected into %TEMP% for one
+# child. A gate hardcoding `C:/dev/.z` would be asserting this machine's layout;
+# a gate running without the override would CLOBBER the live cache from a test.
+set CDWS   [file join $CDOUT ws]
+set CDHOME [file join $CDWS .mt]
+file mkdir $CDHOME
+set cdr [run -timeout 300s -env [list MT_ROOT $CDWS MT_HOME $CDHOME] -- \
+             $MT front cdirs $FX -depth 1]
+set CDDEF [file join $CDHOME cache mt dirs "[::machteld::FrontDirsSlug $FX].txt"]
+check "the default output path is derived from MT_HOME" [expr {
+    [dict get $cdr exit] == 0 && [file exists $CDDEF]}]
+check "and the report names the file it wrote" [expr {
+    [string match "*[file tail $CDDEF]*" [dict get $cdr out]]}]
+# AND IT IS NOT z's FILE. During the transition MT_HOME *is* `.z`, so a default
+# of `cache/cdirs/c-drive-dirs.txt` would have machteld overwrite the live cache
+# of the front door still in daily use -- with a forward-slashed list that is
+# also 2.1x longer on the home tree. Two silent incompatibilities in one file.
+check "the default is not z's cache file" [expr {
+    ![string match "*c-drive-dirs.txt*" $CDDEF]
+    && ![string match "*cache/cdirs/*" [string map {\\ /} $CDDEF]]}]
+# THE DEFAULT ROOT IS THE WORKSPACE, asserted on the reported ROOT rather than on
+# a count: a count is satisfied by any tree of the same size, and the whole point
+# of this default is WHICH tree it is.
+set cdr [run -timeout 300s -env [list MT_ROOT $CDWS MT_HOME $CDHOME] -- \
+             $MT front cdirs -depth 0 -json]
+check "with no root named, cdirs walks MT_ROOT" [expr {
+    [dict get $cdr exit] == 0
+    && [dict get [json decode [dict get $cdr out]] root] eq $CDWS}]
+
+# CD7: `-stdout` writes NO file at all, puts the list on stdout and the report on
+# stderr. The separation is what makes `mt cdirs C:/dev -stdout | rg node_modules`
+# work, and it is two checks rather than one because putting the report on stdout
+# would still pass a gate that only looked for the paths.
+set cdbefore [lsort [glob -nocomplain -directory $CDOUT *]]
+lassign [CdirsRun [file join $FX target] -stdout] cdex cdout cderr
+set cdafter [lsort [glob -nocomplain -directory $CDOUT *]]
+check "-stdout writes no file" [expr {$cdex == 0 && $cdbefore eq $cdafter}]
+check "-stdout puts the list on stdout" [expr {
+    [lsearch -exact [split [string map {\r\n \n} [string trimright $cdout]] \n] \
+         [file join $FX target]] >= 0}]
+# `string first` AND NOT `string match`, and the first draft of this line got it
+# wrong in the way that always passes: `string match "cdirs \[*"` reads `[` as a
+# character-class opener, so the pattern stopped meaning what it looked like.
+# Every bracket in this block is compared literally for that reason.
+check "and the report on stderr" [expr {
+    [string first "cdirs \[" [string trim $cderr]] == 0}]
+check "and the report names no file, because none was written" [expr {
+    ![string match "*list *" $cderr] && ![string match "*report *" $cderr]}]
+# ORTHOGONAL: `-stdout` chooses where the LIST goes, `-json` the FORMAT of the
+# REPORT. All four combinations mean something, which is why there is no
+# conflict rule to write and no fourth case to refuse.
+lassign [CdirsRun [file join $FX target] -stdout -json] cdex cdout cderr
+check "-stdout -json puts paths on stdout and JSON on stderr" [expr {
+    $cdex == 0 && [string match "*/target*" $cdout]
+    && [dict get [json decode $cderr] root] eq [file join $FX target]}]
+# `-out` AND `-stdout` ARE TWO DISPOSITIONS NAMED AT ONCE, refused rather than
+# resolved by precedence: silently letting one win is the command ignoring
+# something the caller wrote, which is the failure this whole report opposes.
+check "-out with -stdout is a usage error, not a silent preference" [expr {
+    [errcode_of {front cdirs $FX -out [file join $CDOUT never.txt] -stdout}]
+        eq {MACHTELD FRONT usage}
+    && ![file exists [file join $CDOUT never.txt]]}]
+
+# CD8: `-depth` is the verb's own option, CHECKED AT THREE VALUES. One value
+# passes under an off-by-one as easily as under the truth; and 0 is the value
+# that separates "the root alone" from "unlimited", which is the trap the palette
+# documents and the same class of mistake as `-timeout 100`.
+foreach n {0 1 3} {
+    set cdf [file join $CDOUT d$n.txt]
+    lassign [CdirsRun $FX -out $cdf -depth $n] cdex cdout cderr
+    check "-depth $n reaches the verb unchanged" [expr {
+        $cdex == 0 && [CdirsLines $cdf] eq [dict get [valof {dirs $FX -depth $n}] paths]}]
+}
+check "-depth 0 is the root alone, and never unlimited" [expr {
+    [CdirsLines [file join $CDOUT d0.txt]] eq [list $FX]}]
+set cdf [file join $CDOUT pr.txt]
+lassign [CdirsRun $FX -out $cdf -prune deep] cdex cdout cderr
+check "-prune reaches the verb unchanged" [expr {
+    $cdex == 0 && [CdirsLines $cdf] eq [dict get [valof {dirs $FX -prune deep}] paths]}]
+check "and the report counts the refusal without naming it" [expr {
+    [string match "*by request*" $cdout] && [string match "*-prune {deep}*" $cdout]}]
+# AND THE SENTENCE AGREES WITH THE NUMBER. `1 directories matching -prune {...}`
+# and `1 directories at the -depth 3 limit` shipped in a report that says
+# `1 directory`, `1 place` and `1 reparse directory` everywhere else -- small, and
+# the same shape as the rest of this file: a count checked and the sentence
+# carrying it not.
+lassign [CdirsRun $FX -out [file join $CDOUT one.txt] -depth 0] cdex cdone cderr
+check "one refusal is `1 directory`, not `1 directories`" [expr {
+    [string match "*1 directory at the -depth 0 limit*" $cdone]
+    && ![string match "*1 directories*" $cdone]
+    && ![string match "*stopped at each*" $cdone]}]
+lassign [CdirsRun $FX -out [file join $CDOUT many.txt] -depth 1] cdex cdmany cderr
+check "and more than one is still plural" [expr {
+    [regexp -- {\d directories at the -depth 1 limit} $cdmany]}]
+
+# CD9: THE HUMAN TEXT AND THE JSON ARE THE SAME NUMBERS. A human reads the text
+# and a script reads `-json`; formatted from two sets of counters, one of them is
+# wrong and nothing says which. Here the text is rendered FROM the report dict,
+# so this gate is checking that the rendering has not grown a second source.
+lassign [CdirsRun $FX -out [file join $CDOUT j.txt] -json] cdex cdjs cderr
+set CDJ [valof {json decode $cdjs}]
+lassign [CdirsRun $FX -out [file join $CDOUT j.txt]] cdex cdtx cderr
+check "the headline count is the report's own `dirs`" [expr {
+    [dict exists $CDJ dirs] && [string first \
+        "[::machteld::FrontThousands [dict get $CDJ dirs]] directories" $cdtx] >= 0}]
+check "the headline verdict is the report's own `complete`" [expr {
+    [dict exists $CDJ complete]
+    && [dict get $CDJ complete] == ([string first "\[COMPLETE\]" $cdtx] >= 0)
+    && [dict get $CDJ complete] != ([string first "\[PARTIAL\]" $cdtx] >= 0)}]
+check "the headline names the root the verb reported" [expr {
+    [dict exists $CDJ root] && [string first "under [dict get $CDJ root] in " $cdtx] >= 0}]
+# THE BICONDITIONAL ABOVE IS CORRECT AND HAS ONLY ONE SUBJECT -- a PARTIAL walk.
+# Hardwiring the word to `PARTIAL` left all 701 checks green; the inverse does
+# fire, so the hole was on the fail-safe side, but a verdict is two words and
+# both of them are printed. `$FX/target` is the fixture's clean subtree.
+lassign [CdirsRun [file join $FX target] -out [file join $CDOUT ok.txt] -json] cdex cdjs cderr
+set CDOKJ [valof {json decode $cdjs}]
+lassign [CdirsRun [file join $FX target] -out [file join $CDOUT ok.txt]] cdex cdoktx cderr
+check "a walk that refused nothing prints \[COMPLETE\], and says so in the JSON" [expr {
+    [dict exists $CDOKJ complete] && [dict get $CDOKJ complete] == 1
+    && [string first "cdirs \[COMPLETE\]" $cdoktx] == 0
+    && [string first "\[PARTIAL\]" $cdoktx] < 0}]
+# THE THREE KEYS THE REPORT PUBLISHES AND NOTHING READ. Forced to 999 / 0 / 0 in
+# turn, the suite stayed green each time -- and `elapsed` is the one thing this
+# layer exists to add over the verb, by the register's own argument for putting
+# `-out` and the two `clock milliseconds` calls up here.
+check "`maxdepth` is the verb's own answer for the same walk" [expr {
+    [dict exists $CDOKJ maxdepth]
+    && [dict get $CDOKJ maxdepth] == [dict get [valof {dirs [file join $FX target]}] maxdepth]}]
+check "`when` is when the run happened" [expr {
+    [dict exists $CDOKJ when]
+    && abs([dict get $CDOKJ when] - [clock seconds]) < 600}]
+# `elapsed` NEEDS A SUBJECT THAT TAKES MEASURABLE TIME, and the fixture does not:
+# a walk of eleven directories can honestly report 0 ms, so a lower bound there
+# would be flaky rather than load-bearing. The home tree at depth 2 is hundreds
+# of directories off a real disk and takes milliseconds; the upper bound is the
+# wall clock this suite measured around the child, which no invented constant can
+# satisfy.
+set cdw0 [clock milliseconds]
+lassign [CdirsRun $HOMEDIR -depth 2 -out [file join $CDOUT el.txt] -json] cdex cdjs cderr
+set cdwall [expr {[clock milliseconds] - $cdw0}]
+set CDELJ [valof {json decode $cdjs}]
+check "`elapsed` is the run's own wall time, not a constant" [expr {
+    [dict exists $CDELJ elapsed] && [dict get $CDELJ elapsed] > 0
+    && [dict get $CDELJ elapsed] <= $cdwall}]
+if {[dict exists $CDELJ elapsed]} {
+    puts "     cdirs elapsed: [dict get $CDELJ elapsed] ms inside a $cdwall ms child"
+}
+# THE FORMATTER ITSELF, which the headline check cannot see: it builds its
+# expectation by calling the same `FrontThousands` the renderer calls, so it
+# gates "no second source of counters" (as its comment says) and not the
+# formatting. Nothing else read this proc.
+foreach {cdn cdwant} {0 0 1 1 999 999 1000 1,000 1234 1,234 999999 999,999
+                      1000000 1,000,000 236159 236,159 -1234 -1,234} {
+    check "$cdn prints as $cdwant" [expr {[::machteld::FrontThousands $cdn] eq $cdwant}]
+}
+# EVERY REFUSAL IS NAMED IN THE TEXT, not merely totalled. This is the claim the
+# command exists to make, and a report that printed only the count would satisfy
+# every other check in this block.
+# `string first` AND NOT `string match`, because a path IS a glob pattern: this
+# machine carries `C:/Users/anafa/gdrive/[19] MASTER`, and the fixture two
+# hundred lines above carries `quote'n[brace]` on purpose. A bracket expression
+# that fails to match is a gate that passes for the wrong reason.
+# `dict exists` first, because a row that has stopped being a dict must make this
+# FAIL rather than raise -- a raise here aborts the run and every check after it
+# silently never happens.
+set cdunnamed {}
+foreach r [valof {dict get $CDJ refused}] {
+    if {![dict exists $r path]} { lappend cdunnamed $r ; continue }
+    if {[string first [dict get $r path] $cdtx] < 0} { lappend cdunnamed [dict get $r path] }
+}
+# THE NON-EMPTINESS IS PART OF THE CLAIM. `foreach` over an empty list names
+# nothing and reports nothing wrong, so a report that lost its rows entirely --
+# or a decode that returned nothing -- would satisfy the loop above perfectly.
+# The fixture carries three junctions, so three is the floor.
+check "every refused place is NAMED in the text, not just counted" [expr {
+    $cdunnamed eq "" && [llength [valof {dict get $CDJ refused}]] >= 3}]
+if {$cdunnamed ne ""} { puts "     counted but not named: [lrange $cdunnamed 0 5]" }
+
+# CD10: an unreadable directory becomes a named refusal carrying its raw win32
+# code -- the palette's reason applies verbatim, since the message cannot be
+# trapped on and does not discriminate: a directory pending delete and an ACL
+# denial both arrive as ERROR_ACCESS_DENIED.
+if {$DENIED} {
+    lassign [CdirsRun $FX -out [file join $CDOUT den.txt] -json] cdex cdjs cderr
+    set CDJ [valof {json decode $cdjs}]
+    set cdrow ""
+    foreach r [valof {dict get $CDJ refused}] {
+        if {[dict exists $r path] && [dict get $r path] eq [file join $FX locked]} { set cdrow $r }
+    }
+    check "an unreadable directory is a named refusal" [expr {$cdrow ne ""}]
+    check "carrying the raw win32 code, and marked PARTIAL" [expr {
+        $cdrow ne "" && [dict get $cdrow win32] != 0 && [dict get $CDJ complete] == 0}]
+    check "and the walk still succeeded" [expr {$cdex == 0}]
+} else {
+    puts "     SKIP cdirs unreadable: elevated, the deny ACE did not take"
+}
+
+# CD11: A FAILED RUN MUST NOT DESTROY A GOOD CACHE. The walk takes twenty
+# seconds on a real tree and can be interrupted; the invariant this ordering buys
+# is that a present sidecar means the list beside it is whole. An unwritable
+# destination is the reachable shape of that failure.
+set CDGOOD [file join $CDOUT keep.txt]
+lassign [CdirsRun $FX -out $CDGOOD] cdex cdout cderr
+set CDKEEP [CdirsLines $CDGOOD]
+set CDBLOCK [file join $CDOUT blocker.txt]
+set cdfh [open $CDBLOCK w] ; puts $cdfh x ; close $cdfh
+check "an unwritable destination raises oserror" [expr {
+    [errcode_of {front cdirs $FX -out [file join $CDBLOCK sub out.txt]}]
+        eq {MACHTELD FRONT oserror}}]
+check "and writes neither file" [expr {
+    ![file exists [file join $CDBLOCK sub]] && [file isfile $CDBLOCK]}]
+check "and the previous run's artefacts are untouched" [expr {
+    [CdirsLines $CDGOOD] eq $CDKEEP && [file exists [file join $CDOUT keep.json]]}]
+# AND THE FAILURE THE OLD ORDERING COULD NOT SURVIVE, which is the one CD11 was
+# not pointed at. The check above uses a `file mkdir` failure, which aborts
+# BEFORE the publish block -- so the only path in this command that can destroy
+# anything was the one path with no gate on it. Here the temporaries are written
+# and the RENAME is what fails, with the destination held open by a reader.
+# Measured on the shipped build: `oserror` raised, list intact, and the previous
+# run's report GONE -- because the old sidecar was deleted before the rename.
+set CDHOLD [file join $CDOUT held.txt]
+lassign [CdirsRun $FX -out $CDHOLD] cdex cdout cderr
+set CDHELD [CdirsLines $CDHOLD]
+set cdfh [open $CDHOLD r]
+set cdcode [errcode_of {front cdirs $FX -out $CDHOLD}]
+close $cdfh
+check "a publish that cannot replace the list raises oserror" [expr {
+    $cdcode eq {MACHTELD FRONT oserror}}]
+check "and the previous run's list AND report both survive it" [expr {
+    [CdirsLines $CDHOLD] eq $CDHELD && $CDHELD ne ""
+    && [file isfile [file join $CDOUT held.json]]
+    && [dict exists [valof {json decode \
+            [lindex [CdirsLines [file join $CDOUT held.json]] 0]}] dirs]}]
+
+# `-out` NAMING A DIRECTORY IS AN ERROR, NOT A SUCCESS. `file rename` moves a
+# file INTO a directory target, so this reported `[COMPLETE]`, exit 0, named the
+# directory as the `list` and wrote a sidecar claiming `"bytes":96` about it --
+# while the list itself sat orphaned inside as `<dir>/<dir>.tmp`. That is the
+# invariant this command states in its own doc, "a present report means the list
+# beside it is whole", broken in the one direction nothing else here could see.
+set CDDIR [file join $CDOUT adir]
+file mkdir $CDDIR
+check "-out naming an existing directory is an oserror" [expr {
+    [errcode_of {front cdirs $FX -out $CDDIR}] eq {MACHTELD FRONT oserror}}]
+check "and it wrote nothing at all, not even a temporary" [expr {
+    [glob -nocomplain -directory $CDDIR *] eq ""
+    && ![file exists $CDDIR.json]}]
+# AND THE SIDECAR PATH IS NOT `rm -rf`'d. The publish step used to delete
+# whatever stood at `<name>.json`, so `-out notes.txt` beside a DIRECTORY called
+# `notes.json` removed it and everything under it, silently, before writing a
+# byte. Overwriting a FILE there is documented; deleting a tree is not.
+set CDJDIR [file join $CDOUT notes.json]
+file mkdir [file join $CDJDIR deep]
+set cdfh [open [file join $CDJDIR deep c.txt] w] ; puts $cdfh keep ; close $cdfh
+check "a directory standing at the report's path is an oserror" [expr {
+    [errcode_of {front cdirs $FX -out [file join $CDOUT notes.txt]}]
+        eq {MACHTELD FRONT oserror}}]
+check "and the directory and its contents are still there" [expr {
+    [file isfile [file join $CDJDIR deep c.txt]]
+    && ![file exists [file join $CDOUT notes.txt]]}]
+
+# AN EMPTY VALUE IS A VALUE, NOT AN ABSENCE, and all three surfaces read it as
+# absence. The verb is the oracle for the first two: `dirs $root -depth {}` and
+# `dirs {}` both raise `badvalue`, and a front door that swallows what its own
+# verb refuses is "the command ignoring something the caller wrote" -- the exact
+# failure the -out/-stdout refusal above exists to name. `mt cdirs $r -depth
+# $limit` with an empty `$limit` is the ordinary shape of an optional limit.
+check "-depth {} is refused, exactly as the verb refuses it" [expr {
+    [errcode_of {front cdirs $FX -depth {} -stdout}] eq {MACHTELD FRONT badvalue}
+    && [lindex [errcode_of {dirs $FX -depth {}}] 2] eq "badvalue"}]
+check "an empty root is refused, exactly as the verb refuses it" [expr {
+    [errcode_of {front cdirs {} -stdout}] eq {MACHTELD FRONT badvalue}
+    && [lindex [errcode_of {dirs {}}] 2] eq "badvalue"}]
+# AND AN EMPTY ROOT IS STILL A ROOT for the one-root rule, or `mt cdirs "" ""`
+# escapes the guard that "front cdirs takes one root, not two".
+check "two roots are two roots even when both are empty" [expr {
+    [errcode_of {front cdirs {} {} -stdout}] eq {MACHTELD FRONT usage}}]
+# `-out {}` WENT TO THE DEFAULT CACHE PATH -- a caller who NAMED a disposition
+# and got a different one. The two guards even disagreed: `-out {} -stdout` was
+# refused as two dispositions while `-out {}` alone counted as no `-out` at all.
+check "-out {} is refused rather than silently becoming the default" [expr {
+    [errcode_of {front cdirs $FX -out {}}] eq {MACHTELD FRONT badvalue}}]
+# `-out` MUST STAY ABSOLUTE THROUGH THE CLEAN. `FrontClean` pops `..` lexically
+# and pops past the drive letter, so the report's `list` key named a file only
+# the original working directory could open -- in the report whose stated job is
+# to name a file a later script can open.
+# An ABSOLUTE subject, so the check does not depend on how deep the suite's
+# working directory happens to be.
+check "-out that climbs above the drive root is refused" [expr {
+    [errcode_of {front cdirs $FX -out C:/../../esc_zzz.txt}]
+        eq {MACHTELD FRONT badvalue}}]
+
+# NO STRAY TEMPORARIES. The publish step writes `.tmp` files and renames them;
+# one left behind is a half-written list sitting where a later reader might find
+# a plausible name. `.prev` too, since the sidecar is now moved aside rather than
+# deleted and a leftover would be a stale report wearing a plausible name.
+check "no .tmp or .prev files are left behind" [expr {
+    [glob -nocomplain -directory $CDOUT *.tmp] eq ""
+    && [glob -nocomplain -directory $CDOUT *.prev] eq ""}]
+
+# CD12: THE CONSEQUENCE, ON THE ONLY SUBJECT THAT HAS ONE. No fixture can create
+# a non-surrogate reparse point without elevation or FSCTL_SET_REPARSE_POINT, so
+# the subject is the real cloud tree that gate 8 already found with `fsutil`, and
+# its absence is SAID rather than passed over. THE ORACLE IS A SECOND WALK ROOTED
+# AT THE CLOUD DIRECTORY -- a different root, a different depth budget, none of
+# cdirs' Tcl involved.
+if {$NONSURR eq ""} {
+    puts "     SKIP cdirs consequence: no non-surrogate reparse point under $HOMEDIR"
+    puts "          (the `entered` block is then never exercised against a real one)"
+} else {
+    set CDCAP 3
+    set cdf [file join $CDOUT home.txt]
+    lassign [CdirsRun $HOMEDIR -out $cdf -depth $CDCAP -json] cdex cdjs cderr
+    set CDJ [valof {json decode $cdjs}]
+    set cdent {}
+    foreach e [valof {dict get $CDJ entered}] {
+        if {[dict exists $e path] && [dict get $e path] eq $NONSURR} { set cdent $e }
+    }
+    check "the descended cloud root is reported, tag and all" [expr {
+        $cdex == 0 && $cdent ne "" && [dict get $cdent surrogate] == 0
+        && [dict get $cdent tag] == $NONTAG}]
+    # THE EXTRAS ARE ATTRIBUTABLE AND THEY ARE REAL. The set below cdirs' own
+    # cloud row is compared against an INDEPENDENT walk of that subtree, and then
+    # every member is probed with Tcl's own stat -- a third implementation, asked
+    # one path at a time. Exhaustive rather than sampled: measured at 594 probes
+    # in 26 ms at this depth, and a sample is the shape that misses the one bad
+    # name in two hundred thousand.
+    set cddepth [llength [split [string trimleft \
+        [string range $NONSURR [string length $HOMEDIR] end] /] /]]
+    set CDSUB [valof {dirs $NONSURR -depth [expr {$CDCAP - $cddepth}]}]
+    set cdbelow {} ; set cdphantom {}
+    foreach p [CdirsLines $cdf] {
+        if {![string equal -length [expr {[string length $NONSURR] + 1}] $NONSURR/ $p]} continue
+        lappend cdbelow $p
+        if {![file isdirectory $p]} { lappend cdphantom $p }
+    }
+    check "what lies below the cloud root equals an independent walk of it" [expr {
+        $CDSUB ne "" && [llength $cdbelow] == [dict get $CDSUB dirs] - 1}]
+    check "and it is not zero -- the divergence from z is under test" [expr {
+        [llength $cdbelow] > 0}]
+    check "every directory found behind the cloud root exists" [expr {$cdphantom eq ""}]
+    if {$cdphantom ne ""} { puts "     phantom: [lrange $cdphantom 0 5]" }
+    # AND THE REPORT SAYS HOW BIG IT IS, on the only subject where the number is
+    # large. Naming the place and giving no number is z's "counted, consequence
+    # invisible" with the terms swapped -- and unlike `refused`, where the size
+    # genuinely cannot be had without entering, this walk DID enter and the paths
+    # are in hand. The oracle is the list file, counted by the test.
+    check "and the entered row carries that count, not just the place" [expr {
+        $cdent ne "" && [dict exists $cdent below]
+        && [dict get $cdent below] == [llength $cdbelow]}]
+    # NARROWING TO THE DIVERGENT SUBTREE MUST NOT LOSE THE DISCLOSURE. `mt cdirs
+    # <the cloud root>` used to print no `entered` block at all, because the
+    # root's tag is read through a handle and the cloud filter consumes its own
+    # reparse point on open -- so the one invocation aimed straight at the
+    # divergence was the one that said nothing about it.
+    lassign [CdirsRun $NONSURR -depth 1 -out [file join $CDOUT nsroot.txt] -json] cdex cdjs cderr
+    set CDNRJ [valof {json decode $cdjs}]
+    set cdnrent {}
+    foreach e [valof {dict get $CDNRJ entered}] {
+        if {[dict exists $e path] && [dict get $e path] eq $NONSURR} { set cdnrent $e }
+    }
+    check "the cloud root discloses itself when it IS the root" [expr {
+        $cdex == 0 && $cdnrent ne "" && [dict get $cdnrent surrogate] == 0
+        && [dict get $cdnrent tag] == $NONTAG}]
+    lassign [CdirsRun $NONSURR -depth 1 -out [file join $CDOUT nsroot.txt]] cdex cdnrtx cderr
+    check "and says so in the text, where a person would read it" [expr {
+        [string match "*content, not a second name for*" $cdnrtx]
+        && [string first $NONSURR $cdnrtx] >= 0}]
+    puts "     cdirs consequence: [llength $cdbelow] directories below $NONSURR at depth $CDCAP"
+}
+
+# CD13: it is a real front-door command, reachable the way z's was.
+check "cdirs is a front-door command"  [expr {"cdirs" in [::machteld::FrontCommands]}]
+check "and mt cdirs resolves in-process" [expr {
+    [dict get [valof {front env cdirs}] kind] eq "command"}]
+# EVERY OPTION IT TAKES IS DECLARED. `front`'s `set opts {...}` line IS the
+# manifest's answer, and this exact hole has been fallen into once already:
+# `front run -inherit` worked, the manifest denied it, and the docs gate called
+# the working example a typo.
+foreach o {-depth -out -prune -stdout} {
+    check "`$o` is declared in front's option table" [expr {
+        $o in [dict get [manifest] front options]}]
+}
+foreach o {-depth -out -prune} {
+    check "`$o` with no value is a usage error" [expr {
+        [lindex [errcode_of {front cdirs $FX $o}] 2] eq "usage"}]
+}
+check "an unknown option is a usage error" [expr {
+    [errcode_of {front cdirs $FX -nosuch v}] eq {MACHTELD FRONT usage}}]
+check "a second root is a usage error" [expr {
+    [errcode_of {front cdirs $FX $FX}] eq {MACHTELD FRONT usage}}]
+# THE FOUR CODES, AND WHY THIS GATE EXISTS AT ALL. The DIRS->FRONT re-raise is
+# written as a switch with four LITERAL arms rather than the tempting
+# `Fail FRONT $code $msg`, because the manifest reads a Tcl verb's codes with
+# `{Fail\s+([A-Z]+)\s+([a-z]+)\s}` and a variable in the code position matches
+# nothing. The one-liner would leave `manifest front codes` denying two codes the
+# command really raises, with every other check in this file still green -- the
+# identical shape that once made the build report `dirs codes=1` against a truth
+# of four.
+foreach c {badvalue oserror} {
+    check "manifest front declares `$c`" [expr {$c in [dict get [manifest] front codes]}]
+}
+foreach {cdlabel cdscript cdwant} [list \
+    "a missing root"      {front cdirs $FX/nope_zzz -stdout}     notfound \
+    "a root that is a file" {front cdirs [file join $FX afile.txt] -stdout} notfound \
+    "a drive-relative root" {front cdirs C: -stdout}             badvalue \
+    "a bad -depth"        {front cdirs $FX -depth nope -stdout}  badvalue \
+    "a malformed -prune"  "front cdirs \$FX -prune \\{ -stdout"  badvalue] {
+    check "$cdlabel is FRONT $cdwant, not DIRS" [expr {
+        [errcode_of $cdscript] eq "MACHTELD FRONT $cdwant"}]
+}
+# `front verify` MUST STILL SEE NO COLLISION. The workspace gains tools without
+# asking anybody, and a promoted name that is also a curated tool is a name that
+# means two things.
+check "cdirs collides with nothing the workspace curates" [expr {
+    "cdirs" ni [::machteld::FrontToolNames]
+    && ![llength [lsearch -all -inline -glob \
+             [dict get [valof {json decode [front verify -json]}] problems] "*cdirs*"]]}]
+
+# CD14: THE DOC SCANNER CAN SEE THIS COMMAND'S OPTIONS -- and this gate exists
+# because the answer was nearly no. The doc-accuracy check five hundred lines
+# above filters option tokens with `^-[a-z]+$`, which rejects `--root`, `--out`
+# and `--max-depth`: had `cdirs` been spelled z's way, the ONLY gate coupling the
+# docs to the option table would have been structurally blind to every option it
+# has, and green. Spelling the options the VERB's way -- `-depth`, `-prune` --
+# keeps them inside the scanner's reach for free, which is a second, mechanical
+# argument for [rule 1] on top of the readability one.
+#
+# Widening the scanner instead was considered and refused: `--json` is accepted
+# at the seam and deliberately NOT declared, so a wider regexp would call a
+# working documented example a typo -- the `front run -inherit` failure with the
+# sign flipped. So the blindness itself is gated here rather than papered over,
+# and the day someone adds a `--long-option` to a Tcl verb this fails and says
+# what to do about it.
+set cdblind {}
+foreach o [dict get [manifest] front options] {
+    if {![regexp {^-[a-z]+$} $o]} { lappend cdblind $o }
+}
+check "every declared front option is a shape the doc scanner checks" [expr {$cdblind eq ""}]
+if {$cdblind ne ""} {
+    puts "     invisible to the doc-accuracy scanner: $cdblind"
+    puts "     (widen its `^-\[a-z\]+\$` filter, or spell the option the palette's way)"
+}
+
+# --- the divergence from z cannot become folklore -----------------------------
+# PROSE-MATCHING IS VACUOUS: a gate asserting that some paragraph contains the
+# word "OneDrive" is satisfied by writing the word. These three tie the doc to a
+# VALUE instead.
+
+# CDD1: THE RULE AS THE DOC STATES IT PREDICTS THE WALKER'S OWN CLASSIFICATION.
+# The mask is EXTRACTED FROM THE DOC and applied to tags the walker reported for
+# real directories on this machine. Change the doc and it fires; change the veto
+# in dirs.c and the walker's `surrogate` field flips and it fires from the other
+# side.
+set CDPAL [help palette]
+set CDMASK ""
+regexp {surrogate bit\s+`?(0x[0-9a-fA-F]+)`?} $CDPAL -> CDMASK
+check "the palette states the surrogate bit as a value" [expr {$CDMASK ne ""}]
+if {$CDMASK ne ""} {
+    set cdwrong {}
+    foreach l [dict get [valof {dirs $HOMEDIR -depth 1}] links] {
+        # BOTH SIDES AS BOOLEANS. The first version of this line compared the
+        # masked tag to the flag directly -- `0x20000000 != 1` -- so it fired on
+        # every junction on the machine and would have gone on firing whatever
+        # either side said. A gate that cannot be green is as useless as one that
+        # cannot be red.
+        set cdpredicted [expr {([dict get $l tag] & $CDMASK) != 0}]
+        if {$cdpredicted != [dict get $l surrogate]} { lappend cdwrong $l }
+    }
+    check "the documented rule predicts every classification the walker made" [expr {
+        $cdwrong eq ""}]
+    foreach w $cdwrong { puts "     doc and walker disagree: $w" }
+}
+
+# CDD2: EVERY TAG THE SOURCE VETOES IS NAMED IN THE DOC. The DFS pair is refused
+# although it does NOT set the bit, and it has never been observed on this
+# machine -- so it is unreachable from any fixture, and the only thing that can
+# keep it honest is the doc and the #defines agreeing. Adding a fourth vetoed tag
+# without documenting it fires this.
+set CDSRC [file join $HERE .. src dirs.c]
+if {![file exists $CDSRC]} {
+    puts "     SKIP veto/doc coupling (no src/ beside the test)"
+} else {
+    set cdfh [open $CDSRC r] ; set cdtext [read $cdfh] ; close $cdfh
+    set cdvetoed {}
+    # `[A-Z0-9_]` AND NOT `[A-Z0-9]`, and the underscore is the whole gate. The
+    # class without it cannot match the standard spelling of a reparse constant
+    # -- `IO_REPARSE_TAG_MOUNT_POINT`, `WCI_1`, `CLOUD_1` are how every one of
+    # them is written -- so a real fourth vetoed tag added as
+    # `#define DIRS_TAG_WCI_1 0x80000018u` and left undocumented was INVISIBLE
+    # here, the `>= 3` floor was met by the three survivors, and all 701 checks
+    # were green. This gate's stated purpose is "adding a fourth vetoed tag
+    # without documenting it fires this", and it did not hold for any tag anyone
+    # is likely to add.
+    foreach {_ nm val} [regexp -all -inline \
+            {#define\s+DIRS_(SURROGATE|TAG_[A-Z0-9_]+)\s+(0x[0-9a-fA-F]+)u?} $cdtext] {
+        dict set cdvetoed [string tolower $val] DIRS_$nm
+    }
+    # AND THE SCANNER'S OWN BLINDNESS IS GATED, rather than trusted a second
+    # time. A LOOSE count of the same defines is compared with what the strict
+    # pattern actually saw, so the next spelling it cannot read fails HERE and
+    # says what to widen -- instead of silently shrinking the set of tags the doc
+    # is held to. This is the same shape as CD14, which gates the doc scanner's
+    # `^-[a-z]+$` blindness rather than papering over it.
+    set cdloose [regexp -all -- {#define\s+DIRS_(?:SURROGATE|TAG_\S+)\s} $cdtext]
+    check "the source declares its veto constants where they can be read" [expr {
+        [dict size $cdvetoed] >= 3}]
+    check "and the scanner reads every one of them, not a subset" [expr {
+        $cdloose >= 3 && [dict size $cdvetoed] == $cdloose}]
+    if {[dict size $cdvetoed] != $cdloose} {
+        puts "     $cdloose veto constants declared, [dict size $cdvetoed] matched:\
+              widen the `DIRS_(SURROGATE|TAG_...)` pattern above"
+    }
+    set cdlowpal [string tolower $CDPAL]
+    set cdundoc {}
+    dict for {v nm} $cdvetoed {
+        if {![string match "*$v*" $cdlowpal]} { lappend cdundoc "$nm=$v" }
+    }
+    check "every tag the walker vetoes is named in the palette doc" [expr {$cdundoc eq ""}]
+    if {$cdundoc ne ""} { puts "     undocumented veto constants: $cdundoc" }
+}
+
+# CDD3: EVERY PROMOTED COMMAND IS DOCUMENTED -- the direction the doc scanner
+# does not go. It checks doc->code; nothing has ever checked code->doc for the
+# front door, so a command could ship undocumented and nothing would say so. The
+# palette has had this since `watch` and `manifest` went missing from a
+# hand-kept list. Written against COMMAND-SHAPED mentions rather than a bare
+# backticked word, because a word appearing anywhere in the file is satisfied by
+# the paragraph that REFUSES to build the command -- which is exactly the state
+# `cdirs` was in until today.
+set CDFD [help front-door]
+set cdundocumented {}
+foreach c [::machteld::FrontCommands] {
+    if {![string match "*`mt $c*" $CDFD] && ![string match "*`front $c*" $CDFD]
+        && ![regexp -line "^\\s*(mt|front)\\s+$c\\M" $CDFD]} {
+        lappend cdundocumented $c
+    }
+}
+check "the front-door plan documents every promoted command" [expr {$cdundocumented eq ""}]
+if {$cdundocumented ne ""} { puts "     undocumented commands: $cdundocumented" }
+
+# CDD4: AND THE STALE CLAIM IS GONE. front-door.md said "it wants a C verb or it
+# stays outside machteld", which was true the day it was written and is false the
+# day the command lands. A false sentence in a shipped doc is the thing this
+# whole file exists to prevent, so it is asserted as a fact about the code: if
+# the command exists, the doc must not still be refusing it.
+if {"cdirs" in [::machteld::FrontCommands]} {
+    check "the doc no longer says cdirs stays outside machteld" [expr {
+        ![string match "*stays outside machteld*" $CDFD]}]
+}
+
+file delete -force $CDOUT
+check "the cdirs fixture tore down completely" [expr {![file exists $CDOUT]}]
 
 DirsWipe $FX
 DirsWipe $FXO

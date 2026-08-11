@@ -871,17 +871,649 @@ proc ::machteld::FrontWithin {base candidate} {
     return [string equal -nocase -length [string length $b] $c $b]
 }
 
+# --- `cdirs`: the directory index, and the consequence z counts but never says -
+#
+# THE VERB WALKS; THIS DECIDES WHAT THE WALK MEANS. `dirs` is C because
+# enumeration, reparse classification, the `\\?\` prefix and the emission order
+# are the four things Tcl genuinely cannot reach, and [the register](direction.md)
+# records it stopping there deliberately: `-out` was cut because it "is three
+# lines of `open`/`puts`" and would have left the principal result key silently
+# empty whenever it was used, and `elapsed` because "`clock milliseconds` on
+# either side of the call is the same number" and "makes the verb never twice
+# the same". Both objections are arguments FOR putting them one layer up. A
+# command's product IS a file, so there is no result key to empty; and this is
+# the caller with the two `clock milliseconds` calls, reporting a RUN rather than
+# returning a value that ought to be reproducible. That is [rule 4] read from the
+# other end, and it is why `-out` is wrong in the verb and right here.
+#
+# WHAT THIS COMMAND IS FOR, in one measurement taken on this machine. Under
+# `C:/Users/anafa` the walk finds 236,162 directories and `z cdirs` finds
+# 112,018. The entire difference is 124,144 directories under ONE reparse point
+# -- `C:/Users/anafa/OneDrive`, tag `0x9000701a`, surrogate bit clear -- which z
+# refuses to descend because it refuses every reparse point, and which `dirs`
+# descends because it refuses only NAME SURROGATES. z is not silent about the
+# decision. It is silent about the CONSEQUENCE: its stats line says "12 links
+# skipped" and names none of the twelve, so eleven junctions that really are a
+# second name for somewhere else and one placeholder root hiding more than half
+# the home tree arrive as the same integer. Counted, consequence invisible.
+#
+# So the rule the report below is built on, and each clause is doing work:
+#
+#   A refusal the WALKER made is NAMED. A refusal the CALLER asked for is
+#   COUNTED. The completeness verdict sits on the first line, beside the count,
+#   so the count cannot be read alone.
+#
+# NAMED, for the walker's decisions, because the size of what lies behind a
+# place the walk did not enter is not knowable WITHOUT entering it -- that is
+# what not entering means, not a gap in the implementation. The number can
+# therefore never be reported, and a report offering one instead invites the
+# reader to take it for the magnitude of the loss. The one honest disclosure
+# available is the PLACE: a reader who sees `C:/Users/anafa/OneDrive` knows the
+# scale instantly, and a reader who sees `12` knows nothing. It is affordable
+# exactly where it matters -- eleven such places in the whole home tree, two in
+# the workspace.
+#
+# COUNTED, for `-prune` and `-depth`, because the caller already knows the
+# criterion and restating it carries what naming each path would; it is also the
+# only choice the verb permits, `pruned` and `depthlimited` being integers
+# rather than path lists. The wording must not overclaim, and [the
+# palette](palette.md) says why: those count REFUSALS, not elisions, and a leaf
+# with nothing under it is counted too.
+#
+# VERDICT FIRST, because z's stats line is lowercase prose that reads as
+# reassurance and needs arithmetic before it admits anything is missing.
+# `[PARTIAL]` sits in the headline, in the same breath as the count.
+
+namespace eval ::machteld {
+    # HOW MANY PATHS A NAMED GROUP PRINTS before it says "and N more". The cap
+    # exists so a tree carrying five thousand symlinks does not print five
+    # thousand lines; it is set ABOVE the largest real case measured here -- the
+    # home tree's eleven junctions -- so that the case this command was built
+    # for prints in full rather than being the first thing the cap hides. The
+    # count on the header line is always exact, and the sidecar and `-json` form
+    # always carry every row.
+    variable FRONT_DIRS_CAP 20
+}
+
+# THE DOMAIN IS THE VERB YOU CALLED, so a failure that started in `dirs` comes
+# back as FRONT. [The contract](contract.md) states the rule and `FrontManifest`
+# already sets the precedent, catching a `json decode` failure and re-raising it
+# as `{MACHTELD FRONT manifest}`. The inner MESSAGE is preserved verbatim --
+# `dirs` says which spelling of a bad root works, and that sentence is the useful
+# part -- and only the domain is corrected.
+#
+# FOUR LITERAL ARMS, NOT `Fail FRONT $code $msg`, and this is not style. The
+# manifest reads a Tcl verb's codes out of its own body with
+# `{Fail\s+([A-Z]+)\s+([a-z]+)\s}`; a variable in the code position matches
+# nothing, so the one-line version would leave `manifest front codes` denying
+# two codes the command really raises while every test still passed. That is not
+# hypothetical: the identical shape happened in the C, where folding
+# free-and-raise into one helper moved the code literal out of the argument
+# position `genmanifest.tcl` reads and the build reported `dirs codes=1` against
+# a truth of four.
+# AN EMPTY LIST THAT `json encode` WILL RENDER AS `[]` EVERY TIME.
+#
+# The encoder reads a value's own representation -- a dict is an object, a list
+# is an array, anything else is a scalar -- and that rule is right; the failure
+# is that an EMPTY list barely has a representation, and Tcl's empty string is a
+# single shared object per interpreter. Whatever any line anywhere in the process
+# last did to that literal is what the encoder sees. Measured here, all three
+# outcomes from the same `[list]` in the same build: `[]`, `{}` and `""`.
+# `json decode {[]}`, which looks like the obvious answer, gives `""`.
+#
+# `lrange` over a one-element list is the form that works, because it returns a
+# FRESH list object rather than the shared literal. It reads oddly and it is
+# honest: the alternative is a report whose `refused` key is an object on exactly
+# the runs where nothing was refused.
+proc ::machteld::FrontEmptyList {} { return [lrange [list x] 1 1] }
+
+proc ::machteld::FrontDirsReraise {o msg} {
+    set code ""
+    if {[dict exists $o -errorcode]} {
+        set ec [dict get $o -errorcode]
+        if {[lindex $ec 0] eq "MACHTELD"} { set code [lindex $ec 2] }
+    }
+    switch -- $code {
+        badvalue { Fail FRONT badvalue $msg }
+        notfound { Fail FRONT notfound $msg }
+        oserror  { Fail FRONT oserror  $msg }
+        default  { Fail FRONT usage    $msg }
+    }
+}
+
+# THE FILENAME IS DERIVED FROM THE ROOT, because z's is not and it lies. z writes
+# every walk to the fixed name `c-drive-dirs.txt`, so `z cdirs --root C:\dev`
+# puts 21,804 workspace directories in a file whose name says "c-drive" -- and
+# overwrites the drive index doing it. Deriving the name means re-running the
+# same root replaces the same file and two different roots cannot collide.
+#
+# The NORMALISED root is the key, never the string the caller typed, so `c:\dev\`,
+# `C:/dev` and `\\?\C:\dev` all name one artefact instead of three.
+#
+# BUT THE SQUASH IS LOSSY, AND THAT CLAIM SHIPPED FALSE. `regsub -all
+# {[^a-z0-9]+} -> "-"` maps `C:/dev/_x`, `C:/dev-x`, `C:/dev.x` and `C:/dev x`
+# onto one name, and the hash tail fired only above 64 characters -- i.e.
+# everywhere EXCEPT where the short, ordinary roots that collide live. Measured
+# against the real indices on this machine, two genuine pairs already collided:
+# `C:/Users/anafa/.codex/.tmp` against `.../.codex/tmp`, and
+# `OneDrive/_LIVE` against `OneDrive/live` -- the second run silently replacing
+# the first's index with no warning from either. Sharper still, a root whose last
+# component is entirely non-ASCII squashed to its PARENT, so
+# `C:/Users/anafa/\u00c4` wrote itself over `c-users-anafa`, the flagship
+# artefact. That is z's `c-drive-dirs.txt` defect in a new spelling, in the one
+# proc whose comment promised it could not happen.
+#
+# THE TEST FOR "SAFE" IS AN INVERSE, NOT A RULE OF THUMB. `FrontDirsUnslug`
+# reconstructs the root that a lossless slug must have come from; if it does not
+# reproduce the lowercased root exactly, the squash threw something away and the
+# hash decides instead. Two things fall out. The ordinary roots keep their
+# readable names -- `C:/dev` -> `c-dev`, `C:/Users/anafa` -> `c-users-anafa`,
+# `//srv/share/x` -> `srv-share-x` -- because those really are recoverable. And
+# the tail is joined with `--`, a sequence the lossless branch can never produce
+# (it would need an empty path component), so a hashed slug can never collide
+# with an unhashed one either.
+proc ::machteld::FrontDirsUnslug {s} {
+    set parts [split $s -]
+    # A ONE-CHARACTER FIRST COMPONENT IS A DRIVE LETTER, which is also why
+    # `//a/b` and `A:/b` -- both `a-b` under the old rule, and a real collision
+    # between a UNC share and a drive -- now differ: only one of them survives
+    # this reconstruction.
+    if {[string length [lindex $parts 0]] == 1} {
+        return "[lindex $parts 0]:/[join [lrange $parts 1 end] /]"
+    }
+    return "//[join $parts /]"
+}
+
+proc ::machteld::FrontDirsSlug {root} {
+    set low [string tolower $root]
+    set s $low
+    regsub -all -- {[^a-z0-9]+} $s "-" s
+    set s [string trim $s -]
+    # A root of pure punctuation cannot happen through `dirs`, which refuses an
+    # empty root -- but an empty filename is a silent disaster rather than a
+    # visible one, so it is answered rather than assumed away.
+    if {$s eq ""} { set s root }
+    # DEEP ROOTS REACH THE LENGTH ARM ON THIS MACHINE: anything under
+    # AppData/Local/Packages/<package>/LocalCache/... is past 64 characters once
+    # squashed, and an unbounded slug pushes the cache path toward its own length
+    # limit. The tail is hashed over the FULL lowercased root, so two roots
+    # sharing a 55-character prefix still key different files -- and hashing the
+    # LOWERCASED root rather than the string as typed is what keeps `c:\dev\_X`
+    # and `C:/dev/_x` one artefact instead of two.
+    if {[string length $s] > 64 || [FrontDirsUnslug $s] ne $low} {
+        set s "[string range $s 0 53]--[string range [hash sum sha256 $low] 0 7]"
+    }
+    return $s
+}
+
+# NAMING A TAG IS POLICY, SO IT IS TCL. `dirs` reports `0x9000701a` and the front
+# door says `cloud`, which is [rule 4] again in its smallest form.
+#
+# THE TABLE NAMES ONLY WHAT `dirs.c` ITSELF NAMES, plus the cloud family, and it
+# stops there on purpose. A table of half-remembered reparse constants would be
+# the front door asserting knowledge the C's own veto rule does not have, and the
+# two would drift apart with nothing to notice. The cloud MASK is reasoned from
+# the documented meaning of the `IO_REPARSE_TAG_CLOUD_1`..`_F` family; only
+# `0x9000701a` has ever been observed here, which is said out loud for the same
+# reason `dirs.c` says it about its DFS pair.
+#
+# `0x00000000` is a real answer and not "no tag": `dirs.c` records that a cloud
+# root reads its tag from the directory scan and reads 0 through a HANDLE,
+# because the filter consumes its own reparse point. Such a row says `reparse`
+# rather than being mistaken for an ordinary directory.
+proc ::machteld::FrontDirsTag {tag} {
+    switch -- [format 0x%08x $tag] {
+        0xa0000003 { return junction }
+        0xa000000c { return symlink }
+        0x8000000a { return dfs }
+        0x80000012 { return dfsr }
+        0x00000000 { return reparse }
+    }
+    if {($tag & 0xffff0fff) == 0x9000001a} { return cloud }
+    return [format 0x%08x $tag]
+}
+
+# The verb's dict becomes the report's dict here, and NOTHING ELSE in this
+# command touches the filesystem to do it. That split is what makes the whole
+# report testable: a fixture hands this proc a synthesised `dirs` result and
+# asserts the verdict and the rows without a disk anywhere. It matters more here
+# than usual -- the review of `dirs` itself found FIVE gates that could not fail,
+# every one of them pointed at a subject that could not exhibit the defect.
+proc ::machteld::FrontDirsReport {d ms depth prune} {
+    # THE JOIN, and it is the easiest thing in this file to get wrong. A `links`
+    # row whose action is `failed` ALWAYS has an `errors` row beside it -- the
+    # descent was attempted and the open failed -- so concatenating the two lists
+    # reports one place twice and makes the headline disagree with the rows under
+    # it. Keyed on the path, so such a place appears ONCE carrying both its tag
+    # and its Win32 code.
+    set order [list]
+    set rows [dict create]
+    foreach e [dict get $d errors] {
+        set p [dict get $e path]
+        if {![dict exists $rows $p]} { lappend order $p }
+        dict set rows $p [dict create path $p why unreadable \
+                              win32 [dict get $e win32] reason [dict get $e reason]]
+    }
+    foreach l [dict get $d links] {
+        set act [dict get $l action]
+        # `pruned` and `depthlimited` link rows are deliberately NOT added here.
+        # `dirs.c` has already counted those in the two integers below, and
+        # counting them again would break the arithmetic the palette guarantees:
+        # every absent directory attributable to EXACTLY ONE cause.
+        if {$act ni {nofollow failed}} continue
+        set p [dict get $l path]
+        set r [expr {[dict exists $rows $p] ? [dict get $rows $p] : [dict create path $p]}]
+        if {![dict exists $rows $p]} { lappend order $p }
+        dict set r why       [FrontDirsTag [dict get $l tag]]
+        dict set r tag       [format 0x%08x [dict get $l tag]]
+        dict set r surrogate [dict get $l surrogate]
+        dict set rows $p $r
+    }
+    set refused [list]
+    foreach p $order { lappend refused [dict get $rows $p] }
+
+    # THE REVERSE SILENCE IS ALSO POSSIBLE, and this block is the answer to it. A
+    # reader expecting z's semantics gets 236,162 lines where z gave 112,018 and
+    # has no way to learn why; the reparse directories that WERE entered are
+    # disclosed too, so the difference is stated rather than discovered by
+    # diffing two files.
+    #
+    # AND DISCLOSING THE PLACE IS NOT ENOUGH, which is the half of this that
+    # shipped missing. The indictment of z is "counted, consequence invisible":
+    # `12 links skipped` names none of the twelve. A report that names the place
+    # and gives no number is the same failure with the terms swapped -- NAMED,
+    # MAGNITUDE INVISIBLE -- and a reader who does not already know z gets no
+    # signal that 124,144 of 236,162 lines, 52.6% of the whole answer, came from
+    # one row. The doc's reason for refusing a number is exact about `refused`
+    # ("not knowable without entering it") and FALSE here: the walk DID enter,
+    # the paths are in hand, and a prefix count over them is sub-second against a
+    # twenty-second walk. So `below` is counted for every entered row.
+    #
+    # Only the non-surrogates are counted by prefix; a descended SURROGATE can
+    # only be the root you named, where the answer is the whole list by
+    # construction and a second pass would be arithmetic dressed as measurement.
+    set entered [list]
+    foreach l [dict get $d links] {
+        if {[dict get $l action] ne "descended"} continue
+        set p [dict get $l path]
+        set row [dict create path $p \
+                     why       [FrontDirsTag [dict get $l tag]] \
+                     tag       [format 0x%08x [dict get $l tag]] \
+                     surrogate [dict get $l surrogate]]
+        if {[dict get $l surrogate]} {
+            dict set row below [expr {[dict get $d dirs] - 1}]
+        } else {
+            set pre "$p/" ; set n [string length $pre] ; set c 0
+            foreach q [dict get $d paths] {
+                if {[string equal -nocase -length $n $pre $q]} { incr c }
+            }
+            dict set row below $c
+        }
+        lappend entered $row
+    }
+
+    # THE VERDICT IS CONSERVATIVE ON PURPOSE. `PARTIAL` means "the walk declined
+    # to enter somewhere", not "something is definitely missing" -- a
+    # depth-limited walk whose cut points are all leaves is PARTIAL although
+    # nothing was lost. For a cache index, erring toward "you may not have
+    # everything" is the safe direction, and the blocks below say which reading
+    # applies in each case.
+    set complete [expr {![llength $refused] && [dict get $d pruned] == 0
+                        && [dict get $d depthlimited] == 0}]
+    # AN EMPTY LIST HAS TO BE MADE TO ENCODE AS ONE, and this cost a shipped
+    # defect to learn. `json encode` decides array-versus-object from a value's
+    # own internal representation -- which is the right rule and the one [the
+    # contract](contract.md) documents -- but an empty list has no representation
+    # worth the name, and Tcl's empty string is ONE SHARED OBJECT for the whole
+    # interpreter. So the answer depends on what some unrelated line did to that
+    # literal earlier in the process. Measured in one binary, on one afternoon:
+    # `mt cdirs C:/dev` wrote a sidecar saying `"entered":{}` and `"prune":{}`
+    # while `front cdirs` on the fixture, same build, wrote `[]` for both. The
+    # contract's own escape hatch -- "say -dict or -list" -- reaches only the TOP
+    # level of a document, and these are nested.
+    #
+    # `FrontEmptyList` is the one form that is stable, and a consumer looping
+    # over `report.refused` is exactly the reader who breaks on `{}` -- on the
+    # runs where nothing was refused, which is the common case.
+    if {![llength $refused]} { set refused [FrontEmptyList] }
+    if {![llength $entered]} { set entered [FrontEmptyList] }
+    set prune [lrange $prune 0 end]
+    if {![llength $prune]} { set prune [FrontEmptyList] }
+    set rep [dict create \
+                 root         [dict get $d root] \
+                 dirs         [dict get $d dirs] \
+                 maxdepth     [dict get $d maxdepth] \
+                 elapsed      $ms \
+                 when         [clock seconds] \
+                 complete     [expr {$complete ? 1 : 0}] \
+                 refused      $refused \
+                 entered      $entered \
+                 pruned       [dict get $d pruned] \
+                 prune        $prune \
+                 depthlimited [dict get $d depthlimited]]
+    # `depth` IS ABSENT WHEN NO LIMIT WAS ASKED FOR, rather than present and
+    # empty -- the rule `status` already follows for the keys it cannot fill. It
+    # is not merely tidier here, it is the only unambiguous encoding available:
+    # `-depth 0` is a real and very different request from "no -depth at all",
+    # and an empty string is exactly the value `json` maps `null` to, so a
+    # present-but-empty `depth` would be indistinguishable from a caller who
+    # passed nothing. Present means a limit was requested; absent means the walk
+    # was unbounded, in which case `depthlimited` is necessarily 0.
+    if {$depth ne ""} { dict set rep depth $depth }
+    return $rep
+}
+
+# WRITE, THEN PUBLISH, and the ordering buys a real invariant on a command that
+# runs for twenty seconds and can be interrupted: a present sidecar means the
+# list beside it is whole. Both temporaries are complete before either is
+# renamed, and the OLD sidecar is deleted BEFORE the new list lands -- so the
+# window in which the two disagree shows an ABSENT report rather than a stale
+# one describing a list it was never a report of. A walk that raises writes
+# nothing at all, because a failed run must not destroy a good cache.
+#
+# z's sidecar cannot make this claim: it is created unconditionally and only
+# sometimes mentioned, so its presence says nothing and its absence has two
+# meanings -- clean run, or the run died.
+proc ::machteld::FrontDirsWrite {d rep out} {
+    set report "[file rootname $out].json"
+    # `-out index.json` would otherwise make the report overwrite the list it is
+    # a report OF. One character of typo, one artefact destroyed, nothing said.
+    if {[string equal -nocase $report $out]} { set report "$out.report.json" }
+    # NEITHER DESTINATION MAY BE A DIRECTORY, and both are refused BEFORE a byte
+    # is written, because both used to be silent disasters.
+    #
+    # `file rename` moves a file INTO a directory target. So `-out <a directory>`
+    # reported `[COMPLETE]`, exit 0, named the directory as the `list` and wrote
+    # a sidecar saying `"bytes":96` about it -- while the list itself sat
+    # orphaned inside as `<dir>/<dir>.tmp`. That is this proc's own invariant --
+    # a present sidecar means the list beside it is whole -- broken in the one
+    # direction nothing else could catch, plus a stray `.tmp`.
+    #
+    # And the sidecar's publish step used to delete whatever stood in its way, so
+    # `-out notes.txt` beside a DIRECTORY named `notes.json` removed it and
+    # everything under it, silently, before writing anything. Overwriting a FILE
+    # there is documented and intended; `rm -rf` of a tree is not.
+    if {[file isdirectory $out]} {
+        Fail FRONT oserror "cdirs: -out $out is a directory, not a file"
+    }
+    if {[file isdirectory $report]} {
+        Fail FRONT oserror "cdirs: the report would go to $report, which is a directory"
+    }
+    set dir [file dirname $out]
+    if {[catch {file mkdir $dir} e]} {
+        Fail FRONT oserror "cdirs: cannot create $dir: $e"
+    }
+    # utf-8 AND lf, neither of which is Tcl's default on Windows, and both of
+    # which matter. `auto` translation emits CRLF, and paths here genuinely carry
+    # non-ASCII -- `dirs.c`'s notes about CP_UTF8 and U+E000 exist because of the
+    # names on this disk. Written a line at a time rather than as one `join`,
+    # because the join materialises a second 23 MB string to no purpose.
+    set fh ""
+    if {[catch {
+        set fh [open $out.tmp w]
+        fconfigure $fh -encoding utf-8 -translation lf
+        foreach p [dict get $d paths] { puts $fh $p }
+        close $fh
+        set fh ""
+    } e]} {
+        if {$fh ne ""} { catch {close $fh} }
+        catch {file delete -force $out.tmp}
+        Fail FRONT oserror "cdirs: cannot write $out: $e"
+    }
+    dict set rep list   $out
+    dict set rep report $report
+    dict set rep bytes  [file size $out.tmp]
+    if {[catch {
+        set fh [open $report.tmp w]
+        fconfigure $fh -encoding utf-8 -translation lf
+        puts $fh [json encode $rep]
+        close $fh
+        set fh ""
+    } e]} {
+        if {$fh ne ""} { catch {close $fh} }
+        catch {file delete -force $out.tmp $report.tmp}
+        Fail FRONT oserror "cdirs: cannot write $report: $e"
+    }
+    # PUBLISH IS ORDERED AND REVERSIBLE, and the second half of that is the fix
+    # for the one path in this proc that could destroy something. What stood here
+    # DELETED the old sidecar first and then renamed; when the rename failed --
+    # the list file held open by a reader is enough -- the command raised
+    # `oserror`, cleaned its temporaries, and left the previous run's list with no
+    # report at all. "A failed run must not destroy a good cache" was written four
+    # lines above the only line that could break it, and CD11 gated the `file
+    # mkdir` failure, which aborts before ever reaching it.
+    #
+    # Moving it aside instead answers both directions. If the LIST cannot be
+    # replaced, nothing has happened yet: the sidecar goes back and the previous
+    # run survives whole. If the list lands and the REPORT cannot, the sidecar is
+    # ABSENT rather than restored -- because a report describing a list it was
+    # never a report of is precisely the state this ordering exists to make
+    # impossible, and absence is the honest reading of "the run died here".
+    set saved ""
+    if {[file exists $report]} { set saved "$report.prev" }
+    set moved 0
+    if {[catch {
+        if {$saved ne ""} { file rename -force $report $saved }
+        file rename -force $out.tmp $out
+        set moved 1
+        file rename -force $report.tmp $report
+    } e]} {
+        if {$saved ne "" && !$moved} { catch {file rename -force $saved $report} }
+        catch {file delete -force $out.tmp $report.tmp}
+        if {$saved ne ""} { catch {file delete -force $saved} }
+        Fail FRONT oserror "cdirs: cannot publish $out: $e"
+    }
+    if {$saved ne ""} { catch {file delete -force $saved} }
+    return $rep
+}
+
+# THOUSANDS SEPARATORS, in the one command whose whole subject is large numbers
+# whose magnitude is the point. `236162` and `236,162` are the same fact and not
+# the same sentence; the rest of the front door's plainer output does without
+# this, and here it earns its six lines.
+proc ::machteld::FrontThousands {n} {
+    set s [string trimleft $n -]
+    set out ""
+    while {[string length $s] > 3} {
+        set out ",[string range $s end-2 end]$out"
+        set s [string range $s 0 end-3]
+    }
+    if {$n < 0} { return "-$s$out" }
+    return "$s$out"
+}
+
+proc ::machteld::FrontDirsBytes {n} {
+    if {$n < 1024}       { return "$n B" }
+    if {$n < 1048576}    { return [format "%.1f KB" [expr {$n / 1024.0}]] }
+    if {$n < 1073741824} { return [format "%.1f MB" [expr {$n / 1048576.0}]] }
+    return [format "%.1f GB" [expr {$n / 1073741824.0}]]
+}
+
+# The report dict becomes text here, and this proc reads NOTHING but the dict it
+# is handed. Pairing a pure dict->dict builder with a pure dict->string renderer
+# is what makes "the human text and the JSON are the same numbers" true by
+# construction instead of by discipline -- there is no second set of counters to
+# drift, which is the way a stats line usually starts lying.
+proc ::machteld::FrontDirsText {rep} {
+    variable FRONT_DIRS_CAP
+    set L 16
+    set out [list]
+    lappend out [format "cdirs \[%s\]  %s director%s under %s in %.1fs" \
+        [expr {[dict get $rep complete] ? "COMPLETE" : "PARTIAL"}] \
+        [FrontThousands [dict get $rep dirs]] \
+        [expr {[dict get $rep dirs] == 1 ? "y" : "ies"}] \
+        [dict get $rep root] [expr {[dict get $rep elapsed] / 1000.0}]]
+    # Absent under `-stdout`, where there are no files to name -- and absent
+    # rather than named-as-empty, the same rule `status` follows for the keys it
+    # cannot fill.
+    if {[dict exists $rep list]} {
+        lappend out [format "%-*s %s  (%s)" $L list [dict get $rep list] \
+                         [FrontDirsBytes [dict get $rep bytes]]]
+        lappend out [format "%-*s %s" $L report [dict get $rep report]]
+    }
+
+    set refused [dict get $rep refused]
+    if {[llength $refused]} {
+        lappend out ""
+        lappend out [format "%-*s %s place%s. The walk stopped %s; what is inside is not in" \
+            $L refused [FrontThousands [llength $refused]] \
+            [expr {[llength $refused] == 1 ? "" : "s"}] \
+            [expr {[llength $refused] == 1 ? "there" : "at each"}]]
+        lappend out [format "%-*s %s" $L "" \
+            "the list, and how much is there cannot be known from here."]
+        set groups [dict create]
+        foreach r $refused { dict lappend groups [dict get $r why] $r }
+        # `unreadable` leads, because a directory you may not open is a different
+        # kind of news from a link the walk declined by policy; the rest follow in
+        # the order the walk met them, which is tree order and reads that way.
+        set kinds [dict keys $groups]
+        if {"unreadable" in $kinds} {
+            set kinds [linsert [lsearch -all -inline -not -exact $kinds unreadable] 0 unreadable]
+        }
+        foreach why $kinds {
+            set rows [dict get $groups $why]
+            set n 0
+            foreach r $rows {
+                incr n
+                if {$n > $FRONT_DIRS_CAP} continue
+                set note ""
+                if {[dict exists $r win32]} { set note "win32 [dict get $r win32]" }
+                lappend out [format "  %-*s %s%s" [expr {$L - 2}] $why [dict get $r path] \
+                                 [expr {$note eq "" ? "" : "   ($note)"}]]
+            }
+            if {[llength $rows] > $FRONT_DIRS_CAP} {
+                lappend out [format "  %-*s ... and %s more (all of them in %s)" \
+                    [expr {$L - 2}] "" [FrontThousands [expr {[llength $rows] - $FRONT_DIRS_CAP}]] \
+                    [expr {[dict exists $rep report] ? [dict get $rep report] : "the -json form"}]]
+            }
+        }
+    }
+
+    set pruned [dict get $rep pruned]
+    set dlim   [dict get $rep depthlimited]
+    if {$pruned || $dlim} {
+        lappend out ""
+        set label "by request"
+        # SINGULARISED, in the one command whose subject is the wording of a
+        # count. `1 directories` in a report that says `1 directory`, `1 place`
+        # and `1 reparse directory` three lines apart is small, and it is the
+        # same class of thing as the rest of this file: the sentence and the
+        # number disagreeing where only the number was checked.
+        if {$dlim} {
+            lappend out [format "%-*s %s director%s at the -depth %s limit" \
+                $L $label [FrontThousands $dlim] [expr {$dlim == 1 ? "y" : "ies"}] \
+                [expr {[dict exists $rep depth] ? [dict get $rep depth] : "?"}]]
+            set label ""
+        }
+        if {$pruned} {
+            lappend out [format "%-*s %s director%s matching -prune {%s}" \
+                $L $label [FrontThousands $pruned] [expr {$pruned == 1 ? "y" : "ies"}] \
+                [dict get $rep prune]]
+        }
+        lappend out [format "%-*s %s" $L "" \
+            "These are counted refusals, not missing subtrees: a directory"]
+        lappend out [format "%-*s %s" $L "" \
+            "with nothing under it is counted here too."]
+    }
+
+    set entered [dict get $rep entered]
+    set content [lmap r $entered {expr {[dict get $r surrogate] ? [continue] : $r}}]
+    set named   [lmap r $entered {expr {[dict get $r surrogate] ? $r : [continue]}}]
+    if {[llength $content]} {
+        # THE COMPLETENESS SENTENCE IS CONDITIONAL, because the unconditional one
+        # was FALSE exactly where being wrong costs the most. `Everything under it
+        # IS in the count above` was printed on every run that had an entered row,
+        # including `mt cdirs C:/Users/anafa -depth 3`, where ~124,000 directories
+        # under that very row are NOT in the count. That is the report telling a
+        # reader the list is complete below a place where it is not -- the one
+        # direction this whole command exists to prevent, in its own output, with
+        # no gate reading the string.
+        #
+        # Conservative in the same direction as the verdict: any `-prune`, any
+        # `-depth` cut, or any refusal lying below an entered row drops the strong
+        # claim, even when the cut was somewhere else entirely.
+        set whole [expr {[dict get $rep pruned] == 0 && [dict get $rep depthlimited] == 0}]
+        if {$whole} {
+            foreach rr $refused {
+                if {![dict exists $rr path]} continue
+                foreach c $content {
+                    if {[FrontWithin [dict get $c path] [dict get $rr path]]} { set whole 0 }
+                }
+            }
+        }
+        set one [expr {[llength $content] == 1}]
+        lappend out ""
+        lappend out [format "%-*s %s reparse director%s that %s content, not a second name for" \
+            $L entered [FrontThousands [llength $content]] \
+            [expr {$one ? "y" : "ies"}] [expr {$one ? "is" : "are"}]]
+        if {$whole} {
+            lappend out [format "%-*s somewhere else, and everything under %s IS in the count above." \
+                $L "" [expr {$one ? "it" : "them"}]]
+        } else {
+            lappend out [format "%-*s somewhere else. This run also stopped early -- see above -- so" \
+                $L ""]
+            lappend out [format "%-*s what is under %s is only PARTLY in the count above." \
+                $L "" [expr {$one ? "it" : "them"}]]
+        }
+        # AND THE MAGNITUDE, per row, because the place alone is the same silence
+        # z is indicted for with the terms swapped. `entered  1 reparse directory
+        # ... C:/Users/anafa/OneDrive` says a true thing and hides that HALF THE
+        # ANSWER came from that one line.
+        foreach r $content {
+            lappend out [format "  %-*s %-50s tag %s" [expr {$L - 2}] [dict get $r why] \
+                             [dict get $r path] [dict get $r tag]]
+            set b [FrontDictOr $r below 0]
+            lappend out [format "%-*s %s of the %s director%s above -- %.1f%% of this answer -- %s under it" \
+                $L "" [FrontThousands $b] [FrontThousands [dict get $rep dirs]] \
+                [expr {[dict get $rep dirs] == 1 ? "y" : "ies"}] \
+                [expr {100.0 * $b / [dict get $rep dirs]}] \
+                [expr {$b == 1 ? "is" : "are"}]]
+        }
+    }
+    # A SURROGATE THAT WAS DESCENDED CAN ONLY BE THE ROOT YOU NAMED, and it is
+    # the one disclosure the verb's review found missing entirely: a junction
+    # root used to produce no `links` row at all, so nothing anywhere in the
+    # answer said that every path returned is a second name for a tree living
+    # somewhere else. 576 checks passed over that. Saying it here as well means
+    # the front door does not re-introduce the silence one layer up.
+    if {[llength $named]} {
+        lappend out ""
+        lappend out [format "%-*s %s reparse director%s the walk entered because you NAMED it." \
+            $L named [FrontThousands [llength $named]] \
+            [expr {[llength $named] == 1 ? "y" : "ies"}]]
+        lappend out [format "%-*s %s" $L "" \
+            "Every path in this list is a second name for a tree living elsewhere."]
+        foreach r $named {
+            lappend out [format "  %-*s %-50s tag %s" [expr {$L - 2}] [dict get $r why] \
+                             [dict get $r path] [dict get $r tag]]
+        }
+    }
+    return [join $out \n]
+}
+
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in verify scout}
+    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs}
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
     # gate called the working example a typo.
-    set opts {-inherit -json}
+    #
+    # `cdirs` ADDS FOUR AND NOT A FIFTH, and the one it does not add is the
+    # reason this comment grew. Its root is a POSITIONAL, spelled the way `dirs`
+    # spells its own subject, because a command built over a verb must not
+    # respell the verb's grammar -- [rule 1] read at the command layer. A
+    # `--root` alias would have to be either declared here, making the manifest
+    # assert an option that duplicates a positional, or left undeclared, making
+    # the running binary accept something the manifest denies. Both break [rule
+    # 6]. The `-json`/`--json` concession is safe because those are two
+    # spellings of ONE option; a positional against an option is a different
+    # grammar, not a different spelling.
+    set opts {-depth -inherit -json -out -prune -stdout}
     if {![llength $args]} {
         Fail FRONT usage "usage: front roots | front which name | front env name ?-json?\
                           | front tools ?pattern? | front run ?-inherit? ?--? name ?arg ...?\
-                          | front journal | front projects ?-json? | front runtimes ?-json?"
+                          | front journal | front projects ?-json? | front runtimes ?-json?\
+                          | front cdirs ?root? ?-depth n? ?-prune patterns? ?-out file? ?-stdout? ?-json?"
     }
     set sub [lindex $args 0]
     if {$sub ni $subs} {
@@ -1002,6 +1634,235 @@ proc ::machteld::front {args} {
         lappend out "summary: [llength $rows] underscore dirs, $hosted hosted projects,\
                      [expr {[llength $rows] - $hosted}] missing z.json, $dirty dirty git repos"
         return [join $out \n]
+    }
+
+    # `cdirs ?root? ?-depth n? ?-prune patterns? ?-out file? ?-stdout? ?-json?`
+    #
+    # ONE POSITIONAL AND FOUR OPTIONS, where z has twelve. Every removal is
+    # argued rather than trimmed to taste, and the arguments are worth having
+    # here because a surface is easier to grow than to shrink:
+    #
+    #   `--slash`        -- there is one spelling. The palette fixes forward
+    #                       slashes and `dirs` returns them, so machteld's list
+    #                       says `C:/Users/...` where z's says `C:\Users\...`.
+    #                       ANYTHING READING z's CACHE BYTE-WISE WILL NOT READ
+    #                       THIS ONE, which is half of why the default output
+    #                       path below must not be z's.
+    #   `--tree`         -- two output grammars in one command, one of which
+    #                       cannot be grepped, cannot be diffed against
+    #                       yesterday's run, and -- decisively -- has nowhere to
+    #                       hang the disposition markers that are this command's
+    #                       whole reason for existing. A tree of indented
+    #                       basenames cannot say "the walk stopped here". A tree
+    #                       renderer over `paths` is four lines in the caller.
+    #   `--safe`         -- z documents it as "retained for compatibility and is
+    #                       now the default policy", i.e. a no-op. A no-op option
+    #                       is a lie in the manifest and a shape kept for a
+    #                       caller who no longer exists.
+    #   `--follow-links` -- UNAVAILABLE, which is stronger than absent. The verb
+    #                       has no descent-policy lever (`-links list|follow|skip`
+    #                       was refused as "four more dispositions and a `seen`
+    #                       set with no receiver asking for it"), and doing it in
+    #                       Tcl means rebuilding canonicalisation, containment
+    #                       and volume+file-id identity in the prelude. Note that
+    #                       a friendly `-follow` arm raising "not supported" would
+    #                       be WORSE than nothing: the manifest derives options
+    #                       from the table above and from switch arms, so either
+    #                       route makes `manifest front options` claim it exists.
+    #   `--flush N`      -- z's buffered-writer tuning. `dirs` returns a complete
+    #                       list before a byte is written; there is no
+    #                       incremental flush to tune.
+    #   `--progress N`   -- the verb has no progress to report (`-onprogress` was
+    #                       refused as "a spinner, fixed at an interval no
+    #                       testable fixture reaches"), so this command cannot
+    #                       observe what it is not given. THE HONEST CONSEQUENCE,
+    #                       printed here rather than hidden: `mt cdirs
+    #                       C:/Users/anafa` prints nothing for ~22 seconds and
+    #                       then prints everything at once. That is a real cost,
+    #                       and a second argument for the workspace default.
+    #   `--quiet`        -- suppresses progress in z; with no progress there is
+    #                       nothing to suppress. The only other available meaning
+    #                       is "suppress the report", which is a flag for turning
+    #                       off the one thing this command was designed around.
+    #   `--gc MODE`      -- Go runtime tuning. No analogue, no caller.
+    #   `max stack`      -- a fact about z's explicit stack, not about the tree.
+    #                       `maxdepth` is the fact about the tree.
+    #   `outside root`   -- only ever counts something under `--follow-links`.
+    #
+    # AND NO `-cloud` / `-nocloud`, which is the option somebody will ask for.
+    # Three reasons, strongest last. It would be a switch whose only purpose is
+    # to reproduce a behaviour this project has MEASURED to be wrong. The
+    # legitimate want underneath "skip OneDrive" is almost never "skip cloud
+    # storage as a class" but "don't index that subtree", which is a want about a
+    # PLACE, and `-prune` addresses places. And decisively: skipping is a veto
+    # INSIDE the walk, the verb exposes no veto hook, so a Tcl-side `-cloud`
+    # could only post-filter a list it had already paid the full 22 seconds to
+    # build -- delivering a shorter answer at full cost while looking like a
+    # skip. That is exactly the class of silent misreport this command exists to
+    # end. `-prune OneDrive` works properly in the sense that matters: the veto is
+    # in the verb and the time is genuinely saved -- 8.2 s against 22.4 s, and the
+    # report gives the COUNT and the PATTERNS, which is all the verb offers.
+    #
+    # ITS LIMITS RUN BOTH WAYS, and the over-match is the one that fires here.
+    # Measured on this machine, `-prune OneDrive` hits FOUR places, not one: the
+    # cloud root, `AppData/Local/OneDrive`, `AppData/Local/Microsoft/OneDrive` and
+    # an Office asset folder called `onedrive`. The answer is 111,899 against z's
+    # 112,015 and it is not a subset of z either -- it DROPS 126 directories z
+    # lists, 124 of them the unrelated `AppData/Local/Microsoft/OneDrive` subtree.
+    # It matches a NAME and not a tag in both directions: `OneDrive - Contoso`
+    # needs `-prune {OneDrive*}` and is missed without it, and anything else on
+    # the disk called `onedrive` is taken with it. A way to skip a PLACE cheaply,
+    # not a way to reproduce z.
+    #
+    # AND THE `entered` DISCLOSURE GOES WITH IT: a pruned reparse directory is a
+    # refusal the CALLER asked for, so it is counted and not named, and
+    # `"entered":[]` is then correct rather than a loss. Naming it would put the
+    # same place in two accounts and break the arithmetic the palette guarantees.
+    # The caller who typed the word already knows.
+    #
+    # THE DEFAULT ROOT IS THE WORKSPACE, NOT `C:/`, and that is a deliberate
+    # divergence from z rather than an oversight. Three reasons.
+    #
+    #   The front door's subject is the workspace. `tools`, `projects`,
+    #   `runtimes`, `scout`, `verify` and `status` all answer about MT_ROOT
+    #   without being told; a bare `mt cdirs` walking `C:\` would be the only
+    #   front-door command silently widening its scope past the workspace, at the
+    #   highest cost in the whole command set.
+    #
+    #   The default should be the root where the answer is CHECKABLE, and this
+    #   is the argument that actually decides. Under the workspace root machteld
+    #   and z agree exactly -- 21,804 against 21,804 on C:/dev, measured, zero
+    #   only-in-z and zero only-in-mt. Under `C:/` they disagree BY DESIGN.
+    #   Defaulting to the disagreeing root would make the zero-argument form the
+    #   one form that can never be validated against the incumbent. Making the
+    #   wide, disagreeing walk something you opt into BY NAMING IT puts the
+    #   disagreement where it belongs: in a request somebody typed.
+    #
+    #   Cost. Workspace: ~1.5 s warm, 21,804 directories, a 1.2 MB file. `C:/`:
+    #   tens of seconds and 7 MB+, with no output at all until it finishes.
+    #
+    # `mt cdirs C:/` is one word longer than z's default, and that is the right
+    # price for the most expensive thing this command can do.
+    if {$sub eq "cdirs"} {
+        set root "" ; set out "" ; set tostdout 0 ; set asjson 0
+        set depth "" ; set prune {} ; set sawout 0 ; set sawroot 0 ; set sawdepth 0
+        set rest [lrange $args 1 end]
+        for {set i 0} {$i < [llength $rest]} {incr i} {
+            set a [lindex $rest $i]
+            switch -- $a {
+                -json - --json { set asjson 1 }
+                -stdout        { set tostdout 1 }
+                -out - -depth - -prune {
+                    incr i
+                    if {$i >= [llength $rest]} { Fail FRONT usage "front cdirs: $a needs a value" }
+                    set v [lindex $rest $i]
+                    switch -- $a {
+                        -out   { set out $v ; set sawout 1 }
+                        -depth { set depth $v ; set sawdepth 1 }
+                        -prune { set prune $v }
+                    }
+                }
+                default {
+                    if {[string index $a 0] eq "-"} {
+                        Fail FRONT usage "front cdirs: unknown option \"$a\":\
+                            usage: front cdirs ?root? ?-depth n? ?-prune patterns?\
+                            ?-out file? ?-stdout? ?-json?"
+                    }
+                    if {$sawroot} { Fail FRONT usage "front cdirs takes one root, not two" }
+                    set root $a ; set sawroot 1
+                }
+            }
+        }
+        # REFUSED RATHER THAN RESOLVED BY PRECEDENCE. `-out` and `-stdout` are
+        # two different dispositions named at once -- write the list here, write
+        # no files -- and silently letting one win would be the command ignoring
+        # something the caller wrote, which is the failure mode the whole report
+        # below is aimed at.
+        if {$sawout && $tostdout} {
+            Fail FRONT usage "front cdirs: -out and -stdout name two different\
+                              dispositions; -stdout writes no files at all"
+        }
+        # AN EMPTY VALUE IS A VALUE, NOT AN ABSENCE -- the same failure the
+        # refusal above is aimed at, one register quieter, and it shipped on all
+        # three surfaces. `mt cdirs $root -depth $limit` with an empty `$limit` is
+        # the ordinary shape of an optional limit; it became a FULL walk, with no
+        # `depth` key in the report to record that a limit had been asked for at
+        # all, while `dirs $root -depth {}` refuses the identical value with
+        # `badvalue`. `mt cdirs "$SOMEUNSETVAR"` walked the workspace where
+        # `dirs {}` says "the root must not be empty". And `-out {}` quietly
+        # became the default cache path -- a caller who NAMED a disposition and
+        # got a different one.
+        #
+        # The two guards even disagreed with each other: `sawout` was already set
+        # by `-out {}`, so `-out {} -stdout` was refused as two dispositions while
+        # `-out {}` alone counted as no `-out` at all. `sawout`, `sawroot` and
+        # `sawdepth` now mean what their names say everywhere.
+        if {$sawout && $out eq ""} {
+            Fail FRONT badvalue "front cdirs: -out takes a filename, not an empty string"
+        }
+        variable FRONT_ROOT ; variable FRONT_HOME
+        FrontRoots
+        if {!$sawroot} { set root $FRONT_ROOT }
+
+        set wargs {}
+        if {$sawdepth} { lappend wargs -depth $depth }
+        # `$prune ne ""` and not `[llength $prune]`, because a malformed list --
+        # `-prune \{` -- makes `llength` THROW an uncoded Tcl error before the
+        # verb ever sees it, turning a clean `{MACHTELD FRONT badvalue}` into
+        # something no caller can trap.
+        if {$prune ne ""} { lappend wargs -prune $prune }
+        set t0 [clock milliseconds]
+        if {[catch {dirs $root {*}$wargs} d o]} { FrontDirsReraise $o $d }
+        set ms [expr {[clock milliseconds] - $t0}]
+        set rep [FrontDirsReport $d $ms $depth $prune]
+
+        # `-stdout` AND `-json` ARE ORTHOGONAL, so there is no conflict rule to
+        # write: `-stdout` chooses where the LIST goes, `-json` chooses the
+        # FORMAT of the REPORT. All four combinations mean something, and the
+        # fourth falling out rather than needing a refusal is what [creed] 6's
+        # word "orthogonal" is asking for.
+        if {$tostdout} {
+            puts stderr [expr {$asjson ? [json encode $rep] : [FrontDirsText $rep]}]
+            return [join [dict get $d paths] \n]
+        }
+        if {$out eq ""} {
+            # `cache/mt/` INSIDE WHICHEVER HOME WAS FOUND, and never z's own
+            # `cache/cdirs/c-drive-dirs.txt`. During the transition MT_HOME IS
+            # `.z`, so writing there would have machteld overwrite the live cache
+            # of the front door still in daily use -- with a list that is
+            # forward-slashed and, at the new default, scoped to the workspace
+            # rather than the drive. Two silent incompatibilities in one file.
+            # This is the same discipline `FRONT_DIRS {.mt .z}` already encodes:
+            # read the live workspace, write your own corner of it.
+            set out [file join $FRONT_HOME cache mt dirs \
+                         "[FrontDirsSlug [dict get $d root]].txt"]
+        }
+        # ABSOLUTE AND LEXICALLY CLEAN, so the `list` key in the report names a
+        # file a later script can open. A relative `-out` recorded verbatim is a
+        # path that means something different from every directory but the one
+        # the command happened to be run from. `FrontClean` and not `file
+        # normalize`, for the reason step 4 already paid for once: `file
+        # normalize` FOLLOWS LINKS, and `.z/r/winsdk` is a junction into Program
+        # Files -- normalising put a tool and its payload in different trees and
+        # cost `signtool` its alias. Where a file is WRITTEN is a question about
+        # names, not about the disk.
+        set outasked $out
+        if {[file pathtype $out] eq "relative"} { set out [file join [pwd] $out] }
+        set out [FrontClean $out]
+        # AND STILL ABSOLUTE AFTERWARDS, which the block above claimed and did not
+        # check. `FrontClean` pops `..` lexically and will pop PAST the drive
+        # letter -- `C:/dev/_machteld/../../../../x.txt` comes back as `x.txt` --
+        # so the `list` key named a file only the original working directory could
+        # open, in the report whose whole job is to name a file a later script can
+        # open. Refused here rather than fixed inside `FrontClean`: that proc
+        # answers "is this path WRITTEN underneath that one" for 275 tool
+        # resolutions, and a filename is not the question it was written for.
+        if {[file pathtype $out] eq "relative"} {
+            Fail FRONT badvalue "front cdirs: -out \"$outasked\" climbs above the root\
+                                 of the drive and names no file"
+        }
+        set rep [FrontDirsWrite $d $rep $out]
+        return [expr {$asjson ? [json encode $rep] : [FrontDirsText $rep]}]
     }
 
     # `verify` -- the structural problems, which must agree with z's exactly.

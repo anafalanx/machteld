@@ -829,3 +829,284 @@ added to the veto: they redirect into another namespace without setting the surr
 namespace pointing back at an ancestor is a cycle nothing here would bound — reasoned from the
 tags' documented meaning and, unlike every other number in that file, **never observed on this
 machine**, which the source says out loud.
+
+## `front cdirs` is built, and it is the first command that must NOT agree with z (2026-08-11)
+
+**A doctrine was overruled, and the entry above is where it was written down.** Hours earlier this
+register said the front-door command "was not built either, and that is route 2 standing", giving
+the reason in full: `mt cdirs` "would also have had to default to `C:/`, where the surrogate rule
+above makes machteld and z disagree by design, against a doctrine that says machteld earns each
+command by agreeing with z on it first." That doctrine had earned everything up to that point —
+275 tool resolutions, 135 project commands, 5 verify problems and 29 scout lines, all agreeing
+exactly — and it is overruled here on the grounds that **agreement was only ever a proxy for
+correctness**, and this is the command where the proxy and the thing part company. Recorded rather
+than quietly reversed, because "not frozen" is not "not accountable".
+
+**The measurement that decides it**, taken on this machine, both walkers reading the same disk
+minutes apart:
+
+| under `C:/Users/anafa` | directories | wall (warm) |
+|---|---|---|
+| `dirs` / `mt cdirs` | **236,162** | 21.8 s |
+| `z cdirs` | **112,018** | 13.3 s |
+| only in `dirs` | **124,144** | every one of them under `C:/Users/anafa/OneDrive` |
+| only in z | **0** | |
+
+236,162 − 112,018 = 124,144, and only-in-z is 0, so those four numbers are one measurement.
+**The version this replaced was not**: it published 236,150, 112,007 and 124,144, and
+236,150 − 112,007 is 124,143. With no duplicates on either side and nothing only-in-z — both
+asserted by the gate — those figures cannot all have come from one run, and for an entry whose
+thesis is "measured rather than asserted" a table that fails its own arithmetic is the wrong error
+to have. Both walks here are warm repeats after a discarded first run. The totals move between runs
+because a home tree churns — 236,159, 236,169 and 236,162 are three real answers within an hour —
+and the 124,144 did not move in any of them.
+
+`C:/Users/anafa/OneDrive` carries reparse tag **`0x9000701a`** with **`surrogate = 0`**. z refuses
+to descend ANY reparse point; `dirs` refuses only NAME SURROGATES (`tag & 0x20000000` — junction
+`0xa0000003`, symlink `0xa000000c`). So z omits more than half the home tree, and these are real
+local directories: Files-On-Demand virtualises file *contents*, not folders. The other eleven
+reparse points under that root are junctions, where stopping is right.
+
+**The defect is not that z stops. It is that z's report cannot tell you it mattered.** Its stats
+line reads `12 links skipped` — one integer, naming none of the twelve, giving the eleven junctions
+that hid a few hundred directories between them and the one that hid 124,144 exactly the same
+weight. Counted, consequence invisible. That is the whole design brief for the command, and it is
+why this one arrives with a report rather than a stats line:
+
+> **A refusal the WALKER made is NAMED. A refusal the CALLER asked for is COUNTED. And the
+> completeness verdict is on the first line, beside the count, so the count cannot be read alone.**
+
+Named rather than counted, because the size of what lies behind a place the walk did not enter is
+**not knowable without entering it** — that is the definition of not entering, not a gap in the
+implementation. The number can therefore never be honestly reported, and offering one invites the
+reader to take it for the magnitude of the loss. The one disclosure available is the place itself,
+and it is affordable exactly where it matters: eleven such places in the whole home tree, two in
+`C:/dev`. Counted rather than named for `-prune` and `-depth` because the caller already knows the
+criterion, and because the verb offers integers there and not path lists.
+
+**Three shape decisions, each following a rule rather than a taste.**
+
+1. **One positional and four options, against z's twelve.** The root is a positional because that
+   is how `dirs` spells its own subject ([rule 1](#) at the command layer). `--root` was considered
+   as a seam alias and refused on a mechanical argument rather than an aesthetic one: the manifest
+   derives `front`'s options from its literal `set opts {...}` line, so an alias must either be
+   *declared* — making the palette assert an option that duplicates a positional — or undeclared,
+   making the binary accept what the manifest denies. Both break [rule 6](#). The `-json`/`--json`
+   concession is safe because those are two spellings of one option; a positional against an option
+   is a different grammar.
+2. **`-out`, `-stdout`, `elapsed` and the report live here, not in the verb** — and the register's
+   own words are the argument. `-out` was cut from `dirs` because it "is three lines of
+   `open`/`puts`" and "would have made the principal result key silently empty whenever it was
+   used"; `elapsed` because "`clock milliseconds` on either side of the call is the same number"
+   and "makes the verb never twice the same". A command's product *is* a file, so there is no
+   result key to empty, and this is the caller with the two `clock milliseconds` calls, recording a
+   run rather than returning a value that ought to be reproducible. Same rule, opposite verdict,
+   one layer up: [rule 4](#) cuts both ways and that is the point of it.
+3. **No `-cloud` / `-nocloud`, and it could not be built honestly anyway.** Skipping is a veto
+   *inside* the walk and the verb exposes no hook for one, so a Tcl-side `-cloud` could only
+   post-filter a list it had already paid the full 21 seconds to build — a shorter answer at full
+   cost, wearing the appearance of a skip. That is precisely the class of silent misreport the
+   command exists to end. `-prune OneDrive` does the real thing.
+
+**Two defaults deliberately unlike z's, both of which would be silent if they were not gated.** The
+default root is `MT_ROOT`, not `C:\`: the argument that decides is not scope but *checkability* —
+under the workspace root the two front doors agree exactly (21,804 against 21,804 on `C:/dev`),
+under `C:/` they disagree by design, and defaulting to the disagreeing root would make the
+zero-argument form the one form that can never be validated against the incumbent. And the default
+output is `$MT_HOME/cache/mt/dirs/<slug>.txt` rather than z's `cache/cdirs/c-drive-dirs.txt`:
+during the transition `MT_HOME` **is** `.z`, the lists are forward-slashed where z's are
+backslashed, and writing 2.1× as many lines into the file z's own cache readers open would be a
+silent substitution. z's fixed filename is its own small lie — `z cdirs --root C:\dev` writes the
+workspace into a file called `c-drive-dirs.txt` and overwrites the drive index — so the name is
+derived from the normalised root here.
+
+### The gate had to be re-pointed, and the oracle had to be fixed first
+
+**`z cdirs --stdout` read back through `run` is a corrupt oracle, and it corrupts in the direction
+that makes the superset gate PASS.** `src/proc.c` caps capture at 1 MiB (`size_t cap = 1u << 20`)
+and truncates in silence. Measured while building the gate: on `%USERPROFILE% --max-depth 6` z
+printed 16,817 lines and `run` returned **16,423** — exit 0, `truncated` set to `out`, and nobody
+looking. The 394 lost lines came back as 394 extras attributable to nothing; at full depth the same
+cap turned 112,007 z-lines into about ten thousand and reported a quarter of a million extras. **A
+superset gate reading z through a pipe is strengthened by its own bug**, which is this project's
+recurring failure — a gate that passes for a reason unrelated to its claim — in its purest form. z's
+list is read from `--out FILE` now, and the line count is cross-checked against the count in z's own
+stats line, so a short file is caught even though it comes off disk.
+
+**The relation is a superset with a named cause, and it is asserted on two subjects because either
+alone is satisfiable by a defect.** On `C:/dev` no non-surrogate reparse point exists, the two veto
+rules coincide, and the lists must be **equal both ways** — that is the bound, and a walker that
+descended junctions would satisfy every superset clause and fail only here. On the home tree: z ⊆
+machteld; the excess **non-empty**, so a divergence gate that goes quiet when OneDrive is unmounted
+says so rather than passing; every extra below a directory machteld itself classified
+`surrogate 0, descended`; every shared path spelled identically, case included, since a
+case-insensitive set comparison hides `CP_ACP`-class mangling; and no duplicates on either side.
+Then, with a separate oracle, **every extra probed with Tcl's own `file isdirectory`** — a third
+implementation asked one path at a time — because all of the set arithmetic above is equally
+satisfied by a walker that *invents* paths.
+
+**And the doc-accuracy scanner was nearly blind to this command, which is worth recording because
+the fix was a decision not to widen it.** That gate filters option tokens with `^-[a-z]+$`, so
+`--root`, `--out` and `--max-depth` are all invisible to it: spelled z's way, `cdirs` would have had
+*no* coupling between its documented options and its declared table, and been green. Spelling the
+options the verb's way keeps them inside the scanner's reach for free — a second, mechanical
+argument for rule 1 on top of the readability one. Widening the regexp was measured (zero new drift
+over all 41 doc blocks) and **refused anyway**: `--json` is accepted at the seam and deliberately
+not declared, so a wider scanner would call a working documented example a typo — the
+`front run -inherit` failure with its sign flipped. The blindness is gated instead: the suite fails
+if any declared `front` option is a shape the scanner cannot see, and says what to do about it.
+
+### And a defect the gates found in the artefact, not in the argument
+
+**`json encode` cannot be relied on to render an EMPTY nested list as `[]`, and this shipped
+before a gate caught it.** The encoder decides array-versus-object from a value's own internal
+representation, which is the right rule and the one [the contract](contract.md) states — but an
+empty list barely has a representation, and **Tcl's empty string is one shared object for the
+whole interpreter**, so the answer depends on what an unrelated line did to that literal earlier
+in the process. Measured in one build on one afternoon, from the same `[list]`: `[]`, `{}` and
+`""`. `mt cdirs C:/dev` wrote a sidecar saying `"entered":{}` while `front cdirs` on the test
+fixture, same binary, wrote `"entered":[]`. The contract's own escape hatch — *"say `-dict` or
+`-list`"* — reaches only the **top level** of a document, and these keys are nested.
+
+The fix is a fresh list object (`lrange` over a one-element list), which is the one form that is
+stable. **The gate history is the more useful part**, because three of the four attempts at it
+could not fail:
+
+- The first gate asserted `refused` encodes as `[]` on a clean walk. Vacuous: the verdict
+  computation calls `llength` on the same list two lines above, which shimmers it, so no mutation
+  of the file could make it red. Proved by breaking it three ways and watching nothing happen.
+- Its replacement decoded the JSON and checked `llength == 0` — which is 0 for `{}` and `[]`
+  alike. It could not see the defect it was named after.
+- A unit check on the helper stayed **green against a deliberately broken helper**, because the
+  suite's own process happened to have left the shared literal list-shaped.
+- What finally fires reads the **raw bytes a real run wrote in its own process**, on a subject
+  with a non-empty `refused` beside an empty `entered` — the ordinary shape of a real walk, and
+  the shape the all-empty subject hid.
+
+**A gate is only as good as the subject it is pointed at**, which the `dirs` review already said;
+this adds that a gate can also be defeated by *where it runs*, and that an in-process check of a
+property the whole interpreter shares is not a check at all.
+
+**The name is a transition spelling, and it is registered as one.** `cdirs` is z's abbreviation for
+"**C:** dirs", so a command defaulting to the workspace carries a name that is mildly wrong in the
+same way `c-drive-dirs.txt` is wrong when it holds `C:\dev`. It ships as `cdirs` because step 4's
+premise is that these commands exist to be typed where z's were, and because the word is already in
+the fingers. If it were being named today it would be `index` — `dirs` is taken by the verb, and a
+promoted front-door command of that name would shadow it. Rule 7 makes the rename cheap when z is
+gone.
+
+## `cdirs` reviewed: the command built to end a silence had four of its own (2026-08-11)
+
+**Three reviews of the entry above, and the useful result is not the count of defects but their
+SHAPE: the command whose whole subject is "counted, consequence invisible" shipped four silences of
+its own, each one the same failure translated into a new register.** That is worth the register
+entry on its own — a doctrine does not protect the code that states it.
+
+- **NAMED, MAGNITUDE INVISIBLE.** The indictment of z is that `12 links skipped` names none of the
+  twelve. What `cdirs` printed was `entered  1 reparse directory ... C:/Users/anafa/OneDrive` — the
+  place, and no number — while **124,144 of 236,162 lines, 52.6% of the whole answer, came from
+  that one row**. The entry above justified the omission with its own sentence about `refused`
+  ("not knowable without entering it"), which is exactly true there and exactly false here: the
+  walk DID enter, the paths were in hand, and a prefix count is sub-second against a 22-second
+  walk. Every `entered` row now carries `below`.
+- **A COMPLETENESS CLAIM PRINTED UNCONDITIONALLY.** `Everything under it IS in the count above` was
+  emitted on every run with an entered row, including `mt cdirs C:/Users/anafa -depth 3`, where
+  ~124,000 directories under that row are absent. The report telling a reader the list is complete
+  below a place where it is not, in the one direction the command exists to prevent, with **no gate
+  reading the string** and the same sentence shipped in the palette as the documented design.
+- **A DISCLOSURE THAT VANISHED WHEN YOU AIMED AT IT.** `dirs <the cloud root>` returned `links`
+  EMPTY, because the root's tag is read through a handle and a cloud filter consumes its own
+  reparse point on open — so `mt cdirs C:/Users/anafa/OneDrive`, the one invocation pointed
+  straight at the divergence, said nothing about it, while naming the parent disclosed it. This is
+  the **junction-root silence the verb was already fixed for once**, in a different spelling, and
+  `dirs.c` had the measurement written at the top of the file the whole time. The fix follows that
+  file's own rule — the handle VETOES and never AUTHORISES — so the parent's scan supplies the row
+  and can only ever add one.
+- **A NAME THAT ASSERTS A ROOT IT MAY NOT HOLD.** `FrontDirsSlug` promised "two different roots
+  cannot collide" and squashed `[^a-z0-9]+` to `-` with a hash tail only above 64 characters, i.e.
+  everywhere except where short roots collide. Measured against the real indices on this disk, two
+  pairs were **already** colliding (`.codex/.tmp` vs `.codex/tmp`, `OneDrive/_LIVE` vs
+  `OneDrive/live`), and any root ending in a non-ASCII component slugged to its PARENT — so
+  `C:/Users/anafa/Ä` overwrote `c-users-anafa.txt`, the flagship artefact. That is **z's
+  `c-drive-dirs.txt` defect reproduced in the proc written to fix it**, and the gate for it tested
+  only the >64-character case, which is the branch where the guarantee holds. The slug is now
+  checked by INVERSE: reconstruct the root from the name, and hash whenever that fails.
+
+**And the same shape once more, in the publish step.** "A failed run must not destroy a good cache"
+was written four lines above the only line that could break it: the old sidecar was DELETED before
+the new list was renamed, so a publish that could not replace the list left the previous run's list
+with no report. The suite's gate for that invariant used a `file mkdir` failure, which aborts
+before ever reaching the publish block — **the one path that can destroy anything was the one path
+with no gate on it.** Beside it, three refusals that were not: `-out <a directory>` reported
+`[COMPLETE]`, named the directory as the list and orphaned the real list inside it as
+`<dir>/<dir>.tmp`; a directory standing at `<name>.json` was recursively deleted; and an empty
+value was read as an absence on all three surfaces, so `mt cdirs $r -depth $limit` with an empty
+`$limit` became a full walk whose report did not record that a limit had been asked for — while
+`dirs $r -depth {}` refuses the identical value.
+
+### The gate history is again the more useful half
+
+**Six gates could not fail, and every one was proved by breaking the code and watching nothing
+happen.** The verdict's three-term conjunction had ONE subject setting `pruned` and `depthlimited`
+*simultaneously*, so either term could be deleted with all checks green — on a build that then
+printed `[COMPLETE]` above `9 directories at the -depth 1 limit`. The whole `entered` paragraph
+could be deleted from the renderer, green. `[COMPLETE]` was never checked against a real run, only
+`[PARTIAL]`. `maxdepth`, `elapsed` and `when` were published and read by nothing — `elapsed` being
+the one thing this layer exists to add over the verb, by the argument in the entry above. And the
+veto-constant scanner's `TAG_[A-Z0-9]+` **has no underscore in its class**, so a real fourth vetoed
+tag added as `DIRS_TAG_WCI_1` and left undocumented was invisible to the gate whose stated purpose
+is to catch exactly that — and every likely future tag is spelled that way
+(`IO_REPARSE_TAG_MOUNT_POINT`, `WCI_1`, `CLOUD_1`). Its blindness is now gated the way CD14 gates
+the doc scanner's: a loose count beside the strict one, failing with instructions.
+
+**The agreement gate's own clause C was satisfiable by an ancestor.** `front_agree.tcl` accepted any
+disclosed `entered` row as an explanation for an extra, so a report naming
+`[file dirname $path]` — the walk root itself — made the clause unconditionally true and the file
+went **fully green**, printing `all below 1 disclosed non-surrogate root(s)`; the summary gave the
+COUNT of gates and never their paths, so a human could not tell either. Two mechanical answers: a
+gate must lie strictly BELOW the walk root, and **z must have listed nothing under it** — which is
+what "z stopped here" means, and is measured (z lists `C:/Users/anafa/OneDrive` and zero paths
+below it). Both fire on the break that used to pass. The line now names the places, which is this
+command's own doctrine applied to its gate. And the BOUND — the clause this file calls the one that
+carries the whole claim — had no newborn exemption where both other branches have one, so a
+directory created under the active `C:/dev` between the two walks failed the strongest gate
+spuriously; proved reached by injecting one in the window between z finishing and machteld
+starting, which now prints `1 path(s) created after z's walk began` instead of `OVER-LISTED`.
+
+**Every fix here was proved by mutation**: fifteen breaks in one build produced 41 failures, each
+attributable to its own named check, and two further builds broke `front_agree`'s clause C in the
+two ways it now refuses. The suite went from 702 checks to 752. One thing the mutation run found
+that no review did: the new `below` gate was written with a bare `dict get`, so the build without
+`below` made it RAISE rather than fail, aborting the run and silently skipping two hundred checks —
+**the `valof` lesson, met for the fifth time, in a gate written the same afternoon the lesson was
+re-read.**
+
+### What was NOT changed, and why
+
+**`-prune OneDrive` losing the `entered` row is correct.** A pruned reparse directory is a refusal
+the CALLER asked for; naming it would put one place in two accounts and break the arithmetic every
+gate here rests on. What was wrong was the DOC, which claimed "the report says what was pruned"
+(it says the count and the patterns) and offered `-prune OneDrive` as if it reproduced z. Measured
+here: it hits **four** places, not one — the cloud root, `AppData/Local/OneDrive`,
+`AppData/Local/Microsoft/OneDrive` and an Office asset folder called `onedrive` — giving 111,899
+against z's 112,015, and it is not even a subset: it **drops 126 directories z lists**, 124 of them
+an unrelated `AppData/Local/Microsoft/OneDrive` subtree. The stated "one honest limit" was the
+under-match; the over-match is what actually fires here, and both are now written down — along with
+the fact that **no option reproduces z's descent policy and none is planned**, which the docs never
+said.
+
+**`FrontClean` still pops `..` past the drive letter.** It answers "is this path WRITTEN underneath
+that one" for 275 tool resolutions and one junctioned payload, and a filename is not the question
+it was written for. `cdirs` refuses the result instead, so `-out` can no longer name a file only
+the original working directory could open.
+
+**Costs are relabelled rather than re-measured.** Every timing on this page and in the palette is a
+WARM repeat; the OneDrive subtree is precisely the part not touched daily, so the cold cost of the
+divergence is understated by these numbers. A cold first-of-the-day walk was observed at 52 s
+during review and could not be reproduced here without dropping the file cache, so it is recorded
+as an observation rather than published as a figure — the same convention `dirs.c` uses for its DFS
+pair. And the cost that matters to a CONSUMER of the list is now named for the first time: 52.6% of
+the emitted paths are inside a Files-On-Demand root, and 67 of the first 4,000 files sampled under
+it carry `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, so a backup or an indexer fed this list touches
+content z's list never named and can trigger downloads. **"More complete" and "cheaper to consume"
+are not the same property**, and the docs claimed the first while saying nothing about the second.
