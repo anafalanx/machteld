@@ -1571,7 +1571,7 @@ proc ::machteld::FrontDirsText {rep} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs ledger mirror}
+    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs}
     FrontStatus 0
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
@@ -2045,26 +2045,21 @@ proc ::machteld::front {args} {
             lappend out "       git: [FrontGitLine [dict get $p git]]"
         }
         lappend out ""
-        lappend out "not yet: mirror state, latest report, and --deep (verify + ledger check)"
+        lappend out "not yet: the workspace state z reports under --deep"
         return [join $out \n]
     }
 
-    # `ledger refresh|check` -- the payload inventory. Implemented in
-    # `tcl/ledger.tcl`, because it is one self-contained command with a
-    # byte-exact output format and this file is long enough.
-    if {$sub eq "ledger"} {
-        if {[llength $args] != 2} { Fail FRONT usage "usage: front ledger refresh|check" }
-        return [LedgerRun [lindex $args 1]]
-    }
-
-    # `mirror` -- the recovery replica. Implemented in `tcl/mirror.tcl`: it is
-    # the largest command here by a wide margin and the only one that can
-    # DELETE, so it lives on its own page where its refusals can be read without
-    # scrolling past resolution. Its options are its own, not `front`'s, because
-    # they are z's double-dashed spellings and belong in one parser with them.
-    if {$sub eq "mirror"} {
-        return [MirrorRun [lrange $args 1 end]]
-    }
+    # `ledger` AND `mirror` WERE HERE, AND ARE GONE. Both existed to reproduce a
+    # z command against a z workspace, and z is staying: the strangler was
+    # stopped deliberately after the port measured what it would cost. See
+    # [the register](direction.md). What was learned is kept -- `dirs`, `links`
+    # and `canon` are the durable half and are the reason the attempt paid for
+    # itself -- and the ~1,500 lines that only mirrored z's CLI are not.
+    #
+    # This also retired the whole outstanding mirror defect list: the link
+    # manifest format, `logDirKey`, the artefact provenance ordering, the missing
+    # `--log-dir` validation, and the unported ownership record. A command you do
+    # not ship has no bugs.
 
     if {$sub in {projects runtimes}} {
         set asjson 0
