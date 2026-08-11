@@ -481,6 +481,40 @@ That is the cold-cache error for the fourth time in this project and the first t
 before publication. What caught it was refusing a ratio without attributing it — the 0.3 µs loop
 measurement made "Tcl is slow" impossible to believe.
 
+### `mt mirror --dry-run` is built; the destructive half is refused
+
+The port landed on the plan the measurement produced. `mt mirror --dry-run` does the whole command
+except the one phase that writes: it resolves and validates source and destination, scans the
+source for links through the C `links` verb, writes the restore manifest, runs `robocopy /L`,
+parses the summary, writes the report and publishes the artefact index. Against the live workspace
+its output matches `z mirror --dry-run` section for section — the same two junctions with the same
+targets, the same `robocopy code 3`, the same `dirs`/`files`/`bytes` rows and `ended` line.
+
+**`mt mirror` without `--dry-run` refuses**, with `{MACHTELD MIRROR unsupported}` naming what is
+missing. `/MIR` deletes destination extras, and z gates a real run on an ownership record —
+`.z-mirror-owner.json` beside the destination, written once by `--adopt-dest` — which is what stops
+a destination another tool is managing from being adopted silently. That record is not ported. A
+command that is 95% of the way to deleting a backup is not 95% finished; it is the most dangerous
+shape it can be in, so the refusal is unconditional and gated three ways in the suite (`--force-dest`
+and `--adopt-dest` do not unlock it).
+
+**One divergence is named rather than glossed.** z holds a kernel-level *pin* on every path
+component between validating a path and handing it to robocopy — a handle per component with delete
+sharing denied, so the name cannot be swapped underneath it. Tcl cannot express that. What machteld
+does instead is re-resolve and re-compare identities immediately before each spawn, which **narrows
+the window and does not close it**. Identity itself is faithful: `file stat`'s `dev` and `ino` on
+Windows are the volume serial and the NTFS file index, the same pair z reads from
+`GetFileInformationByHandle`, verified by the `links -hardlinks` fixture from the other side.
+
+**Three defects the first run found, all of them the same species.** The run id put eight *raw
+random bytes* into a filename (z hex-encodes); the cache-policy line was written as a quoted Tcl
+string so `\c` and `\s` were eaten and it printed `.zcacheshell`, a path that does not exist,
+offered as reassurance that it was excluded; and the preflight summary read `(robocopy summary not
+found)` under a perfectly good 19 MB log, because robocopy writes its log in the system code page
+and a strict UTF-8 decode threw — the `catch` then fell back to robocopy's stdout, which `/LOG:`
+had left empty. The last is the worst of the three: **it reported no drift where there was drift**,
+which is the one failure mode a preflight must not have. The log is read as bytes now.
+
 **So: port it.** Not because Tcl can carry the loop at 3× — it can, and would not need to — but
 because the loop belongs in C that **already exists**. A link scanner is `dirs.c` minus one filter
 line, plus reading the reparse target for the handful of surrogates found (two in 302,654 entries).

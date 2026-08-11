@@ -1548,7 +1548,7 @@ proc ::machteld::FrontDirsText {rep} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs ledger}
+    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs ledger mirror}
     FrontStatus 0
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
@@ -2023,6 +2023,15 @@ proc ::machteld::front {args} {
     if {$sub eq "ledger"} {
         if {[llength $args] != 2} { Fail FRONT usage "usage: front ledger refresh|check" }
         return [LedgerRun [lindex $args 1]]
+    }
+
+    # `mirror` -- the recovery replica. Implemented in `tcl/mirror.tcl`: it is
+    # the largest command here by a wide margin and the only one that can
+    # DELETE, so it lives on its own page where its refusals can be read without
+    # scrolling past resolution. Its options are its own, not `front`'s, because
+    # they are z's double-dashed spellings and belong in one parser with them.
+    if {$sub eq "mirror"} {
+        return [MirrorRun [lrange $args 1 end]]
     }
 
     if {$sub in {projects runtimes}} {

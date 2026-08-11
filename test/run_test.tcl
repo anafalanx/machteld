@@ -660,6 +660,25 @@ if {![file isdirectory $SRC]} {
         foreach {_ c} [regexp -all -inline -- {Fail\s+\$\w+\s+([a-z]+)\s} $text] {
             dict set thrown $c 1
         }
+        # AND THE INVERSE SHAPE, which was a hole until `mirror` fell into it.
+        # The two patterns above read `Fail DOMAIN code` and `Fail $domain code`
+        # -- a literal domain with a literal code, or a passed domain. mirror.tcl
+        # writes the third: a per-verb wrapper `MirrorFail {code msg}` whose body
+        # is `Fail MIRROR $code $msg`, so the DOMAIN is a literal and the CODE is
+        # the variable. Neither pattern saw either half, so `MIRROR` and all five
+        # of its codes were outside the registry entirely while contract.md
+        # documented them -- the gate failed loudly, which is the only reason
+        # this is a note and not a silence.
+        foreach {_ d} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+\$} $text] {
+            dict set domains $d 1
+        }
+        # The wrapper's CALL SITES carry the codes: `MirrorFail usage "..."`.
+        # Matched on the `<Word>Fail <code>` shape rather than on a list of
+        # wrapper names, so the next verb to grow one is inside the gate by
+        # construction.
+        foreach {_ c} [regexp -all -inline -- {\m[A-Z]\w*Fail\s+([a-z]+)\s} $text] {
+            dict set thrown $c 1
+        }
     }
     check "every prelude error carries an errorcode" [expr {$uncoded == 0}]
     if {$uncoded != 0} { puts "     $uncoded uncoded 'return -code error' remain" }
@@ -3930,6 +3949,145 @@ if {"cdirs" in [::machteld::FrontCommands]} {
 
 file delete -force $CDOUT
 check "the cdirs fixture tore down completely" [expr {![file exists $CDOUT]}]
+
+# --- `mirror`: the one command that can delete ------------------------------
+#
+# NOTHING HERE RUNS ROBOCOPY. Every gate below is on a pure function or on a
+# REFUSAL, because the two things worth testing without a fixture destination
+# are "does it decline the dangerous cases" and "does it read robocopy's answer
+# correctly". The dry run against the live workspace is `front_agree`'s job.
+
+# MR1: THE REFUSAL THAT MATTERS MOST. A real /MIR run deletes destination
+# extras; the ownership record z gates that on is not ported, so the destructive
+# path must refuse -- and the refusal must be UNCONDITIONAL, not a flag away.
+check "mirror refuses a destructive run" [expr {
+    [errcode_of {front mirror}] eq {MACHTELD MIRROR unsupported}}]
+check "mirror refuses it with --force-dest too" [expr {
+    [errcode_of {front mirror --force-dest}] eq {MACHTELD MIRROR unsupported}}]
+check "mirror refuses it with --adopt-dest too" [expr {
+    [errcode_of {front mirror --adopt-dest}] eq {MACHTELD MIRROR unsupported}}]
+
+# MR2: option parsing, including the two combinations z refuses.
+check "mirror parses z's short dry-run flag" [expr {
+    [dict get [::machteld::MirrorOpts {-n}] dryrun] == 1}]
+check "mirror parses --dest with a value" [expr {
+    [dict get [::machteld::MirrorOpts {--dest X:/somewhere}] dest] eq "X:/somewhere"}]
+check "mirror parses --dest=value" [expr {
+    [dict get [::machteld::MirrorOpts {--dest=X:/somewhere}] dest] eq "X:/somewhere"}]
+check "mirror refuses --dest with no path" [expr {
+    [errcode_of {::machteld::MirrorOpts {--dest}}] eq {MACHTELD MIRROR usage}}]
+check "mirror refuses --dest followed by a flag" [expr {
+    [errcode_of {::machteld::MirrorOpts {--dest --quiet}}] eq {MACHTELD MIRROR usage}}]
+check "mirror refuses an unknown argument" [expr {
+    [errcode_of {::machteld::MirrorOpts {--wat}}] eq {MACHTELD MIRROR usage}}]
+check "mirror refuses --dry-run with --no-preflight" [expr {
+    [errcode_of {::machteld::MirrorOpts {--dry-run --no-preflight}}] eq {MACHTELD MIRROR usage}}]
+check "mirror refuses --dry-run with --adopt-dest" [expr {
+    [errcode_of {::machteld::MirrorOpts {--dry-run --adopt-dest}}] eq {MACHTELD MIRROR usage}}]
+
+# MR3: the destination refusals, which are the whole safety surface. Asserted on
+# NAMES here; the identity half needs real directories and is exercised by the
+# dry run.
+check "mirror refuses a destination not named z-backup" [expr {
+    [errcode_of {::machteld::MirrorValidatePaths C:/dev C:/somewhere/else 0}] eq
+    {MACHTELD MIRROR badvalue}}]
+check "mirror accepts that destination with --force-dest" [expr {
+    [catch {::machteld::MirrorValidatePaths C:/dev C:/somewhere/else 1}] == 0}]
+check "mirror refuses a destination inside the source" [expr {
+    [errcode_of {::machteld::MirrorValidatePaths C:/dev C:/dev/z-backup 0}] eq
+    {MACHTELD MIRROR badvalue}}]
+check "mirror refuses a source inside the destination" [expr {
+    [errcode_of {::machteld::MirrorValidatePaths C:/backups/z-backup/inner C:/backups/z-backup 0}]
+    eq {MACHTELD MIRROR badvalue}}]
+# AND ACCEPTS TWO TREES THAT MERELY SHARE A PARENT, which the first version of
+# the check above got wrong -- it asserted that `C:/dev/sub` into
+# `C:/dev/z-backup` must be refused, and neither contains the other. A test that
+# demands a refusal the code should not make is a test that would have been
+# "fixed" by making the code refuse valid work.
+check "mirror allows siblings under one parent" [expr {
+    [catch {::machteld::MirrorValidatePaths C:/dev/sub C:/dev2/z-backup 0}] == 0}]
+check "mirror refuses a drive root as destination" [expr {
+    [errcode_of {::machteld::MirrorValidatePaths C:/dev D:/ 1}] eq {MACHTELD MIRROR badvalue}}]
+
+# MR4: robocopy's exit code is a BITFIELD. Reading it as an ordinal is the
+# classic way to call a successful mirror a failure -- 3 is the everyday code.
+check "mirror reads exit 0"  [expr {
+    [::machteld::MirrorExitMeaning 0] eq "no changes; destination already matched source"}]
+check "mirror reads exit 3 as two facts" [expr {
+    [::machteld::MirrorExitMeaning 3] eq "copied files; destination extras noticed or removed"}]
+check "mirror reads exit 8 as failure" [expr {
+    [string first "copy failures" [::machteld::MirrorExitMeaning 8]] >= 0}]
+check "mirror reads exit 16 as fatal" [expr {
+    [string first "fatal robocopy error" [::machteld::MirrorExitMeaning 16]] >= 0}]
+
+# MR5: robocopy's summary block, parsed out of a real log tail.
+set MRLOG "
+                 Total     Copied    Skipped  Mismatch    FAILED     Extras
+    Dirs :       21892      15362       6530         0         0      10985
+   Files :      280406     191533      88873         0         0     151812
+   Bytes : 16136895273 8703969842 7432925431         0         0 6557800025
+   Times :     0:00:10    0:00:00                        0:00:00    0:00:10
+   Ended : Tuesday, August 11, 2026 22:32:32
+"
+set MRS [::machteld::MirrorParseSummary $MRLOG]
+check "mirror parses the dirs row"  [expr {[dict get $MRS dirs total] eq "21892"}]
+check "mirror parses the files row" [expr {[dict get $MRS files extras] eq "151812"}]
+check "mirror parses the bytes row" [expr {[dict get $MRS bytes copied] eq "8703969842"}]
+check "mirror parses the ended line" [expr {
+    [dict get $MRS ended] eq "Tuesday, August 11, 2026 22:32:32"}]
+check "mirror renders the summary z's way" [expr {
+    [lindex [::machteld::MirrorSummaryLines "  would change" $MRS] 1] eq
+    "  dirs  total=21892 copied=15362 skipped=6530 failed=0 extras=10985"}]
+# AND SAYS SO WHEN THERE IS NOTHING. A summary silently rendered as blank is a
+# preflight reporting no drift when it simply could not read the log.
+check "mirror says when it found no summary" [expr {
+    [lindex [::machteld::MirrorSummaryLines "x" [::machteld::MirrorParseSummary "nothing"]] 1]
+    eq "  (robocopy summary not found)"}]
+
+# MR6: the reserved-extra correction. The destination's own link manifest has no
+# source-side counterpart during a run, so /MIR counts it as an extra and sets
+# bit 2 -- drift that is entirely this command's own bookkeeping.
+set MRONE [::machteld::MirrorParseSummary "
+    Dirs :  1  0  1  0  0  0
+   Files :  1  0  0  0  0  1
+   Bytes : 10  0  0  0  0 10
+"]
+lassign [::machteld::MirrorNormalizeReservedSize 3 $MRONE 10] MRCODE MRFIX
+check "mirror subtracts the reserved extra" [expr {[dict get $MRFIX files extras] == 0}]
+check "mirror subtracts its bytes too" [expr {[dict get $MRFIX bytes extras] == 0}]
+check "mirror clears the extras bit only when nothing is left" [expr {$MRCODE == 1}]
+# ...and NOT when there is real drift beside it.
+set MRTWO [::machteld::MirrorParseSummary "
+    Dirs :  1  0  1  0  0  2
+   Files :  1  0  0  0  0  5
+   Bytes : 10  0  0  0  0 99
+"]
+lassign [::machteld::MirrorNormalizeReservedSize 3 $MRTWO 10] MRCODE2 MRFIX2
+check "mirror keeps the extras bit when drift remains" [expr {$MRCODE2 == 3}]
+check "mirror leaves the other extras alone" [expr {[dict get $MRFIX2 files extras] == 4}]
+
+# MR7: the quoting a command line needs before it goes in a report.
+check "mirror quotes an argument with spaces" [expr {
+    [::machteld::MirrorCommandLine {C:\x\rc.exe} {a b {c d}}] eq {C:\x\rc.exe a b "c d"}}]
+check "mirror escapes an embedded quote" [expr {
+    [string first {\"} [::machteld::MirrorCommandLine x [list {a"b}]]] >= 0}]
+
+# MR8: the state and artefact writers produce parseable JSON with z's key names,
+# because `z status` and `z logs` read them.
+set MRSTATE [::machteld::LedgerJson [list o [::machteld::MirrorStateObj \
+    [dict create stage preflight updatedAt 2026-01-01T00:00:00 heartbeat 1 pid 2 \
+                 runId r1 dryRun 1 source S dest D logDir L reportPath R]]]]
+set MRD [valof {json decode $MRSTATE}]
+check "mirror's state file is valid JSON"      [expr {[dict exists $MRD stage]}]
+check "mirror's state names the run"           [expr {[valof {dict get $MRD runId}] eq "r1"}]
+check "mirror's state spells dryRun as a bool" [expr {[string first {"dryRun": true} $MRSTATE] > 0}]
+check "the json writer has a boolean type"     [expr {
+    [::machteld::LedgerJson {b 0}] eq "false" && [::machteld::LedgerJson {b 1}] eq "true"}]
+
+# MR9: mirror is a promoted front-door command, and the manifest knows it.
+check "mirror is a promoted front-door command" [expr {"mirror" in [::machteld::FrontCommands]}]
+check "the manifest declares the mirror subcommand" [expr {
+    "mirror" in [dict get [manifest] front subcommands]}]
 
 # --- `links`: the same walk, asked what redirects and what is shared ----------
 #
