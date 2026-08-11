@@ -116,6 +116,7 @@ errors.
 | `unsupported` | this build cannot do it — `wrap` or `help` on a host with no embedded payload, or a manifest key the front door has yet to implement |
 | `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
 | `noroot` | no workspace was found at or above the executable — there is no `.mt` (nor `.z`) |
+| `dangling` | the name is there and its target is not — a broken junction or symlink. Distinct from `notfound` because a resolver walking up to the nearest existing ancestor must treat "nothing here" as *keep going* and "here, but broken" as *stop* |
 | `manifest` | the workspace manifest is missing, unreadable, or does not describe what was asked for |
 
 Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`

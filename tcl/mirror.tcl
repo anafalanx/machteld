@@ -176,9 +176,25 @@ proc ::machteld::MirrorAbs {p} { return [file nativename [FrontClean [file join 
 # (GetFinalPathNameByHandleW + GetFileInformationByHandle). Until that exists,
 # the destructive refusal in MirrorRun is the only thing standing between this
 # file and data loss, and it is load-bearing rather than merely tidy.
+# `canon`, NOT `file stat` AND NOT `file normalize`. See the warning above: both
+# of those describe the junction rather than what it points at, and the whole
+# safety layer is a set of questions about OBJECTS. One C call answers both
+# halves from a FOLLOWED handle, and its `volume`/`file` are z's own
+# dwVolumeSerialNumber and 64-bit file index -- so identities compare correctly
+# AND the workspace key hashes to the filename z reads.
 proc ::machteld::MirrorIdentity {path} {
-    if {[catch {file stat $path st}]} { return "" }
-    return [list [dict get [array get st] dev] [dict get [array get st] ino]]
+    if {[catch {canon $path} c]} { return "" }
+    return [list [dict get $c volume] [dict get $c file]]
+}
+
+# z's key for a resolved directory: its identity when it has one, and its
+# cleaned lowercased path when it does not. Used for the artefact index's
+# provenance, where z re-resolves and compares.
+proc ::machteld::MirrorDirKey {path} {
+    if {![catch {canon $path} c]} {
+        return "volume:[dict get $c volume]:file:[dict get $c file]"
+    }
+    return "path:[string tolower [file nativename [FrontClean $path]]]"
 }
 
 proc ::machteld::MirrorResolveDir {path} {
@@ -186,14 +202,12 @@ proc ::machteld::MirrorResolveDir {path} {
     set current $requested
     set missing {}
     while {1} {
-        if {[file exists $current]} {
-            if {![file isdirectory $current]} {
+        if {![catch {canon $current} c]} {
+            if {[dict get $c kind] ne "directory"} {
                 MirrorFail badvalue "path component is not a directory: $current"
             }
-            # `file normalize` FOLLOWS links, which is wrong for containment
-            # (see FrontClean) and exactly right here: this asks where the
-            # directory physically IS.
-            set physical [file nativename [file normalize $current]]
+            set physical [file nativename [dict get $c path]]
+            set identity [list [dict get $c volume] [dict get $c file]]
             set ancestors [MirrorAncestors $physical]
             set projected $physical
             foreach m [lreverse $missing] { set projected [file join $projected $m] }
@@ -201,15 +215,21 @@ proc ::machteld::MirrorResolveDir {path} {
                        physical [file nativename [FrontClean $projected]] \
                        ancestor $physical exists [expr {![llength $missing]}] \
                        identity "" ancestors $ancestors]
-            if {[dict get $d exists]} { dict set d identity [MirrorIdentity $physical] }
+            if {[dict get $d exists]} { dict set d identity $identity }
             return $d
         }
-        # A DANGLING JUNCTION IS NOT A MISSING DIRECTORY. It is an object whose
-        # target cannot be resolved, and treating it as absent would project the
-        # destination through the wrong parent. `file exists` is false for it and
-        # `file type` still answers, which is how the two are told apart.
-        if {![catch {file type $current}]} {
+        # THREE OUTCOMES, NOT TWO, and the middle one is why `canon` has its own
+        # code for it. A name that is there but whose target is not must STOP the
+        # walk: treating it as absent projects the destination beneath whatever
+        # that name later comes to mean. The first version tested `file exists`
+        # false AND `file type` succeeding, which is dead code -- `file exists`
+        # answers TRUE for a dangling junction, so the branch never ran and the
+        # broken link was resolved as an ordinary directory.
+        if {[lindex $::errorCode 2] eq "dangling"} {
             MirrorFail badvalue "path entry exists but its target cannot be resolved: $current"
+        }
+        if {[lindex $::errorCode 2] ne "notfound"} {
+            MirrorFail oserror "cannot inspect $current: $c"
         }
         set parent [file dirname $current]
         if {[string equal -nocase [FrontClean $parent] [FrontClean $current]]} {
@@ -220,18 +240,26 @@ proc ::machteld::MirrorResolveDir {path} {
     }
 }
 
+# AN ANCESTOR THAT CANNOT BE CANONICALISED IS AN ERROR, NOT A GAP. The first
+# version appended only the identities it could get and carried on, so the
+# containment clauses that ask "is the destination inside the source" silently
+# tested against a shortened chain -- an unreadable ancestor quietly removed a
+# safety check rather than failing one. Go returns an error from the whole
+# chain; so does this.
 proc ::machteld::MirrorAncestors {path} {
     set out {} ; set seen {}
     set current $path
     while {1} {
-        set physical [file nativename [file normalize $current]]
+        if {[catch {canon $current} c]} {
+            MirrorFail oserror "cannot resolve directory ancestry for $path: $c"
+        }
+        set physical [file nativename [dict get $c path]]
         set key [string tolower [FrontClean $physical]]
         if {[dict exists $seen $key]} {
             MirrorFail oserror "directory ancestry loop at $physical"
         }
         dict set seen $key 1
-        set id [MirrorIdentity $physical]
-        if {$id ne ""} { lappend out $id }
+        lappend out [list [dict get $c volume] [dict get $c file]]
         set parent [file dirname $physical]
         if {[string equal -nocase [FrontClean $parent] [FrontClean $physical]]} { return $out }
         set current $parent
@@ -360,10 +388,34 @@ proc ::machteld::MirrorOwnerPath {root} {
 # directory and refuses anything else, because a `robocopy.exe` earlier on PATH
 # is an arbitrary program about to be handed /MIR and a destination.
 proc ::machteld::MirrorRobocopy {} {
+    # NOT %SystemRoot%, WHICH IS THE VARIABLE z NAMES AS DELIBERATELY NOT
+    # CONSULTED. The first version read it, hardcoded `System32` beside it, and
+    # tested with `file exists` -- which FOLLOWS links, so a junction or symlink
+    # called robocopy.exe passed. Three weakenings of one check, in the one place
+    # this command hands a program `/MIR` and a destination.
+    #
+    # `[info library]` is Tcl's own, so the system directory comes from the OS:
+    # `file volumes` cannot give it and there is no GetSystemDirectory in Tcl,
+    # but `$::env(WINDIR)` and `%SystemRoot%` are the same untrusted class. What
+    # IS available is the volume the OS booted from, via the well-known
+    # `comspec`... which is also environment. So the honest position: this reads
+    # an environment variable like z refuses to, and then applies the checks z
+    # applies to what it finds -- absolute, not a reparse point, a regular file.
+    # Narrower than z, and the residual gap is named rather than hidden.
     set sysroot [expr {[info exists ::env(SystemRoot)] ? $::env(SystemRoot) : "C:/Windows"}]
     set exe [file join $sysroot System32 robocopy.exe]
-    if {![file exists $exe]} {
+    if {[catch {canon $exe} c]} {
         MirrorFail notfound "no robocopy at [file nativename $exe]"
+    }
+    # `canon` FOLLOWS, so this is the real object: a reparse point pointing
+    # somewhere else resolves to what it points at, and the checks below are
+    # about that. A directory named robocopy.exe, or a link to one, is refused.
+    if {[dict get $c kind] ne "file"} {
+        MirrorFail badvalue "robocopy is not a regular file: [file nativename $exe]"
+    }
+    if {![string equal -nocase [FrontClean [dict get $c path]] [FrontClean $exe]]} {
+        MirrorFail badvalue "robocopy at [file nativename $exe] redirects to\
+                             [file nativename [dict get $c path]]; refusing"
     }
     return [file nativename $exe]
 }
@@ -517,15 +569,22 @@ proc ::machteld::MirrorRunID {{ms ""}} {
 # being mirrored (robocopy would copy a file that is changing under it) nor
 # inside the destination (it would be deleted as an extra), so it is keyed on
 # the workspace's IDENTITY and lives under the user cache or TEMP.
-proc ::machteld::MirrorStatePath {} {
+proc ::machteld::MirrorStatePath {{dest ""}} {
     variable MIRROR_STATE ; variable FRONT_ROOT
     if {$MIRROR_STATE ne ""} { return $MIRROR_STATE }
     FrontRoots
     set root [MirrorResolveDir $FRONT_ROOT]
-    set key [string tolower [FrontClean [dict get $root physical]]]
+    # THE KEY IS z's KEY, so the file lands where z looks for it. `canon`
+    # returns the volume serial and file index already `%016x`-formatted, which
+    # is the format z hashes -- the first version formatted `file stat`'s dev/ino
+    # instead and produced `volume:0000000000000002:...` from a DRIVE-LETTER
+    # INDEX, hashing to a filename `z status` and `z logs` never read. The
+    # fallback keeps Go's `filepath.Clean` spelling, backslashes and all, because
+    # it is hashed rather than displayed.
+    set key [string tolower [file nativename [FrontClean [dict get $root physical]]]]
     if {[dict get $root identity] ne ""} {
         lassign [dict get $root identity] vol fil
-        set key [format "volume:%016x:file:%016x" $vol $fil]
+        set key "volume:$vol:file:$fil"
     }
     set name "mirror-[string range [hash sum sha256 $key] 0 31].json"
     set cands {}
@@ -537,8 +596,22 @@ proc ::machteld::MirrorStatePath {} {
     foreach c $cands {
         set dir [file join $c z mirror-state]
         if {[catch {MirrorResolveDir $dir} rd]} { lappend rejected "$dir: $rd" ; continue }
-        if {[FrontWithin [dict get $root physical] [dict get $rd physical]]} {
-            lappend rejected "$dir: inside mirror source" ; continue
+        # OUTSIDE BOTH TREES, and the destination half was missing. Inside the
+        # SOURCE, robocopy copies a file that is changing under it; inside the
+        # DESTINATION, /MIR deletes it as an extra mid-run. z checks both, by
+        # path AND by identity; this checks both by path, and by identity for
+        # the ancestors `MirrorResolveDir` already resolved -- which is what
+        # catches a junctioned state directory now that `canon` sees through one.
+        foreach {what tree} [list source [dict get $root physical] destination $dest] {
+            if {$tree eq ""} continue
+            if {[FrontWithin $tree [dict get $rd physical]]} {
+                lappend rejected "$dir: inside mirror $what" ; continue
+            }
+        }
+        if {[llength $rejected] && [string match "$dir:*" [lindex $rejected end]]} { continue }
+        if {$dest ne "" && ![catch {MirrorIdentity $dest} did] && $did ne ""
+            && $did in [dict get $rd ancestors]} {
+            lappend rejected "$dir: inside mirror destination" ; continue
         }
         set MIRROR_STATE [file nativename [file join [dict get $rd physical] $name]]
         return $MIRROR_STATE
@@ -758,9 +831,17 @@ proc ::machteld::MirrorPublishArtifacts {path base code result} {
     foreach k {preflightLog mirrorLog postflightLog linkManifest} {
         if {[dict exists $idx $k] && ![file exists [dict get $idx $k]]} { dict unset idx $k }
     }
+    # `logDirKey` IS AN IDENTITY, NOT A LOWERCASED PATH. z re-resolves the log
+    # directory on read and compares this against
+    # `volume:%016x:file:%016x` (or `path:<clean>` when it has no identity), so
+    # a lowercased forward-slashed path never matches -- and the mismatch does
+    # not degrade gracefully: `validateMirrorArtifactIndex` fails on the FIRST
+    # kind and z discards the whole index, falling back to globbing the default
+    # log directory. The index this file goes to trouble to format correctly was
+    # being rejected in one line.
     set prov [dict create runId [dict get $base runId] \
                   logDir [dict get $base logDir] \
-                  logDirKey [string tolower [FrontClean [dict get $base logDir]]]]
+                  logDirKey [MirrorDirKey [dict get $base logDir]]]
     set provall [expr {[dict exists $idx artifactProvenance] ? [dict get $idx artifactProvenance] : {}}]
     if {![file exists [dict get $base reportPath]]} {
         MirrorFail oserror "completed report does not exist: [dict get $base reportPath]"
@@ -839,7 +920,7 @@ proc ::machteld::MirrorRun {argl} {
     }
 
     set robocopy [MirrorRobocopy]
-    set statepath [MirrorStatePath]
+    set statepath [MirrorStatePath $dest]
     set artifacts [MirrorArtifactPath $statepath]
     set started [clock milliseconds]
     set runid [MirrorRunID $started]
@@ -931,7 +1012,14 @@ proc ::machteld::MirrorRun {argl} {
         lappend out ""
     }
 
-    set result [expr {[llength [dict get $scan errors]] ? "failed" : "ok"}]
+    # A PREFLIGHT THAT FAILED IS A FAILED RUN. robocopy's code is a bitfield and
+    # only >= 8 is a real failure; z branches there, publishes `result: failed`
+    # and returns 1. The first version computed `result` from link-scan errors
+    # ALONE, so a preflight exiting 8 produced a report reading
+    # `robocopy exit code: 8` / `meaning: copy failures` / `result: ok`, the same
+    # `ok` in the artefact index, and exit 0 -- a command reporting success in
+    # the same breath as the failure it just printed.
+    set result [expr {[llength [dict get $scan errors]] || $precode >= 8 ? "failed" : "ok"}]
     set rep [dict create runid $runid dryrun 1 source $source dest $dest robocopy $robocopy \
                  preflightcmd $precmd links [dict get $scan links] \
                  linkerrors [dict get $scan errors] skiplinkscan [dict get $o skiplinkscan] \

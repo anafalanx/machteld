@@ -265,6 +265,42 @@ same facts z reaches it from.
 `links` follows the same descent policy as `dirs`, so the root exemption applies here too: a
 junction root is walked, and reported.
 
+### `canon` — which object is this path, and where does it really live?
+
+```tcl
+canon C:/dev/.z/r/winsdk/10.0.26100.0
+    → {path "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64"
+       volume 00000000eb960d30  file 00060000001cd001  kind directory  links 1}
+```
+
+One open that **follows**, and two questions asked of that handle:
+`GetFinalPathNameByHandleW` for where the object is, `GetFileInformationByHandle` for which object
+it is. `path` comes back forward-slashed and unprefixed like `dirs`'s; `volume` and `file` are
+16-digit hex tokens to compare rather than numbers to do arithmetic on, because a 64-bit file index
+does not fit a signed wide.
+
+**This exists because Tcl gets both halves wrong, and gets them wrong quietly.** `file normalize`
+does **not** resolve a reparse point that is the *final* component — measured on the junction above,
+it returns the junction while normalising one component deeper follows it. And `file stat`'s `dev`
+is the **drive-letter index** (every path on `C:` reports 2, where the volume serial is
+`0xeb960d30`), while on a junction it describes the junction rather than its target. Two names for
+one file do share an `ino`, so a caller comparing identities gets self-consistent answers that are
+about the wrong objects — the most dangerous shape a wrong answer can take.
+
+`mirror` is the caller that needed it: a destination junction pointing into the mirror source passed
+every containment clause, and robocopy's own `/L` verdict then named a file *inside the source* as a
+destination extra. See [the front-door plan](front-door.md).
+
+**The numbers are z's numbers.** `volume` and `file` are the same `dwVolumeSerialNumber` and 64-bit
+file index z hashes into its mirror-state filename, verified by computing the key here and finding
+z's own artefact index already sitting at that name.
+
+- `dangling` is its own error code, not `notfound`, and the distinction is load-bearing: a resolver
+  walking up to the nearest existing ancestor must treat *nothing here* as "keep going" and *here,
+  but broken* as "stop". `file exists` cannot tell them apart — it answers **true** for a dangling
+  junction — which is why mirror's first attempt at this test was dead code.
+- `links` is the file's hard-link count, free from the same call.
+
 **What it deliberately does not do**, because [rule 4](direction.md) says C is for what Tcl cannot
 reach: it does not write the list to a file (three lines of `open`/`puts` do that, and a result
 key that is silently empty whenever an option is used is the failure this verb exists to abolish),
