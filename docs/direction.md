@@ -1110,3 +1110,49 @@ the emitted paths are inside a Files-On-Demand root, and 67 of the first 4,000 f
 it carry `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, so a backup or an indexer fed this list touches
 content z's list never named and can trigger downloads. **"More complete" and "cheaper to consume"
 are not the same property**, and the docs claimed the first while saying nothing about the second.
+
+## `-arg0`: a refusal that outlived its reason (2026-08-11)
+
+**`mt make` did not work, and the front door said so honestly.** The workspace vendors GNU Make as
+`mingw32-make.exe` and its manifest entry carries `arg0: make`. The front door refused the whole
+tool with `{MACHTELD FRONT unsupported}` rather than launch it under a name that would make
+`$(MAKE)` — and therefore every recursive build — come back spelled wrong. That refusal was the
+right call at the time: this stage exists to be compared against z, and a confident wrong
+resolution is worse than one that names what is missing. `preFromRoot`, `pre` and `envFromRoot`
+were closed the same way, one at a time.
+
+**What made it wrong was time, not reasoning.** A refusal is a placeholder; left standing it
+becomes a decision nobody made. A front door replacing z has to run what z runs, and `make` is not
+an exotic corner — it is the tool a build reaches for first. The register's own test is whether a
+refusal still names something *hard*. This one no longer did.
+
+**The launcher never needed anything.** `wj_launch` has always handed `CreateProcessW` the
+executable and the command line as **separate** arguments — `lpApplicationName` and
+`lpCommandLine` — so which file runs and what it calls itself have been independent since M1. Only
+a way to *say* so was missing. That is the second time this month a front-door gap turned out to be
+a missing option over an already-correct mechanism (`-inherit` was the first), and it is worth
+naming as a pattern: **when a capability looks expensive, check whether the layer below already has
+it.** The whole of `-arg0` in C is one option, one field, and a nine-line `argv_with_arg0()`.
+
+**Declared by the shared parser, therefore true of all four spawners.** `run`, `child start`,
+`detach` and `pty spawn` take it, because all four spawn and the shared parser is the one place a
+spawning option belongs. Putting it only on `run` would have made the palette lie about which verbs
+launch processes, which is exactly the kind of per-verb divergence the contract exists to prevent.
+
+**Applied after resolution, never before — and that ordering is the whole safety property.** The
+program is found from `argv[0]` as written; only then is `argv[0]` replaced in the child's vector.
+So `-arg0` renames and never redirects, and `run -arg0 bash -- no_such_program.exe` still fails
+`notfound` rather than quietly running bash. A gate holds that ordering, because the failure mode
+if it ever inverts is a `PATH` lookup for something the caller did not ask for — silent, plausible,
+and the one thing this workspace refuses everywhere.
+
+**Proved by the artefact, not by the option.** `mt make -C <dir> show` prints the same bytes as
+`z make`, including Make's own `make:` prefix on its directory messages — which is observable proof
+that `argv[0]` took, since that prefix *is* the name Make was called by. The suite's behaviour
+checks use the workspace bash (`echo $0`) and are **skipped with a printed notice** if it is
+absent, rather than passing vacuously; break-testing `argv_with_arg0()` into an unconditional
+`return cargv` fails exactly one named check.
+
+**The refusal list is now empty.** `preFromRoot`, `pre`, `envFromRoot`, `arg0` — every key the
+workspace manifest uses is honoured. The `{MACHTELD FRONT unsupported}` path stays, and still
+guards `status -deep`; what changed is that it no longer stands in front of a tool anyone runs.

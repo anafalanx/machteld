@@ -2071,13 +2071,22 @@ proc ::machteld::FrontExec {r inherit cargs} {
         return [uplevel #0 [list {*}[dict get $r args] {*}$cargs]]
     }
 
-    if {[dict exists $r arg0]} {
-        # The one tool in the workspace that asks for it (`make`). Refused rather
-        # than run without it: the program would see a different argv[0] than the
-        # workspace intends, which is a silent difference, and this file's whole
-        # standard is that a wrong answer is worse than a refusal.
-        Fail FRONT unsupported "\"[dict get $r name]\" needs arg0, which the front door cannot set yet"
-    }
+    # `arg0` -- WHAT THE CHILD READS AS ITS OWN NAME. One tool in the workspace
+    # asks for it: `make` is vendored as `mingw32-make.exe`, and a makefile that
+    # asks `$(MAKE)`, or a recursive build re-invoking itself, gets that spelling
+    # back unless argv[0] says `make`.
+    #
+    # This was REFUSED with `{MACHTELD FRONT unsupported}` until 2026-08-11, on
+    # the grounds that running it with the wrong argv[0] is a silent difference
+    # and a refusal beats a wrong answer. That was the right call while the
+    # palette had no way to say it -- and the wrong shape of permanent, because
+    # `mt make` simply did not work in a front door meant to replace one where it
+    # does. The launcher turned out to need NO change at all: `wj_launch` has
+    # always passed the executable and the command line to CreateProcessW
+    # separately, so which file runs and what it calls itself were independent
+    # from the first day. What was missing was one option to say so.
+    set opts {}
+    if {[dict exists $r arg0]} { lappend opts -arg0 [dict get $r arg0] }
 
     set argv [list [dict get $r exe]]
     if {[dict exists $r pre]} { lappend argv {*}[dict get $r pre] }
@@ -2094,9 +2103,9 @@ proc ::machteld::FrontExec {r inherit cargs} {
     }
 
     if {$inherit} {
-        set res [run -inherit -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+        set res [run -inherit -dir [dict get $r cwd] -env [dict get $r env] {*}$opts -- {*}$argv]
     } else {
-        set res [run -dir [dict get $r cwd] -env [dict get $r env] -- {*}$argv]
+        set res [run -dir [dict get $r cwd] -env [dict get $r env] {*}$opts -- {*}$argv]
     }
     if {$jid ne ""} {
         catch {journal done $jid [dict get $res status] [dict get $res exit]}

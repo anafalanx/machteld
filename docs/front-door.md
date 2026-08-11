@@ -294,7 +294,33 @@ two-character prefix, then an `M`, then `other`. A `MD` line is a deletion, not 
 **The missing keys are ABSENT, not null.** A caller diffing against z sees a key that is not there,
 which is true, rather than a `mirror: null` that would be a claim — and there IS a report here, so
 that claim would be false. `mt status -deep` is refused outright with `{MACHTELD FRONT unsupported}`
-naming what it needs, the same way an `arg0` manifest entry is refused rather than approximated.
+naming what it needs, the same way an `arg0` manifest entry *used to be* refused rather than
+approximated — see below, where that refusal was closed.
+
+### `arg0`, and a refusal that outlived its reason
+
+`mt make` did not work. The workspace vendors GNU Make as `mingw32-make.exe` with `arg0: make` in
+its manifest entry, and the front door refused the whole tool with `{MACHTELD FRONT unsupported}`
+rather than run it under a name that would make `$(MAKE)` — and every recursive build — come back
+wrong.
+
+That refusal was right while the palette could not express the rename, and wrong the moment it
+became permanent: a front door replacing z has to run what z runs. **The launcher needed no change
+at all.** `wj_launch` has always passed the executable and the command line to `CreateProcessW`
+separately, as `lpApplicationName` and `lpCommandLine`, so which file runs and what it calls itself
+were independent from the first day. The missing piece was one option in the shared parser — which
+is why `run`, `child start`, `detach` and `pty spawn` all take `-arg0`: all four spawn, and the
+shared parser is where the option lives.
+
+Applied **after** resolution, never before, so it is a rename and never a redirection:
+`run -arg0 bash -- no_such_program.exe` still fails `notfound`, and the suite checks exactly that.
+`mt make` now produces byte-identical output to `z make`, down to GNU Make's own `make:` prefix on
+its directory messages — which is the observable proof that `argv[0]` took, since Make prints the
+name it was called by. The resolution diff compares `arg0` alongside `exe`, `env` and `pre`, so a
+rename that silently stops happening fails the same test that would have caught it never starting.
+
+**Every key the workspace manifest uses is now honoured.** `preFromRoot`, `pre`, `envFromRoot` and
+`arg0` were the refusal list, and it is empty.
 
 ### The project tier, and three defects in one paragraph
 

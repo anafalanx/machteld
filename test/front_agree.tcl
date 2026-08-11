@@ -118,6 +118,16 @@ foreach n $names {
         }
     }
 
+    # `arg0` -- what the child reads as its own name, which is not always where
+    # it lives. Exactly one tool asks for it (`make`, vendored as
+    # mingw32-make.exe) and machteld REFUSED to run it at all until 2026-08-11,
+    # so this comparison would have been vacuous before there was anything to
+    # compare. It is here because a rename that silently stops happening looks
+    # exactly like one that never did.
+    set targ0 [expr {[dict exists $them arg0] ? [dict get $them arg0] : ""}]
+    set marg0 [expr {[dict exists $me arg0] ? [dict get $me arg0] : ""}]
+    if {$targ0 ne $marg0} { lappend problems "arg0: mine \"$marg0\" / theirs \"$targ0\"" }
+
     # The prepended arguments, which z reports as finalArgv after the exe.
     set tpre [lrange [dict get $them finalArgv] 1 end]
     set mpre [expr {[dict exists $me pre] ? [dict get $me pre] : {}}]

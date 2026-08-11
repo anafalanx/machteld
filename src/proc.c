@@ -272,6 +272,7 @@ typedef struct {
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
     int                channels;   /* -channels: hand the pipes over as Tcl channels */
     int                inherit;    /* -inherit: the child gets OUR stdio, not pipes */
+    const char        *arg0;       /* -arg0: what the child reads as argv[0], if not its own path */
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
@@ -367,6 +368,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
      * garbage as "inherit stdio" -- so it created no pipes and channel mode
      * dereferenced a NULL handle. A segfault, from one missing line. */
     o->inherit = 0;
+    o->arg0 = NULL;
     int i = i0;
     for (; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -387,6 +389,21 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
             o->cpu_100ns = (unsigned long long)d * 10000ULL;
         } else if (strcmp(a, "-dir") == 0) {
             o->dir = v;
+        } else if (strcmp(a, "-arg0") == 0) {
+            /* WHAT THE CHILD READS AS ITS OWN NAME, which is not always where it
+             * lives. GNU make is the case that forced this: the workspace
+             * vendors it as `mingw32-make.exe`, and a makefile asking `$(MAKE)`
+             * -- or a recursive build re-invoking itself -- gets that spelling
+             * back unless argv[0] says `make`.
+             *
+             * Nothing in the launcher had to change. `wj_launch` already passes
+             * the executable and the command line to CreateProcessW SEPARATELY,
+             * as lpApplicationName and lpCommandLine, so which file runs and
+             * what it calls itself were always independent; the only thing
+             * missing was a way to say so. The program is still resolved from
+             * argv[0] as given, so `-arg0` renames the child WITHOUT changing
+             * which file is found -- a rename, never a redirection. */
+            o->arg0 = v;
         } else if (strcmp(a, "-stdin") == 0) {
             o->stdin_text = v;
         } else if (strcmp(a, "-env") == 0) {
@@ -417,6 +434,23 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
  * always documented for it -- and every failure after that point is `launch`.
  * The caller seeds it with "launch", so a new failure path here defaults to the
  * general code rather than silently inheriting a specific one. */
+/* THE ARGV THE CHILD ACTUALLY GETS. Applied AFTER `resolve_exe` at every launch
+ * site, never before: the program is found from argv[0] as the caller wrote it,
+ * and `-arg0` only changes what the child then reads back. Getting that order
+ * wrong would turn a rename into a PATH lookup for a different program, which
+ * is the one thing this workspace refuses to do anywhere else.
+ *
+ * Returns cargv untouched when there is no -arg0, so the common path allocates
+ * nothing; the caller frees only what it was given back changed. */
+static const char **argv_with_arg0(run_opts *o, int cargc, const char **cargv) {
+    if (o->arg0 == NULL) return cargv;
+    const char **a = (const char **)malloc(sizeof(*a) * (size_t)cargc);
+    if (a == NULL) return cargv;   /* out of memory: the real name is a safe answer */
+    a[0] = o->arg0;
+    for (int i = 1; i < cargc; i++) a[i] = cargv[i];
+    return a;
+}
+
 static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
                              int track, int stream, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
@@ -498,7 +532,10 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         io = (wj_stdio){ (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
     }
     c->inherit = o->inherit;
-    if (wj_launch(exe, cargc, cargv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err) != 0) goto fail;
+    const char **largv = argv_with_arg0(o, cargc, cargv);
+    int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err);
+    if (largv != cargv) free((void *)largv);
+    if (lrc != 0) goto fail;
 
     CloseHandle(outW); outW = NULL;
     CloseHandle(errW); errW = NULL;
@@ -1243,7 +1280,10 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     }
     void *jobh[1] = { wj_job_handle(djob) };
     wj_stdio io = { nul, nul, nul };
-    if (wj_launch(exe, cargc, cargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, o.env_block, &pid, &proch, &err) != 0) {
+    const char **dargv = argv_with_arg0(&o, cargc, cargv);
+    int drc = wj_launch(exe, cargc, dargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, o.env_block, &pid, &proch, &err);
+    if (dargv != cargv) free((void *)dargv);
+    if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);
         goto cleanup;
     }
@@ -1321,7 +1361,12 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
                         int cols, int rows, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
     if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
-    char *cmdText = wj_make_cmdline(cargc, cargv);
+    /* Same rename, same order: resolve from argv[0] as written, then say what
+     * the child reads. A pty child is as entitled to its own name as any other,
+     * and a `-arg0` the manifest advertises on `pty` must work on `pty`. */
+    const char **pargv = argv_with_arg0(o, cargc, cargv);
+    char *cmdText = wj_make_cmdline(cargc, pargv);
+    if (pargv != cargv) free((void *)pargv);
 
     HANDLE   inR = NULL, inW = NULL, outR = NULL, outW = NULL;
     HPCON    hpc = NULL;
