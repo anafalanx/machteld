@@ -130,6 +130,91 @@ Ask for them once and the rest reads like a script:
 namespace eval ::mytool { namespace path ::machteld }
 ```
 
+## Built — the directory tree
+
+```tcl
+dirs C:/dev                          ;# every directory beneath it, as a dict
+dirs $d -depth 2                     ;# the root is depth 0; -depth 0 is the root alone
+dirs $d -prune {node_modules .git}   ;# listed, not descended -- string match, case-insensitive
+```
+
+The result is `{root paths dirs links errors pruned depthlimited maxdepth}`. `paths` is the list,
+in depth-first pre-order with siblings ascending; `dirs` is how many were emitted (`llength
+$paths`); `maxdepth` is the deepest level reached. **Files are never listed** — this verb answers
+one question.
+
+**This verb exists because the Tcl version was written three times and was wrong three times,
+silently.** `glob -types d *` came back 786 directories short, `glob -- * .*` came back 16,504
+over, and deduplicating the second lost the first 786 again — no error from any of them, and the
+only reason anyone knew is that the whole list was diffed against another walker's. See
+[direction](direction.md), "`cdirs` does not become Tcl". What `glob` actually misses is the
+**hidden attribute**, not dot-names — `.git` is `+h` — and `-types {d hidden}` is an *exclusive*
+filter that returns the hidden entries only.
+
+**So the shape of the answer is arithmetic, not prose.** Every directory under the root is either
+in `paths`, or its absence is attributable to exactly one counted cause: an ancestor in `errors`,
+an ancestor counted in `pruned` or `depthlimited`, or a `links` row saying the walk stopped at a
+name standing for somewhere else. Nothing can go missing without a row that says so.
+
+- `links` — one dict per directory reparse point encountered, `{path tag surrogate action}`,
+  where `action` is `descended`, `nofollow`, `pruned`, `depthlimited` or `failed` (the descent was
+  attempted and the open failed — there is an `errors` row beside it).
+- `errors` — one dict per failure, `{path win32 reason}`. The raw Win32 code travels with the
+  message because the message cannot be trapped on and does not discriminate: a directory pending
+  delete and an ACL denial both arrive as `ERROR_ACCESS_DENIED`. **An unreadable subdirectory is
+  a row, never an exception** — it is still listed, since we saw it in its parent. **One row per
+  lost directory**, not per parent, so the cardinality is recoverable and the arithmetic above can
+  actually be closed.
+
+`pruned` and `depthlimited` **count refusals, not elisions.** Every directory not descended is
+counted, including a leaf with nothing underneath it — so `depthlimited == 0` is the only reading
+that means "nothing was cut", and a nonzero value is not the number of omitted subtrees.
+
+**Only *name surrogates* are refused entry, which is a deliberate difference from `z cdirs`.** A
+junction is tag `0xa0000003` and a symbolic link `0xa000000c`; both set the surrogate bit
+`0x20000000` and both are genuinely another name for somewhere else. A OneDrive Files-On-Demand
+root is `0x9000701a` and does **not** — it is ordinary content behind a filter, and refusing to
+descend it omits everything beneath it. The bit is the usual *spelling* of "a name for somewhere
+else" rather than the rule itself, so DFS (`0x8000000a`) and DFSR (`0x80000012`) are refused
+beside it although they do not set it: they redirect into another namespace, and one pointing back
+at an ancestor is a cycle this veto would otherwise not bound. That pair is reasoned from the
+tags' documented meaning and **not** measured — there is no DFS namespace on the machine this was
+built on.
+
+Every reparse directory gets a `links` row carrying its tag, so the choice is auditable rather
+than asserted — **including when the reparse point is the root you named.** A junction root is
+descended (you named it, so you get it) and its row says `{surrogate 1 action descended}`, which
+is the only thing in the answer disclosing that every path returned is a second name for a tree
+living somewhere else. The classification is made on a *handle* opened with
+`FILE_FLAG_OPEN_REPARSE_POINT`, not on the parent's directory scan, so a name replaced between
+enumeration and descent cannot walk the walker out of the tree.
+
+**Long paths work.** Every path is `\\?\`-prefixed internally; without that, seven directories in
+`C:\dev` at lengths 278–424 vanish with a clean exit. Paths come back forward-slashed and
+unprefixed, and a UNC root round-trips as `//server/share/…`. `C:/` and `\\?\C:\` are both the
+drive's root *directory*; `\\?\C:` would be the volume device and is never built.
+
+**A root component ending in `.` or a space is refused, not honoured.** Win32 normalisation trims
+both, so `dirs X/...` would resolve to `X` and hand back the *parent's* tree under the parent's
+name — a clean, plausible answer to a question nobody asked. `.` and `..` are exempt, since there
+the trailing dots are the whole meaning. The walker lists such directories happily, so this is one
+place its own output does not round-trip: spell the root `\\?\C:\…`, which turns normalisation off
+and reaches them.
+
+`-depth 0` is the root alone and **never** means unlimited — unlimited is spelled by leaving the
+option out, because a sentinel that turns a typo into a thousand-fold difference in what you get
+back is the same mistake as `-timeout 100`. A drive-relative root (`C:` rather than `C:/`)
+resolves against the per-drive current directory, which is process state nobody set; it is
+refused with `badvalue` naming the spelling that works.
+
+**What it deliberately does not do**, because [rule 4](direction.md) says C is for what Tcl cannot
+reach: it does not write the list to a file (three lines of `open`/`puts` do that, and a result
+key that is silently empty whenever an option is used is the failure this verb exists to abolish),
+it does not call back with progress, it does not report an elapsed time (`clock milliseconds`
+either side of the call is the same number), and it does not resolve links to their targets — that
+is canonicalisation, containment, identity and a `seen` set, which is a subsystem rather than a
+verb.
+
 ## Built — the machine's processes
 
 ```tcl

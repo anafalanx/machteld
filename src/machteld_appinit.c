@@ -29,6 +29,9 @@ extern int Machteldjournal_Init(Tcl_Interp *interp); /* src/journal.c */
 #ifdef MACHTELD_HASH
 extern int Machteldhash_Init(Tcl_Interp *interp); /* src/hash.c */
 #endif
+#ifdef MACHTELD_DIRS
+extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
+#endif
 
 int
 Machteld_RegisterLibs(Tcl_Interp *interp)
@@ -84,6 +87,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldhash", Machteldhash_Init, NULL);
+#endif
+#ifdef MACHTELD_DIRS
+    /* the directory tree, in C because Tcl's glob answers differently than it
+     * reads -- three prelude walkers were wrong three different ways without
+     * raising anything (docs/direction.md, "cdirs does not become Tcl"). */
+    if (Machtelddirs_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machtelddirs", Machtelddirs_Init, NULL);
 #endif
 
     /*

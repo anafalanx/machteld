@@ -674,13 +674,23 @@ interesting part.
 **The interesting part is that the walker is still wrong, three attempts in.** Every failure was
 silent — no error, no exception, just a different number:
 
-- `glob -types d -directory $d *` does **not** match dot-names on Windows, so every `.git` subtree
+- `glob -types d -directory $d *` misses the **HIDDEN ATTRIBUTE**, so every `.git` subtree
   vanished: 786 directories short.
-- `glob ... -- * .*` matches them **twice**, because `*` also matches dot-names once the pattern
+- `glob ... -- * .*` matches dot-names **twice**, because `*` also matches them once the pattern
   list asks for them. Every dot-directory was queued and walked twice: 16,504 phantom entries, a
   77% overcount, and the walk *terminated normally*.
-- Deduplicating by lowercased path fixed the overcount and lost the dot-directories again. Still
-  786 short, cause not established.
+- Deduplicating by lowercased path fixed the overcount and lost the hidden directories again.
+  Still 786 short, cause not established.
+
+**Correction, 2026-08-11, measured while building the replacement.** The first bullet above used
+to say `glob -types d *` "does not match dot-names on Windows". It does — on a controlled fixture
+it returned `.dotname` and missed `hiddenattr`. The cause of the 786 is the **hidden attribute**,
+and `.git` is `+h`; `-types {d hidden}` is not an addition but an *exclusive filter*, returning
+the hidden entries **only**. `glob -- * .*` also returns `.` and `..`. Three separate misreadings
+of one pattern language, and the entry above named the wrong one — which matters, because a
+fixture built around dot-names alone reproduces none of it. The gates in `test/run_test.tcl` carry
+a dot-name, a hidden dot-name and a hidden+system name as three separate subjects for exactly
+this reason.
 
 None of that was visible without diffing the full list against z's. A directory walker looks like
 the simplest possible program and is not: on Windows it is reparse-point classification, dot-name
@@ -698,3 +708,124 @@ entry does not pick between them because nothing yet needs it to:
 
 What this does **not** license is the third route: writing it in Tcl anyway and accepting an
 eight-times-slower, still-incorrect walk because the rest of step 4 went well.
+
+### Resolved: route 1, as the palette verb `dirs` (2026-08-11)
+
+**`src/dirs.c` is built, and it agrees with z exactly.** Measured in one session, same machine,
+warm, full-list diff in both directions with multiplicity: on `C:\dev` z reports 21,794 lines and
+`dirs` reports 21,794 paths, zero only-in-z, zero only-in-mt, zero duplicates on either side; on
+`C:\dev\.z`, 12,813 against 12,813, same zeroes. Wall clock, in-process against a subprocess:
+2.05 s against z's 2.66 s and 1.24 s against 1.64 s — **0.77× and 0.75×**, which is a ratio and
+not a claim about either program, since z pays process creation and Go runtime init while `dirs`
+pays for building a 21,794-element `Tcl_Obj` list. The point is the list, not the milliseconds:
+the 12.2-second `glob` walk was refused for being *wrong*, and this one is not.
+
+**One deliberate disagreement with z, and it is the reason the surrogate rule is written down.**
+z refuses to descend anything carrying `FILE_ATTRIBUTE_REPARSE_POINT`. `dirs` refuses only *name
+surrogates* — `tag & 0x20000000`, which a junction (`0xa0000003`) and a symlink (`0xa000000c`)
+set and a OneDrive Files-On-Demand root (`0x9000701a`) does not. On the two trees above the two
+rules coincide, because every directory reparse point there is a junction; under a cloud tree they
+do not, and z's rule silently omits everything beneath it. Every reparse directory comes back as a
+`links` row carrying its tag and what was done about it, so the choice can be audited instead of
+believed.
+
+**What did not get built, and why that is the entry's real content.** The specification this was
+written from carried `-out FILE`, an `-onprogress` callback, `elapsed`, `maxpending` and a
+`-links list|follow|skip` mode with canonicalisation, containment and volume+file-id identity
+behind it. All of that is gone. [Rule 3](#) asks whether a proposal is one small C verb or a
+subsystem, and [rule 4](#) says everything expressible in Tcl stays in Tcl: `-out` is three lines
+of `open`/`puts` and would have made the principal result key silently empty whenever it was used;
+`-onprogress` is a spinner, fixed at an interval no testable fixture reaches; `elapsed` is
+`clock milliseconds` on either side of the call and makes the verb never twice the same; `follow`
+is four more dispositions and a `seen` set with no receiver asking for it. What remains is
+`dirs <root> ?-depth n? ?-prune patterns?` — the enumeration, the reparse classification, the
+`\\?\` prefix and the emission order, which are the four things Tcl genuinely cannot reach.
+
+**The front-door command was not built either, and that is route 2 standing.**
+[front-door.md](front-door.md) had already struck `cdirs` off step 4 — "it wants a C verb **or**
+it stays outside machteld" — and route 1 says "a C verb", not "and also port z's command line".
+`mt cdirs` would also have had to default to `C:/`, where the surrogate rule above makes machteld
+and z disagree by design, against a doctrine that says machteld earns each command by agreeing
+with z on it first. The verb is here; the command stays z's until something asks for it.
+
+### What review found in it, and what that says about the gates (2026-08-11)
+
+**Four reviews of the shipped verb; the hard parts held and the accounting did not.** Path
+arithmetic, handle discipline, the copy-not-pointer stack pop, 40,000 siblings, 300 levels, a
+17,208-character path and a full-list diff against an independently written `FindFirstFileExW`
+oracle all survived direct measurement. What did not survive is the part the file is *about*.
+
+**Three defects, each of them a silence, and each in the mechanism built to prevent silence.**
+
+- **A junction ROOT produced no `links` row.** The classification block is gated on `depth > 0`
+  because the root is exempt from the *veto* — you named it, so you get it — which quietly made it
+  exempt from being *described*, and the root's validation handle follows the reparse point so its
+  tag reads 0. So `dirs <junction>` returned `root`, `paths`, `dirs`, empty `errors` **and empty
+  `links`**: nothing anywhere in the answer said that every path in it is a second name for a tree
+  living somewhere else. Both the source and [the palette](palette.md) promised "every reparse
+  directory gets a row". 576 checks passed over it, because the gate for a junction root looked
+  only at `paths` and `dirs`.
+- **`dirs X/...` returned the parent's tree.** `GetFullPathNameW` trims trailing dots, `...`
+  collapses to nothing, and the walk came back with six directories under the parent's own name,
+  no error and no row. `X/trailspace ` and `X/traildot.` failed loudly with `notfound`, which was
+  luck rather than design — the walker *creates and lists* all four names happily, so this was the
+  verb's own output failing to round-trip, in the one spelling that was silent about it. Now
+  refused with `badvalue` naming the `\\?\` spelling that works; `.` and `..` stay exempt.
+- **Every error return leaked its three result `Tcl_Obj`s** — 144 bytes a call, exactly
+  3 × `sizeof(Tcl_Obj)`, linear over 200,000 calls with no plateau, against a success path that
+  plateaus at zero. `notfound` is what a directory that vanished between two walks answers, which
+  is the ordinary failure for a walker, and the host is a long-lived front door.
+
+**And the harder lesson: five of the gates could not fail.** Not "did not" — *could not*, and they
+were found by patching the code rather than by reading it. `lsearch -glob $GOT $FXO*` can never
+match anything the walker does, because every path is built lexically from the root's own prefix
+and a link target is never resolved; the subject had to become the basename `*/ochild`, which
+exists nowhere inside the tree. "maxdepth reports the deepest reached" used `>=`, so replacing the
+whole computation with `9999` passed. "A trailing separator changes nothing" compared only counts,
+and `dirs_join` suppresses a doubled separator independently — so disabling the entire
+trailing-separator strip left every check green while the reported root came back `…/docs/`. (That
+also retired a false claim in the source: the strip's comment said removing it would build
+`\\?\C:\dev\\build` and fail every child with 123. It does not; the strip's real job is the
+reported root.) And **the accounting invariant, the gate this verb's whole shape exists to serve,
+skipped any probe the walker had listed** (`if {$absent in $GOT} continue`) — so over-listing, the
+exact defect it was aimed at, emptied it. Measured against a build whose surrogate veto reads
+`depth > 1` and whose open follows: all three junctions descended, the whole tree duplicated under
+`linkup`, and the old gate reported **zero unaccounted**.
+
+**"dirs lists nothing twice" is the one worth remembering**, because it was a real gate with a
+starved fixture. The only defect in the shipped code that can produce a genuine duplicate is
+converting names with `CP_ACP`, and under it every fixture name still mapped to something
+distinct — `e9`, `???`, `?`, `??` — so the gate stayed silent and only the set-difference gate
+fired. One extra directory named `\ue001` beside `\ue000` makes both collapse to `?`. Measured on
+the same broken build: old fixture, **0 duplicates, gate silent**; new fixture, **1 duplicate,
+gate fires**. A gate is only as good as the subject it is pointed at, and a fixture is a claim
+about which defects are reachable.
+
+**Method, since it is the transferable part.** Every gate changed here was proved by breaking the
+code, watching the gate go red, and restoring: the surrogate veto at `depth > 1`, `CP_ACP` in
+place of `CP_UTF8`, `maxdepth = 9999`, the trailing-separator strip disabled, and seven
+independent reverts in one build — root classification, the leak, the component check, the
+prefixed drive-root exemption, the post-normalisation prefix re-test and the UNC flag — which
+produced eleven failures and not one false one. The block went from 76 checks to 102, and the
+suite from 576 to 602. Behaviours that had **no** gate at all now have one: UNC roots, `C:/`,
+`\\?\`-prefixed roots, the forward-slash spelling of that prefix, device-path and empty-root
+refusal, a malformed `-prune` list, and `manifest dirs codes` — the last of which was added
+because fixing the leak *broke* it. Folding free-and-raise into one helper moved the code literal
+out of the argument position `genmanifest.tcl` reads, the build reported `codes=1` against a truth
+of four, and all 600 checks still passed. Creed 4 is the palette describing itself; the generator
+can be blinded by an ordinary refactor, so something has to notice. The fixture also stopped
+leaking itself: its teardown removed junctions before `icacls /reset /t`, which had been following
+`linkup` around the tree ~64 levels deep, and the on-entry wipe now collects every stale
+`mt_dirs_*` rather than this run's own pid — a path that by construction can never be a killed
+run's.
+
+**What is fixed but cannot be gated, and is written down instead.** Six allocation-failure paths
+used to drop directories with no row — a subtree vanishing under memory pressure while the verb
+answered `TCL_OK` with a short, plausible list — and they now each raise a counted
+`ERROR_NOT_ENOUGH_MEMORY` row, one per lost directory rather than one per parent, so the
+cardinality the arithmetic needs is recoverable. None of it is reachable from a fixture, which is
+precisely why it is written rather than argued about. The same applies to the two DFS reparse tags
+added to the veto: they redirect into another namespace without setting the surrogate bit, and a
+namespace pointing back at an ancestor is a cycle nothing here would bound — reasoned from the
+tags' documented meaning and, unlike every other number in that file, **never observed on this
+machine**, which the source says out loud.

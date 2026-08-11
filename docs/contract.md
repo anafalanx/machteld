@@ -75,6 +75,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CHILD` | `child` (all subcommands) |
 | `WAIT` | `wait` |
 | `DETACH` | `detach` |
+| `DIRS` | `dirs` — walk a directory tree |
 | `PTY` | `pty` (all subcommands) |
 | `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
@@ -104,7 +105,7 @@ errors.
 | `launch` | the program was found, but starting it failed (pipe, job, ConPTY, `CreateProcess`) |
 | `usage` | malformed invocation — unknown option, missing option value, too many children to wait on |
 | `badvalue` | an option's value is ill-formed — a duration without a unit, a bad byte size, a bad exit code |
-| `oserror` | a Win32 call failed after launch — reading, writing, killing, waiting |
+| `oserror` | a Win32 call failed after launch — reading, writing, killing, waiting; or `dirs` could not allocate the walk |
 | `notopen` | a `store` operation was attempted before `store open` |
 | `sqlite` | SQLite reported an error; the *message* is SQLite's wording, the *code* is ours |
 | `parse` | the text is not valid JSON; the message says what was wrong and where it stopped |
