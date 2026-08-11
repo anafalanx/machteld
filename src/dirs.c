@@ -446,7 +446,7 @@ static char *links_target(const wchar_t *path, int isdir) {
     DWORD got = 0;
     if (!DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0,
                          raw, MAXIMUM_REPARSE_DATA_BUFFER_SIZE, &got, NULL)
-        || got < 8) {
+        || got < sizeof(DWORD)) {          /* enough for ReparseTag, and no more */
         free(raw);
         CloseHandle(h);
         return NULL;
@@ -456,13 +456,24 @@ static char *links_target(const wchar_t *path, int isdir) {
     LinksReparse *r = (LinksReparse *)raw;
     const WCHAR *base;
     WORD off, len;
+    size_t hdr;                            /* bytes before PathBuffer, per ARM */
     int relative = 0;
+    /* THE FIXED PART MUST BE PRESENT BEFORE ITS FIELDS ARE READ. A `got < 8`
+     * guard covers the tag and nothing else: the symlink arm then reads four
+     * WORDs AND a ULONG Flags -- twenty bytes in -- and `off`/`len` feed the
+     * bounds check below, so with a short payload the guard decides safety from
+     * uninitialised heap, and `relative` picks between two different answers
+     * from the same garbage. Checked per arm, before the first read. */
     if (r->ReparseTag == IO_REPARSE_TAG_SYMLINK) {
+        hdr = offsetof(LinksReparse, u.Symlink.PathBuffer);
+        if ((size_t)got < hdr) { free(raw); return NULL; }
         base = r->u.Symlink.PathBuffer;
         off  = r->u.Symlink.SubstituteNameOffset;
         len  = r->u.Symlink.SubstituteNameLength;
         relative = (r->u.Symlink.Flags & LINKS_SYMLINK_RELATIVE) != 0;
     } else if (r->ReparseTag == 0xa0000003u) {
+        hdr = offsetof(LinksReparse, u.Mount.PathBuffer);
+        if ((size_t)got < hdr) { free(raw); return NULL; }
         base = r->u.Mount.PathBuffer;
         off  = r->u.Mount.SubstituteNameOffset;
         len  = r->u.Mount.SubstituteNameLength;
@@ -470,10 +481,21 @@ static char *links_target(const wchar_t *path, int isdir) {
         free(raw);
         return NULL;
     }
-    /* The offsets are attacker-adjacent only in the sense that a filesystem can
-     * contradict itself; either way a length that leaves the buffer is refused
-     * rather than trusted. */
-    if ((size_t)off + (size_t)len + offsetof(LinksReparse, u) > (size_t)got) {
+    /* `off` IS RELATIVE TO PathBuffer, NOT TO THE STRUCT, and the first version
+     * of this line added `offsetof(LinksReparse, u)` -- the offset of the UNION.
+     * Measured with the pinned toolchain: the union is at 8, but PathBuffer is
+     * at 20 in the symlink arm and 16 in the mount arm, so the check under-
+     * counted by 12 and 8. One constant cannot be right for both, which is the
+     * same reason the two arms cannot share a struct. A payload with
+     * `off = 0, len = 16376, got = 16384` passed and read 12 bytes past a
+     * 16 KB malloc -- demonstrated, with a guard page, as a segfault.
+     *
+     * Unreachable on local NTFS, where a real link always leaves slack. Reachable
+     * from anything that services FSCTL_GET_REPARSE_POINT and can contradict
+     * itself: the SMB redirector, a WinFsp/Dokan filesystem, a mounted image --
+     * and `mirror` runs this over DESTINATION trees, which is exactly where a
+     * redirector is plausible. */
+    if (hdr + (size_t)off + (size_t)len > (size_t)got) {
         free(raw);
         return NULL;
     }
@@ -967,6 +989,20 @@ static Tcl_Obj *dirs_dict(DirsWalk *w, Tcl_Obj *root) {
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("pruned", -1), Tcl_NewWideIntObj(w->pruned));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("depthlimited", -1), Tcl_NewWideIntObj(w->depthlimited));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("maxdepth", -1), Tcl_NewWideIntObj(w->maxdepth));
+    /* THE TWO LISTS THIS MODE DOES NOT USE, RELEASED -- and their absence here
+     * was a LEAK OF 93 BYTES PER CALL, measured at 2 x sizeof(Tcl_Obj) over
+     * 200,000 calls on the shipped exe. `dirs_init` creates `entries` and
+     * `multi` in BOTH modes; only what a dict adopts is owned, and this dict
+     * adopts neither, so every successful `dirs` dropped two list objects on
+     * the floor while every error path (which runs `dirs_free`) was clean.
+     *
+     * This is the bug the nineteen-line comment above `dirs_free` exists to
+     * memorialise -- 144 bytes a call, `notfound`, a long-lived front door --
+     * reintroduced by the commit that added `links`, in the verb that comment
+     * was written to protect. `links_dict` does the mirror image for `paths`
+     * and `links`; neither is optional. */
+    Tcl_DecrRefCount(w->entries);
+    Tcl_DecrRefCount(w->multi);
     return d;
 }
 
