@@ -8,6 +8,34 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-11 — the walk goes to C, `cdirs` diverges on purpose, and `mt make` finally runs
+
+**`dirs`** is a C verb now: a `GetFileInformationByHandleEx` walk that classifies reparse points
+by their name-surrogate bit rather than by a list of tags it happens to know, so a tag nobody has
+seen yet is classified by the rule Windows publishes instead of by omission. It lists exactly what
+z lists, in 0.77× of z's time.
+
+**`front cdirs` is the first command that must NOT agree with z**, and the divergence is the
+point: z's walk stops at OneDrive, so it never names **124,144 directories that are on the disk**.
+Agreement was the wrong target once quality was, and the gate now proves a *superset* — every path
+z found, plus extras that were probed and found real, with every extra attributable to a disclosed
+root. Both are argued at length in [direction](direction.md), which is also where the four defects
+review found *in* `cdirs` are written down.
+
+**`mt make` works.** It was refused outright with `{MACHTELD FRONT unsupported}` because the
+workspace vendors GNU Make as `mingw32-make.exe` with `arg0: make`, and the palette had no way to
+say "run this file under that name" — so a makefile asking `$(MAKE)`, and every recursive build,
+would have come back spelled wrong. `-arg0` is now a shared spawning option (`run`, `child start`,
+`detach`, `pty spawn`), applied **after** the program is resolved so it renames and never
+redirects: `run -arg0 bash -- no_such_program.exe` still fails `notfound`. The launcher needed no
+change at all — `wj_launch` has always passed `CreateProcessW` the executable and the command line
+as separate arguments, so which file runs and what it calls itself were independent from the first
+day. `mt make` and `z make` now print the same bytes, down to Make's own `make:` prefix.
+
+**Every key the workspace manifest uses is honoured**: `preFromRoot`, `pre`, `envFromRoot` and
+`arg0` were the refusal list, and it is empty. 759 checks pass; the resolution diff agrees on all
+275 tools and all 135 project commands.
+
 ## 2026-08-10 — step 4 begins, and finds four tools machteld could not run
 
 Six of z's commands are now reachable by their bare names — `mt which`, `mt env`, `mt tools`,

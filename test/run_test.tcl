@@ -1326,6 +1326,47 @@ file delete -force $PMW
 # tree-kill and the deadline all still in force.
 check "run declares -inherit" [expr {"-inherit" in [dict get [manifest] run options]}]
 
+# --- -arg0: the child's name need not be its path ----------------------------
+# `wj_launch` has always passed the executable and the command line to
+# CreateProcessW SEPARATELY -- lpApplicationName and lpCommandLine -- so which
+# file runs and what it calls itself were independent from the first day. Only
+# a way to SAY so was missing, and the front door refused the one workspace tool
+# that needs it (`make`, vendored as mingw32-make.exe) rather than run it under
+# the wrong name.
+#
+# Declared by the SHARED parser, so every spawning verb claims it -- and a claim
+# the manifest makes is one the verb has to honour.
+foreach {v where} {run {run options}
+                   child {child subcommands start options}
+                   detach {detach options}
+                   pty {pty subcommands spawn options}} {
+    check "$v declares -arg0" [expr {"-arg0" in [dict get [manifest] {*}$where]}]
+}
+
+# THE RENAME IS ONLY OBSERVABLE FROM INSIDE THE CHILD, and Tcl cannot see its
+# own argv[0]: `info nameofexecutable` is the exe path however it was invoked,
+# and `$argv0` is the script. So this needs a child that reports its own name,
+# and `bash -c {echo $0}` is the one the workspace vendors. Skipped rather than
+# failed where there is no workspace -- the suite must pass on a machine that
+# has never seen one, which is why the z-agreement lives in its own file.
+set A0BASH ""
+catch { set A0BASH [dict get [front env bash] exe] }
+if {$A0BASH ne "" && [file exists $A0BASH]} {
+    set plain [string trim [dict get [run -timeout 30s -- $A0BASH -c {echo $0}] out]]
+    set named [string trim [dict get [run -timeout 30s -arg0 MTFAKE0 -- $A0BASH -c {echo $0}] out]]
+    check "without -arg0 the child sees its own path" [expr {$plain ne "MTFAKE0" && $plain ne ""}]
+    check "with -arg0 the child sees the name given"  [expr {$named eq "MTFAKE0"}]
+    # A RENAME, NEVER A REDIRECTION. `-arg0` is applied AFTER the program is
+    # resolved from argv[0] as written, so it cannot change WHICH file runs.
+    # Getting that order wrong would turn a rename into a PATH lookup for
+    # something else entirely -- the one thing this workspace refuses everywhere
+    # else -- so naming a program that does not exist must still fail.
+    check "-arg0 does not choose the program" [expr {
+        [errcode_of {run -arg0 bash -- no_such_program_zzz.exe}] eq {MACHTELD RUN notfound}}]
+} else {
+    puts "     (no workspace bash: the -arg0 behaviour checks need one)"
+}
+
 # PROVED, NOT ASSUMED. Asserting "out is empty" would also pass if the child
 # never ran. So an inner machteld runs the child with -inherit, and the OUTER
 # one captures: the marker can only reach this pipe by flowing through the inner

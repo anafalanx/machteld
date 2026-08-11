@@ -36,6 +36,7 @@ detach -- watchdog.exe   → 8140               ;# fire-and-forget daemon; retur
 
 ```tcl
 run -inherit -- rg -n TODO .   ;# the child gets OUR terminal: colours, pager, Ctrl-C
+run -arg0 make -- mingw32-make.exe -C $dir   ;# the child reads `make` as its own name
 ```
 
 **`-inherit` hands the child our stdio instead of a pipe.** Every other launch path here exists to
@@ -49,6 +50,24 @@ inheritable copies and restricts inheritance to exactly those, so handing it the
 handles gives the child the terminal with **every supervision guarantee intact** — born in the job
 object, tree-killable, capped, and its deadline still enforced. A stream with no handle (a GUI
 process has no console) falls back to `NUL` on its own rather than failing the launch.
+
+**`-arg0` renames the child without redirecting it.** A program's `argv[0]` is not always where it
+lives: the workspace vendors GNU Make as `mingw32-make.exe`, and a makefile asking `$(MAKE)` — or a
+recursive build re-invoking itself — reads back whatever `argv[0]` said, so under its real filename
+every recursion spells the tool wrong. Declared by the *shared* option parser, which is why `run`,
+`child start`, `detach` and `pty spawn` all take it: all four spawn, and that parser is the one
+place a spawning option belongs.
+
+It is applied **after** the program is resolved from `argv[0]` as written, and that order is the
+whole safety property: `-arg0` changes what the child calls itself and never which file is found.
+`run -arg0 bash -- no_such_program.exe` still fails `notfound`, and the suite checks exactly that —
+otherwise a rename would quietly become a `PATH` lookup for something else, which is the one thing
+this workspace refuses everywhere.
+
+This one needed no launcher change either, and for a sharper reason than `-inherit` did: `wj_launch`
+has always handed `CreateProcessW` the executable and the command line as **separate** arguments
+(`lpApplicationName` and `lpCommandLine`). Which file runs and what it calls itself were independent
+from the first day — there was simply no way to say so.
 
 (Runtime semantics — linear + bounded lifetime — are in the [execution model](execution-model.md).)
 
@@ -533,9 +552,18 @@ exists" — that would let a stray file in the working directory change what `mt
 a PATH fallback wearing different clothes. An unknown name exits **127**, the shell's convention.
 
 **Read-only? No longer, and it still refuses rather than guesses.** A manifest entry using a key the
-front door does not implement yet (`preFromRoot`, `pre`, `envFromRoot`, `arg0`) is an *error*,
-not a silent partial answer: the point of this stage is to be compared against `z`, and a
-confident wrong resolution is worse than a refusal that names what is missing.
+front door does not implement is an *error*, not a silent partial answer: the point of this stage
+is to be compared against `z`, and a confident wrong resolution is worse than a refusal that names
+what is missing. `preFromRoot`, `pre`, `envFromRoot` and `arg0` are all implemented now — **every
+key the workspace manifest uses is honoured**, and there is nothing left on that refusal list.
+
+`arg0` was the last, and it is worth saying why it took a C option to close. One tool asks for it:
+`make`, which the workspace vendors as `mingw32-make.exe` and which must read `make` back from its
+own `argv[0]`, or a makefile asking `$(MAKE)` — and every recursive build — gets the wrong spelling.
+The refusal was correct while the palette had no way to express it and wrong as a permanent state,
+because `mt make` simply did not work. The launcher needed no change at all: `wj_launch` has always
+handed the executable and the command line to `CreateProcessW` **separately**, so which file runs
+and what it calls itself were independent from the first day. See [`-arg0`](#built--execution-core).
 
 ## Built — the front door's record
 
