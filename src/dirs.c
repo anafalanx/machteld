@@ -91,6 +91,9 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+/* FSCTL_GET_REPARSE_POINT and MAXIMUM_REPARSE_DATA_BUFFER_SIZE live here rather
+ * than in windows.h -- `links` reads a reparse payload, `dirs` never did. */
+#include <winioctl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -166,6 +169,15 @@ typedef struct {
     int      pruned;
 } DirsChild;
 
+/* WHAT THE WALK IS BEING ASKED FOR. `dirs` lists directories; `links` reports
+ * the reparse points and (on request) the multiply-linked files it passes. One
+ * walker serves both, because two walkers is two answers to "what is under
+ * here" and this file exists to have one. In DIRS mode every branch below
+ * behaves exactly as it did before the mode existed -- the 809 checks are the
+ * gate on that, and they run unchanged. */
+#define DIRS_MODE_DIRS  0
+#define DIRS_MODE_LINKS 1
+
 typedef struct {
     Tcl_Obj     *paths;
     Tcl_Obj     *links;
@@ -178,6 +190,14 @@ typedef struct {
     int          unc;        /* the root is \\?\UNC\..., so the prefix strips differently */
     Tcl_Size     prunec;
     Tcl_Obj    **prunev;
+
+    /* --- links mode only ------------------------------------------------- */
+    int          mode;
+    int          hardlinks;  /* -hardlinks: also report files with nlinks > 1 */
+    Tcl_Obj     *entries;    /* {path .. type .. target ..} per name surrogate */
+    Tcl_Obj     *multi;      /* {path .. links N} per multiply-linked file */
+    Tcl_WideInt  files;
+    Tcl_WideInt  multilink;
 } DirsWalk;
 
 /* MB_ERR_INVALID_CHARS IS THE MIRROR OF THE FLAG BELOW, and the two have to
@@ -363,6 +383,174 @@ static void dirs_fault(DirsWalk *w, const wchar_t *path, DWORD e) {
  * body runs zero times, `paths` comes back holding the root alone, `errors` is
  * empty, and the verb reports a clean, plausible, entirely empty answer. Hence
  * the do/while shape: process what you were given, then ask for more. */
+/* --- links mode: naming a reparse point, and reading where it points --------
+ *
+ * THE TYPE NAMES ARE z's, DELIBERATELY. `mirror` writes them into
+ * `<runid>-links.json`, the manifest a restore reads to rebuild links a
+ * robocopy /XJ run refused to copy -- so the strings are a FILE FORMAT shared
+ * with the front door being replaced, not a rendering choice. Same reasoning as
+ * the ledger's `generatedBy`. */
+static const char *links_type(DWORD tag, int isdir) {
+    if (tag == IO_REPARSE_TAG_SYMLINK) {
+        return isdir ? "directory symlink" : "file symlink";
+    }
+    if (tag == 0xa0000003u) return "junction";   /* IO_REPARSE_TAG_MOUNT_POINT */
+    return NULL;                                  /* a surrogate we cannot name */
+}
+
+/* mingw's headers do not declare the reparse payload, so it is declared here.
+ * Both link shapes put the same four offsets first; only the symlink adds
+ * `Flags`, which is why the two cases cannot share one struct. */
+typedef struct {
+    DWORD ReparseTag;
+    WORD  ReparseDataLength;
+    WORD  Reserved;
+    union {
+        struct {
+            WORD  SubstituteNameOffset;
+            WORD  SubstituteNameLength;
+            WORD  PrintNameOffset;
+            WORD  PrintNameLength;
+            ULONG Flags;
+            WCHAR PathBuffer[1];
+        } Symlink;
+        struct {
+            WORD  SubstituteNameOffset;
+            WORD  SubstituteNameLength;
+            WORD  PrintNameOffset;
+            WORD  PrintNameLength;
+            WCHAR PathBuffer[1];
+        } Mount;
+        struct { UCHAR DataBuffer[1]; } Generic;
+    } u;
+} LinksReparse;
+
+#define LINKS_SYMLINK_RELATIVE 0x00000001u
+
+/* WHERE IT POINTS, spelled the way `os.Readlink` spells it, because the manifest
+ * is compared against z's. That means the SUBSTITUTE name (not the print name,
+ * which a junction may leave empty), with the object-manager prefix `\??\`
+ * stripped and `\??\UNC\` folded back to `\\` -- and a RELATIVE symlink left
+ * exactly as written, since there is nothing to strip and prefixing one would
+ * invent a target. Returns malloc'd UTF-8, or NULL. */
+static char *links_target(const wchar_t *path, int isdir) {
+    DWORD flags = FILE_FLAG_OPEN_REPARSE_POINT;
+    if (isdir) flags |= FILE_FLAG_BACKUP_SEMANTICS;
+    HANDLE h = CreateFileW(path, 0,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, flags, NULL);
+    if (h == INVALID_HANDLE_VALUE) return NULL;
+
+    char *raw = (char *)malloc(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+    if (raw == NULL) { CloseHandle(h); return NULL; }
+    DWORD got = 0;
+    if (!DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0,
+                         raw, MAXIMUM_REPARSE_DATA_BUFFER_SIZE, &got, NULL)
+        || got < 8) {
+        free(raw);
+        CloseHandle(h);
+        return NULL;
+    }
+    CloseHandle(h);
+
+    LinksReparse *r = (LinksReparse *)raw;
+    const WCHAR *base;
+    WORD off, len;
+    int relative = 0;
+    if (r->ReparseTag == IO_REPARSE_TAG_SYMLINK) {
+        base = r->u.Symlink.PathBuffer;
+        off  = r->u.Symlink.SubstituteNameOffset;
+        len  = r->u.Symlink.SubstituteNameLength;
+        relative = (r->u.Symlink.Flags & LINKS_SYMLINK_RELATIVE) != 0;
+    } else if (r->ReparseTag == 0xa0000003u) {
+        base = r->u.Mount.PathBuffer;
+        off  = r->u.Mount.SubstituteNameOffset;
+        len  = r->u.Mount.SubstituteNameLength;
+    } else {
+        free(raw);
+        return NULL;
+    }
+    /* The offsets are attacker-adjacent only in the sense that a filesystem can
+     * contradict itself; either way a length that leaves the buffer is refused
+     * rather than trusted. */
+    if ((size_t)off + (size_t)len + offsetof(LinksReparse, u) > (size_t)got) {
+        free(raw);
+        return NULL;
+    }
+    const WCHAR *name = (const WCHAR *)((const char *)base + off);
+    size_t n = len / sizeof(WCHAR);
+
+    if (!relative) {
+        if (n >= 4 && name[0] == L'\\' && name[1] == L'?' && name[2] == L'?' && name[3] == L'\\') {
+            name += 4;
+            n    -= 4;
+            if (n >= 4 && (name[0] == L'U' || name[0] == L'u')
+                       && (name[1] == L'N' || name[1] == L'n')
+                       && (name[2] == L'C' || name[2] == L'c') && name[3] == L'\\') {
+                /* \??\UNC\server\share -> \\server\share */
+                char *tail = u16_to_u8n(name + 3, (int)(n - 3));
+                if (tail == NULL) { free(raw); return NULL; }
+                size_t tl = strlen(tail);
+                char *out = (char *)malloc(tl + 2);
+                if (out == NULL) { free(tail); free(raw); return NULL; }
+                out[0] = '\\';
+                memcpy(out + 1, tail, tl + 1);
+                free(tail);
+                free(raw);
+                return out;
+            }
+        }
+    }
+    char *out = u16_to_u8n(name, (int)n);
+    free(raw);
+    return out;
+}
+
+/* The link count, the one fact that needs a handle -- see spike/mirrorlinks.
+ * FILES ONLY is not an optimisation to be revisited: NTFS does not permit
+ * hardlinks to directories, so a directory's count is always 1, and z opens
+ * 17,512 destination directory handles that can never report anything. */
+static DWORD links_nlinks(const wchar_t *path) {
+    HANDLE h = CreateFileW(path, 0,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    BY_HANDLE_FILE_INFORMATION bhfi;
+    DWORD n = GetFileInformationByHandle(h, &bhfi) ? bhfi.nNumberOfLinks : 0;
+    CloseHandle(h);
+    return n;
+}
+
+/* One row per surrogate. `tag` travels with it for the same reason it does in
+ * `dirs`: an unnameable surrogate is still a fact, and a caller that cannot
+ * classify it can still be told the number. */
+static void links_record(DirsWalk *w, const wchar_t *full, const char *shown,
+                         DWORD tag, int isdir) {
+    const char *type = links_type(tag, isdir);
+    char *target = links_target(full, isdir);
+    char hex[16];
+    snprintf(hex, sizeof hex, "0x%08lx", (unsigned long)tag);
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("path", -1),
+                   Tcl_NewStringObj(shown ? shown : "", -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("type", -1),
+                   Tcl_NewStringObj(type ? type : "", -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("target", -1),
+                   Tcl_NewStringObj(target ? target : "", -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("tag", -1), Tcl_NewStringObj(hex, -1));
+    Tcl_ListObjAppendElement(NULL, w->entries, d);
+    free(target);
+    /* z REFUSES a surrogate it cannot name and refuses one whose target it
+     * cannot read, and a refusal is what makes `mirror` decline a destructive
+     * run rather than write an incomplete restore manifest. Both are error rows
+     * here, so the Tcl side reaches the same decision from the same facts. */
+    if (type == NULL) {
+        dirs_fault(w, full, ERROR_NOT_SUPPORTED);
+    } else if (target == NULL) {
+        dirs_fault(w, full, ERROR_INVALID_DATA);
+    }
+}
+
 static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                          DirsChild **out, size_t *outn) {
     size_t bufsz = DIRS_BUFSZ;
@@ -429,16 +617,63 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
             int skip = 0;
             if (nlen == 1 && e->FileName[0] == L'.') skip = 1;
             if (nlen == 2 && e->FileName[0] == L'.' && e->FileName[1] == L'.') skip = 1;
-            /* FILES ARE NEVER LISTED. This verb answers one question.
+            /* FILES ARE NEVER LISTED BY `dirs`. This verb answers one question.
              *
-             * AND THAT LINE IS WHERE A LINK SCANNER WOULD START. The entry in
-             * hand already carries the file's attributes AND, for a reparse
-             * point, its tag in EaSize -- both read out of the directory
-             * enumeration, at no per-file cost. spike/mirrorlinks priced
-             * classifying every file here rather than discarding it: 986 ms
-             * against 1,013 ms over 302,654 entries, i.e. free. See
-             * spike/mirrorlinks/RESULTS.md. */
-            if (!(e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) skip = 1;
+             * AND THIS IS WHERE `links` DIVERGES. The entry in hand already
+             * carries the file's attributes AND, for a reparse point, its tag
+             * in EaSize -- both read out of the directory enumeration, at no
+             * per-file cost. spike/mirrorlinks priced classifying every file
+             * here rather than discarding it: 986 ms against 1,013 ms over
+             * 302,654 entries, i.e. free. The handle for a link COUNT is the
+             * one thing that is not free (~66 us), which is why -hardlinks is
+             * an option and not the default.
+             *
+             * A file is never pushed on the stack in either mode -- there is
+             * nothing under it to walk -- so it is dealt with here, entirely,
+             * and then skipped. */
+            if (!(e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (w->mode == DIRS_MODE_LINKS) {
+                    w->files++;
+                    int fileparse = (e->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+                    DWORD ftag = fileparse ? e->EaSize : 0;
+                    /* `skip` is still 1 here only for `.` and `..`, which are
+                     * directories and cannot reach this branch -- tested rather
+                     * than assumed, because the guard is free and a `.` entry
+                     * joined onto its parent is a path that names the parent. */
+                    int wants = (fileparse && dirs_isname(ftag)) || w->hardlinks;
+                    if (wants && !skip) {
+                        wchar_t *fp = dirs_join(it->path, wcslen(it->path), e->FileName, nlen);
+                        if (fp == NULL) {
+                            dirs_fault(w, it->path, ERROR_NOT_ENOUGH_MEMORY);
+                        } else {
+                            char *fshown = dirs_strip(fp, w->unc);
+                            if (fileparse && dirs_isname(ftag)) {
+                                links_record(w, fp, fshown, ftag, 0);
+                            }
+                            /* A reparse point is not a candidate for the
+                             * hardlink question: its bytes are a link payload,
+                             * not shared content, and opening one to ask would
+                             * be a second handle for an answer that cannot
+                             * matter. */
+                            if (w->hardlinks && !fileparse) {
+                                DWORD nl = links_nlinks(fp);
+                                if (nl > 1) {
+                                    w->multilink++;
+                                    Tcl_Obj *m = Tcl_NewDictObj();
+                                    Tcl_DictObjPut(NULL, m, Tcl_NewStringObj("path", -1),
+                                                   Tcl_NewStringObj(fshown ? fshown : "", -1));
+                                    Tcl_DictObjPut(NULL, m, Tcl_NewStringObj("links", -1),
+                                                   Tcl_NewWideIntObj((Tcl_WideInt)nl));
+                                    Tcl_ListObjAppendElement(NULL, w->multi, m);
+                                }
+                            }
+                            free(fshown);
+                            free(fp);
+                        }
+                    }
+                }
+                skip = 1;
+            }
             if (!skip) {
                 if (n == cap) {
                     size_t ncap = cap ? cap * 2 : 32;
@@ -564,7 +799,13 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
 
         char *shown = dirs_strip(it.path, w->unc);
         if (shown != NULL) {
-            Tcl_ListObjAppendElement(NULL, w->paths, Tcl_NewStringObj(shown, -1));
+            /* COUNTED IN BOTH MODES, LISTED IN ONLY ONE. `links` has no use for
+             * 300,000 path strings and would pay for every one of them; the
+             * count is what its report needs, and the emission-precedes-policy
+             * rule this loop rests on is about COUNTING, which is unchanged. */
+            if (w->mode == DIRS_MODE_DIRS) {
+                Tcl_ListObjAppendElement(NULL, w->paths, Tcl_NewStringObj(shown, -1));
+            }
             w->count++;
         } else {
             /* Neither listed, nor counted, nor explained -- the one loss class
@@ -699,6 +940,15 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
         if (it.reparse) {
             Tcl_ListObjAppendElement(NULL, w->links,
                 dirs_link_row(shown ? shown : "", it.tag, it.surrogate, action));
+            /* DIRECTORY surrogates are recorded HERE and file surrogates in
+             * dirs_children, because a directory reaches the stack and a file
+             * never does. Gated on `dirs_isname` rather than on the surrogate
+             * BIT so the two DFS tags -- which redirect the namespace without
+             * setting it -- are named as links too, which is the one place this
+             * walker is deliberately stricter than z. */
+            if (w->mode == DIRS_MODE_LINKS && dirs_isname(it.tag)) {
+                links_record(w, it.path, shown, it.tag, 1);
+            }
         }
         free(shown);
         free(it.path);
@@ -885,70 +1135,128 @@ static void dirs_free(DirsWalk *w) {
     Tcl_DecrRefCount(w->paths);
     Tcl_DecrRefCount(w->links);
     Tcl_DecrRefCount(w->errors);
+    Tcl_DecrRefCount(w->entries);
+    Tcl_DecrRefCount(w->multi);
 }
 
-static int DirsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
-    (void)cd;
-    if (objc < 2) {
-        Tcl_WrongNumArgs(interp, 1, objv, "root ?-depth n? ?-prune patterns?");
-        return TCL_ERROR;
+/* `links` RETURNS A DIFFERENT ANSWER FROM THE SAME WALK. Not `paths` -- a
+ * caller asking which links are under a tree does not want 300,000 path strings
+ * and the memory to hold them, which is why the walk skips building that list in
+ * this mode rather than building it and dropping it here. */
+static Tcl_Obj *links_dict(DirsWalk *w, Tcl_Obj *root) {
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("root", -1), root);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("links", -1), w->entries);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("multilinked", -1), w->multi);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("dirs", -1), Tcl_NewWideIntObj(w->count));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("files", -1), Tcl_NewWideIntObj(w->files));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("errors", -1), w->errors);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("pruned", -1), Tcl_NewWideIntObj(w->pruned));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("depthlimited", -1), Tcl_NewWideIntObj(w->depthlimited));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("maxdepth", -1), Tcl_NewWideIntObj(w->maxdepth));
+    /* The two lists this mode does not use are still owned by the walk and are
+     * released here, because only the dict adopts what it is given. */
+    Tcl_DecrRefCount(w->paths);
+    Tcl_DecrRefCount(w->links);
+    return d;
+}
+
+/* THE OPTION LOOPS ARE PER VERB, AND THAT IS THE MANIFEST'S DOING.
+ *
+ * One shared loop with `if (mode == LINKS && ...-hardlinks...)` in it is the
+ * obvious code and it makes the palette LIE: tools/genmanifest.tcl derives a
+ * verb's options from the `strcmp(a, "-x")` literals its implementation can
+ * reach, and reachability is a fact about the call graph, not about a runtime
+ * branch it cannot evaluate. With one loop, `dirs` was reported as taking
+ * `-hardlinks` -- an option it refuses -- which is exactly the class of false
+ * claim [creed 4] exists to prevent. Two loops, each reached from one command,
+ * make the derivation true by construction.
+ *
+ * `-depth` and `-prune` stay in ONE function, because both verbs really do take
+ * them and the manifest should say so from one place. */
+static int dirs_opt_kv(Tcl_Interp *interp, const char *a, Tcl_Obj *v, DirsWalk *w) {
+    if (strcmp(a, "-depth") == 0) {
+        Tcl_WideInt d;
+        if (Tcl_GetWideIntFromObj(NULL, v, &d) != TCL_OK || d < 0 || d > 0x7fffffff) {
+            /* NEGATIVE IS NOT "UNLIMITED" AND NEITHER IS ZERO. Unlimited is
+             * spelled by leaving the option out; -depth 0 emits the root alone.
+             * A sentinel that turns a typo into a thousand-fold difference in
+             * what you get back is the `-timeout 100` mistake, and this verb's
+             * answer is a whole drive. */
+            return dirs_error(interp, "badvalue", "-depth takes a non-negative integer");
+        }
+        w->depthcap = (int)d;
+        return TCL_OK;
     }
-
-    /* THE PARSER IS THE STRUCT'S SOLE INITIALISER and it sets every field before
-     * anything reads one. proc.c:363-369 records what the alternative cost: a
-     * field added to an options struct and not to its initialiser held whatever
-     * was on the stack, `child start` read the garbage as "inherit stdio",
-     * created no pipes, and dereferenced NULL. */
-    DirsWalk w;
-    w.paths = Tcl_NewListObj(0, NULL);
-    w.links = Tcl_NewListObj(0, NULL);
-    w.errors = Tcl_NewListObj(0, NULL);
-    w.count = 0;
-    w.pruned = 0;
-    w.depthlimited = 0;
-    w.maxdepth = 0;
-    w.depthcap = -1;
-    w.unc = 0;
-    w.prunec = 0;
-    w.prunev = NULL;
-
-    for (int i = 2; i < objc; i++) {
-        const char *a = Tcl_GetString(objv[i]);
-        int isdepth = (strcmp(a, "-depth") == 0);
-        int isprune = (strcmp(a, "-prune") == 0);
-        if (!isdepth && !isprune) {
-            dirs_free(&w); return dirs_error(interp, "usage", "unknown option");
-        }
-        if (i + 1 >= objc) {
-            dirs_free(&w); return dirs_error(interp, "usage", "option needs a value");
-        }
-        Tcl_Obj *v = objv[++i];
-        if (isdepth) {
-            Tcl_WideInt d;
-            if (Tcl_GetWideIntFromObj(NULL, v, &d) != TCL_OK || d < 0 || d > 0x7fffffff) {
-                /* NEGATIVE IS NOT "UNLIMITED" AND NEITHER IS ZERO. Unlimited is
-                 * spelled by leaving the option out; -depth 0 emits the root
-                 * alone. A sentinel that turns a typo into a thousand-fold
-                 * difference in what you get back is the `-timeout 100` mistake,
-                 * and this verb's answer is a whole drive. */
-                dirs_free(&w);
-                return dirs_error(interp, "badvalue", "-depth takes a non-negative integer");
-            }
-            w.depthcap = (int)d;
-            continue;
-        }
+    if (strcmp(a, "-prune") == 0) {
         /* Tcl's OWN matcher, so `-prune` speaks `string match` and not a private
          * pattern dialect nobody can look up -- the exact trap `glob`'s pattern
          * language set for the three Tcl attempts. Case-insensitive, against the
          * base name only. */
-        if (Tcl_ListObjGetElements(NULL, v, &w.prunec, &w.prunev) != TCL_OK) {
-            w.prunec = 0;
-            w.prunev = NULL;
-            dirs_free(&w);
+        if (Tcl_ListObjGetElements(NULL, v, &w->prunec, &w->prunev) != TCL_OK) {
+            w->prunec = 0;
+            w->prunev = NULL;
             return dirs_error(interp, "badvalue", "-prune takes a list of patterns");
         }
+        return TCL_OK;
     }
+    return dirs_error(interp, "usage", "unknown option");
+}
 
+static int dirs_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], DirsWalk *w) {
+    for (int i = 2; i < objc; i++) {
+        const char *a = Tcl_GetString(objv[i]);
+        if (i + 1 >= objc) return dirs_error(interp, "usage", "option needs a value");
+        if (dirs_opt_kv(interp, a, objv[++i], w) != TCL_OK) return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
+/* `-hardlinks` IS THE ONLY VALUELESS OPTION EITHER VERB TAKES, and only `links`
+ * takes it: it is the switch that buys one handle per file -- ~66 us, measured
+ * in spike/mirrorlinks -- for the one question a directory enumeration cannot
+ * answer. `dirs` refuses it as an unknown option rather than accepting and
+ * ignoring it, which is why this literal must not be reachable from `dirs`. */
+static int links_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], DirsWalk *w) {
+    for (int i = 2; i < objc; i++) {
+        const char *a = Tcl_GetString(objv[i]);
+        if (strcmp(a, "-hardlinks") == 0) { w->hardlinks = 1; continue; }
+        if (i + 1 >= objc) return dirs_error(interp, "usage", "option needs a value");
+        if (dirs_opt_kv(interp, a, objv[++i], w) != TCL_OK) return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
+/* THE SOLE INITIALISER, and it sets every field before anything reads one.
+ * proc.c:363-369 records what the alternative cost: a field added to an options
+ * struct and not to its initialiser held whatever was on the stack, `child
+ * start` read the garbage as "inherit stdio", created no pipes, and
+ * dereferenced NULL. */
+static void dirs_init(DirsWalk *w, int mode) {
+    w->paths = Tcl_NewListObj(0, NULL);
+    w->links = Tcl_NewListObj(0, NULL);
+    w->errors = Tcl_NewListObj(0, NULL);
+    w->count = 0;
+    w->pruned = 0;
+    w->depthlimited = 0;
+    w->maxdepth = 0;
+    w->depthcap = -1;
+    w->unc = 0;
+    w->prunec = 0;
+    w->prunev = NULL;
+    w->mode = mode;
+    w->hardlinks = 0;
+    w->entries = Tcl_NewListObj(0, NULL);
+    w->multi = Tcl_NewListObj(0, NULL);
+    w->files = 0;
+    w->multilink = 0;
+}
+
+/* The walk itself, once the options are in. Takes no argv beyond the root, so
+ * no option literal can reach it and neither verb's manifest entry is polluted
+ * by the other's. */
+static int dirs_core(Tcl_Interp *interp, Tcl_Obj *const objv[], DirsWalk *wp) {
+    DirsWalk w = *wp;
     wchar_t *rootw = NULL;
     if (dirs_prefix(interp, Tcl_GetString(objv[1]), &rootw, &w.unc) != TCL_OK) {
         dirs_free(&w); return TCL_ERROR;   /* dirs_prefix has already spoken */
@@ -1048,12 +1356,43 @@ static int DirsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     }
     free(rootw);
 
-    Tcl_SetObjResult(interp, dirs_dict(&w, rootobj));
+    Tcl_SetObjResult(interp, w.mode == DIRS_MODE_LINKS ? links_dict(&w, rootobj)
+                                                       : dirs_dict(&w, rootobj));
     return TCL_OK;
+}
+
+static int DirsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    (void)cd;
+    if (objc < 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "root ?-depth n? ?-prune patterns?");
+        return TCL_ERROR;
+    }
+    DirsWalk w;
+    dirs_init(&w, DIRS_MODE_DIRS);
+    if (dirs_parse(interp, objc, objv, &w) != TCL_OK) { dirs_free(&w); return TCL_ERROR; }
+    return dirs_core(interp, objv, &w);
+}
+
+/* `links` -- every name surrogate under a tree, with where it points, and on
+ * request every file whose bytes are shared. The two questions `mirror` asks of
+ * a tree before it will touch it, and the reason they are one verb is that they
+ * are one walk: the reparse tag comes free with the enumeration, and only the
+ * link count needs a handle. See spike/mirrorlinks. */
+static int LinksCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    (void)cd;
+    if (objc < 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "root ?-depth n? ?-prune patterns? ?-hardlinks?");
+        return TCL_ERROR;
+    }
+    DirsWalk w;
+    dirs_init(&w, DIRS_MODE_LINKS);
+    if (links_parse(interp, objc, objv, &w) != TCL_OK) { dirs_free(&w); return TCL_ERROR; }
+    return dirs_core(interp, objv, &w);
 }
 
 int Machtelddirs_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::dirs", DirsCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::links", LinksCmd, NULL, NULL);
     Tcl_PkgProvide(interp, "machteld::dirs", "0.1");
     return TCL_OK;
 }

@@ -113,13 +113,46 @@ proc srcfile {name} {
 # attribution can still follow a helper called from one branch -- `hash`'s
 # -binary lives in `want_binary`, defined above the dispatcher and therefore
 # outside every `idx ==` region.
+# EVERY FILE-LOCAL FUNCTION A REGION REACHES, to closure. Hoisted out of
+# `opts_in`, which has done this since `hash`'s -binary went missing, so the
+# domain and code scanners can use the same rule: DERIVATION MUST GO WHERE THE
+# CODE WENT. Nothing else in this file may assume a verb's facts are written in
+# the function the dispatcher happens to be.
+proc fn_closure {region fns} {
+    set todo {} ; set seen {}
+    foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $region] {
+        if {[dict exists $fns $callee]} { lappend todo $callee }
+    }
+    while {[llength $todo]} {
+        set f [lindex $todo 0] ; set todo [lrange $todo 1 end]
+        if {$f in $seen} continue
+        lappend seen $f
+        set body [dict get $fns $f]
+        append region "\n" $body
+        foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $body] {
+            if {[dict exists $fns $callee] && $callee ni $seen} { lappend todo $callee }
+        }
+    }
+    return $region
+}
+
 proc verb_body {verb} {
     global REG FILETEXT FILEFNS VERBSOF IMPL
     set path [dict get $REG $verb]
     if {[llength [dict get $VERBSOF $path]] == 1} { return [dict get $FILETEXT $path] }
     set fns [dict get $FILEFNS $path]
     foreach {fn v} $IMPL {
-        if {$v eq $verb && [dict exists $fns $fn]} { return [dict get $fns $fn] }
+        if {$v eq $verb && [dict exists $fns $fn]} {
+            # THE DISPATCHER IS NOT ALWAYS THE IMPLEMENTATION. `dirs` and `links`
+            # share one command body behind two three-line registrations, so
+            # reading `DirsCmd` alone yields no domain, no codes and no options
+            # -- and the generator said so, loudly, rather than emitting a verb
+            # described as raising nothing. Following the local callees is the
+            # same rule `opts_in` has always used; it is applied here now because
+            # this is the first file where a verb's dispatcher holds none of its
+            # facts.
+            return [fn_closure [dict get $fns $fn] $fns]
+        }
     }
     error "genmanifest: $verb is registered in [file tail $path] but its\
            implementation was not found -- see `functions`"
@@ -168,20 +201,7 @@ proc opts_in {region shared {fns {}}} {
     # while the palette documented -binary and the binary accepted it. Same
     # shape as the result-shape scanner following `child_dict` to
     # `child_dict_ex`: derivation must go where the code went.
-    set todo {} ; set seen {}
-    foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $region] {
-        if {[dict exists $fns $callee]} { lappend todo $callee }
-    }
-    while {[llength $todo]} {
-        set f [lindex $todo 0] ; set todo [lrange $todo 1 end]
-        if {$f in $seen} continue
-        lappend seen $f
-        set body [dict get $fns $f]
-        append region "\n" $body
-        foreach {_ callee} [regexp -all -inline {(\w+)\s*\(} $body] {
-            if {[dict exists $fns $callee] && $callee ni $seen} { lappend todo $callee }
-        }
-    }
+    set region [fn_closure $region $fns]
     # Any strcmp against a "-something" literal is an option check, whichever
     # way the argument got there: some sites compare Tcl_GetString(objv[i])
     # directly, others hoist it into a local first. Matching only the first
