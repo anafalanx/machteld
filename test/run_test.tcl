@@ -1814,7 +1814,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach dirs front hash help journal json log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
+    {child cli detach dirs front hash help journal json links log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -1924,8 +1924,23 @@ if {[file isdirectory $SRC]} {
     set optsrc [lsearch -all -inline -not [lsearch -all -inline -not \
         [lsort [glob -nocomplain -directory $SRC *.c]] *sqlite3.c] *sqlite3ext*]
     check "the option scan covers every source file" [expr {[llength $optsrc] >= 8}]
+    # COMMENTS ARE NOT CODE, and this gate learned it the way the palette-advice
+    # gate did: a comment in dirs.c EXPLAINING that the generator reads
+    # `strcmp(a, "-x")` literals made the scan demand an option called `-x`, and
+    # the suite failed on a sentence. A gate that a comment can fail is a gate
+    # reporting on prose. Stripped before scanning, in both comment syntaxes,
+    # and the stripper is checked below so it cannot quietly stop stripping.
+    proc cstrip {text} {
+        regsub -all {/\*.*?\*/} $text " " text
+        regsub -all -line {//.*$} $text " " text
+        return $text
+    }
+    check "the comment stripper strips both syntaxes" [expr {
+        [string first "-nope" [cstrip "a /* strcmp(a, \"-nope\") */ b"]] < 0 &&
+        [string first "-nope" [cstrip "a // strcmp(a, \"-nope\")\nb"]] < 0 &&
+        [string first "-real" [cstrip {strcmp(a, "-real")}]] >= 0}]
     foreach f $optsrc {
-        set fh [open $f r] ; set text [read $fh] ; close $fh
+        set fh [open $f r] ; set text [cstrip [read $fh]] ; close $fh
         foreach {_ o} [regexp -all -inline {strcmp\([^,]+,\s*"(-\w+)"\)} $text] { lappend inC $o }
     }
     set missing [lsort -unique [lmap o $inC {expr {$o in $declared ? [continue] : $o}}]]
@@ -3915,6 +3930,110 @@ if {"cdirs" in [::machteld::FrontCommands]} {
 
 file delete -force $CDOUT
 check "the cdirs fixture tore down completely" [expr {![file exists $CDOUT]}]
+
+# --- `links`: the same walk, asked what redirects and what is shared ----------
+#
+# THE VERB `mirror` IS BUILT ON. A fixture rather than the live tree, because the
+# facts have to be arranged: two junctions in 302,654 real entries is not a test,
+# it is a coincidence that happens to hold today.
+set LKFX [file join [file dirname $FX] mt_links_fx]
+file delete -force $LKFX
+file mkdir [file join $LKFX plain sub]
+file mkdir [file join $LKFX target]
+# Written with a local helper rather than the ledger section's: that one is
+# defined two hundred lines BELOW this point, and a fixture that reaches forward
+# for its writer fails with "invalid command" instead of with what it checks --
+# the lesson `valof` and the hoisted `errcode_of` are already here for.
+proc LinksFxWrite {path text} {
+    set fh [open $path wb]
+    puts -nonewline $fh $text
+    close $fh
+}
+LinksFxWrite [file join $LKFX plain a.txt] "a\n"
+LinksFxWrite [file join $LKFX target t.txt] "t\n"
+# A junction and a hardlink both work without elevation; a SYMLINK needs either
+# admin or Developer Mode, so it is attempted and skipped WITH A NOTICE rather
+# than silently dropped -- a check that quietly does not run is the shape this
+# suite exists to refuse.
+set LKJ [file join $LKFX jn]
+catch {exec cmd /c mklink /J [file nativename $LKJ] [file nativename [file join $LKFX target]]}
+set LKHAVEJ [file exists $LKJ]
+set LKSYM [file join $LKFX sym.txt]
+catch {exec cmd /c mklink [file nativename $LKSYM] [file nativename [file join $LKFX plain a.txt]]}
+set LKHAVES [file exists $LKSYM]
+catch {exec cmd /c mklink /H [file nativename [file join $LKFX plain b.txt]] \
+                             [file nativename [file join $LKFX plain a.txt]]}
+set LKHAVEH [file exists [file join $LKFX plain b.txt]]
+if {!$LKHAVEJ} { puts "     (no junction: mklink /J failed -- the links junction checks need one)" }
+if {!$LKHAVES} { puts "     (no symlink: mklink needs admin or Developer Mode -- that check is skipped)" }
+if {!$LKHAVEH} { puts "     (no hardlink: mklink /H failed -- the -hardlinks checks need one)" }
+
+set LK [links $LKFX]
+# FIELD ACCESS THAT CANNOT ABORT THE RUN. `dict get` on a row that is not there
+# raises, and a raise here takes the remaining two hundred checks with it -- the
+# `valof` lesson, which this suite has now learned six times. A missing row
+# yields "" and fails its own check, loudly, alone.
+proc lkat {d kind path field} {
+    if {[catch {dict get $d $kind} rows]} { return "" }
+    foreach e $rows {
+        if {[catch {dict get $e path} p]} continue
+        if {[string match "*$path" $p]} {
+            if {[catch {dict get $e $field} v]} { return "" }
+            return $v
+        }
+    }
+    return ""
+}
+proc lkslash {p} { return [string tolower [string map {\\ /} $p]] }
+check "links counts the files it walked past" [expr {[valof {dict get $LK files}] >= 2}]
+check "links counts directories like dirs does" [expr {[valof {dict get $LK dirs}] >= 4}]
+if {$LKHAVEJ} {
+    check "links names a junction as z names it" [expr {
+        [lkat $LK links /jn type] eq "junction"}]
+    check "links reads the junction's target" [expr {
+        [lkslash [lkat $LK links /jn target]] eq [lkslash [file join $LKFX target]]}]
+    check "links reports the junction's tag" [expr {
+        [lkat $LK links /jn tag] eq "0xa0000003"}]
+    # AND DOES NOT DESCEND IT. `target/t.txt` is reachable through the junction
+    # as well as through `target` itself, so a walker that entered the junction
+    # would count it twice.
+    check "links does not descend a name surrogate" [expr {[valof {dict get $LK files}] <= 5}]
+}
+if {$LKHAVES} {
+    check "links names a file symlink" [expr {
+        [lkat $LK links /sym.txt type] eq "file symlink"}]
+    check "links reads the symlink's target" [expr {
+        [lkat $LK links /sym.txt target] ne ""}]
+}
+# WITHOUT -hardlinks THE HANDLE IS NEVER TAKEN, which is the whole reason it is
+# an option: one open per file at ~66 us against ~3.3 us for the walk.
+check "links reports no multilinks unless asked" [expr {[dict get $LK multilinked] eq ""}]
+if {$LKHAVEH} {
+    set LKH [links $LKFX -hardlinks]
+    check "links -hardlinks finds both names of the shared file" [expr {
+        [llength [valof {dict get $LKH multilinked}]] == 2}]
+    check "links -hardlinks reports the link count" [expr {
+        [lkat $LKH multilinked /a.txt links] == 2}]
+    # A reparse point's bytes are a link payload, not shared content, so it is
+    # never opened for a count it cannot have.
+    if {$LKHAVES} {
+        check "links -hardlinks ignores reparse points" [expr {
+            [lkat $LKH multilinked /sym.txt links] eq ""}]
+    }
+}
+check "links refuses an unknown option" [expr {
+    [errcode_of {links $LKFX -nope 1}] eq {MACHTELD DIRS usage}}]
+check "dirs refuses the option only links takes" [expr {
+    [errcode_of {dirs $LKFX -hardlinks}] eq {MACHTELD DIRS usage}}]
+check "links refuses a missing root like dirs does" [expr {
+    [errcode_of {links [file join $LKFX no_such_dir_zzz]}] eq {MACHTELD DIRS notfound}}]
+# The palette's two verbs must not drift apart on the shared half.
+check "links and dirs count the same directories" [expr {
+    [dict get $LK dirs] == [dict get [dirs $LKFX] dirs]}]
+check "links honours -depth" [expr {[dict get [links $LKFX -depth 0] dirs] == 1}]
+
+file delete -force $LKFX
+check "the links fixture tore down completely" [expr {![file exists $LKFX]}]
 
 # --- `ledger`: the payload inventory, and Go's JSON transcribed ---------------
 #

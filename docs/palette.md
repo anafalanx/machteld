@@ -226,6 +226,45 @@ back is the same mistake as `-timeout 100`. A drive-relative root (`C:` rather t
 resolves against the per-drive current directory, which is process state nobody set; it is
 refused with `badvalue` naming the spelling that works.
 
+### `links` — the same walk, asked a different question
+
+```tcl
+links C:/dev                         ;# every name surrogate under it, with where it points
+links $d -hardlinks                  ;# and every file whose bytes are shared
+links $d -depth 2 -prune {node_modules}   ;# the same two options dirs takes
+```
+
+The result is `{root links multilinked dirs files errors pruned depthlimited maxdepth}`. `links` is
+one dict per name surrogate — `{path type target tag}`, where `type` is `junction`,
+`file symlink` or `directory symlink` — and `multilinked` is one dict per file with more than one
+name, `{path links}`, empty unless `-hardlinks` was asked for.
+
+**The two questions `mirror` asks of a tree before it will touch it**, and they are one verb
+because they are one walk. `dirs` throws every file entry away at the moment the enumeration hands
+it over, tag and all; `links` keeps it. Measured, that costs nothing: 986 ms against 1,013 ms over
+302,654 entries, because the bytes were already in the buffer. See
+[spike/mirrorlinks](../spike/mirrorlinks/RESULTS.md).
+
+**`-hardlinks` is an option and not the default because it is the one thing the enumeration cannot
+answer.** No directory info class carries a link count, so it costs one open/query/close per file
+— ~66 µs, against ~3.3 µs per entry for the whole walk. Directories are never opened for it: NTFS
+does not permit hardlinks to directories, so their count is always 1, and a handle-per-entry scan
+takes 2,523 more handles than a handle-per-file scan over `.z\r\msys2` and finds exactly the same
+160 multilinked files. Reparse points are not opened either — their bytes are a link payload, not
+shared content.
+
+**The type names are z's, deliberately**, because they are written into the restore manifest a
+`mirror` replica carries: a file format shared with the front door being replaced, not a rendering
+choice. Same reasoning as the ledger's `generatedBy`.
+
+**A surrogate this verb cannot name, or whose target it cannot read, is an `errors` row** as well
+as a `links` row with the field left empty. That is what lets `mirror` refuse a destructive run
+rather than write a restore manifest that silently omits a link — the refusal is reached from the
+same facts z reaches it from.
+
+`links` follows the same descent policy as `dirs`, so the root exemption applies here too: a
+junction root is walked, and reported.
+
 **What it deliberately does not do**, because [rule 4](direction.md) says C is for what Tcl cannot
 reach: it does not write the list to a file (three lines of `open`/`puts` do that, and a result
 key that is silently empty whenever an option is used is the failure this verb exists to abolish),
