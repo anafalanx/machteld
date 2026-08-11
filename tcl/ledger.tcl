@@ -60,6 +60,15 @@ proc ::machteld::LedgerJson {v {ind ""}} {
         i { return $payload }
         n { return "null" }
         s { return [LedgerJsonStr $payload] }
+        b {
+            # A BOOLEAN TYPE RATHER THAN A RAW-TEXT ONE. `mirror`'s state and
+            # artefact files carry `dryRun` and `skipped`, and the obvious way to
+            # get them out is a passthrough that emits whatever string it is
+            # handed -- which is an unescaped hole in a writer whose entire job
+            # is escaping. This takes a Tcl truth value and emits one of two
+            # literals; nothing else can reach the output.
+            return [expr {$payload ? "true" : "false"}]
+        }
         o {
             # Go's indenter writes an empty object as `{}` on one line, and this
             # is not a corner case: EVERY payload ends in `"restore": {}`.

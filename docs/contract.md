@@ -75,7 +75,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CHILD` | `child` (all subcommands) |
 | `WAIT` | `wait` |
 | `DETACH` | `detach` |
-| `DIRS` | `dirs` — walk a directory tree |
+| `DIRS` | `dirs` and `links` — one walker, two questions, so one domain |
 | `PTY` | `pty` (all subcommands) |
 | `WATCH` | `watch` (all subcommands) |
 | `STORE` | `store` (all subcommands) |
@@ -87,6 +87,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CLI` | `cli` |
 | `LOG` | `log` (all subcommands) |
 | `FRONT` | `front` — the workspace front door |
+| `MIRROR` | `mirror` — the recovery replica. Its own domain and not `FRONT`'s, because its refusals are the substance of the command rather than a failure of the front door to resolve something |
 | `TCL` | `tcl` — run a script as this process's program |
 | `JOURNAL` | `journal` — the front door's record |
 | `WORKER` | `worker` (all subcommands) |
