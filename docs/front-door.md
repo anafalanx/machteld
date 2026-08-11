@@ -488,6 +488,34 @@ The port makes a scan z runs twice per mirror run **14× faster**: 28.2 s of z's
 becomes 2.0 s. And it is more faithful in one respect already visible — pure Tcl cannot tell a
 junction from a directory symlink, and the C walk reads the tag.
 
+**The destination hardlink check was the one piece left unmeasured, and it is now measured too.**
+It rejects destination files whose bytes are shared through hardlinks, which needs
+`nNumberOfLinks`, which no directory enumeration class carries — so unlike the link scan there is
+no order of magnitude waiting to be found. Three of z's five system calls per entry are still
+waste: the attribute query and the reparse `DeviceIoControl` are answerable from the enumeration,
+and **NTFS forbids hardlinks to directories**, so the 17,512 directory handles z opens on the
+destination can never find anything (measured — a handle-per-entry mode takes 2,523 more handles
+than handle-per-file and finds the same 160 multilinked files, every run). What remains is one
+open/query/close per file, and that is irreducible.
+
+**It does not force the code into C.** Tcl's `file stat` returns a real `nlink` on Windows —
+verified against a `mklink /H` fixture, and it finds the same 160 multilinked files in msys2 that
+the C probe finds. Interleaved, median of 7 rounds: **C 66.1 µs against Tcl 90.0 µs per file**
+locally, and 51.8 against 69.2 on the OneDrive destination — **1.36× and 1.34×**, the same ratio
+twice from independent samples. At full scale the destination's 241,700 files cost ~12.6 s in C and
+~16.7 s in Tcl against z's ~18 s: the whole spread is about four seconds inside a command that runs
+robocopy over a quarter of a million files. So the scan should be C because the walk already is,
+not because anything requires it.
+
+**Two wrong numbers came out of that measurement before the design was fixed**, and both are worth
+naming because they were produced the same afternoon as the rule that should have prevented them.
+Run as sequential blocks, "Tcl is twice as fast as C" (102.2 µs against 54.7) and "`GENERIC_READ`
+is nearly 2× faster than `access=0`" (66.4 against 115.4). Interleaved, both orderings reverse and
+z's existing flags turn out to be the fastest of the three. The variance was larger than every
+effect being looked for, and min-of-N does not converge when the machine is drifting — the fix is
+to run every arm inside each round so the noise is shared, and report the median. Third rule, and
+the one that generalises furthest: **comparisons must be interleaved, not blocked.**
+
 ### `ledger`, and a file two programs have to agree on to the byte
 
 `mt ledger refresh` and `mt ledger check` maintain `.z/book/payloads.lock.json` and
