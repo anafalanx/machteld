@@ -188,14 +188,26 @@ typedef struct {
     Tcl_WideInt  maxdepth;
     int          depthcap;   /* -1 is unlimited, and unlimited is spelled by omission */
     int          unc;        /* the root is \\?\UNC\..., so the prefix strips differently */
+    /* THE PATTERNS ARE OWNED, NOT BORROWED, and that is a bug fix rather than a
+     * style. `prunev` used to be the raw element array of the CALLER's `-prune`
+     * object, held for the whole walk. Hand the same Tcl_Obj to `-depth` as
+     * well -- `dirs $d -prune $v -depth $v` -- and `Tcl_GetWideIntFromObj`
+     * shimmers it to a number, freeing the list rep and its ListStore, while
+     * `prunec` still says there is one pattern. Measured: the read did not
+     * crash, it silently matched nothing, so the subtree the caller asked to
+     * exclude was walked and listed and `pruned` reported 0. No error, no row --
+     * this file's whole thesis inverted, since its guarantee is about what goes
+     * MISSING and says nothing about what should have been left out. */
+    Tcl_Obj     *pruneobj;   /* our own copy, ref held for the walk's lifetime */
     Tcl_Size     prunec;
-    Tcl_Obj    **prunev;
+    Tcl_Obj    **prunev;     /* into pruneobj, which nothing else can shimmer */
 
     /* --- links mode only ------------------------------------------------- */
     int          mode;
     int          hardlinks;  /* -hardlinks: also report files with nlinks > 1 */
     Tcl_Obj     *entries;    /* {path .. type .. target ..} per name surrogate */
     Tcl_Obj     *multi;      /* {path .. links N} per multiply-linked file */
+    Tcl_Obj     *entered;    /* non-surrogate reparse dirs the walk went into */
     Tcl_WideInt  files;
     Tcl_WideInt  multilink;
 } DirsWalk;
@@ -532,14 +544,23 @@ static char *links_target(const wchar_t *path, int isdir) {
  * FILES ONLY is not an optimisation to be revisited: NTFS does not permit
  * hardlinks to directories, so a directory's count is always 1, and z opens
  * 17,512 destination directory handles that can never report anything. */
+/* Returns 0 ONLY when the answer could not be obtained, and leaves GetLastError
+ * set for the caller's error row. NTFS never reports zero links for a file that
+ * exists, so 0 is unambiguous as a failure signal. */
 static DWORD links_nlinks(const wchar_t *path) {
     HANDLE h = CreateFileW(path, 0,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (h == INVALID_HANDLE_VALUE) return 0;
     BY_HANDLE_FILE_INFORMATION bhfi;
-    DWORD n = GetFileInformationByHandle(h, &bhfi) ? bhfi.nNumberOfLinks : 0;
-    CloseHandle(h);
+    DWORD err = 0, n = 0;
+    if (GetFileInformationByHandle(h, &bhfi)) {
+        n = bhfi.nNumberOfLinks;
+    } else {
+        err = GetLastError();
+    }
+    CloseHandle(h);          /* CloseHandle clobbers GetLastError; restore it */
+    if (n == 0) SetLastError(err ? err : ERROR_ACCESS_DENIED);
     return n;
 }
 
@@ -679,7 +700,24 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                              * matter. */
                             if (w->hardlinks && !fileparse) {
                                 DWORD nl = links_nlinks(fp);
-                                if (nl > 1) {
+                                /* A FILE WE COULD NOT OPEN IS NOT A FILE WITH
+                                 * ONE LINK. `links_nlinks` returns 0 for a
+                                 * failed open, a failed query and (nominally) a
+                                 * real zero alike, and `nl > 1` folded all three
+                                 * into "nothing to report" with no row -- so
+                                 * `links C:/ -hardlinks` answered `multilinked 0,
+                                 * errors 0` over a root where three of five files
+                                 * (pagefile.sys, swapfile.sys, the SAM hive) cannot
+                                 * be opened at all. Under WinSxS, where servicing
+                                 * hardlinks live in bulk beside locked and
+                                 * ACL-denied files, that silence is the answer
+                                 * being wrong about the very thing it was asked.
+                                 * The contract this file states for a surrogate
+                                 * whose target cannot be read now holds for the
+                                 * link count too. */
+                                if (nl == 0) {
+                                    dirs_fault(w, fp, GetLastError());
+                                } else if (nl > 1) {
                                     w->multilink++;
                                     Tcl_Obj *m = Tcl_NewDictObj();
                                     Tcl_DictObjPut(NULL, m, Tcl_NewStringObj("path", -1),
@@ -971,6 +1009,23 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
             if (w->mode == DIRS_MODE_LINKS && dirs_isname(it.tag)) {
                 links_record(w, it.path, shown, it.tag, 1);
             }
+            /* AND EVERY OTHER REPARSE DIRECTORY IS STILL DISCLOSED. `links`
+             * built the row above and then `links_dict` threw the whole list
+             * away, so a NON-surrogate reparse point -- a OneDrive
+             * Files-On-Demand root, tag 0x9000701a -- vanished from the answer
+             * entirely: `links C:/Users/anafa/OneDrive` came back
+             * `links {} multilinked {} errors {}`, clean, plausible and silent
+             * about a cloud placeholder the walk had just descended.
+             *
+             * That is the exact silence `dirs` was fixed for once already, in
+             * this same directory, reintroduced by a new verb through a
+             * different route. The row is kept in its own key so the two
+             * questions stay separate: `links` is where the walk stopped,
+             * `entered` is where it went that z would not. */
+            if (w->mode == DIRS_MODE_LINKS && !dirs_isname(it.tag)) {
+                Tcl_ListObjAppendElement(NULL, w->entered,
+                    dirs_link_row(shown ? shown : "", it.tag, it.surrogate, action));
+            }
         }
         free(shown);
         free(it.path);
@@ -1003,6 +1058,7 @@ static Tcl_Obj *dirs_dict(DirsWalk *w, Tcl_Obj *root) {
      * and `links`; neither is optional. */
     Tcl_DecrRefCount(w->entries);
     Tcl_DecrRefCount(w->multi);
+    Tcl_DecrRefCount(w->entered);
     return d;
 }
 
@@ -1167,12 +1223,26 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
  * the truth is four. Creed 4 says the palette describes itself; a helper that
  * hides three of a verb's four codes from the generator is that promise
  * decaying silently, in the file whose subject is silent decay. */
+/* SEPARATE FROM dirs_free, because the prune copy has to be released on the
+ * SUCCESS path too -- where the five result lists must NOT be, three of them
+ * having been adopted by the dict. Called from both. */
+static void dirs_freeprune(DirsWalk *w) {
+    if (w->pruneobj != NULL) {
+        Tcl_DecrRefCount(w->pruneobj);
+        w->pruneobj = NULL;
+    }
+    w->prunec = 0;
+    w->prunev = NULL;
+}
+
 static void dirs_free(DirsWalk *w) {
     Tcl_DecrRefCount(w->paths);
     Tcl_DecrRefCount(w->links);
     Tcl_DecrRefCount(w->errors);
     Tcl_DecrRefCount(w->entries);
     Tcl_DecrRefCount(w->multi);
+    Tcl_DecrRefCount(w->entered);
+    dirs_freeprune(w);
 }
 
 /* `links` RETURNS A DIFFERENT ANSWER FROM THE SAME WALK. Not `paths` -- a
@@ -1184,6 +1254,7 @@ static Tcl_Obj *links_dict(DirsWalk *w, Tcl_Obj *root) {
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("root", -1), root);
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("links", -1), w->entries);
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("multilinked", -1), w->multi);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("entered", -1), w->entered);
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("dirs", -1), Tcl_NewWideIntObj(w->count));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("files", -1), Tcl_NewWideIntObj(w->files));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("errors", -1), w->errors);
@@ -1228,8 +1299,17 @@ static int dirs_opt_kv(Tcl_Interp *interp, const char *a, Tcl_Obj *v, DirsWalk *
         /* Tcl's OWN matcher, so `-prune` speaks `string match` and not a private
          * pattern dialect nobody can look up -- the exact trap `glob`'s pattern
          * language set for the three Tcl attempts. Case-insensitive, against the
-         * base name only. */
-        if (Tcl_ListObjGetElements(NULL, v, &w->prunec, &w->prunev) != TCL_OK) {
+         * base name only.
+         *
+         * DUPLICATED FIRST. The elements below point into the list's internal
+         * representation, and the caller's object is not ours to rely on: the
+         * same Tcl_Obj passed to `-depth` in the same command shimmers to a
+         * number and takes the ListStore with it. A private copy with our own
+         * reference is unshimmerable for the walk's lifetime. */
+        if (w->pruneobj != NULL) { Tcl_DecrRefCount(w->pruneobj); w->pruneobj = NULL; }
+        w->pruneobj = Tcl_DuplicateObj(v);
+        Tcl_IncrRefCount(w->pruneobj);
+        if (Tcl_ListObjGetElements(NULL, w->pruneobj, &w->prunec, &w->prunev) != TCL_OK) {
             w->prunec = 0;
             w->prunev = NULL;
             return dirs_error(interp, "badvalue", "-prune takes a list of patterns");
@@ -1278,12 +1358,14 @@ static void dirs_init(DirsWalk *w, int mode) {
     w->maxdepth = 0;
     w->depthcap = -1;
     w->unc = 0;
+    w->pruneobj = NULL;
     w->prunec = 0;
     w->prunev = NULL;
     w->mode = mode;
     w->hardlinks = 0;
     w->entries = Tcl_NewListObj(0, NULL);
     w->multi = Tcl_NewListObj(0, NULL);
+    w->entered = Tcl_NewListObj(0, NULL);
     w->files = 0;
     w->multilink = 0;
 }
@@ -1392,6 +1474,8 @@ static int dirs_core(Tcl_Interp *interp, Tcl_Obj *const objv[], DirsWalk *wp) {
     }
     free(rootw);
 
+    /* The patterns are done with; the result lists are not. */
+    dirs_freeprune(&w);
     Tcl_SetObjResult(interp, w.mode == DIRS_MODE_LINKS ? links_dict(&w, rootobj)
                                                        : dirs_dict(&w, rootobj));
     return TCL_OK;
