@@ -4264,10 +4264,80 @@ if {$LKHAVEH} {
             [lkat $LKH multilinked /sym.txt links] eq ""}]
     }
 }
+# LK-UAF: `-prune` HELD A BORROWED POINTER INTO THE CALLER'S OBJECT. Hand the
+# same Tcl_Obj to `-depth` in one command and `Tcl_GetWideIntFromObj` shimmers it
+# to a number, freeing the list rep while `prunec` still says there is a pattern.
+# It did not crash -- it silently matched NOTHING, so the subtree the caller
+# asked to exclude was walked and listed with `pruned` reporting 0. This file's
+# guarantee is about what goes MISSING and says nothing about what should have
+# been left out, so no other gate here could have caught it.
+# ITS OWN FIXTURE, not $LKFX. The first version added this subtree to the shared
+# one AFTER `$LK` had been captured, and the "links and dirs count the same
+# directories" check two screens below then compared a stale count against a
+# fresh one and failed. A fixture that mutates a tree another check already
+# measured is a test breaking a test.
+set LKPFX [file join [file dirname $FX] mt_prune_fx]
+file delete -force $LKPFX
+file mkdir [file join $LKPFX pruneme child deeper]
+file mkdir [file join $LKPFX other]
+set LKV pruneme
+set LKSHARED [valof {dirs $LKPFX -prune $LKV -depth 9}]
+set LKSEP    [valof {dirs $LKPFX -prune pruneme -depth 9}]
+check "-prune actually pruned something in this fixture" [expr {
+    [valof {dict get $LKSEP pruned}] >= 1}]
+check "-prune survives sharing its object with -depth" [expr {
+    [valof {dict get $LKSHARED pruned}] == [valof {dict get $LKSEP pruned}]
+    && [valof {dict get $LKSHARED dirs}] == [valof {dict get $LKSEP dirs}]}]
+check "links -prune survives the same sharing" [expr {
+    [valof {dict get [links $LKPFX -prune $LKV -depth 9] pruned}]
+    == [valof {dict get $LKSEP pruned}]}]
+file delete -force $LKPFX
+
+# LK-ERR: A FILE THAT CANNOT BE OPENED IS NOT A FILE WITH ONE LINK. `links
+# -hardlinks` folded "open failed", "query failed" and a real answer into one
+# zero and wrote no row, so `links C:/ -hardlinks` answered `multilinked 0,
+# errors 0` over a root where pagefile.sys, swapfile.sys and the SAM hive cannot
+# be opened at all. Asserted against C:/ because that is where locked files
+# reliably live; a machine with none gets a printed notice, not a silent pass.
+set LKROOT [valof {links C:/ -hardlinks -depth 1}]
+if {[llength [valof {dict get $LKROOT errors}]] == 0} {
+    puts "     (no unopenable file at C:/ -- the hardlink error-row check needs one)"
+} else {
+    check "links -hardlinks reports a file it could not open" [expr {
+        [llength [valof {dict get $LKROOT errors}]] >= 1}]
+    check "and that row carries a real win32 code" [expr {
+        [valof {dict get [lindex [valof {dict get $LKROOT errors}] 0] win32}] > 0}]
+}
+
+# LK-ENT: A NON-SURROGATE REPARSE DIRECTORY IS DISCLOSED, NOT DROPPED. `links`
+# built the row and `links_dict` threw the list away, so a OneDrive
+# Files-On-Demand root came back `links {} multilinked {} errors {}` -- clean,
+# plausible, and silent about a cloud placeholder the walk had just descended.
+# `dirs` was fixed for that exact silence once already, in this directory.
+set LKOD "C:/Users/anafa/OneDrive"
+if {![file isdirectory $LKOD]} {
+    puts "     (no OneDrive root -- the non-surrogate disclosure check needs one)"
+} else {
+    set LKE [valof {links $LKOD -depth 0}]
+    check "links discloses a reparse directory it entered" [expr {
+        [llength [valof {dict get $LKE entered}]] == 1}]
+    check "and the row carries the tag that made it enterable" [expr {
+        [valof {dict get [lindex [valof {dict get $LKE entered}] 0] surrogate}] == 0
+        && [valof {dict get [lindex [valof {dict get $LKE entered}] 0] tag}] ne ""}]
+    # The two keys answer different questions and must not be merged: `links` is
+    # where the walk STOPPED, `entered` is where it went that z would not.
+    check "a non-surrogate is not filed as a link" [expr {
+        [llength [valof {dict get $LKE links}]] == 0}]
+}
+
 check "links refuses an unknown option" [expr {
     [errcode_of {links $LKFX -nope 1}] eq {MACHTELD DIRS usage}}]
+# WITH A VALUE, so the refusal is about the NAME. Without one, `dirs` errors
+# "option needs a value" before it ever consults the option table -- so the
+# original form of this check passed for a reason unrelated to its claim, and
+# would have stayed green if `-hardlinks` were moved into the shared parser.
 check "dirs refuses the option only links takes" [expr {
-    [errcode_of {dirs $LKFX -hardlinks}] eq {MACHTELD DIRS usage}}]
+    [errcode_of {dirs $LKFX -hardlinks 1}] eq {MACHTELD DIRS usage}}]
 check "links refuses a missing root like dirs does" [expr {
     [errcode_of {links [file join $LKFX no_such_dir_zzz]}] eq {MACHTELD DIRS notfound}}]
 # The palette's two verbs must not drift apart on the shared half.
