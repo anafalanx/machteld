@@ -433,8 +433,77 @@ about z, which is correct and not a gap.
 So what genuinely remains of step 4 is **`mirror`, `ledger` and the shell shim** — the three the
 plan always meant to do last — plus `logs`/`follow` and `status --deep` behind them.
 
-**Next:** `ledger`, which is the smallest of the three and the only one that does not touch the
-replica.
+**`ledger` is done** (below). What remains is **`mirror` and the shell shim**.
+
+### `ledger`, and a file two programs have to agree on to the byte
+
+`mt ledger refresh` and `mt ledger check` maintain `.z/book/payloads.lock.json` and
+`.z/book/msys2-packages.lock.txt`: the inventory that stands in for the gigabytes of payload the
+workspace deliberately does *not* commit. Every curated tool, every runtime, the kernel's own Go
+and Deno, their entrypoints with SHA-256 and size, the cached downloads that produced them, and
+where each came from. `check` says whether the tree still matches, and exits 1 when it does not.
+
+**This is the first command whose product is a file both front doors write**, and that changes what
+agreement has to mean. Everywhere else machteld could render its own shape and diff the substance —
+`runtimes` prints its own table, `verify` keeps its own footer. Here the output goes into a shared,
+git-tracked file, so it must match `json.MarshalIndent` **byte for byte** or the two tools call
+each other's output stale forever, and the workspace carries a file that is permanently wrong
+according to whichever program did not write it last.
+
+That means transcribing four Go behaviours no JSON writer would choose on its own:
+
+- **Struct declaration order** — not alphabetical, not insertion order.
+- **HTML escaping, on by default.** `json.Marshal` escapes `<`, `>` and `&` unless you use an
+  `Encoder` with `SetEscapeHTML(false)`; z calls `MarshalIndent`, so a source URL with a query
+  string comes out spelling its ampersand as a `\u` escape. Not one of the workspace's 275 tools
+  has one today, so the real workspace could never have revealed this — the suite's fixture
+  carries `?a=1&b=2` on purpose.
+- **`omitempty` per field**, including `bytes` and `aliasCount`, where a zero disappears entirely.
+- **`omitempty` on a struct does nothing.** `Restore` is tagged `omitempty` and is a struct, and
+  `encoding/json` has no notion of an empty struct — so **every** payload carries a `"restore": {}`
+  it does not need. The most visible Go-ism in the file, and the easiest thing in the world to
+  leave out.
+
+It matches. Machteld's 33,257 bytes are byte-identical to the 33,257 z produces, verified against
+z's own `generateLedgerFiles` called directly rather than against the committed file — because the
+committed file is **stale**, and has been since 18 July. The four payloads it is missing are
+`EditPadPro8`, `RegexBuddy5`, `CSCSE5` and `FNSE3`: the same four `t/` directories the manifest
+never mentions, and the same four machteld could not run until step 4 went looking. A ledger going
+stale is not a defect in either program — it is a record of the tree changing — but it is a pleasing
+coincidence that the workspace's own bookkeeping had been quietly out of date about exactly the
+tools this project had already caught it forgetting.
+
+**`generatedBy` still says `z ledger refresh`, and that is deliberate.** It names the *format's*
+generator, and machteld is a second implementation of that command rather than a second format. The
+one line that is **not** z's is the advice `check` prints when something is stale: z says
+`run: z ledger refresh`, machteld says `run: mt ledger refresh`, because a front door replacing z
+must not answer a problem by telling you to go and run z. That is a sentence addressed to a person,
+not a byte in a shared file, and the agreement test asserts both halves — every other line
+identical, that one different in exactly that way.
+
+**And a verdict command finally exits like one.** `mt verify` printed five workspace problems and
+exited **0** until this landed, so `mt verify && deploy` deployed on a broken workspace. `ledger
+check` has the same shape, which is what forced the mechanism: a front-door command can now say
+what the process should exit with, separately from what it returns. Not an error — `verify` finding
+problems is a *successful* run of a command that looked and reported, and raising would make a
+script `catch` a working command and print its verdict as a failure message. Reset at the top of
+every `front` call, so the last command to run is the one whose verdict the process carries.
+
+**Cost: 1.43× z**, and the whole of the remaining gap is measured rather than guessed.
+`mt ledger check` runs in ~3.9 s against z's ~2.8 s, interleaved, five runs each. Both pay ~1.26 s
+for `pacman -Q`, a subprocess neither can avoid. Assembly is ~440 ms. The rest is SHA-256 over
+**973 MB across 55 files**, and machteld's `hash` runs at **598 MB/s** against Go's
+hardware-accelerated implementation — that difference alone is roughly the whole 1.1 s. It is a
+`src/hash.c` question rather than a ledger one, and it is recorded here rather than fixed.
+
+Getting there cost one optimisation worth naming, because its shape will recur. The first working
+version spent **1.3 s of its 3.5 s inside `FrontClean`** — called **212,000 times over ~1,500
+distinct strings**, because containment is asked once per (payload, tool, candidate path) and both
+sides get cleaned every time. `FrontClean` is a purely lexical function of its argument, so
+memoising it needs no invalidation key at all, unlike `manifest`'s memo. Measured same-build with
+hashing stubbed out, to keep its 900–1400 ms of variance out of the number: **1,254 ms → 426 ms,
+2.82×**. The first end-to-end A/B showed the change making things *slower*, because hashing
+variance and background load swamped an 810 ms effect — the cold-cache lesson, met a third time.
 
 ### `cdirs`, and the first command that must NOT agree with z
 

@@ -8,6 +8,39 @@ timestamp: 2026-07-09
 
 # Log
 
+## 2026-08-11 — `ledger`, and a verdict command that finally exits like one
+
+**`mt ledger refresh|check`** maintains `book/payloads.lock.json` and `book/msys2-packages.lock.txt`
+— the content-addressed inventory that stands in for the gigabytes of payload the workspace
+deliberately does not commit. It is the first command whose product is a **file both front doors
+write**, so agreeing on the facts is not enough: it has to match `json.MarshalIndent` byte for byte,
+or whichever tool ran second calls the other's output stale forever. It does — 33,257 bytes
+identical to z's, checked against z's own `generateLedgerFiles` rather than against the committed
+file.
+
+Four Go behaviours had to be transcribed, and one of them the real workspace could never have
+revealed: `encoding/json` **HTML-escapes `<`, `>` and `&` by default**, and not one of the 275
+curated tools has a query string in its source URL. The suite's fixture carries `?a=1&b=2` for that
+reason. The others: struct declaration order, `omitempty` on numeric fields, and the fact that
+`omitempty` **does nothing to a struct** — which is why every payload carries a `"restore": {}`.
+
+**`mt verify` exited 0 on a workspace with five problems**, so `mt verify && deploy` deployed.
+`ledger check` has the same shape and forced the fix: a front-door command can now report an exit
+code separately from its return value. Deliberately not an error — a command that looked and found
+problems ran successfully, and raising would make a script `catch` a working command.
+
+**1.43× z, and the gap is not the port**: ~1.26 s of both runs is `pacman -Q`, and the remainder is
+SHA-256 over 973 MB at 598 MB/s against Go's hardware-accelerated implementation. One optimisation
+landed on the way — `FrontClean` memoised after it was measured at **212,000 calls over ~1,500
+distinct strings**, 1,254 ms → 426 ms — and the first end-to-end A/B of it said, wrongly, that it
+made things slower. Hashing variance swamped an 810 ms effect. That is the cold-cache lesson for
+the third time, and it now has a narrow statement in [direction](direction.md): an end-to-end
+number cannot measure a component smaller than its own variance.
+
+809 checks pass. Six mutations were run against the new gates and each failed exactly its own
+checks; two of them are caught **only** because the golden fixture carries a payload with no
+manifest entry and a capital letter.
+
 ## 2026-08-11 — the walk goes to C, `cdirs` diverges on purpose, and `mt make` finally runs
 
 **`dirs`** is a C verb now: a `GetFileInformationByHandleEx` walk that classifies reparse points

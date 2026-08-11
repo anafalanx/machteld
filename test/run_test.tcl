@@ -3916,6 +3916,317 @@ if {"cdirs" in [::machteld::FrontCommands]} {
 file delete -force $CDOUT
 check "the cdirs fixture tore down completely" [expr {![file exists $CDOUT]}]
 
+# --- `ledger`: the payload inventory, and Go's JSON transcribed ---------------
+#
+# THE FORMAT IS THE WHOLE PROBLEM. `book/payloads.lock.json` is written into a
+# workspace BOTH front doors share, so it has to match `json.MarshalIndent` byte
+# for byte or the two tools call each other's output stale forever. The
+# agreement test diffs against the live z; these gates pin the rules that make
+# that possible, one Go behaviour at a time, so a break says WHICH rule went.
+
+# LJ1: Go's string escaping, including the three nobody expects. `encoding/json`
+# HTML-escapes by default -- z calls `MarshalIndent`, not an Encoder with
+# SetEscapeHTML(false) -- so `<`, `>` and `&` come out as \u escapes in a file no
+# browser will ever load.
+check "ledger escapes < as \\u003c"  [expr {[::machteld::LedgerJsonStr "a<b"] eq {"a\u003cb"}}]
+check "ledger escapes > as \\u003e"  [expr {[::machteld::LedgerJsonStr "a>b"] eq {"a\u003eb"}}]
+check "ledger escapes & as \\u0026"  [expr {[::machteld::LedgerJsonStr "a&b"] eq {"a\u0026b"}}]
+check "ledger escapes the quote"     [expr {[::machteld::LedgerJsonStr "a\"b"] eq {"a\"b"}}]
+check "ledger escapes the backslash" [expr {[::machteld::LedgerJsonStr "a\\b"] eq {"a\\b"}}]
+check "ledger uses the short escapes" [expr {
+    [::machteld::LedgerJsonStr "a\nb\tc\rd"] eq {"a\nb\tc\rd"}}]
+# Every other C0 control is \u00xx in LOWERCASE hex -- Go uses neither \b nor \f.
+check "ledger spells other controls \\u00xx" [expr {
+    [::machteld::LedgerJsonStr "a\u0007b"] eq {"a\u0007b"}}]
+check "ledger does not use \\b for backspace" [expr {
+    [::machteld::LedgerJsonStr "a\u0008b"] eq {"a\u0008b"}}]
+check "ledger spells U+2028 and U+2029" [expr {
+    [::machteld::LedgerJsonStr "a\u2028b\u2029c"] eq {"a\u2028b\u2029c"}}]
+check "ledger leaves DEL alone (Go does)" [expr {
+    [::machteld::LedgerJsonStr "a\u007fb"] eq "\"a\u007fb\""}]
+
+# LJ2: the indenter. An EMPTY object stays on one line, which is not a corner
+# case here -- every payload without a source ends `"restore": {}`.
+check "ledger writes an empty object as {}"   [expr {[::machteld::LedgerJson {o {}}] eq "\{\}"}]
+check "ledger writes an empty array as \[\]"  [expr {[::machteld::LedgerJson {a {}}] eq "\[\]"}]
+check "ledger writes null"                    [expr {[::machteld::LedgerJson {n {}}] eq "null"}]
+check "ledger indents two spaces per level" [expr {
+    [::machteld::LedgerJson [list o [list k [list a [list {i 1} {i 2}]]]]] eq
+    "\{\n  \"k\": \[\n    1,\n    2\n  \]\n\}"}]
+
+# LJ3: the version rules, which are not guessable from the output. A payload's
+# version is not its directory name: `cpython-3.12.13-windows-x86_64-none` is
+# reported as `3.12.13`, and `winsdk` has no version in its path at all.
+check "ledger reads the semantic version out of a python dir" [expr {
+    [::machteld::LedgerSemantic cpython-3.12.13-windows-x86_64-none] eq "3.12.13"}]
+check "ledger takes a bare version as itself" [expr {[::machteld::LedgerSemantic 9.0.4] eq "9.0.4"}]
+check "ledger finds no version in a bare name" [expr {[::machteld::LedgerSemantic winsdk] eq ""}]
+check "ledger does not call a lone dot a version" [expr {![::machteld::LedgerLooksVersion "."]}]
+
+# LJ4: a cached download is claimed by DIGIT-BOUNDED version match, so `1.25`
+# does not claim `1.25.11`'s archive and `1.4` does not claim `21.4`'s.
+check "ledger matches a version at a boundary" [expr {
+    [::machteld::LedgerContainsVersion "node-v24.16.0-win-x64.zip" "24.16.0"]}]
+check "ledger refuses a version that is a prefix" [expr {
+    ![::machteld::LedgerContainsVersion "go1.25.11.windows-amd64.zip" "1.25"]}]
+check "ledger refuses a version preceded by a digit" [expr {
+    ![::machteld::LedgerContainsVersion "v21.4.zip" "1.4"]}]
+check "ledger compacts to letters and digits" [expr {
+    [::machteld::LedgerCompact "SQLite-3.53.2_x64"] eq "sqlite3532x64"}]
+# The compact token is used only when it is long enough to mean something: Go's
+# threshold is 4, so `1.2.3` (compact `123`) never contributes one.
+check "ledger drops a compact version token under 4 chars" [expr {
+    [lindex [::machteld::LedgerMatcher sqlite 1.2.3 0] 2] eq ""}]
+check "ledger keeps a compact version token of 4+" [expr {
+    [lindex [::machteld::LedgerMatcher sqlite 3.53.2 0] 2] eq "3532"}]
+
+# LJ5: `filepath.IsAbs` on Windows -- a ROOTED path is not an absolute one, and
+# only absolute `pre` arguments become entrypoints.
+check "ledger calls a drive path absolute"   [::machteld::LedgerAbsolute {C:\x\y.exe}]
+check "ledger calls a UNC path absolute"     [::machteld::LedgerAbsolute {\\srv\share\y.exe}]
+check "ledger calls a rooted path relative"  [expr {![::machteld::LedgerAbsolute {\x\y.exe}]}]
+check "ledger calls a bare arg relative"     [expr {![::machteld::LedgerAbsolute {-Q}]}]
+check "ledger relativises with forward slashes" [expr {
+    [::machteld::LedgerRelSlash {C:\dev\.z} {C:\dev\.z\t\rg\rg.exe}] eq "t/rg/rg.exe"}]
+
+# LJ6: A WHOLE WORKSPACE, AND THE EXACT BYTES IT PRODUCES.
+#
+# The fixture is small enough to write the expected document out in full, which
+# is the point: a golden file is the only test that catches a field emitted in
+# the wrong ORDER, or an `omitempty` applied where Go does not apply one. The
+# three hashes are computed rather than pasted, because they are facts about the
+# fixture's contents and nothing is learned by hard-coding them.
+#
+# `Zed` EARNS ITS PLACE TWICE. It is the only fixture payload the manifest does
+# not describe, so it is the only one that produces the bare `"restore": {}` --
+# the Go-ism this file calls the easiest thing in the world to leave out, and
+# which two sourced payloads would never have exercised. And its capital letter
+# pins the SORT: ids are ordered by byte, so `tool:Zed` comes before
+# `tool:toolone`, where any case-folding comparison puts it after.
+set LFX [file join [file dirname $FX] mt_ledger_fx]
+file delete -force $LFX
+file mkdir [file join $LFX .z t toolone]
+file mkdir [file join $LFX .z t Zed]
+file mkdir [file join $LFX .z r gh]
+file mkdir [file join $LFX .z cache downloads]
+proc LedgerFxWrite {path text} {
+    set fh [open $path wb]
+    puts -nonewline $fh $text
+    close $fh
+}
+LedgerFxWrite [file join $LFX .z t toolone toolone.exe] "toolone\n"
+LedgerFxWrite [file join $LFX .z t Zed Zed.exe] "zed\n"
+LedgerFxWrite [file join $LFX .z r gh gh.exe] "gh\n"
+LedgerFxWrite [file join $LFX .z cache downloads toolone-1.2.3-win.zip] "zip\n"
+LedgerFxWrite [file join $LFX .z manifest.json] {{"tools": {
+  "toolone": {"version": "1.2.3", "license": "MIT",
+              "source": "https://example.invalid/toolone?a=1&b=2", "exe": "toolone.exe"},
+  "ghcli":   {"version": "2.0.0", "source": "https://example.invalid/gh",
+              "exeFromRoot": "r/gh/gh.exe"}
+}}}
+
+# The fixture runs in a CHILD, because FrontRoots resolves the workspace once per
+# process and this suite is already standing in the real one.
+proc LedgerMt {root args} {
+    global MT
+    return [run -timeout 120s -env [list MT_ROOT $root MT_HOME [file join $root .z]] \
+                -- $MT {*}$args]
+}
+proc LedgerLines {r} { return [split [string map {\r\n \n} [string trim [dict get $r out]]] \n] }
+proc LedgerSlurp {path} {
+    if {[catch {open $path rb} fh]} { return "" }
+    set d [read $fh]
+    close $fh
+    return [encoding convertfrom utf-8 $d]
+}
+
+set r [LedgerMt $LFX ledger check]
+check "ledger check reports a missing lock" [expr {
+    [lindex [LedgerLines $r] 0] eq "missing book/payloads.lock.json"}]
+check "ledger check exits 1 when something is missing" [expr {[dict get $r exit] == 1}]
+# THE ONE LINE THAT IS NOT z's, and it is deliberate: a front door replacing z
+# does not answer a problem by telling you to go and run z.
+check "ledger check names the front door in its advice" [expr {
+    [lindex [LedgerLines $r] end] eq "run: mt ledger refresh"}]
+
+set r [LedgerMt $LFX ledger refresh]
+check "ledger refresh exits 0" [expr {[dict get $r exit] == 0}]
+# ONE file, not two: with no msys2 payload there is no package lock to write, and
+# z omits the key rather than writing an empty file.
+check "ledger refresh writes only what it has" [expr {
+    [LedgerLines $r] eq {{updated book/payloads.lock.json}}}]
+
+set LGOT [LedgerSlurp [file join $LFX .z book payloads.lock.json]]
+set LH1 [valof {hash file sha256 [file join $LFX .z r gh gh.exe]}]
+set LH2 [valof {hash file sha256 [file join $LFX .z t toolone toolone.exe]}]
+set LH3 [valof {hash file sha256 [file join $LFX .z cache downloads toolone-1.2.3-win.zip]}]
+set LH4 [valof {hash file sha256 [file join $LFX .z t Zed Zed.exe]}]
+set LWANT [join [list \
+"\{" \
+{  "schema": 1,} \
+{  "generatedBy": "z ledger refresh",} \
+{  "policy": "git tracks z code/docs/manifests/bookkeeping under Z_HOME; fetchable payload roots under t/, r/, go/, deno/, and cache/ are ignored",} \
+"  \"files\": \{" \
+{    "resolver": "manifest.json",} \
+{    "payloadLock": "book/payloads.lock.json",} \
+{    "msys2PackageLock": "book/msys2-packages.lock.txt"} \
+"  \}," \
+"  \"payloads\": \[" \
+"    \{" \
+{      "id": "runtime:gh:2.0.0",} \
+{      "kind": "runtime",} \
+{      "name": "gh",} \
+{      "version": "2.0.0",} \
+{      "path": "r/gh",} \
+{      "source": "https://example.invalid/gh",} \
+"      \"aliases\": \[" \
+{        "ghcli"} \
+"      \]," \
+"      \"entrypoints\": \[" \
+"        \{" \
+{          "path": "r/gh/gh.exe",} \
+"          \"aliases\": \[" \
+{            "ghcli"} \
+"          \]," \
+"          \"sha256\": \"$LH1\"," \
+{          "bytes": 3} \
+"        \}" \
+"      \]," \
+"      \"restore\": \{" \
+{        "method": "manual download or package-manager install, then run z ledger refresh",} \
+{        "source": "https://example.invalid/gh"} \
+"      \}" \
+"    \}," \
+"    \{" \
+{      "id": "tool:Zed",} \
+{      "kind": "tool",} \
+{      "name": "Zed",} \
+{      "path": "t/Zed",} \
+"      \"aliases\": \[" \
+{        "Zed"} \
+"      \]," \
+"      \"entrypoints\": \[" \
+"        \{" \
+{          "path": "t/Zed/Zed.exe",} \
+"          \"aliases\": \[" \
+{            "Zed"} \
+"          \]," \
+"          \"sha256\": \"$LH4\"," \
+{          "bytes": 4} \
+"        \}" \
+"      \]," \
+"      \"restore\": \{\}" \
+"    \}," \
+"    \{" \
+{      "id": "tool:toolone",} \
+{      "kind": "tool",} \
+{      "name": "toolone",} \
+{      "version": "1.2.3",} \
+{      "path": "t/toolone",} \
+{      "source": "https://example.invalid/toolone?a=1\u0026b=2",} \
+{      "license": "MIT",} \
+"      \"aliases\": \[" \
+{        "toolone"} \
+"      \]," \
+"      \"entrypoints\": \[" \
+"        \{" \
+{          "path": "t/toolone/toolone.exe",} \
+"          \"aliases\": \[" \
+{            "toolone"} \
+"          \]," \
+"          \"sha256\": \"$LH2\"," \
+{          "bytes": 8} \
+"        \}" \
+"      \]," \
+"      \"cachedDownloads\": \[" \
+"        \{" \
+{          "path": "cache/downloads/toolone-1.2.3-win.zip",} \
+"          \"sha256\": \"$LH3\"," \
+{          "bytes": 4} \
+"        \}" \
+"      \]," \
+"      \"restore\": \{" \
+{        "method": "manual download or package-manager install, then run z ledger refresh",} \
+{        "source": "https://example.invalid/toolone?a=1\u0026b=2"} \
+"      \}" \
+"    \}" \
+"  \]" \
+"\}" \
+{}] \n]
+check "ledger writes the document Go would write, byte for byte" [expr {$LGOT eq $LWANT}]
+if {$LGOT ne $LWANT} {
+    set la [split $LGOT \n] ; set lb [split $LWANT \n]
+    set n [expr {[llength $la] > [llength $lb] ? [llength $la] : [llength $lb]}]
+    for {set i 0} {$i < $n} {incr i} {
+        if {[lindex $la $i] ne [lindex $lb $i]} {
+            puts "     first difference at line [expr {$i + 1}]:"
+            puts "       got:  [lindex $la $i]"
+            puts "       want: [lindex $lb $i]"
+            break
+        }
+    }
+}
+# THE AMPERSAND IS IN THE FIXTURE ON PURPOSE. `?a=1&b=2` is the one Go-ism no
+# amount of staring at the real workspace would reveal, because not one of its
+# 275 tools has a query string in its source URL. If HTML escaping is ever
+# dropped, this is the check that says so.
+check "ledger HTML-escapes an ampersand in real output" [expr {
+    [string first {a=1\u0026b=2} $LGOT] > 0}]
+
+set r [LedgerMt $LFX ledger check]
+check "ledger check calls a fresh lock current" [expr {
+    [LedgerLines $r] eq {{ok: payload ledgers are current}}}]
+check "ledger check exits 0 when current" [expr {[dict get $r exit] == 0}]
+
+# A PAYLOAD CHANGED IS A STALE LEDGER, which is what the hashes are for.
+LedgerFxWrite [file join $LFX .z t toolone toolone.exe] "toolone-v2\n"
+set r [LedgerMt $LFX ledger check]
+check "ledger check notices a changed payload" [expr {
+    [lindex [LedgerLines $r] 0] eq "stale book/payloads.lock.json"}]
+check "ledger check exits 1 when stale" [expr {[dict get $r exit] == 1}]
+LedgerMt $LFX ledger refresh
+set r [LedgerMt $LFX ledger check]
+check "ledger refresh makes it current again" [expr {[dict get $r exit] == 0}]
+
+# An empty workspace: `payloads` has no `omitempty` in Go, so a nil slice is
+# `null` and not `[]`. Easy to get wrong, invisible in the real workspace.
+set LFXE [file join [file dirname $FX] mt_ledger_empty]
+file delete -force $LFXE
+file mkdir [file join $LFXE .z]
+LedgerFxWrite [file join $LFXE .z manifest.json] {{"tools": {}}}
+LedgerMt $LFXE ledger refresh
+set LEMPTY [LedgerSlurp [file join $LFXE .z book payloads.lock.json]]
+check "ledger writes null, not \[\], for no payloads" [expr {
+    [string first "\"payloads\": null\n\}" $LEMPTY] > 0}]
+
+# LJ7: usage, and the front-door wiring.
+check "ledger is a promoted front-door command" [expr {"ledger" in [::machteld::FrontCommands]}]
+check "the manifest declares the ledger subcommand" [expr {
+    "ledger" in [dict get [manifest] front subcommands]}]
+check "front ledger with no subcommand is a usage error" [expr {
+    [errcode_of {front ledger}] eq {MACHTELD FRONT usage}}]
+check "front ledger with a bad subcommand is a usage error" [expr {
+    [errcode_of {front ledger polish}] eq {MACHTELD FRONT usage}}]
+
+# LJ8: THE EXIT CODE A VERDICT COMMAND REPORTS. `mt verify` printed problems and
+# exited 0 until 2026-08-11, so `mt verify && deploy` deployed on a broken
+# workspace. FrontStatus is the mechanism; both its users are checked.
+check "FrontStatus is zero after a command with nothing to report" [expr {
+    [front roots] ne "" && [::machteld::FrontStatus] == 0}]
+set r [LedgerMt $LFX verify]
+check "verify exits 0 on a clean fixture workspace" [expr {[dict get $r exit] == 0}]
+# ...and 1 where there is something to report. Asserted against the OUTPUT
+# rather than against a count, so this stays true the day the real workspace's
+# five layout problems are fixed.
+set r [run -timeout 120s -- $MT verify]
+check "verify's exit code follows its verdict" [expr {
+    [string match "problems:*" [string trim [dict get $r out]]]
+        ? [dict get $r exit] == 1 : [dict get $r exit] == 0}]
+
+file delete -force $LFX $LFXE
+check "the ledger fixtures tore down completely" [expr {
+    ![file exists $LFX] && ![file exists $LFXE]}]
+
 DirsWipe $FX
 DirsWipe $FXO
 check "the fixture tore down completely" [expr {![file exists $FX] && ![file exists $FXO]}]
