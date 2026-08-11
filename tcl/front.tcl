@@ -52,6 +52,33 @@ namespace eval ::machteld {
 
     variable FRONT_JOURNAL ""   ;# "" untried, "on" open, "off" unavailable
     variable FRONT_SESSION ""   ;# this front door invocation
+    variable FRONT_CLEAN {}     ;# lexical path cleaning, memoised -- see FrontClean
+
+    # THE EXIT CODE A COMMAND MEANT TO REPORT. See FrontStatus.
+    variable FRONT_STATUS 0
+}
+
+# A REPORT THAT SAYS "BROKEN" MUST NOT EXIT 0, and until now every front-door
+# command did. `mt verify` listed five workspace problems and exited SUCCESS
+# where `z verify` exits 1, so `mt verify && deploy` deployed. `ledger check` has
+# the same shape and is the reason this exists: both are commands whose whole
+# product is a verdict, and a verdict a shell cannot read is half a command.
+#
+# WHY NOT AN ERROR. Because it is not one. `verify` finding problems and `ledger
+# check` finding a stale file are both SUCCESSFUL runs of a command that looked
+# and reported; raising `{MACHTELD FRONT ...}` would make a script `catch` a
+# working command and would print the verdict as a failure message. The command
+# returns its text and says, separately, what the process should exit with.
+#
+# RESET AT THE TOP OF EVERY `front` CALL, because one process can run several --
+# `front in <project> verify` runs `verify` inside `in` -- and a stale 1 from an
+# earlier command would sentence a later one that succeeded. The LAST command to
+# run is the one whose verdict the process carries, which is the only reading
+# that makes `mt <anything>` mean what it says.
+proc ::machteld::FrontStatus {{code ""}} {
+    variable FRONT_STATUS
+    if {$code ne ""} { set FRONT_STATUS $code }
+    return $FRONT_STATUS
 }
 
 # THE JOURNAL IS A SERVICE, NOT A PRECONDITION. It is opened lazily, once, and
@@ -769,7 +796,12 @@ proc ::machteld::FrontGitRun {g dir argl {codeVar ""} {errVar ""}} {
 # in the manifest, where it can be read instead of restated.
 proc ::machteld::FrontVersioned {} { return {go node python sqlite tcltk twapi} }
 
-proc ::machteld::FrontRuntimes {} {
+# `targets` IS AN ARGUMENT so a caller that has already resolved all 275 curated
+# tools does not pay for it twice. `ledger` is that caller: it needs the same
+# list for its entrypoints, and resolving the workspace twice in one command is
+# 250 ms nobody asked for. Absent, it resolves them itself, which is what every
+# other caller does.
+proc ::machteld::FrontRuntimes {{targets ""}} {
     variable FRONT_HOME
     FrontRoots
     set root [file join $FRONT_HOME r]
@@ -778,10 +810,12 @@ proc ::machteld::FrontRuntimes {} {
     # executable, prepended argument or environment value lives under this
     # payload" -- which is a fact about the RESOLVED target, not about the
     # manifest text.
-    set targets {}
-    foreach n [FrontToolNames] {
-        if {[catch {FrontResolve $n} t]} continue
-        lappend targets [list $n $t]
+    if {$targets eq ""} {
+        set targets {}
+        foreach n [FrontToolNames] {
+            if {[catch {FrontResolve $n} t]} continue
+            lappend targets [list $n $t]
+        }
     }
     set out {}
     foreach d [lsort [glob -nocomplain -types d -directory $root *]] {
@@ -845,7 +879,29 @@ proc ::machteld::FrontDictOr {d key default} {
 #
 # One row of fourteen differed, because exactly one payload is a junction.
 # Nothing about the shape of the code says which of the two is wrong.
+#
+# MEMOISED, AND SAFE TO MEMOISE FOR A REASON WORTH STATING. This is a pure
+# function of its argument -- it splits a string and rejoins it, and never
+# touches the disk -- so a cached answer cannot go stale the way a cached
+# `manifest` could, and it needs no invalidation key. The measurement that
+# prompted it: `ledger` called this **212,000 times over ~1,500 distinct
+# strings**, because containment is asked once per (payload, tool, candidate
+# path) and both sides get cleaned every time. 1.5 s of a 3.1 s command.
+#
+# The cap is not for this command. It is for a long-lived process -- a Tk
+# supervisor, a pool worker -- that could ask about unboundedly many distinct
+# paths; dropping the whole table is correct because every entry is
+# recomputable, and one page of paths is the only working set any caller here
+# has.
 proc ::machteld::FrontClean {p} {
+    variable FRONT_CLEAN
+    if {[dict exists $FRONT_CLEAN $p]} { return [dict get $FRONT_CLEAN $p] }
+    set out [FrontCleanCompute $p]
+    if {[dict size $FRONT_CLEAN] >= 8192} { set FRONT_CLEAN {} }
+    dict set FRONT_CLEAN $p $out
+    return $out
+}
+proc ::machteld::FrontCleanCompute {p} {
     set segs [split [string map {\\ /} $p] /]
     set lead ""
     if {[llength $segs] > 2 && [lindex $segs 0] eq "" && [lindex $segs 1] eq ""} {
@@ -1492,7 +1548,8 @@ proc ::machteld::FrontDirsText {rep} {
 }
 
 proc ::machteld::front {args} {
-    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs}
+    set subs {roots which env tools run journal projects runtimes status in verify scout cdirs ledger}
+    FrontStatus 0
     # THE DECLARED TABLE IS THE MANIFEST'S ANSWER, so an option missing here is
     # an option the palette denies having. `-inherit` was missing: `front run
     # -inherit` worked, the manifest said `front` took only -json, and the docs
@@ -1903,6 +1960,12 @@ proc ::machteld::front {args} {
                    counts [dict create builtins [llength [FrontCommands]] \
                                tools [llength [FrontToolNames]] scripts 0 \
                                project [dict size $pcmds]]]
+        # A WORKSPACE WITH PROBLEMS EXITS 1, which z has always done and this
+        # did not until 2026-08-11: `mt verify` printed five problems and exited
+        # SUCCESS, so `mt verify && deploy` deployed on a broken workspace. Set
+        # before the `-json` return as well, because a script reading the JSON is
+        # exactly the caller most likely to be testing the exit code too.
+        if {[llength $problems]} { FrontStatus 1 }
         if {$asjson} { return [json encode $d] }
         set out {}
         if {[llength $problems]} {
@@ -1952,6 +2015,14 @@ proc ::machteld::front {args} {
         lappend out ""
         lappend out "not yet: mirror state, latest report, and --deep (verify + ledger check)"
         return [join $out \n]
+    }
+
+    # `ledger refresh|check` -- the payload inventory. Implemented in
+    # `tcl/ledger.tcl`, because it is one self-contained command with a
+    # byte-exact output format and this file is long enough.
+    if {$sub eq "ledger"} {
+        if {[llength $args] != 2} { Fail FRONT usage "usage: front ledger refresh|check" }
+        return [LedgerRun [lindex $args 1]]
     }
 
     if {$sub in {projects runtimes}} {
@@ -2262,7 +2333,10 @@ proc ::machteld::FrontDispatch {} {
     }
     if {[dict exists $res exit]} { exit [dict get $res exit] }
     if {$res ne ""} { catch {puts $res} }
-    exit 0
+    # AND WHATEVER THE COMMAND ITSELF SAID. `verify` and `ledger check` report a
+    # verdict rather than a value; FrontStatus is how they say what the process
+    # should exit with. Zero unless one of them set it, so nothing else changes.
+    exit [FrontStatus]
 }
 
 # The front door takes over argv here, at the very foot of the prelude.

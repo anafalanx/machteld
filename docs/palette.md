@@ -575,6 +575,8 @@ front status ?-json?               ;# root, workspace git, every project's git
 front in els build                 ;# resolve and run a name in a project's context
 front verify ?-json?               ;# the workspace's structural problems
 front scout ?-commands? ?--serial? ?-json?   ;# every _dir: project file, readme, git, commands
+front ledger refresh               ;# rewrite book/*.lock.* from what is on disk
+front ledger check                 ;# does the tree still match the ledger? exit 1 if not
 journal rows -live                 ;# what is running now
 journal rows -limit 20             ;# the last 20, newest first
 journal rows -name rg -project els -since $ms -failed
@@ -586,6 +588,18 @@ A front door sees every process the workspace starts, which nothing else does �
 the line you typed, not what it resolved to, how long it took, or whether it was killed.
 `front run` records around every spawn, so the record accrues without anyone remembering to ask.
 The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
+
+**`verify` and `ledger check` report a verdict, so they set an exit code.** Both return their text
+as a value like every other command, and both additionally say what the *process* should exit with
+— 1 when there is something to report. That is not an error and is deliberately not raised: a
+command that looked and found problems ran successfully, and a script that `catch`es it would treat
+a working command as a broken one. `mt verify` exited 0 on a workspace with five problems until
+2026-08-11, which is what forced the mechanism; see [the front-door plan](front-door.md).
+
+**`ledger`'s output is a file two programs write**, so it is byte-identical to z's down to Go's
+`json.MarshalIndent` quirks — HTML-escaped `&`, struct field order, and a `"restore": {}` on every
+payload because `omitempty` does nothing to a struct. `generatedBy` still names z for the same
+reason: it identifies the format, and a second implementation of a format is not a second format.
 
 ## Built — the directory index
 
