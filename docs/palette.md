@@ -255,7 +255,7 @@ shared content.
 
 **The type names are z's, deliberately**, because they are written into the restore manifest a
 `mirror` replica carries: a file format shared with the front door being replaced, not a rendering
-choice. Same reasoning as the ledger's `generatedBy`.
+choice, kept because the format outlives the port that needed it.
 
 **A surrogate this verb cannot name, or whose target it cannot read, is an `errors` row** as well
 as a `links` row with the field left empty. That is what lets `mirror` refuse a destructive run
@@ -620,11 +620,17 @@ this process.
 of process start to call a loaded command and hand the answer back through a pipe as text.
 
 **And the exe dispatches its own argv**, so `mt rg -n TODO .` works. The rule, applied in the
-prelude because `Tcl_Main` calls AppInit before it reads argv: no arguments is the shell; a
-leading `-` belongs to Tcl; something that *looks like a path* (a separator, or a `.tcl`
-extension) is a script; anything else is a name to resolve. Deliberately **not** "if the file
-exists" — that would let a stray file in the working directory change what `mt rg` means, which is
-a PATH fallback wearing different clothes. An unknown name exits **127**, the shell's convention.
+prelude because `Tcl_Main` calls AppInit before it reads argv, is **one line long: the first
+argument is a NAME.** No arguments is the shell; a leading `-` belongs to Tcl; everything else is a
+name to resolve. A script is named, not detected — `mt tcl app.tcl`.
+
+There is deliberately **no shape test**. Not "a name unless it looks like a path", not "a name
+unless a file of that name exists" — a name. A shape test lets a stray file in the working
+directory change what `mt rg` means, which is a PATH fallback wearing different clothes; and the
+separator/`.tcl` heuristic this paragraph described until 2026-08-12 had been **deleted from the
+dispatcher on 2026-08-10**, surviving only inside the error message a failed resolution prints.
+So the doc taught an invocation (`mt app.tcl`) that exits 127. An unknown name exits **127**, the
+shell's convention, and if it looks like a script the message says so.
 
 **Read-only? No longer, and it still refuses rather than guesses.** A manifest entry using a key the
 front door does not implement is an *error*, not a silent partial answer: the point of this stage
@@ -650,8 +656,6 @@ front status ?-json?               ;# root, workspace git, every project's git
 front in els build                 ;# resolve and run a name in a project's context
 front verify ?-json?               ;# the workspace's structural problems
 front scout ?-commands? ?--serial? ?-json?   ;# every _dir: project file, readme, git, commands
-front ledger refresh               ;# rewrite book/*.lock.* from what is on disk
-front ledger check                 ;# does the tree still match the ledger? exit 1 if not
 journal rows -live                 ;# what is running now
 journal rows -limit 20             ;# the last 20, newest first
 journal rows -name rg -project els -since $ms -failed
@@ -664,17 +668,18 @@ the line you typed, not what it resolved to, how long it took, or whether it was
 `front run` records around every spawn, so the record accrues without anyone remembering to ask.
 The reasoning, the schema and what is deliberately absent are in [the journal](journal.md).
 
-**`verify` and `ledger check` report a verdict, so they set an exit code.** Both return their text
-as a value like every other command, and both additionally say what the *process* should exit with
-— 1 when there is something to report. That is not an error and is deliberately not raised: a
-command that looked and found problems ran successfully, and a script that `catch`es it would treat
-a working command as a broken one. `mt verify` exited 0 on a workspace with five problems until
-2026-08-11, which is what forced the mechanism; see [the front-door plan](front-door.md).
+**`verify` reports a verdict, so it sets an exit code.** It returns its text as a value like every
+other command, and additionally says what the *process* should exit with — 1 when there is
+something to report. That is not an error and is deliberately not raised: a command that looked and
+found problems ran successfully, and a script that `catch`es it would treat a working command as a
+broken one. `mt verify` exited 0 on a workspace with five problems until 2026-08-11, which is what
+forced the mechanism.
 
-**`ledger`'s output is a file two programs write**, so it is byte-identical to z's down to Go's
-`json.MarshalIndent` quirks — HTML-escaped `&`, struct field order, and a `"restore": {}` on every
-payload because `omitempty` does nothing to a struct. `generatedBy` still names z for the same
-reason: it identifies the format, and a second implementation of a format is not a second format.
+**`ledger` and `mirror` were here and are gone.** Both reproduced a `z` command against a `z`
+workspace, and [the register](direction.md) records why that effort was stopped: z stays. What the
+attempt left behind is `dirs`, `links` and `canon` — the three verbs above that no portable
+filesystem layer gives you on Windows — and three measurement rules the whole project now runs by.
+What it did not leave behind is fifteen hundred lines that only mirrored somebody else's CLI.
 
 ## Built — the directory index
 

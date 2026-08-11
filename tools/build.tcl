@@ -174,7 +174,7 @@ fconfigure $fo -translation lf
 # call that takes over argv, so anything sourced later would be defined after the
 # front door has already run. Order is otherwise irrelevant -- Tcl resolves
 # procs at call time -- and this one is not.
-foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] $genman [Rp tcl ledger.tcl] [Rp tcl mirror.tcl] [Rp tcl front.tcl]] {
+foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] $genman [Rp tcl front.tcl]] {
     set fi [open $part r]
     fconfigure $fi -translation lf
     puts $fo [read $fi]

@@ -1,10 +1,43 @@
 ---
-type: plan
-title: machteld as the front door
-description: Retire the tool factory; become the environment director that z.exe is today, in Tcl/Tk and C.
-tags: [machteld, front-door, z, plan]
-timestamp: 2026-08-10
+type: archive
+title: machteld as the front door — abandoned, with the reasons
+description: The attempt to replace z.exe, why it was stopped, and what machteld kept from it.
+tags: [machteld, front-door, z, archive]
+timestamp: 2026-08-12
 ---
+
+> # ARCHIVED — 2026-08-12
+>
+> **This plan was carried out to step 4 and then deliberately stopped. z stays.** What follows
+> below is the working record, left as written, and it should be read as history rather than as a
+> statement about the shipped binary. `ledger` and `mirror` no longer exist; the front-door
+> commands it describes were built and most still work, but machteld is not a front door and is
+> not trying to become one.
+>
+> **Why it was stopped**, in one paragraph. The port succeeded everywhere the subject was the
+> workspace's own data — 275/275 tools, 139/139 project commands, a byte-identical ledger, a
+> directory walk **14.3× faster** than z's — and failed everywhere the subject was *Windows object
+> semantics*. Tcl's `file exists` answers **true** for a dangling junction; `file normalize` does
+> not resolve a reparse point that is the final component; `file stat`'s `dev` is the drive-letter
+> index, and on a junction it describes the junction. Each is self-consistent, so the safety layer
+> gave coherent answers about the wrong objects — and a destination junction pointing into the
+> mirror source passed every containment clause, with robocopy's own `/L` confirming a real `/MIR`
+> would have deleted a file inside the source. That hole was found by adversarial review after the
+> code was committed, not by me, and the refusal that saved it was there for an unrelated reason.
+>
+> The judgement: for a domain that **is** Win32 semantics, a portable filesystem abstraction is a
+> liability, and z's author had already bypassed Go's for exactly that reason. Finishing `mirror`
+> meant thousands more safety-critical lines for a saving of roughly sixteen seconds on a command
+> that runs rarely. Bad trade, and it does not improve with effort.
+>
+> **What machteld kept** is the durable half, and it is not small: the `dirs` / `links` / `canon`
+> trio — a Windows path layer that is honest about junctions, hidden attributes, long paths, cloud
+> placeholders and file identity, which no portable scripting library gives you — plus `-arg0`,
+> `-inherit`, the journal, and three measurement rules the project now runs by. The spike that
+> decided it is preserved at [`spike/mirrorlinks`](../spike/mirrorlinks/RESULTS.md).
+>
+> Some sentences below were false when this was archived and are corrected in place, marked
+> **[CORRECTED]**. Nothing else has been rewritten.
 
 # machteld as the front door
 
@@ -166,6 +199,16 @@ that would let `rows -live` tell a running process from one whose front door die
 once-per-session pruning — so today the file only grows.
 
 ## Step 3 is done: the factory is retired, 10.2 MB → 6.0 MB
+
+> **[CORRECTED]** This whole section is false as of the next day and was never amended. `wrap` came
+> back on 2026-08-10 — a receiver arrived that the original refusal had said did not exist: small
+> tools shared with colleagues through an SMB folder, on machines with nothing installed. The build
+> links and embeds **both** bare hosts today (`tools/build.tcl`, `tools/package.tcl`),
+> `src/machteld_gui_main.c` is still there, `wrap` is documented as built in
+> [the palette](palette.md), and the shipped exe is **≈10.4 MB** — *larger* than the 10.2 MB this
+> heading uses as its "before". [The register](direction.md) carries the reversal; this file did
+> not, so a reader sizing the artefact from here was wrong by 2×. Everything in the two paragraphs
+> below applies only to the few hours between the retirement and the reversal.
 
 `wrap`, both embedded bare hosts, the GUI `WinMain` host and the tool-stamping loop at the end of
 the build are gone. The build used to finish by running the exe it had just produced five times, to

@@ -1407,3 +1407,82 @@ And a correction to the entry above, from the same cause: the destination was re
 full destination -- 17,512 directories **and 241,700 files** -- walks in **1,355 ms, 5.23 us/entry**,
 the same rate as the local tree. That was a cold cache, for the fifth time. There is no OneDrive
 metadata penalty in this measurement.
+
+## DECIDED: z stays. machteld returns to being a toolkit (2026-08-12)
+
+**The strangler is stopped, and not because it failed everywhere.** It succeeded completely where
+the subject was the workspace's own DATA -- 275/275 tools and 139/139 project commands agreeing
+with the live z, a byte-identical ledger, a directory walk 14.3x faster than z's own -- and it
+failed where the subject was WINDOWS OBJECT SEMANTICS. That split is the whole finding, and it is
+sharper than "Tcl is too slow", which the measurements had already disproved: Tcl is 3.0x Go on a
+syscall-bound walk, and the interpreter is 0.3 us against a 27 us system call.
+
+### What actually went wrong
+
+Tcl told this project three false things, and told them QUIETLY:
+
+  `file exists` answers TRUE for a dangling junction, so the branch written to catch one was dead
+  code that never ran.
+
+  `file normalize` does not resolve a reparse point that is the FINAL component, so a resolver
+  walking up to the nearest existing ancestor stops AT a junction and calls it physical.
+
+  `file stat`'s `dev` is the drive-letter INDEX, not the volume serial, and on a junction it
+  describes the junction rather than the target.
+
+Each is self-consistent -- two names for one file really do share an `ino` -- so the safety layer
+produced COHERENT ANSWERS ABOUT THE WRONG OBJECTS, which is the most dangerous shape a wrong answer
+takes. The consequence was reproduced end to end: a destination junction pointing into the mirror
+source passed every containment clause, and robocopy's own /L verdict named a file INSIDE THE
+SOURCE as a destination extra. A real /MIR would have deleted it.
+
+That hole was found by ADVERSARIAL REVIEW AFTER THE CODE WAS COMMITTED, not by the author, and the
+refusal that saved it had been put there for an unrelated reason (an unported ownership record).
+That is the honest measure of how much confidence "it looks right and 875 checks pass" deserves.
+
+### The judgement
+
+For a domain that IS Win32 semantics, a portable filesystem abstraction is a liability rather than
+a convenience -- and z's author had already reached the same conclusion from the other side, which
+is why z bypasses Go's `os`/`filepath` in every file that matters. The comparison was never
+Tcl-versus-Go. It was "in which language do you write your Win32 calls, and what does the layer
+above them lie about".
+
+And the arithmetic was bad independently: finishing `mirror` meant thousands more safety-critical
+lines -- the ownership record, restore-links, check, rehearse, the manifest format -- to save
+roughly SIXTEEN SECONDS on a command that runs occasionally and whose actual work robocopy does.
+The highest-risk component in the system for the lowest return in it.
+
+### What is kept, and it is not small
+
+  `dirs`, `links` and `canon` -- a Windows path layer honest about junctions, the hidden ATTRIBUTE
+  (not dot-names), `\?\` long paths, cloud placeholders, name-surrogate classification and file
+  identity from a followed handle. No portable scripting library gives you this. It is the reason
+  the attempt paid for itself.
+
+  `-arg0` and `-inherit` on the spawners; the journal; an exit-code mechanism for verdict commands.
+
+  Three measurement rules, each earned by publishing a wrong number first: an end-to-end number
+  cannot measure a component smaller than its own variance; a ratio you cannot attribute is not a
+  result; comparisons must be interleaved, not blocked.
+
+  Two verification rules: a test that enumerates from the side under test is structurally blind
+  (273/273 while four tools were missing), and adversarial review finds what self-review cannot --
+  five reviewers, five sets of real defects, including a heap over-read with a segfaulting proof
+  and a 93 bytes/call leak that reintroduced the exact bug a nineteen-line comment memorialised.
+
+  One practice: BUILD THE HOSTILE FIXTURE FIRST. The junction, the dangling link, the hardlink, the
+  cloud placeholder. Everything that survived self-review and died under adversarial review shared
+  one property -- it looked right and was self-consistent.
+
+### What is retired
+
+`ledger` and `mirror`, and with them their entire outstanding defect list: the link manifest
+format, `logDirKey`, the artefact provenance ordering, the missing `--log-dir` validation, the
+ownership record. A command you do not ship has no bugs. `front-door.md` is archived with the
+verdict at its head and its false claims corrected in place rather than quietly rewritten.
+
+The front door's GENERIC half stays -- name resolution, `roots`, project detection, the argv
+dispatcher, `cdirs` -- because those are toolkit features that happen to know where a workspace is,
+and `cdirs` finds 124,144 directories z never names. machteld stops describing itself as a front
+door.
