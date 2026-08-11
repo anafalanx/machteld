@@ -429,7 +429,15 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
             int skip = 0;
             if (nlen == 1 && e->FileName[0] == L'.') skip = 1;
             if (nlen == 2 && e->FileName[0] == L'.' && e->FileName[1] == L'.') skip = 1;
-            /* FILES ARE NEVER LISTED. This verb answers one question. */
+            /* FILES ARE NEVER LISTED. This verb answers one question.
+             *
+             * AND THAT LINE IS WHERE A LINK SCANNER WOULD START. The entry in
+             * hand already carries the file's attributes AND, for a reparse
+             * point, its tag in EaSize -- both read out of the directory
+             * enumeration, at no per-file cost. spike/mirrorlinks priced
+             * classifying every file here rather than discarding it: 986 ms
+             * against 1,013 ms over 302,654 entries, i.e. free. See
+             * spike/mirrorlinks/RESULTS.md. */
             if (!(e->FileAttributes & FILE_ATTRIBUTE_DIRECTORY)) skip = 1;
             if (!skip) {
                 if (n == cap) {

@@ -433,7 +433,60 @@ about z, which is correct and not a gap.
 So what genuinely remains of step 4 is **`mirror`, `ledger` and the shell shim** — the three the
 plan always meant to do last — plus `logs`/`follow` and `status --deep` behind them.
 
-**`ledger` is done** (below). What remains is **`mirror` and the shell shim**.
+**`ledger` is done** (below). What remains is **`mirror` and the shell shim** — and
+`mirror`'s inner loop has now been prototyped and measured before committing to the port. It
+answers the reservation this plan carried, and the answer is the opposite of the worry.
+
+### `mirror`'s inner loop, measured before the port
+
+The worry was that `mirror` (4,527 lines) is per-file work over large trees — the shape where Tcl's
+per-operation cost bites — and that the honest ending would be a C program with a Tcl configuration
+file, in which case Go was the better host and mirror should stay in z. So it was prototyped rather
+than ported. The full experiment is in [`spike/mirrorlinks/RESULTS.md`](../spike/mirrorlinks/RESULTS.md);
+the predictions were registered before the arms ran and all three held.
+
+**There is no byte-copying loop.** `z mirror` drives `robocopy /MIR`; the copying, the retrying and
+the deletion of destination extras are Windows'. What z itself does per entry is two tree walks —
+a source link scan (run **twice** per mirror run, preflight and postflight) and a destination hazard
+scan — and both ask Windows about **one path at a time**: `GetFileAttributes` per entry, plus a
+`CreateFile` + `GetFileInformationByHandle` per entry on the destination side. Those walks are
+**374 of mirror's 4,527 lines**. The other 4,153 are options, path pinning, run locks, state,
+artefact indexing, reports, the restore manifest and rehearsal — glue.
+
+On `C:\dev` — 21,860 directories and 280,794 files, **302,654 entries**, warm, minimum of three:
+
+| | | per entry | |
+|---|---|---|---|
+| z's own Go loop | **14,081 ms** | 46.5 µs | |
+| the same answer in C, bulk enumeration | **986 ms** | 3.3 µs | **14.3× faster** |
+| C, unmodified — file entries discarded | 1,013 ms | 3.3 µs | |
+| pure Tcl | *abandoned at 20 minutes* | | see below |
+
+All three found the same two junctions, so this compares one answer three ways.
+
+**Classifying every file costs nothing.** 986 ms against 1,013 ms is the build that classifies all
+280,794 files coming out *marginally faster* than the one that throws them away — a 2.7% difference,
+which is noise. `dirs.c:433` has been discarding data it already paid to read: the enumeration
+returns each child's attributes **and**, for a reparse point, its tag in `EaSize`.
+
+**Tcl is not the constraint, and the 20-minute run was a lie.** On one warm subtree where all three
+arms completed, pure Tcl is **3.0× Go** — not 100×. The full-tree Tcl run showed 40 s of CPU in
+16 minutes of wall time, 3% CPU, entirely blocked on I/O, and timing first-touch against
+repeat-touch on the same 20,000 files gives **5,984 µs versus 46.5 µs — 128×**. It was measuring a
+cold file cache. Warm, a Tcl `file` call and Go's `GetFileAttributes` cost the same, because they
+are the same system call with different spelling in front of it: the Tcl **loop** costs 0.3 µs per
+entry and the **call** costs 27 µs.
+
+That is the cold-cache error for the fourth time in this project and the first time it was caught
+before publication. What caught it was refusing a ratio without attributing it — the 0.3 µs loop
+measurement made "Tcl is slow" impossible to believe.
+
+**So: port it.** Not because Tcl can carry the loop at 3× — it can, and would not need to — but
+because the loop belongs in C that **already exists**. A link scanner is `dirs.c` minus one filter
+line, plus reading the reparse target for the handful of surrogates found (two in 302,654 entries).
+The port makes a scan z runs twice per mirror run **14× faster**: 28.2 s of z's own per-entry work
+becomes 2.0 s. And it is more faithful in one respect already visible — pure Tcl cannot tell a
+junction from a directory symlink, and the C walk reads the tag.
 
 ### `ledger`, and a file two programs have to agree on to the byte
 

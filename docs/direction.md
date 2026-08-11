@@ -1256,3 +1256,72 @@ it and nothing here is a defect: a ledger going stale is a record of the tree ch
 writing down only because the workspace's own bookkeeping had been quietly out of date about
 precisely the tools this project had already caught it forgetting. **It is left stale**, because
 refreshing it writes two git-tracked files in a repository this work does not own.
+
+## mirror's inner loop: prototyped before the port, and the reservation is answered (2026-08-11)
+
+**The question was whether to port `mirror` at all.** It is 4,527 lines, 43% of z, and its work
+looked like the one shape this project should be suspicious of: per-file processing over large
+trees, where Tcl's per-operation cost bites hardest. The stated reservation was that porting it
+might end in a C program with a Tcl configuration language -- and if so, Go was the better host for
+that C and mirror should stay in z permanently. The strangler pattern allows a permanent seam.
+
+So it was measured first. Full experiment in `spike/mirrorlinks/`; predictions registered before the
+arms ran, and all three held.
+
+### Three things the prototype found, in order of how much they change the answer
+
+**1. There is no byte-copying loop.** `z mirror` drives `robocopy /MIR`. The copying, the retrying
+and the deletion of destination extras are Windows'. The premise of the reservation -- "file-by-file
+copying with hashing and link handling" -- was simply wrong about what mirror does. What z does per
+entry is two tree walks, and they are **374 of mirror's 4,527 lines**. The other 4,153 are options,
+path resolution and pinning, run locks, state, artefact indexing, reports, the restore manifest and
+rehearsal: glue, and glue is the half Tcl is for.
+
+**2. Tcl is 3x Go on that walk, not 100x, and 99% of the walk is a system call neither language
+chose.** Attributed over a fixed 2,000-file sample: the Tcl LOOP costs **0.3 us per entry** and any
+single `file` command costs **~27 us**, the same figure whether it asks `exists`, `type`, `stat` or
+`attributes`. The language is 1% of the cost. On one warm subtree where every arm completed, pure
+Tcl is 6,283 ms against Go's 2,112 ms.
+
+**3. Both of them are ~14x slower than they need to be, and machteld already has the fix.** z asks
+Windows about one path at a time -- `GetFileAttributes` per entry on the source, plus `CreateFile` +
+`GetFileInformationByHandle` per entry on the destination. `dirs.c` does not: one
+`GetFileInformationByHandleEx(FileIdBothDirectoryRestartInfo)` per DIRECTORY returns every child's
+attributes and, for a reparse point, its tag in `EaSize`. On 302,654 entries: **14,081 ms against
+986 ms.**
+
+And the marginal cost of classifying every one of the 280,794 FILES is **zero** -- 986 ms against a
+1,013 ms baseline that discards them, the classifying build coming out marginally faster, which is
+noise. `dirs.c:433` has been throwing away data it already paid to read. That line now carries a
+comment saying so and pointing at the measurement.
+
+### The cold cache, for the fourth time, caught before publication for the first
+
+The pure-Tcl arm on the full tree was still running after **20 minutes** against C's 986 ms. The
+obvious write-up was "Tcl is a thousand times slower here" and it would have been false. The process
+showed **40 s of CPU in 16 minutes of wall clock** -- 3% CPU, blocked on I/O throughout -- and timing
+first-touch against repeat-touch on the same 20,000 files gives **5,984 us against 46.5 us, 128x**.
+The run was measuring a cold file cache. Warm, a Tcl `file` call and Go's `GetFileAttributes` are
+indistinguishable at this resolution, because they are the same system call.
+
+The three previous times -- the basekits, `scout`, the `FrontClean` memo -- the wrong number was
+published first and corrected afterwards. What was different here is that the ratio was refused
+until it could be ATTRIBUTED, and the 0.3 us loop measurement made "Tcl is slow" impossible to
+believe. That is the generalisable form: **a ratio you cannot attribute is not a result.** It sits
+beside the rule from the ledger entry -- an end-to-end number cannot measure a component smaller
+than its own variance -- and the two together are most of what this project keeps relearning.
+
+### DECIDED: mirror is ported, with the walk in C
+
+Not because Tcl can carry the inner loop at 3x, though it can. Because the loop belongs in C that
+**already exists**: a link scanner is `dirs.c` with the file filter removed and the reparse target
+read for the handful of surrogates found -- two junctions in 302,654 entries, one `CreateFile` +
+`FSCTL_GET_REPARSE_POINT` each. The port makes a scan z runs TWICE per mirror run 14x faster:
+**28.2 s of z's own per-entry work becomes 2.0 s.** It is also more faithful in a way already
+visible in the prototype -- pure Tcl reports `link` for both junctions and directory symlinks and
+cannot separate them, and the C walk reads the tag.
+
+**What is NOT decided here** is the destination hazard scan's hardlink check, which needs
+`nNumberOfLinks` and therefore a handle per file -- the one piece of mirror that genuinely is a
+per-file open. It was not prototyped. It should be, before that half is written, because it is the
+only remaining place where the "C program with a Tcl config file" ending is still live.
