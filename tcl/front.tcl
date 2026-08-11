@@ -909,10 +909,33 @@ proc ::machteld::FrontCleanCompute {p} {
     } elseif {[lindex $segs 0] eq ""} {
         set lead "/"  ; set segs [lrange $segs 1 end]
     }
+    # `..` MUST NOT EAT THE VOLUME. The drive letter is just another segment to
+    # the loop below, so `C:/../dev` popped `C:` and returned the RELATIVE path
+    # `dev` -- which a caller then re-anchors at the working directory, naming a
+    # place nobody typed. `C:/..` came back as the EMPTY STRING, and in `mirror`
+    # that became the current directory: a destination the user never named,
+    # reached past the "cannot be a filesystem root" check because by then it was
+    # no longer a root. `filepath.Clean`, which this exists to imitate, keeps the
+    # volume and answers `C:\`.
+    #
+    # The floor is how many leading segments name the volume: one for a drive
+    # letter, two for a UNC `\\server\share`, none for a rooted or relative path
+    # -- where a leading `..` is meaningful and is kept, as Go keeps it.
+    set floor 0
+    if {$lead eq "//"} {
+        set floor 2
+    } elseif {[regexp {^[A-Za-z]:$} [lindex $segs 0]]} {
+        set floor 1
+    }
     set out {}
     foreach s $segs {
         if {$s eq "" || $s eq "."} continue
-        if {$s eq ".." && [llength $out]} { set out [lrange $out 0 end-1] ; continue }
+        if {$s eq ".."} {
+            if {[llength $out] > $floor} { set out [lrange $out 0 end-1] ; continue }
+            # At or above the volume root. Go drops it rather than climbing.
+            if {$floor > 0} continue
+            if {[llength $out]} { set out [lrange $out 0 end-1] ; continue }
+        }
         lappend out $s
     }
     return $lead[join $out /]
@@ -1906,14 +1929,23 @@ proc ::machteld::front {args} {
         set outasked $out
         if {[file pathtype $out] eq "relative"} { set out [file join [pwd] $out] }
         set out [FrontClean $out]
-        # AND STILL ABSOLUTE AFTERWARDS, which the block above claimed and did not
-        # check. `FrontClean` pops `..` lexically and will pop PAST the drive
-        # letter -- `C:/dev/_machteld/../../../../x.txt` comes back as `x.txt` --
-        # so the `list` key named a file only the original working directory could
-        # open, in the report whose whole job is to name a file a later script can
-        # open. Refused here rather than fixed inside `FrontClean`: that proc
-        # answers "is this path WRITTEN underneath that one" for 275 tool
-        # resolutions, and a filename is not the question it was written for.
+        # AND STILL ABSOLUTE AFTERWARDS. This used to be the ONLY defence, and
+        # its comment recorded a decision that has since been reversed: it said
+        # `FrontClean` pops `..` PAST the drive letter and that fixing it there
+        # was wrong, because that proc answers a containment question for 275
+        # tool resolutions and a filename is not what it was written for.
+        #
+        # That reasoning was wrong about the containment question too. Adversarial
+        # review found the same pop turning `--dest C:/..` into the EMPTY STRING
+        # and thence, via re-anchoring, into `mirror`'s working directory -- a
+        # destination nobody named, reached past the "cannot be a filesystem root"
+        # check because by then it was not one. `FrontClean` now keeps the volume,
+        # as `filepath.Clean` always did.
+        #
+        # So this branch should no longer be reachable. It stays anyway: it costs
+        # one `file pathtype`, and it is the check that would notice if the clean
+        # ever regressed. A guard that cannot fire today and would have caught
+        # yesterday's bug is worth its two lines.
         if {[file pathtype $out] eq "relative"} {
             Fail FRONT badvalue "front cdirs: -out \"$outasked\" climbs above the root\
                                  of the drive and names no file"

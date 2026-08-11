@@ -42,6 +42,20 @@ proc valof {script} {
     return $r
 }
 
+# WRITING A FIXTURE FILE, HOISTED HERE FOR THE SAME REASON `errcode_of` WAS.
+# Three separate sections grew their own copy of this three lines lower down,
+# and twice a section reached FORWARD for one defined two hundred lines below
+# it -- which does not fail the check, it aborts the run with "invalid command"
+# and silently drops every check after it. Same failure the two procs above
+# exist to prevent, arriving through the fixtures instead of through the
+# subjects. One writer, defined before anything uses it.
+proc FxWrite {path text} {
+    file mkdir [file dirname $path]
+    set fh [open $path wb]
+    puts -nonewline $fh $text
+    close $fh
+}
+
 # 0. the palette is exposed as bare verbs (unqualified run/child/... resolve)
 set ok 0
 if {![catch {run -- cmd /c echo bare-ok} br]} { set ok [string match *bare-ok* [dict get $br out]] }
@@ -1833,7 +1847,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {child cli detach dirs front hash help journal json links log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
+    {canon child cli detach dirs front hash help journal json links log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -3678,15 +3692,42 @@ check "two roots are two roots even when both are empty" [expr {
 # refused as two dispositions while `-out {}` alone counted as no `-out` at all.
 check "-out {} is refused rather than silently becoming the default" [expr {
     [errcode_of {front cdirs $FX -out {}}] eq {MACHTELD FRONT badvalue}}]
-# `-out` MUST STAY ABSOLUTE THROUGH THE CLEAN. `FrontClean` pops `..` lexically
-# and pops past the drive letter, so the report's `list` key named a file only
-# the original working directory could open -- in the report whose stated job is
-# to name a file a later script can open.
-# An ABSOLUTE subject, so the check does not depend on how deep the suite's
-# working directory happens to be.
-check "-out that climbs above the drive root is refused" [expr {
-    [errcode_of {front cdirs $FX -out C:/../../esc_zzz.txt}]
-        eq {MACHTELD FRONT badvalue}}]
+# `-out` MUST STAY ABSOLUTE THROUGH THE CLEAN. `FrontClean` popped `..` past the
+# drive letter, so the report's `list` key named a file only the original working
+# directory could open -- in the report whose stated job is to name a file a
+# later script can open.
+#
+# THIS CHECK USED TO ASSERT A REFUSAL, AND IT WAS RESTING ON THE BUG. It ran
+# `front cdirs $FX -out C:/../../esc_zzz.txt` and expected `badvalue` -- which is
+# what happened only because the clean turned that into the RELATIVE
+# `esc_zzz.txt` and the absoluteness guard then caught it. Windows and
+# `filepath.Clean` both read `C:/../..` as `C:\`, so the correct answer is
+# `C:/esc_zzz.txt`: absolute, openable, exactly what the caller asked for. Fixing
+# `FrontClean` turned this check red, which is the gate working -- it noticed the
+# behaviour change -- but its EXPECTATION was wrong.
+#
+# Re-pointed at the property, and asserted on `FrontClean` itself rather than by
+# running the command: with the volume now preserved, the old subject would
+# genuinely write `C:\esc_zzz.txt`, and a suite that creates files at the root of
+# the system drive to test a path cleaner is worse than the bug.
+check "the clean keeps the volume when .. climbs past the root" [expr {
+    [::machteld::FrontClean C:/../../esc_zzz.txt] eq "C:/esc_zzz.txt"}]
+check "the clean does not turn a drive root into nothing" [expr {
+    [::machteld::FrontClean C:/..] eq "C:" && [::machteld::FrontClean C:/../] eq "C:"}]
+check "the clean keeps a UNC share whole" [expr {
+    [::machteld::FrontClean //srv/share/a/../../z] eq "//srv/share/z"}]
+check "the clean still keeps a relative .. relative" [expr {
+    [::machteld::FrontClean ../x] eq "../x"}]
+# AND `-out` STILL LANDS SOMEWHERE ABSOLUTE, which is the property that gate was
+# always about. A relative `-out` is ANCHORED at the working directory rather
+# than refused -- it always was, and my replacement check asserted the opposite
+# and failed, which is the second time in this batch that a new test encoded an
+# expectation the code never had. `front cdirs`'s own absoluteness guard is now
+# unreachable by construction and is kept as a tripwire, so what is asserted here
+# is the outcome rather than the refusal.
+check "-out lands on an absolute path" [expr {
+    [file pathtype [dict get [json decode \
+        [front cdirs $FX -out [file join $CDOUT rel_ok.txt] -json]] list]] eq "absolute"}]
 
 # NO STRAY TEMPORARIES. The publish step writes `.tmp` files and renames them;
 # one left behind is a half-written list sitting where a later reader might find
@@ -4027,6 +4068,41 @@ check "mirror allows siblings under one parent" [expr {
 check "mirror refuses a drive root as destination" [expr {
     [errcode_of {::machteld::MirrorValidatePaths C:/dev D:/ 1}] eq {MACHTELD MIRROR badvalue}}]
 
+# MR3b: THE ATTACK THAT GOT THROUGH. A destination JUNCTION pointing into the
+# mirror source passed every clause above, because `file normalize` does not
+# resolve a reparse point that is the final component and `file stat` describes
+# the junction rather than its target -- so `physical` was not physical and the
+# containment tests were asking about the wrong object. Reproduced end to end by
+# adversarial review: robocopy's own /L verdict named a file INSIDE THE SOURCE
+# as a destination extra, which is to say a real /MIR would have deleted it.
+#
+# Fixed by the `canon` verb, and this is the regression test. It builds the
+# reviewer's fixture rather than describing it, because the whole failure was
+# that the code's model of a junction and Windows' model of one disagreed.
+set MRJFX [file join [file dirname $FX] mt_mirror_jn]
+file delete -force $MRJFX
+file mkdir [file join $MRJFX ws sub]
+file mkdir [file join $MRJFX away]
+FxWrite [file join $MRJFX ws sub PRECIOUS.txt] "do not delete\n"
+set MRJ [file join $MRJFX away z-backup]
+catch {exec cmd /c mklink /J [file nativename $MRJ] [file nativename [file join $MRJFX ws sub]]}
+if {![file exists $MRJ]} {
+    puts "     (no junction: mklink /J failed -- the junction-destination check needs one)"
+} else {
+    check "canon resolves a destination junction to its target" [expr {
+        [string equal -nocase [valof {dict get [canon $MRJ] path}] \
+                              [valof {dict get [canon [file join $MRJFX ws sub]] path}]]}]
+    check "mirror refuses a destination junction pointing into the source" [expr {
+        [errcode_of {::machteld::MirrorPlan [file join $MRJFX ws] $MRJ 0}]
+        eq {MACHTELD MIRROR badvalue}}]
+    # AND THE SOURCE-SIDE MIRROR IMAGE: a SOURCE reached through a junction that
+    # lands inside the destination.
+    check "mirror still allows two genuinely separate trees" [expr {
+        [catch {::machteld::MirrorPlan [file join $MRJFX ws] \
+                    [file join $MRJFX away2 z-backup] 0}] == 0}]
+}
+file delete -force $MRJFX
+
 # MR4: robocopy's exit code is a BITFIELD. Reading it as an ordinal is the
 # classic way to call a successful mirror a failure -- 3 is the everyday code.
 check "mirror reads exit 0"  [expr {
@@ -4116,17 +4192,8 @@ set LKFX [file join [file dirname $FX] mt_links_fx]
 file delete -force $LKFX
 file mkdir [file join $LKFX plain sub]
 file mkdir [file join $LKFX target]
-# Written with a local helper rather than the ledger section's: that one is
-# defined two hundred lines BELOW this point, and a fixture that reaches forward
-# for its writer fails with "invalid command" instead of with what it checks --
-# the lesson `valof` and the hoisted `errcode_of` are already here for.
-proc LinksFxWrite {path text} {
-    set fh [open $path wb]
-    puts -nonewline $fh $text
-    close $fh
-}
-LinksFxWrite [file join $LKFX plain a.txt] "a\n"
-LinksFxWrite [file join $LKFX target t.txt] "t\n"
+FxWrite [file join $LKFX plain a.txt] "a\n"
+FxWrite [file join $LKFX target t.txt] "t\n"
 # A junction and a hardlink both work without elevation; a SYMLINK needs either
 # admin or Developer Mode, so it is attempted and skipped WITH A NOTICE rather
 # than silently dropped -- a check that quietly does not run is the shape this
@@ -4304,16 +4371,11 @@ file mkdir [file join $LFX .z t toolone]
 file mkdir [file join $LFX .z t Zed]
 file mkdir [file join $LFX .z r gh]
 file mkdir [file join $LFX .z cache downloads]
-proc LedgerFxWrite {path text} {
-    set fh [open $path wb]
-    puts -nonewline $fh $text
-    close $fh
-}
-LedgerFxWrite [file join $LFX .z t toolone toolone.exe] "toolone\n"
-LedgerFxWrite [file join $LFX .z t Zed Zed.exe] "zed\n"
-LedgerFxWrite [file join $LFX .z r gh gh.exe] "gh\n"
-LedgerFxWrite [file join $LFX .z cache downloads toolone-1.2.3-win.zip] "zip\n"
-LedgerFxWrite [file join $LFX .z manifest.json] {{"tools": {
+FxWrite [file join $LFX .z t toolone toolone.exe] "toolone\n"
+FxWrite [file join $LFX .z t Zed Zed.exe] "zed\n"
+FxWrite [file join $LFX .z r gh gh.exe] "gh\n"
+FxWrite [file join $LFX .z cache downloads toolone-1.2.3-win.zip] "zip\n"
+FxWrite [file join $LFX .z manifest.json] {{"tools": {
   "toolone": {"version": "1.2.3", "license": "MIT",
               "source": "https://example.invalid/toolone?a=1&b=2", "exe": "toolone.exe"},
   "ghcli":   {"version": "2.0.0", "source": "https://example.invalid/gh",
@@ -4474,7 +4536,7 @@ check "ledger check calls a fresh lock current" [expr {
 check "ledger check exits 0 when current" [expr {[dict get $r exit] == 0}]
 
 # A PAYLOAD CHANGED IS A STALE LEDGER, which is what the hashes are for.
-LedgerFxWrite [file join $LFX .z t toolone toolone.exe] "toolone-v2\n"
+FxWrite [file join $LFX .z t toolone toolone.exe] "toolone-v2\n"
 set r [LedgerMt $LFX ledger check]
 check "ledger check notices a changed payload" [expr {
     [lindex [LedgerLines $r] 0] eq "stale book/payloads.lock.json"}]
@@ -4488,7 +4550,7 @@ check "ledger refresh makes it current again" [expr {[dict get $r exit] == 0}]
 set LFXE [file join [file dirname $FX] mt_ledger_empty]
 file delete -force $LFXE
 file mkdir [file join $LFXE .z]
-LedgerFxWrite [file join $LFXE .z manifest.json] {{"tools": {}}}
+FxWrite [file join $LFXE .z manifest.json] {{"tools": {}}}
 LedgerMt $LFXE ledger refresh
 set LEMPTY [LedgerSlurp [file join $LFXE .z book payloads.lock.json]]
 check "ledger writes null, not \[\], for no payloads" [expr {

@@ -1426,9 +1426,145 @@ static int LinksCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     return dirs_core(interp, objv, &w);
 }
 
+/* --- `canon`: which object is this path, and where does it really live? -----
+ *
+ * THE THIRD QUESTION THIS FILE ANSWERS, and the one `mirror` could not ask.
+ *
+ * `file normalize` DOES NOT RESOLVE A REPARSE POINT THAT IS THE FINAL
+ * COMPONENT. Measured: `file normalize C:/dev/.z/r/winsdk/10.0.26100.0` returns
+ * the junction itself, while normalising one component deeper follows it. So a
+ * front door that resolves `--dest <a junction>` through Tcl gets the
+ * junction's own name back and every containment test it then performs is
+ * asking about the wrong object. Reproduced end to end before this verb
+ * existed: a destination junction pointing into the mirror source passed every
+ * clause, and robocopy's own /L verdict named a file INSIDE THE SOURCE as a
+ * destination extra -- which is to say a real /MIR would have deleted it.
+ *
+ * `file stat` CANNOT SUPPLY THE IDENTITY EITHER. Its `dev` is the drive-letter
+ * index -- every path on C: reports 2, where the volume serial is 0xeb960d30 --
+ * and on a junction it describes the JUNCTION rather than its target (measured,
+ * 2/26741 against 2/53249). Two names for one file do share an `ino`, which is
+ * why the containment checks were self-consistent while being wrong, and it is
+ * the most dangerous kind of nearly-right.
+ *
+ * So: one open that FOLLOWS, and two questions asked of that handle.
+ * GetFinalPathNameByHandleW is where the object actually is;
+ * GetFileInformationByHandle is which object it is. Both are things Tcl has no
+ * spelling for, which is [rule 4] -- C only for what Tcl cannot reach -- and
+ * this is the second time the answer to "can Tcl host this" has been "yes,
+ * except for one syscall".
+ *
+ * THE NUMBERS ARE z's NUMBERS. `volume` and `file` are the same
+ * dwVolumeSerialNumber and 64-bit file index z hashes into its mirror-state
+ * filename, so a workspace key computed from these lands on the file z reads
+ * rather than beside it. */
+static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    (void)cd;
+    if (objc != 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "path");
+        return TCL_ERROR;
+    }
+    wchar_t *pathw = NULL;
+    int unc = 0;
+    if (dirs_prefix(interp, Tcl_GetString(objv[1]), &pathw, &unc) != TCL_OK) {
+        return TCL_ERROR;                  /* dirs_prefix has already spoken */
+    }
+    /* FOLLOW. This is the whole verb: `dirs` opens with
+     * FILE_FLAG_OPEN_REPARSE_POINT so a junction is classified rather than
+     * entered, and here the opposite is wanted -- the target is the answer. */
+    HANDLE h = dirs_open(pathw, 1);
+    if (h == INVALID_HANDLE_VALUE) {
+        /* A DANGLING LINK IS NOT A MISSING PATH, and the caller has to be able
+         * to tell them apart: projecting a destination through a parent that
+         * turns out to be a broken junction is how you mirror into the wrong
+         * tree. The reparse-point open answers "the name exists"; the followed
+         * open above answers "and it leads somewhere". */
+        DWORD e = GetLastError();
+        HANDLE raw = dirs_open(pathw, 0);
+        if (raw != INVALID_HANDLE_VALUE) {
+            CloseHandle(raw);
+            free(pathw);
+            /* ITS OWN CODE, because the caller's decision turns on it. A
+             * resolver walking UP to the nearest existing ancestor must treat
+             * "nothing here" as "keep going" and "here, but broken" as STOP:
+             * projecting a destination beneath a dangling junction puts it in
+             * whatever tree that name later comes to mean. Reported as
+             * `notfound` the two are indistinguishable, and mirror's first
+             * attempt to tell them apart in Tcl -- `file exists` false AND
+             * `file type` succeeding -- was dead code, because `file exists`
+             * answers TRUE for a dangling junction. */
+            return dirs_error(interp, "dangling",
+                "the path exists but its target cannot be resolved");
+        }
+        free(pathw);
+        return dirs_error(interp, e == ERROR_ACCESS_DENIED ? "oserror" : "notfound",
+            e == ERROR_ACCESS_DENIED ? "the path cannot be opened" : "no such path");
+    }
+
+    BY_HANDLE_FILE_INFORMATION bhfi;
+    memset(&bhfi, 0, sizeof bhfi);
+    if (!GetFileInformationByHandle(h, &bhfi)) {
+        CloseHandle(h);
+        free(pathw);
+        return dirs_error(interp, "oserror", "the path could not be identified");
+    }
+    /* Asked for its length first: a path can be up to 32,767 units and a fixed
+     * buffer here is the bug this file's `\\?\` handling exists to avoid. */
+    DWORD need = GetFinalPathNameByHandleW(h, NULL, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (need == 0) {
+        CloseHandle(h);
+        free(pathw);
+        return dirs_error(interp, "oserror", "the path could not be canonicalised");
+    }
+    wchar_t *finalw = (wchar_t *)malloc((size_t)(need + 1) * sizeof(wchar_t));
+    if (finalw == NULL) {
+        CloseHandle(h);
+        free(pathw);
+        return dirs_error(interp, "oserror", "out of memory");
+    }
+    DWORD wrote = GetFinalPathNameByHandleW(h, finalw, need, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(h);
+    free(pathw);
+    if (wrote == 0 || wrote >= need + 1) {
+        free(finalw);
+        return dirs_error(interp, "oserror", "the path could not be canonicalised");
+    }
+    finalw[wrote] = L'\0';
+
+    /* GetFinalPathNameByHandleW always answers with the `\\?\` prefix, in the
+     * same two shapes dirs_strip already undoes -- `\\?\C:\x` and `\\?\UNC\s\h`. */
+    int func = (wcsncmp(finalw, L"\\\\?\\UNC\\", 8) == 0);
+    char *shown = dirs_strip(finalw, func);
+    free(finalw);
+    if (shown == NULL) return dirs_error(interp, "oserror", "the path is not representable");
+
+    Tcl_Obj *d = Tcl_NewDictObj();
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("path", -1), Tcl_NewStringObj(shown, -1));
+    free(shown);
+    /* HEX STRINGS, NOT INTEGERS, and the width is z's `%016x`. A 64-bit file
+     * index does not fit a Tcl_WideInt's signed range on every volume, and a
+     * caller comparing identities wants a token to compare rather than a number
+     * to do arithmetic on. */
+    char vol[24], fil[24];
+    snprintf(vol, sizeof vol, "%016llx", (unsigned long long)bhfi.dwVolumeSerialNumber);
+    snprintf(fil, sizeof fil, "%016llx",
+             ((unsigned long long)bhfi.nFileIndexHigh << 32) | bhfi.nFileIndexLow);
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("volume", -1), Tcl_NewStringObj(vol, -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("file", -1), Tcl_NewStringObj(fil, -1));
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("kind", -1), Tcl_NewStringObj(
+        (bhfi.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? "directory" : "file", -1));
+    /* The link count comes free with the same call, and it is the one fact
+     * `links -hardlinks` pays a handle per file for. */
+    Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("links", -1),
+                   Tcl_NewWideIntObj((Tcl_WideInt)bhfi.nNumberOfLinks));
+    Tcl_SetObjResult(interp, d);
+    return TCL_OK;
+}
+
 int Machtelddirs_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::dirs", DirsCmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::links", LinksCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "::machteld::canon", CanonCmd, NULL, NULL);
     Tcl_PkgProvide(interp, "machteld::dirs", "0.1");
     return TCL_OK;
 }
