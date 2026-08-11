@@ -1325,3 +1325,85 @@ cannot separate them, and the C walk reads the tag.
 `nNumberOfLinks` and therefore a handle per file -- the one piece of mirror that genuinely is a
 per-file open. It was not prototyped. It should be, before that half is written, because it is the
 only remaining place where the "C program with a Tcl config file" ending is still live.
+
+## The destination hardlink check: irreducible, and it does not force C (2026-08-11)
+
+The entry above closed with one thing deliberately unmeasured and named it as the only place where
+the "C program with a Tcl configuration file" ending was still live: `validateMirrorDestinationHazards`
+rejects destination files whose bytes are shared through hardlinks, `nNumberOfLinks` is not carried
+by any directory enumeration class, and so that half of mirror needs **a handle per file**.
+
+Measured now. **It is irreducible, it is not dramatic, and it does not force C.**
+
+### Three of five system calls per entry are waste, and the other two are not
+
+    GetFileAttributes(path)                       redundant -- the enumeration already said
+    CreateFile(path, 0, ..., OPEN_REPARSE_POINT)  needed
+    GetFileInformationByHandle(h)                 needed
+    CloseHandle(h)                                needed
+    DeviceIoControl(FSCTL_GET_REPARSE_POINT)      redundant -- the tag is in the enumeration
+
+And a third saving is available a priori: **NTFS does not permit hardlinks to directories**, so their
+link count is always 1 and opening one can never find anything. z opens one for each of the
+destination's 17,512 directories. That is measured rather than assumed -- a handle-per-entry mode
+takes 63,669 handles where a handle-per-file mode takes 61,146, and both find exactly the same 160
+multilinked files, every run.
+
+What remains after all three savings is one open/query/close per file, and there is no way around
+it. The only bulk route is `FSCTL_QUERY_FILE_LAYOUT`, which needs a volume handle and normally
+elevation; not pursued, and recorded as the place to look if the seconds ever matter.
+
+### Tcl can express this check, which is what actually settles the question
+
+`file stat` fills `nlink` from a genuine `GetFileInformationByHandle` on Windows. Verified against a
+fixture built with `mklink /H` -- the hardlinked pair reports `nlink=2` and a shared `ino`, an
+ordinary file reports 1 -- and over the msys2 tree it finds **the same 160 multilinked files** the C
+probe finds. There is no capability gap, so nothing forces the code into C.
+
+The cost, on a fixed list of paths and INTERLEAVED (see below), median of 7 rounds local and 5 on the
+destination:
+
+| | local, 10k files | OneDrive dest, 2k files |
+|---|---|---|
+| C, `access=0` + `OPEN_REPARSE_POINT` (z's flags) | **66.1 us** | **51.8 us** |
+| C, `access=GENERIC_READ` | 76.5 us | 57.8 us |
+| Tcl `file stat` | **90.0 us** | **69.2 us** |
+
+**Tcl is 1.36x and 1.34x of C** -- the same ratio twice from independent samples, which is the reason
+to believe it, and exactly what an operation that is ~98% system call should look like. At full
+scale the destination's 241,700 files cost ~12.6 s in C and ~16.7 s in Tcl, against z's ~18 s today.
+The entire spread between best and worst here is about four seconds inside a command that runs
+robocopy over a quarter of a million files.
+
+So: the destination scan **should** be C, because the walk already is and the link count then costs
+nothing extra in code. But it is a convenience, not a constraint, and the ending this spike was
+written to rule out is ruled out.
+
+### The design error, twice, and this time inside one afternoon
+
+Sequential blocks produced two confident wrong results here:
+
+**"Tcl is twice as fast as C"** -- 102.2 us against 54.7 us. Interleaved, the ordering reverses.
+
+**"`GENERIC_READ` is nearly 2x faster than `access=0`"** -- 66.4 against 115.4 sequentially, and
+76.5 against 66.1, the other way round, interleaved. There is no Win32 fact there at all. z's
+existing flags are the fastest of the three.
+
+Both came from the same cause as the drift that was already recorded one entry above: three
+consecutive walks of one subtree measured 3,501 / 5,159 / 6,520 ms. **The variance was larger than
+every effect being looked for.** The fix is not more repeats -- min-of-N does not converge when the
+machine is drifting -- it is INTERLEAVING: run every arm inside each round, so whatever the machine
+is doing is shared by all arms rather than landing on one, and report the median.
+
+That is the third rule this project has had to write down about measurement, and it is the one that
+generalises furthest:
+
+- an end-to-end number cannot measure a component smaller than its own variance (ledger);
+- a ratio you cannot attribute is not a result (mirror part 1);
+- **comparisons must be interleaved, not blocked** (here).
+
+And a correction to the entry above, from the same cause: the destination was reported there as
+"17,512 dirs in 5,648 ms, ~7x slower per directory than local, the cloud filter driver". Warm, the
+full destination -- 17,512 directories **and 241,700 files** -- walks in **1,355 ms, 5.23 us/entry**,
+the same rate as the local tree. That was a cold cache, for the fifth time. There is no OneDrive
+metadata penalty in this measurement.
