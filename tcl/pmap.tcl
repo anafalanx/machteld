@@ -79,7 +79,7 @@ proc ::machteld::pmap {args} {
     set rc [catch {
         set p [pool create -width $width -maxtries $maxtries -- {*}$cmd]
         pool submit $p $reqs
-        pool wait $p -timeout [expr {$timeout / 1000}]s
+        pool wait $p -timeout ${timeout}ms
     } replies opts]
     # ALWAYS, on every path. This is the whole first reason for the verb.
     if {$p ne ""} { catch {pool close $p} }
@@ -104,15 +104,6 @@ proc ::machteld::pmap {args} {
             # A handler that raised a plain `error` has errorcode NONE, which
             # nothing can trap on. Passing that through would hand back a code
             # that means nothing, so it becomes a pmap failure instead.
-            #
-            # Raised through Fail rather than by assembling the errorcode into a
-            # variable, and that is not a style choice: `-errorcode $code` is
-            # invisible to BOTH the manifest derivation and the registry closure
-            # test, which match on literals. So `failed` was a code this verb
-            # could throw while declaring only `badvalue usage` and appearing
-            # nowhere in the contract -- precisely the undeclared-code defect
-            # those gates exist to catch, in the verb that came after them. It
-            # surfaced from a break-test aimed at something else.
             if {$code eq "" || $code eq "NONE"} { Fail PMAP failed $msg }
             return -code error -errorcode $code $msg
         }
@@ -120,3 +111,6 @@ proc ::machteld::pmap {args} {
     }
     return $out
 }
+
+::machteld::MetaDefine pmap [dict create kind tcl args args domain PMAP \
+    codes {badvalue failed launch timeout usage} options {-maxtries -raw -timeout -width}]

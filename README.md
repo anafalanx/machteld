@@ -1,38 +1,86 @@
 # machteld
 
-*A single-exe personal Tcl/Tk toolkit for Windows 11. You write Tcl; the power is in C.*
+machteld is a compact Windows machine-control runtime: Tcl 9 plus a small,
+structured command palette implemented in C and Tcl. It ships as one executable,
+starts no service, needs no installed Tcl, and keeps Windows process, ConPTY,
+filesystem, HTTP, hashing, JSON, and SQLite machinery behind Tcl-shaped commands.
 
-machteld is one signed Windows executable (Win 11 23H2+) that does three things:
+The 0.4.0 release target is 64-bit Windows 10 version 1809 or newer (including
+Windows 11 and corresponding Windows Server releases). ConPTY sets that floor;
+the shipped artifact is x64, not a claim to run on every historical Windows box.
 
-- **A workspace front door.** `mt <name>` turns a name into something runnable under a controlled environment — a builtin verb, or a tool the workspace curates — with **no system-`PATH` fallback**, so what runs is what the workspace vendored. It records every one in a [SQLite journal](docs/journal.md). A script is named too: `mt tcl app.tcl`.
-- **A tool factory.** `wrap ./mytool -o mytool.exe --gui` stamps a pure-Tcl/Tk program into its own standalone exe — console **or** GUI, with **zero compiler**. Both subsystem hosts and the Tcl/Tk libraries ride inside `mt.exe`, so nothing needs installing to build a tool or to run one. Write something in an afternoon, hand a colleague one file.
-- **A machine-control primitive library** — in its REPL, in any script it runs, and in anything it starts: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, live capture/streaming), interactive **ConPTY** steering (`pty` / `expect`), live file events (`watch`), a machine-wide process view (`mtps`), JSON (`json`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
-
-Built to be as legible to agents as to humans — *no AI inside; the agent is an external mind.*
-It carries **its own spec inside it**: `help` serves the documentation bundle and `manifest`
-answers with the real surface — verbs, options, result shapes and error codes — derived from the
-source rather than maintained beside it, so it cannot describe a binary it is not.
+Version 0.4.0 deliberately has one entry route: a readable UTF-8 program file.
+The conventional extension is `.tcl`, but the runtime does not require it. The file must
+begin with a literal opt-in command:
 
 ```tcl
-set w [watch start $dir -recursive]
-wait -any [child start -- build.cmd] $w      ;# the build finished, or a file changed
-dict get [manifest] watch subcommands        ;# what this exe can actually do
+package require machteld 0.4.0
+
+set result [run -timeout 30s -- git status --short]
+puts [dict get $result out]
 ```
 
-**No applications ship inside it — but the machinery to make your own does.** Five did ride along
-once: `changes`, `tasks`, `sums`, `life`, `lifelab`, first as stamped exes and then briefly as
-scripts in the exe's own archive. Both arrangements were removed on 2026-08-10, because a front
-door resolves names and supervises what it starts, and hosting the applications as well made it two
-things at once. `wrap` stayed, and the distinction is the whole point: **a verb hands you an exe of
-your own; an application would be one machteld keeps.**
+Run it directly:
 
-They earned their keep on the way out, and what they taught is what remains. `changes` and `tasks`
-were written first and then named the C capability they needed, which is how `watch` and `mtps`
-came to exist. `sums` proved the opposite direction — that this exe can spawn **copies of itself**
-as a pool of persistent workers, with no tclsh and no worker script on disk. `life` and `lifelab`
-were the stress experiment that found the cap-enforcement and timeout defects the supervision layer
-had been hiding. The palette and [the log](docs/log.md) keep the findings; git keeps the programs.
+```text
+machteld.exe app.tcl argument ...
+```
 
-**Concept & design docs:** [`docs/`](docs/) — an [OKF v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog) knowledge bundle. Start at [`docs/index.md`](docs/index.md).
+The entry check is parsed before the file is evaluated. `package require
+machteld`, an optional literal version, and `package require -exact machteld
+<version>` are accepted. A generic Tcl script is refused: using this runtime is
+an explicit dependency, not an inference from a filename.
 
-Licensed under Apache-2.0.
+## The palette
+
+- Process control: supervised `run`, `child`, `wait`, and `scope`; independent
+  `detach`.
+- Interactive programs: `pty spawn/send/read/expect/strip/close` over ConPTY.
+- Machine observation: `watch`, `mtps`, `dirs`, `links`, and `canon`.
+- Data and network: `store`, `json`, `hash`, and `http`.
+- Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
+- Runtime support: `version`, `manifest`, `help`, and `wrap`.
+
+Commands live in `::machteld`; the prelude adds that namespace to the global
+command path, so small programs can use the bare names shown above. `manifest`
+returns the exact verbs, options, subcommands, declared fixed result shapes, and
+raised/protocol error codes in the running executable. `help` reads bundled
+documentation when the distribution host carries it.
+
+Machteld failures use Tcl's structured error code, while a supervised program's
+timeout is a normal result state:
+
+```tcl
+set result [run -timeout 2s -- slow.exe]
+if {[dict get $result status] eq "timeout"} {
+    puts stderr "slow.exe exceeded its deadline"
+}
+```
+
+Durations always carry units: `500ms`, `30s`, `5m`, or `2h`.
+
+## Standalone tools
+
+`wrap` turns an opted-in program file, or a directory containing one, into a
+standalone console or GUI executable without a compiler:
+
+```text
+machteld.exe wrap app.tcl -o app.exe
+machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
+```
+
+A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
+subtree, the staged entry is validated, and the output is published atomically. There is no
+reduced runtime mode: every wrapped console or GUI tool exposes the same
+programmatic Machteld 0.4.0 machine-control API, including the statically linked,
+binary-safe SQLite `store`. Distribution-only documentation and wrapping
+basekits are not embedded recursively in tools.
+
+Start with [the documentation index](docs/index.md), then use
+[the palette](docs/palette.md) as the command reference and
+[the contract](docs/contract.md) for stable conventions.
+
+Machteld's own code is licensed under the [Apache License 2.0](LICENSE).
+Bundled material retains its own terms, including the verbatim
+[Tcl](licenses/Tcl-9.0.4.txt) and [Tk](licenses/Tk-9.0.4.txt) notices and the
+[JSONTestSuite license](test/jsontestsuite/LICENSE).

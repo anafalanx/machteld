@@ -1,22 +1,73 @@
 # machteld.tcl -- the machteld prelude.
 #
-# Sourced by the C host (Machteld_AppInit) from the appended zipfs BEFORE
-# Tcl_Main runs a user script or enters the REPL. M0 establishes only the
-# namespace, version, and a branded prompt; the command palette
-# (run / child / pty / wait / scope / detach and the domain ensembles) lands
-# from M1 on.
+# Sourced by the C host from zipfs before Tcl_Main evaluates an entry file.
 
 namespace eval ::machteld {
-    variable version 0.3.0
-    # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl,
-    # which derives it from src/*.c. Declared empty here so the verb answers
-    # something honest in a build where generation was skipped.
+    variable version 0.4.0
+    # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl
+    # from the explicit native specification, after checking its command set
+    # against src/*.c. Declared empty here so an unpackaged prelude never invents
+    # native facts.
     variable MANIFEST {}
+    variable TCL_MANIFEST {}
 }
 
 proc ::machteld::version {} {
     variable version
     return $version
+}
+
+# Explicit public facts for Tcl-authored verbs. Command bodies are programs,
+# not an API-description language: comments and refactors must not change what
+# `manifest` claims. C facts remain generated into MANIFEST.
+proc ::machteld::MetaDefine {verb facts} {
+    variable TCL_MANIFEST
+    if {[catch {dict size $facts}]} { error "MetaDefine $verb: facts must be a dict" }
+    if {![dict exists $facts kind] || [dict get $facts kind] ne "tcl"} {
+        error "MetaDefine $verb: Tcl metadata must declare {kind tcl}"
+    }
+    if {[dict exists $TCL_MANIFEST $verb]} {
+        error "MetaDefine $verb: metadata is already registered"
+    }
+    dict set TCL_MANIFEST $verb $facts
+    return
+}
+
+proc ::machteld::MetaMergeEntry {verb base extra} {
+    set extending [expr {[dict exists $base kind] && [dict get $base kind] eq "c"}]
+    if {$extending && $verb ne "pty"} {
+        error "manifest: Tcl metadata cannot extend C verb \"$verb\""
+    }
+    if {!$extending} {
+        error "manifest: duplicate metadata for \"$verb\""
+    }
+    if {[dict exists $base domain] && [dict exists $extra domain] &&
+        [dict get $base domain] ne [dict get $extra domain]} {
+        error "manifest: conflicting domain for \"$verb\""
+    }
+    if {$extending} {
+        dict unset extra kind
+        if {[dict exists $extra args]} { dict unset extra args }
+    }
+    foreach key {codes options replycodes} {
+        if {![dict exists $extra $key]} continue
+        set values [dict get $extra $key]
+        if {[dict exists $base $key]} { set values [concat [dict get $base $key] $values] }
+        dict set base $key [lsort -unique $values]
+        dict unset extra $key
+    }
+    if {[dict exists $extra subcommands]} {
+        set subs [expr {[dict exists $base subcommands] ? [dict get $base subcommands] : {}}]
+        dict for {name sfacts} [dict get $extra subcommands] {
+            if {[dict exists $subs $name]} {
+                error "manifest: Tcl metadata duplicates $verb subcommand \"$name\""
+            }
+            dict set subs $name $sfacts
+        }
+        dict set base subcommands $subs
+        dict unset extra subcommands
+    }
+    return [dict merge $base $extra]
 }
 
 # manifest: the palette describing itself ([creed] 4). One dict, no arguments,
@@ -29,225 +80,26 @@ proc ::machteld::version {} {
 #   dict get [manifest] pty subcommands read options   -> -timeout
 #   dict get [manifest] child codes          -> what `child` can throw
 #
-# Every field is DERIVED from the C at build time, so it cannot drift from the
-# code it describes -- which is the difference between self-description and a
-# second copy of the truth. Prose belongs to `help`, deliberately: a summary is
-# authored, and mixing authored text into a generated file is how a generated
-# file starts being hand-edited.
-# The two halves are derived by two different means, for one reason: C cannot be
-# asked about itself at runtime and Tcl can. So the C facts are extracted from
-# the source at build time, and the Tcl facts are read out of the live
-# interpreter here -- `namespace ensemble configure -map` for a verb the prelude
-# extends (pty gains `expect`), `info args` for a plain proc. Neither half is
-# hand-maintained, which is the whole point: a hand-kept list is a second copy
-# of the truth, and second copies drift.
-#
-# Internal helpers are excluded by the naming convention this prelude already
-# follows: a leading underscore or capital (_dur2ms, PtyCore) means "not
-# palette".
-# IS THIS NAME A PALETTE VERB? One definition, because two would drift: the
-# manifest's own loop uses it below, and the front door's resolver asks it
-# instead of asking for the whole manifest. A leading capital or underscore is
-# a helper, by the convention the prelude already follows.
-proc ::machteld::PaletteVerb {v} {
-    if {[string match {[A-Z_]*} $v]} { return 0 }
-    return [expr {"::machteld::$v" in [info commands ::machteld::*]}]
-}
-
-# DERIVED ONCE PER PROCESS, NOT ONCE PER CALL. Deriving the Tcl half means
-# running MtclFacts over every Tcl-written verb, and MtclFacts follows helpers
-# transitively with a regexp per helper per body -- 316 ms for 13 verbs, on the
-# measurements in [the log](log.md).
-#
-# That was being paid by EVERY `mt <name>`, because the front door's resolver
-# opened with `dict exists [manifest] $name` to ask whether a name was a builtin.
-# A front door that rebuilds its own self-description before it can look
-# anything up is the whole of why this exe answered in 360 ms where z.exe
-# answers in 9.
-#
-# The cache is keyed on the command set, not on a flag: if a script defines a
-# new ::machteld:: command the answer must change, and comparing the sorted
-# name list costs ~0.1 ms against 316. Honest rather than merely fast.
+# Native facts come from the explicit build specification. Tcl facts are explicit
+# registrations next to their implementations; the suite checks both against live
+# behavior.
 proc ::machteld::manifest {} {
     variable MANIFEST
-    variable MANIFEST_CACHE
-    variable MANIFEST_CACHE_KEY
-    set key [info commands ::machteld::*]
-    if {[info exists MANIFEST_CACHE] && $MANIFEST_CACHE_KEY eq $key} {
-        return $MANIFEST_CACHE
-    }
-    set m [ManifestDerive]
-    set MANIFEST_CACHE $m
-    set MANIFEST_CACHE_KEY $key
-    return $m
-}
-proc ::machteld::ManifestDerive {} {
-    variable MANIFEST
+    variable TCL_MANIFEST
     set m $MANIFEST
-    foreach cmd [lsort [info commands ::machteld::*]] {
-        set v [namespace tail $cmd]
-        if {![PaletteVerb $v]} continue
-        if {[dict exists $m $v]} {
-            # A C verb the prelude re-presents as an ensemble: take the union,
-            # so a subcommand added in Tcl is as visible as one written in C.
-            if {[namespace ensemble exists $cmd]} {
-                set subs [dict get $m $v subcommands]
-                set vcodes [dict get $m $v codes]
-                foreach {s target} [namespace ensemble configure $cmd -map] {
-                    if {![dict exists $subs $s]} { dict set subs $s [dict create options {}] }
-                    # A subcommand implemented in Tcl behind a C verb -- `pty
-                    # expect` is the case -- carries codes and options of its own.
-                    # Reading only the C left the manifest silent about
-                    # {MACHTELD PTY timeout}, which `pty expect` genuinely raises:
-                    # a subcommand written in the prelude was less visible than
-                    # one written in C, in the dict that exists to describe them
-                    # both.
-                    set t [lindex $target 0]
-                    if {![llength [info procs $t]]} continue
-                    set f [MtclFacts $t]
-                    if {[dict exists $f codes]} { lappend vcodes {*}[dict get $f codes] }
-                    if {[dict exists $f options]} {
-                        dict set subs $s options [lsort -unique [concat \
-                            [dict get $subs $s options] [dict get $f options]]]
-                    }
-                }
-                dict set m $v subcommands $subs
-                dict set m $v codes [lsort -unique $vcodes]
-            }
-            continue
+    dict for {verb facts} $TCL_MANIFEST {
+        if {[dict exists $m $verb]} {
+            dict set m $verb [MetaMergeEntry $verb [dict get $m $verb] $facts]
+        } else {
+            dict set m $verb $facts
         }
-        # KIND IS READ, NOT ASSUMED. A command with no entry used to be called
-        # `kind tcl` outright, which made a C verb the build-time generator
-        # never saw indistinguishable from a prelude verb -- and that is exactly
-        # what happened to `journal`: a C command with six options, described as
-        # a Tcl verb with none. If it is not a proc it is C, and a C entry
-        # carrying no domain is the generator having missed a file, which the
-        # suite fails on rather than publishing.
-        set entry [dict create kind [expr {[llength [info procs $cmd]] ? "tcl" : "c"}]]
-        if {[llength [info procs $cmd]]} {
-            dict set entry args [info args $cmd]
-            set entry [dict merge $entry [MtclFacts $cmd]]
-        }
-        dict set m $v $entry
     }
     return $m
 }
 
-# What a Tcl verb declares about itself, read out of its own body.
-#
-# The C half of the manifest is derived from src/*.c at build time; this is the
-# same trick applied to the prelude, and until Phase 0 it did not exist -- a Tcl
-# verb reported `kind tcl` plus `info args` and nothing else, so the two verbs
-# written in Tcl at the time (`help`, and `wrap`, since retired) had no domain,
-# no codes and no options in the very dict whose purpose is describing the
-# palette. Tolerable for two verbs; not tolerable for the standard library
-# ([stdlib](stdlib.md)), which lands here and would have left creed 4 covering
-# barely half the palette.
-#
-# `info body` is the source rather than a table, so this cannot drift: it reads
-# the body of the actual command in the actual interpreter -- including one
-# sourced out of the exe's own zipfs, which is how every shipped tool runs.
-proc ::machteld::MtclFacts {cmd} {
-    set body [info body $cmd]
-    set domain ""
-    set codes {}
-
-    # The ordinary raiser.
-    foreach {_ d c} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} $body] {
-        set domain $d ; lappend codes $c
-    }
-    # A script literal carrying its own errorcode, evaluated later by uplevel:
-    # `pty expect`'s timeout body is built as text and run in the caller's frame,
-    # so it cannot call Fail and states its code inline instead. `--` before the
-    # pattern because it begins with a dash, and regexp would read it as a switch.
-    foreach {_ d c} [regexp -all -inline -- \
-            {-errorcode\s+\{MACHTELD\s+([A-Z]+)\s+([a-z]+)\}} $body] {
-        set domain $d ; lappend codes $c
-    }
-    # Internal helpers that raise on the verb's behalf, followed TRANSITIVELY.
-    # `cli` delegates spec checking to CliNorm, so a scan of `cli`'s own body
-    # declared `usage` and nothing else while the verb could plainly raise
-    # `badvalue`. One level fixed that case and was still not enough: `pool` names
-    # PoolCreate, which names PoolSpawn, which is where `launch` is raised -- two
-    # hops away and therefore invisible, so the manifest under-declared a code the
-    # verb really throws. Depth is not a property anyone should have to guess, so
-    # this walks to closure with a visited set rather than to a fixed number.
-    set helpers {}
-    foreach hcmd [info procs ::machteld::*] {
-        if {[string match {[A-Z_]*} [namespace tail $hcmd]]} { lappend helpers $hcmd }
-    }
-    set seen {}
-    set frontier [list $body]
-    while {[llength $frontier]} {
-        set text [lindex $frontier 0]
-        set frontier [lrange $frontier 1 end]
-        foreach hcmd $helpers {
-            set hname [namespace tail $hcmd]
-            if {[dict exists $seen $hname]} continue
-            # `\\y` doubled on purpose: inside a quoted "\y$hname\y" Tcl collapses
-            # the unknown escape to a bare y before the regex engine sees it, so
-            # the pattern silently becomes yCliNormy and matches nothing at all.
-            if {![regexp \\y$hname\\y $text]} continue
-            dict set seen $hname 1
-            set hbody [info body $hcmd]
-            lappend frontier $hbody
-            foreach {_ hd hc} [regexp -all -inline -- {Fail\s+([A-Z]+)\s+([a-z]+)\s} $hbody] {
-                if {$domain eq ""} { set domain $hd }
-                if {$hd eq $domain} { lappend codes $hc }
-            }
-        }
-    }
-
-    # A shared helper told which domain to raise in: `_dur2ms PTY $v` fails with
-    # badvalue, but that literal lives in _dur2ms, not here. The C generator has
-    # the same problem with parse_opts and solves it the same way -- follow the
-    # call, and attribute what it raises to the verb that made it.
-    foreach {_ helper d} [regexp -all -inline -- \
-            {(?:::machteld::)?(_[a-z]\w*)\s+([A-Z]+)[\s\]]} $body] {
-        set h ::machteld::$helper
-        if {![llength [info procs $h]]} continue
-        if {$domain eq ""} { set domain $d }
-        foreach {_ c} [regexp -all -inline -- {Fail\s+\$\w+\s+([a-z]+)\s} [info body $h]] {
-            lappend codes $c
-        }
-    }
-
-    # Options. A verb may DECLARE its table -- `set opts {...}` -- and that wins
-    # outright, including when it is empty. Guessing is only a fallback, because
-    # guessing cannot distinguish a verb's own options from option literals it
-    # handles on someone else's behalf: `cli` compares against "--help" while
-    # parsing a *tool's* argv, and the scanner read that as an option of `cli`.
-    set options {}
-    if {[regexp -line -- {^\s+set opts \{([^\}]*)\}} $body -> declared]} {
-        set options $declared
-    } else {
-        # The two idioms the prelude uses where nothing is declared: a switch arm,
-        # and an equality against a literal. Matching only one is exactly how the
-        # C side once under-reported `watch`'s options as none.
-        foreach {_ o} [regexp -all -inline -line -- {^\s+(--?[a-z][-a-z0-9]*)\s+\{} $body] {
-            lappend options $o
-        }
-        foreach {_ o} [regexp -all -inline -- {eq\s+"(--?[a-z][-a-z0-9]*)"} $body] {
-            lappend options $o
-        }
-    }
-
-    # Subcommands, declared the way the C declares them. A C verb names its
-    # table in `static const char *const subs[]`; a Tcl verb writes
-    # `set subs {parse usage}` for exactly the same reason -- so the manifest can
-    # read the table rather than anyone keeping a second copy of it in a doc.
-    set subcommands {}
-    if {[regexp -line -- {^\s+set subs \{([^\}]*)\}} $body -> raw]} {
-        foreach sname $raw { dict set subcommands $sname [dict create options {}] }
-    }
-
-    set out [dict create]
-    if {[dict size $subcommands]} { dict set out subcommands $subcommands }
-    if {$domain ne ""}      { dict set out domain $domain }
-    if {[llength $codes]}   { dict set out codes [lsort -unique $codes] }
-    if {[llength $options]} { dict set out options [lsort -unique $options] }
-    return $out
-}
+::machteld::MetaDefine version [dict create kind tcl args {}]
+::machteld::MetaDefine manifest [dict create kind tcl args {}]
+::machteld::MetaDefine scope [dict create kind tcl args {body}]
 
 # scope { body }: run body, then close (tree-kill) any children started within
 # it that are still alive at the closing brace -- bounded lifetime by lexical
@@ -265,37 +117,25 @@ proc ::machteld::scope {body} {
     return -options $options $result
 }
 
-# vtstrip: remove ANSI/VT escape sequences from text, so output captured from a
+# Remove ANSI/VT escape sequences from text, so output captured from a
 # pseudo-console (pty read) can be matched or displayed as clean text. Strips CSI
 # (ESC [ ...), OSC (ESC ] ... BEL/ST), and the common two/one-char ESC sequences
 # (charset select, keypad, cursor save/restore). Printable text, newlines, tabs,
 # and carriage returns are preserved. ESC/BEL/backslash are built with [format
 # %c] and literal brackets are matched with bracket-classes ([[] is a literal
 # '['), so the source carries no control characters and no escape ambiguity.
-proc ::machteld::vtstrip {s} {
+proc ::machteld::PtyStrip {s} {
     set E  [format %c 27]  ;# ESC
     set B  [format %c 7]   ;# BEL
     set BS [string repeat [format %c 92] 2]  ;# "\\" -- a regex-literal backslash (ESC-\ ST)
-    regsub -all [string cat $E {[[][0-9;?<>=]*[ -/]*[@-~]}] $s {} s
+    regsub -all [string cat $E {[[][0-?]*[ -/]*[@-~]}] $s {} s
     regsub -all [string cat $E {[]].*?(?:} $B {|} $E $BS {)}] $s {} s
     regsub -all [string cat $E {[()#][0-9A-Za-z]}] $s {} s
     regsub -all [string cat $E {[=>78McDEHM]}] $s {} s
     return $s
 }
 
-# Fail: the prelude's raiser, mirroring src/proc.c's mt_error(interp, DOMAIN,
-# code, msg). Every Tcl verb fails through it, so `{MACHTELD <DOMAIN> <code>}`
-# means the same thing whether the verb was written in C or here.
-#
-# The prelude used to raise eleven bare `return -code error` with no code at all,
-# which put its two verbs of the time (`help`, and `wrap`, since retired) outside
-# the error registry entirely -- nothing to document, and nothing a scan could
-# find. That was survivable while the prelude held two verbs. It stops being survivable as the standard library lands here,
-# which is why this is Phase 0 of [the standard library](stdlib.md) rather than
-# a cleanup to get to later.
-#
-# An error raised inside Fail propagates out through its caller unchanged, so no
-# -level games are needed; the only cost is Fail appearing in a stack trace.
+# One raiser keeps Tcl-authored commands on the native error contract.
 proc ::machteld::Fail {domain code msg} {
     return -code error -errorcode [list MACHTELD $domain $code] $msg
 }
@@ -339,15 +179,21 @@ if {[info commands ::machteld::pty] ne ""} {
         }
         set pats {}
         set tbody {return -code error -errorcode {MACHTELD PTY timeout} "pty expect: timed out"}
+        if {[llength [lindex $args 0]] % 2} {
+            Fail PTY usage "pty expect: patterns must be pattern/body pairs"
+        }
         foreach {pat body} [lindex $args 0] {
             if {$pat eq "timeout"} { set tbody $body } else { lappend pats $pat $body }
         }
         set buf ""
         set deadline [expr {[clock milliseconds] + $timeout_ms}]
         while {1} {
-            append buf [::machteld::PtyCore read $tok -timeout 100ms]
+            set remaining [expr {$deadline - [clock milliseconds]}]
+            if {$remaining <= 0} { return [uplevel 1 $tbody] }
+            set slice [expr {min(100, $remaining)}]
+            append buf [::machteld::PtyCore read $tok -timeout ${slice}ms]
             if {$buf ne ""} {
-                set clean [::machteld::vtstrip $buf]
+                set clean [::machteld::PtyStrip $buf]
                 foreach {pat body} $pats {
                     if {[string match $pat $clean]} { return [uplevel 1 $body] }
                 }
@@ -356,13 +202,17 @@ if {[info commands ::machteld::pty] ne ""} {
         }
     }
 
-    # HAND-MAINTAINED, AND THEREFORE A DRIFT HAZARD: a subcommand added to the C
-    # is invisible until it is named here too. `pty info` landed in proc.c and
-    # this map still had five entries, so the verb existed in the binary and
-    # could not be called. The count stayed at six either way -- five core plus
-    # `expect` -- so only a set comparison catches it, which is what the manifest
-    # test in run_test.tcl does.
-    namespace ensemble create -command ::machteld::pty -map {
+    # Tcl's default ensemble miss is {TCL LOOKUP SUBCOMMAND ...}.  Keep the
+    # public PTY command on Machteld's error contract without enabling prefix
+    # matching or adding an implicit dispatch path.
+    proc ::machteld::PtyUnknown {ensemble subcommand args} {
+        Fail PTY usage "pty: unknown subcommand \"$subcommand\""
+    }
+
+    # The runtime suite checks this explicit public map against the merged
+    # manifest, so changing either side alone is a release failure.
+    namespace ensemble create -command ::machteld::pty -prefixes 0 \
+        -unknown ::machteld::PtyUnknown -map {
         spawn  {::machteld::PtyCore spawn}
         send   {::machteld::PtyCore send}
         read   {::machteld::PtyCore read}
@@ -370,34 +220,109 @@ if {[info commands ::machteld::pty] ne ""} {
         list   {::machteld::PtyCore list}
         info   {::machteld::PtyCore info}
         expect ::machteld::PtyExpect
+        strip  ::machteld::PtyStrip
     }
+    ::machteld::MetaDefine pty [dict create kind tcl args args domain PTY codes {badvalue timeout usage} \
+        options {-timeout} subcommands [dict create \
+            expect [dict create options {-timeout}] \
+            strip  [dict create options {}]]]
 }
 
 
-# wrap: stamp a pure-Tcl/Tk tool into a standalone exe, fully self-contained --
-# the Tcl/Tk script libraries, the prelude, and BOTH basekits (console + GUI) ride
-# inside this machteld.exe, so no external toolchain or payload is needed. Zero
-# compiler (pure zipfs, the els/starpack overlay). Named `wrap`, not `package`,
-# because Tcl core owns the command `package`. Sign the result: append-then-sign.
-#   wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?
-# <tooldir> must contain main.tcl (the tool's entry, auto-run by AppHook).
+# Stamp an opted-in machteld program into a standalone console or GUI exe. The
+# application always lives below archive-root `app`; runtime-owned names remain
+# at the root and therefore impose no naming policy on application files.
+proc ::machteld::_children {dir} {
+    set seen {}
+    foreach item [concat \
+            [glob -nocomplain -directory $dir *] \
+            [glob -nocomplain -types hidden -directory $dir *] \
+            [glob -nocomplain -directory $dir .*] \
+            [glob -nocomplain -types hidden -directory $dir .*]] {
+        if {[file tail $item] in {. ..}} continue
+        # Preserve the spelling present on disk.  The staging filesystem is a
+        # normal case-insensitive Windows directory, so reject a source tree
+        # that could not be copied there without merging or overwriting names.
+        dict set seen [string map {\\ /} [file normalize $item]] $item
+    }
+    set folded {}
+    foreach item [dict values $seen] {
+        set tail [file tail $item]
+        set key [string tolower $tail]
+        if {[dict exists $folded $key] && [dict get $folded $key] ne $tail} {
+            Fail WRAP badvalue \
+                "wrap: sibling names differ only by case: \"[dict get $folded $key]\" and \"$tail\""
+        }
+        dict set folded $key $tail
+    }
+    return [lsort [dict values $seen]]
+}
+
 proc ::machteld::_copy_tree {src dst} {
     file mkdir $dst
-    foreach item [glob -nocomplain [file join $src *]] {
+    foreach item [::machteld::_children $src] {
         set target [file join $dst [file tail $item]]
-        if {[file isdirectory $item]} {
+        set type [file type $item]
+        if {$type eq "directory"} {
             ::machteld::_copy_tree $item $target
+        } elseif {$type eq "file"} {
+            file copy $item $target
         } else {
-            file copy -force $item $target
+            Fail WRAP badvalue "wrap: input contains unsupported path type \"$type\": $item"
         }
     }
 }
+
+# Resolve a relative application path one component at a time and retain the
+# spelling actually present on disk. NTFS is usually case-insensitive while
+# zipfs is case-sensitive, so copying the caller's spelling into the launcher
+# can create an executable that packages successfully but cannot start.
+proc ::machteld::_actual_relative {root relative} {
+    set current $root
+    set actual {}
+    foreach requested [file split $relative] {
+        if {![file isdirectory $current]} {
+            Fail WRAP notfound "wrap: an entry component before \"$requested\" is not a directory"
+        }
+        set exact {}
+        set folded {}
+        foreach item [::machteld::_children $current] {
+            set tail [file tail $item]
+            if {$tail eq $requested} { lappend exact $item }
+            if {[string equal -nocase $tail $requested]} { lappend folded $item }
+        }
+        if {[llength $exact] == 1} {
+            set current [lindex $exact 0]
+        } elseif {![llength $exact] && [llength $folded] == 1} {
+            set current [lindex $folded 0]
+        } elseif {![llength $exact] && ![llength $folded]} {
+            Fail WRAP notfound "wrap: entry component \"$requested\" does not exist"
+        } else {
+            Fail WRAP badvalue "wrap: entry component \"$requested\" is ambiguous by case"
+        }
+        lappend actual [file tail $current]
+    }
+    return [list $current [file join {*}$actual]]
+}
+
+proc ::machteld::_canon_key {facts} {
+    return [list [dict get $facts volume] [dict get $facts file]]
+}
+proc ::machteld::_path_key {path} {
+    return [string tolower [string trimright [string map {\\ /} $path] /]]
+}
+proc ::machteld::_inside {parent child} {
+    set parent [_path_key $parent]
+    set child [_path_key $child]
+    return [expr {$child eq $parent || [string first "$parent/" $child] == 0}]
+}
 proc ::machteld::_zip_entries {root {rel ""}} {
     set out {}
-    foreach item [glob -nocomplain [file join $root $rel *]] {
+    set dir [expr {$rel eq "" ? $root : [file join $root $rel]}]
+    foreach item [::machteld::_children $dir] {
         set name [file tail $item]
         set zrel [expr {$rel eq "" ? $name : [file join $rel $name]}]
-        if {[file isdirectory $item]} {
+        if {[file type $item] eq "directory"} {
             lappend out {*}[::machteld::_zip_entries $root $zrel]
         } else {
             lappend out $item [string map {\\ /} $zrel]
@@ -405,68 +330,217 @@ proc ::machteld::_zip_entries {root {rel ""}} {
     }
     return $out
 }
+
+proc ::machteld::_new_workdir {parent} {
+    for {set tries 0} {$tries < 32} {incr tries} {
+        set suffix [binary encode hex [hash random 16]]
+        set work [file join $parent .machteld-wrap-$suffix]
+        if {[file exists $work]} continue
+        if {![catch {file mkdir $work}]} {
+            set facts [canon $work]
+            return [list $work [_canon_key $facts]]
+        }
+    }
+    Fail WRAP oserror "wrap: cannot create a unique work directory beside the output"
+}
+
+proc ::machteld::_write_launcher {path archiveEntry} {
+    set channel [open $path {WRONLY CREAT EXCL}]
+    try {
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts $channel {package require machteld 0.4.0}
+        puts $channel "set argv0 \[file join \[file dirname \[info script\]\] [list $archiveEntry]\]"
+        puts $channel {source $argv0}
+    } finally {
+        close $channel
+    }
+}
+
 proc ::machteld::wrap {args} {
-    set gui 0; set out ""; set with_prelude 1; set tool ""
+    set gui 0; set out ""; set input ""; set entry ""; set entrySet 0
     for {set i 0} {$i < [llength $args]} {incr i} {
         set a [lindex $args $i]
         switch -- $a {
             --gui        { set gui 1 }
             --console    { set gui 0 }
-            --no-prelude { set with_prelude 0 }
-            -o           { incr i; set out [lindex $args $i] }
+            --entry - -o {
+                if {$i + 1 >= [llength $args]} { Fail WRAP usage "wrap: $a needs a value" }
+                set v [lindex $args [incr i]]
+                if {$a eq "--entry"} { set entry $v; set entrySet 1 } else { set out $v }
+            }
             default {
-                if {$tool eq ""} {
-                    set tool $a
+                if {[string match -* $a]} {
+                    Fail WRAP usage "wrap: unknown option \"$a\""
+                } elseif {$input eq ""} {
+                    set input $a
                 } else {
                     Fail WRAP usage "wrap: unexpected argument \"$a\""
                 }
             }
         }
     }
-    if {$tool eq "" || $out eq ""} {
-        Fail WRAP usage "usage: wrap <tooldir> -o <out.exe> ?--gui|--console? ?--no-prelude?"
+    if {$input eq "" || $out eq ""} {
+        Fail WRAP usage "usage: wrap input -o out.exe ?--entry path? ?--gui|--console?"
     }
-    if {![file exists [file join $tool main.tcl]]} {
-        Fail WRAP notfound "wrap: \"$tool\" has no main.tcl (the tool's entry point)"
+    if {![file exists $input]} { Fail WRAP notfound "wrap: input \"$input\" does not exist" }
+    set single [expr {![file isdirectory $input]}]
+    if {$single && $entrySet} { Fail WRAP usage "wrap: --entry applies only to a directory" }
+    if {$single} {
+        if {![file isfile $input]} { Fail WRAP badvalue "wrap: input must be a file or directory" }
+        set sourceRoot [file dirname [file normalize $input]]
+        set entryPath [file normalize $input]
+        set archiveEntry [string map {\\ /} [file join app [file tail $entryPath]]]
+    } else {
+        set sourceRoot [file normalize $input]
+        if {!$entrySet} { set entry main.tcl }
+        if {$entry eq "" || [file pathtype $entry] ne "relative" || ".." in [file split $entry]} {
+            Fail WRAP badvalue "wrap: --entry must be a relative file below the input directory"
+        }
+        lassign [::machteld::_actual_relative $sourceRoot $entry] entryPath actualEntry
+        set archiveEntry [string map {\\ /} [file join app {*}[file split $actualEntry]]]
     }
-    # Locate our own mounted payload (the Tcl/Tk libs + the embedded basekits).
-    set root ""
-    foreach _m [dict keys [zipfs mount]] {
-        if {[file isdirectory $_m/tcl_library] && [file isdirectory $_m/basekit]} {
-            set root $_m; break
+    if {![file isfile $entryPath]} { Fail WRAP notfound "wrap: entry \"$entryPath\" is not a file" }
+    if {[catch {canon $entryPath} entryCanon]} {
+        Fail WRAP badvalue "wrap: entry cannot be resolved: $entryCanon"
+    }
+    if {!$single} {
+        if {[catch {canon $sourceRoot} sourceCanon]} {
+            Fail WRAP badvalue "wrap: input directory cannot be resolved: $sourceCanon"
+        }
+        if {![_inside [dict get $sourceCanon path] [dict get $entryCanon path]]} {
+            Fail WRAP badvalue "wrap: --entry must resolve inside the input directory"
+        }
+        if {[catch {links $sourceRoot} survey]} {
+            Fail WRAP oserror "wrap: cannot inspect input directory: $survey"
+        }
+        if {[llength [dict get $survey errors]] || [llength [dict get $survey links]]} {
+            Fail WRAP badvalue "wrap: input directory contains an unreadable path or name surrogate"
         }
     }
-    if {$root eq ""} {
-        Fail WRAP unsupported "wrap: this machteld carries no embedded payload (run the packaged machteld.exe)"
+
+    set out [file normalize $out]
+    if {[file isdirectory $out]} { Fail WRAP badvalue "wrap: output \"$out\" is a directory" }
+    set outParent [file dirname $out]
+    if {![file isdirectory $outParent]} {
+        Fail WRAP notfound "wrap: output directory \"$outParent\" does not exist"
+    }
+    if {[catch {canon $outParent} parentCanon]} {
+        Fail WRAP badvalue "wrap: output directory cannot be resolved: $parentCanon"
+    }
+    if {!$single && [_inside [dict get $sourceCanon path] [dict get $parentCanon path]]} {
+        Fail WRAP badvalue "wrap: output cannot be inside the input directory"
+    }
+    if {[file exists $out]} {
+        if {[catch {canon $out} outCanon]} {
+            Fail WRAP badvalue "wrap: existing output cannot be resolved: $outCanon"
+        }
+        if {[_canon_key $entryCanon] eq [_canon_key $outCanon]} {
+            Fail WRAP badvalue "wrap: output cannot overwrite its input entry"
+        }
+        if {!$single && [_inside [dict get $sourceCanon path] [dict get $outCanon path]]} {
+            Fail WRAP badvalue "wrap: output cannot be inside the input directory"
+        }
+        if {![catch {canon [info nameofexecutable]} hostCanon] &&
+                [_canon_key $hostCanon] eq [_canon_key $outCanon]} {
+            Fail WRAP badvalue "wrap: output cannot overwrite the running host"
+        }
+    }
+
+    if {[info commands ::machteld::EntryCheck] eq "" ||
+            [info commands ::machteld::Publish] eq ""} {
+        Fail WRAP unsupported "wrap: this host lacks packaging support"
+    }
+    if {![info exists ::machteld::prelude]} {
+        Fail WRAP unsupported "wrap: the embedded runtime root is unavailable"
+    }
+    set root [file dirname $::machteld::prelude]
+    if {![file isdirectory [file join $root tcl_library]] ||
+            ![file isdirectory [file join $root tcl9]] ||
+            ![file isdirectory [file join $root tk_library]] ||
+            ![file isdirectory [file join $root licenses]] ||
+            ![file isdirectory [file join $root basekit]]} {
+        Fail WRAP unsupported "wrap: this executable carries no wrapper basekits"
     }
     set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
-    if {![file exists $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
+    if {![file isfile $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
 
-    set work [file tempdir]
+    lassign [_new_workdir $outParent] work workKey
     try {
         set stage [file join $work stage]
         file mkdir $stage
         ::machteld::_copy_tree [file join $root tcl_library] [file join $stage tcl_library]
+        ::machteld::_copy_tree [file join $root tcl9]        [file join $stage tcl9]
         ::machteld::_copy_tree [file join $root tk_library]  [file join $stage tk_library]
-        if {$with_prelude && [file exists [file join $root machteld.tcl]]} {
-            file copy -force [file join $root machteld.tcl] [file join $stage machteld.tcl]
+        ::machteld::_copy_tree [file join $root licenses]    [file join $stage licenses]
+        file copy [file join $root machteld.tcl] [file join $stage machteld.tcl]
+        set app [file join $stage app]
+        if {$single} {
+            file mkdir $app
+            set stagedEntry [file join $app [file tail $entryPath]]
+            file copy $entryPath $stagedEntry
+        } else {
+            ::machteld::_copy_tree $sourceRoot $app
+            lassign [::machteld::_actual_relative $app $actualEntry] stagedEntry stagedRelative
+            set archiveEntry [string map {\\ /} [file join app {*}[file split $stagedRelative]]]
+            # A persistent link introduced during the copy is still refused.
+            if {[catch {links $sourceRoot} afterSurvey] ||
+                    [llength [dict get $afterSurvey errors]] ||
+                    [llength [dict get $afterSurvey links]]} {
+                Fail WRAP badvalue "wrap: input changed to contain an unreadable path or name surrogate"
+            }
+            if {[catch {canon $entryPath} afterEntry] ||
+                    [_canon_key $entryCanon] ne [_canon_key $afterEntry]} {
+                Fail WRAP badvalue "wrap: entry changed while the input was being staged"
+            }
         }
-        ::machteld::_copy_tree $tool $stage
+        if {[catch {::machteld::EntryCheck $stagedEntry} checked opts]} {
+            set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]
+            if {[lrange $code 0 1] eq {MACHTELD ENTRY}} {
+                Fail WRAP [lindex $code 2] $checked
+            }
+            return -options $opts $checked
+        }
+        ::machteld::_write_launcher [file join $stage main.tcl] $archiveEntry
+
         set tmpbare [file join $work bare.exe]
-        file copy -force $bare $tmpbare
-        file delete -force $out
-        zipfs lmkimg $out [::machteld::_zip_entries $stage] {} $tmpbare
+        file copy $bare $tmpbare
+        set candidate [file join $work candidate.exe]
+        zipfs lmkimg $candidate [::machteld::_zip_entries $stage] {} $tmpbare
+        ::machteld::Publish $candidate $out
+    } on error {msg opts} {
+        set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]
+        if {[lindex $code 0] eq "MACHTELD"} { return -options $opts $msg }
+        Fail WRAP oserror "wrap: $msg"
     } finally {
-        catch {file delete -force $work}
+        # Best-effort cleanup.  The identity check avoids deleting an obviously
+        # replaced path; publication safety does not depend on cleanup success.
+        if {![catch {canon $work} finalWork] && [_canon_key $finalWork] eq $workKey} {
+            catch {file delete -force $work}
+        }
     }
     return $out
 }
 
-# help: machteld ships its own docs -- the OKF bundle rides in the appended zipfs
-# at //zipfs:/docs/, so the tool serves its own spec (no external lookup, and an
-# agent can load the palette straight from the binary). `help` lists topics,
-# `help <topic>` returns that concept file, `help all` returns the whole bundle.
-# Returns the text (the REPL prints it; a script can capture it).
+::machteld::MetaDefine wrap [dict create kind tcl args args domain WRAP \
+    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui -o}]
+
+# Serve the documentation carried in zipfs. Return text so callers choose where
+# to display it.
+proc ::machteld::HelpRead {path} {
+    set ch ""
+    if {[catch {
+        set ch [open $path r]
+        fconfigure $ch -encoding utf-8
+        set text [read $ch]
+        close $ch
+        set ch ""
+    } msg]} {
+        if {$ch ne ""} { catch {close $ch} }
+        Fail HELP oserror "help: cannot read \"$path\": $msg"
+    }
+    return $text
+}
+
 proc ::machteld::help {{topic ""}} {
     set docs ""
     foreach _m [dict keys [zipfs mount]] {
@@ -478,24 +552,22 @@ proc ::machteld::help {{topic ""}} {
         set out "machteld [::machteld::version] -- help <topic>:\n"
         foreach f $files { append out "  [file rootname $f]\n" }
         append out "  all   (the whole bundle)\n"
+        append out "\nCommands:\n  [join [lsort [dict keys [manifest]]] { }]\n"
         return $out
     }
     if {$topic eq "all"} {
         set out ""
         foreach f $files {
-            set ch [open [file join $docs $f] r]
-            append out [read $ch] "\n\n---\n\n"
-            close $ch
+            append out [HelpRead [file join $docs $f]] "\n\n---\n\n"
         }
         return $out
     }
     set f [file join $docs $topic.md]
     if {![file exists $f]} { Fail HELP notfound "help: no topic \"$topic\" (try: help)" }
-    set ch [open $f r]
-    set text [read $ch]
-    close $ch
-    return $text
+    return [HelpRead $f]
 }
+
+::machteld::MetaDefine help [dict create kind tcl args {{topic {}}} domain HELP codes {notfound oserror unsupported}]
 
 # Expose the palette as bare verbs: unqualified run / child / pty / wait / scope
 # / detach / store resolve to ::machteld::* -- so the REPL and scripts read like
@@ -510,6 +582,7 @@ namespace eval :: { namespace path [concat [namespace path] ::machteld] }
 # (The version label tracks the pinned Tcl/Tk payload; `load {} Tk` itself is
 # version-agnostic and always loads whatever Tk is linked in.)
 package ifneeded Tk 9.0.4 {load {} Tk}
+package provide machteld $::machteld::version
 
 # One-line banner on the first interactive prompt, then a plain branded prompt.
 # (tcl_prompt1 is never invoked in non-interactive/script mode, so scripts stay

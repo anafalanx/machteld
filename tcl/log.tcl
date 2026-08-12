@@ -6,24 +6,9 @@
 #   log error "cannot open $path"
 #   log configure                  -> the current settings, and what was dropped
 #
-# Logging is in every standard library there is -- Python's `logging`, Go's `log`,
-# Deno's `log` -- and machteld had none, which matters more here than the count
-# suggests: running things unattended is the whole premise. A `detach`'d daemon
-# had nowhere to write at all.
-#
-# A WRITE FAILURE NEVER THROWS. This is the decision that shapes the rest. A
-# wrapped GUI exe is started with no standard channels, so `puts stderr` there
-# raises -- and a log call that can throw is a log call that kills the program at
-# whatever arbitrary point it was asked to record something. Nothing is worth
-# that. So a failed write increments a counter instead, and `log configure`
-# reports it, which is the same bargain `watch` already makes with its `dropped`
-# count: losing data silently is unacceptable, so it is counted and reported, but
-# it does not become an exception in the middle of unrelated work.
-#
-# PAIRS AFTER THE MESSAGE ARE STRUCTURE, NOT DECORATION. `log info "started" pid
-# 4812 dir /tmp` renders `... started pid=4812 dir=/tmp`. Creed 2 says
-# machine-legible and human-legible should be the same thing, and a log line is
-# the place that principle is most often abandoned.
+# A write failure never throws: a GUI host may have no standard channels, and a
+# diagnostic must not terminate unrelated work. Failures increment `dropped`.
+# Key/value pairs after the message remain machine- and human-readable.
 
 namespace eval ::machteld {
     variable LOG_LEVEL   info
@@ -118,6 +103,9 @@ proc ::machteld::log {args} {
                                 dropped $LOG_DROPPED]
         }
         if {[llength $rest] % 2} { Fail LOG usage "log configure: an option is missing its value" }
+        set newLevel $LOG_LEVEL
+        set sinkKind current
+        set sinkValue ""
         foreach {o v} $rest {
             if {$o ni $opts} {
                 Fail LOG usage "log configure: unknown option \"$o\": must be [join $opts {, }]"
@@ -127,7 +115,7 @@ proc ::machteld::log {args} {
                     if {$v ni [concat $LOG_LEVELS off]} {
                         Fail LOG badvalue "log: unknown level \"$v\": must be [join [concat $LOG_LEVELS off] {, }]"
                     }
-                    set LOG_LEVEL $v
+                    set newLevel $v
                 }
                 -channel {
                     # Checked here for the same reason -file is: a channel that
@@ -136,29 +124,48 @@ proc ::machteld::log {args} {
                     if {$v ni [chan names]} {
                         Fail LOG badvalue "log: \"$v\" is not an open channel"
                     }
-                    if {$LOG_OWNED} { catch {close $LOG_CHAN} ; set LOG_OWNED 0 }
-                    set LOG_CHAN $v
-                    set LOG_FILE ""
+                    set sinkKind channel
+                    set sinkValue $v
                 }
                 -file {
-                    # Opened here, not at first write, so a path that cannot be
-                    # written is reported to whoever configured it rather than
-                    # discovered later by a message that quietly went nowhere.
-                    if {[catch {open $v a} ch]} {
-                        Fail LOG oserror "log: cannot open \"$v\" for appending"
-                    }
-                    fconfigure $ch -translation lf -buffering line
-                    if {$LOG_OWNED} { catch {close $LOG_CHAN} }
-                    set LOG_CHAN $ch
-                    set LOG_FILE $v
-                    set LOG_OWNED 1
+                    set sinkKind file
+                    set sinkValue $v
                 }
             }
+        }
+        # Commit only after the whole request is known to be valid. A bad final
+        # option must not leave a different level or half-installed sink behind.
+        set staged ""
+        if {$sinkKind eq "file"} {
+            if {[catch {
+                set staged [open $sinkValue a]
+                fconfigure $staged -translation lf -buffering line
+            }]} {
+                if {$staged ne ""} { catch {close $staged} }
+                Fail LOG oserror "log: cannot open \"$sinkValue\" for appending"
+            }
+        }
+        if {$sinkKind ne "current" && $LOG_OWNED} { catch {close $LOG_CHAN} }
+        set LOG_LEVEL $newLevel
+        if {$sinkKind eq "channel"} {
+            set LOG_CHAN $sinkValue
+            set LOG_FILE ""
+            set LOG_OWNED 0
+        } elseif {$sinkKind eq "file"} {
+            set LOG_CHAN $staged
+            set LOG_FILE $sinkValue
+            set LOG_OWNED 1
         }
         return
     }
 
     if {[llength $args] < 2} { Fail LOG usage "log $sub: a message is required" }
-    LogWrite $sub [lindex $args 1] [lrange $args 2 end]
-    return
+    return [LogWrite $sub [lindex $args 1] [lrange $args 2 end]]
 }
+
+::machteld::MetaDefine log [dict create kind tcl args args domain LOG \
+    codes {badvalue oserror usage} options {-channel -file -level} \
+    subcommands [dict create \
+        configure [dict create options {-channel -file -level}] \
+        debug [dict create options {}] info [dict create options {}] \
+        warn [dict create options {}] error [dict create options {}]]]

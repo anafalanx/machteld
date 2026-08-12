@@ -6,28 +6,41 @@
 # icon/manifest survives). The prelude is deliberately NOT named main.tcl: the C
 # host sources it explicitly and leaves Tcl_Main's REPL/script handling intact.
 #
-#   tclsh90s package.tcl --tcltk <dir> --prelude <machteld.tcl> --wrapper <exe> \
-#           --out <exe> ?--docs <dir>? ?--embed-console <exe>? ?--embed-gui <exe>?
+#   tclsh90s package.tcl --prefix <dir> --prelude <machteld.tcl> --wrapper <exe> \
+#           --licenses <dir> --apache-license <file> --out <exe> ?--docs <dir>? \
+#           ?--embed-console <exe>? ?--embed-gui <exe>?
 
-array set opt {--tcltk "" --prelude "" --wrapper "" --out "" --docs "" --embed-console "" --embed-gui ""}
+array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --out "" --docs "" --embed-console "" --embed-gui ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
-    if {[info exists opt($a)]} {
-        incr i
-        set opt($a) [lindex $argv $i]
-    }
+    if {![info exists opt($a)]} { error "package.tcl: unknown option $a" }
+    if {$i + 1 >= [llength $argv]} { error "package.tcl: $a needs a value" }
+    incr i
+    set opt($a) [lindex $argv $i]
 }
-foreach k {--tcltk --prelude --wrapper --out} {
+foreach k {--prefix --prelude --wrapper --licenses --apache-license --out} {
     if {$opt($k) eq ""} { error "package.tcl: missing $k" }
 }
-set TC   $opt(--tcltk)
+set TC   $opt(--prefix)
 set PREL $opt(--prelude)
 set WRAP $opt(--wrapper)
 set OUT  $opt(--out)
 
+proc children {directory} {
+    set seen {}
+    foreach item [concat \
+            [glob -nocomplain -directory $directory *] \
+            [glob -nocomplain -types hidden -directory $directory *]] {
+        set tail [file tail $item]
+        if {$tail in {. ..}} continue
+        dict set seen $item 1
+    }
+    return [lsort [dict keys $seen]]
+}
+
 proc copy_tree {src dst} {
     file mkdir $dst
-    foreach item [glob -nocomplain [file join $src *]] {
+    foreach item [children $src] {
         set target [file join $dst [file tail $item]]
         if {[file isdirectory $item]} {
             copy_tree $item $target
@@ -39,7 +52,8 @@ proc copy_tree {src dst} {
 
 proc zip_entries {root {rel ""}} {
     set out {}
-    foreach item [glob -nocomplain [file join $root $rel *]] {
+    set directory [expr {$rel eq "" ? $root : [file join $root $rel]}]
+    foreach item [children $directory] {
         set name [file tail $item]
         set zrel [expr {$rel eq "" ? $name : [file join $rel $name]}]
         if {[file isdirectory $item]} {
@@ -51,18 +65,49 @@ proc zip_entries {root {rel ""}} {
     return $out
 }
 
-set stage [file join [file dirname $OUT] _pkg_stage]
-file delete -force $stage
-file mkdir $stage
+set outputDir [file dirname [file normalize $OUT]]
+file mkdir $outputDir
+# Claim both namespaces exclusively beside the destination. The live marker
+# keeps ownership of the derived staging-directory name; the candidate itself
+# is created with exclusive tempfile semantics. We delete only those exact
+# names and publish only after lmkimg has completed successfully.
+set stageClaim ""
+set stageMarker ""
+set stage ""
+set outputCandidate ""
+try {
+    set stageMarker [file tempfile stageClaim [file join $outputDir .machteld-package-stage-]]
+    set stage "${stageClaim}.d"
+    if {[file exists $stage]} { error "package staging namespace already exists: $stage" }
+    file mkdir $stage
+    set candidateMarker [file tempfile outputCandidate [file join $outputDir .machteld-package-candidate-]]
+    close $candidateMarker
 
 # Tcl core script library.
-set tclLib [file join $TC tcllib tcl_library]
-if {![file isdirectory $tclLib]} { error "tcl_library not found: $tclLib" }
+set tclLib ""
+foreach candidate [list [file join $TC lib tcl9.0] [file join $TC tcl_library]] {
+    if {[file isdirectory $candidate]} { set tclLib $candidate; break }
+}
+if {$tclLib eq ""} { error "tcl_library not found under dependency prefix: $TC" }
 copy_tree $tclLib [file join $stage tcl_library]
+
+# Tcl 9 installs script modules separately from the core script library. Core
+# services such as clock require msgcat from this sibling tree; keeping its
+# canonical `tcl9/9.0/*.tm` layout also lets tm.tcl discover the modules from
+# [file dirname [info library]] after the archive is mounted.
+set tclModules ""
+foreach candidate [list [file join $TC lib tcl9] [file join $TC tcl9]] {
+    if {[file isdirectory $candidate]} { set tclModules $candidate; break }
+}
+if {$tclModules eq ""} { error "Tcl module tree not found under dependency prefix: $TC" }
+if {![file exists [file join $tclModules 9.0 msgcat-1.7.1.tm]]} {
+    error "Tcl module tree has no msgcat 1.7.1: $tclModules"
+}
+copy_tree $tclModules [file join $stage tcl9]
 
 # Tk core script library: prefer the copy inside the static wish; else tcllib.
 set copiedTk 0
-set wish [file join $TC tcl9s bin wish90s.exe]
+set wish [file join $TC bin wish90s.exe]
 if {[file exists $wish] && ![catch {zipfs mount $wish Wt}]} {
     if {[file isdirectory //zipfs:/Wt/tk_library]} {
         copy_tree //zipfs:/Wt/tk_library [file join $stage tk_library]
@@ -71,35 +116,47 @@ if {[file exists $wish] && ![catch {zipfs mount $wish Wt}]} {
     catch {zipfs unmount Wt}
 }
 if {!$copiedTk} {
-    set tkLib [file join $TC tcllib tk_library]
-    if {[file isdirectory $tkLib]} {
-        copy_tree $tkLib [file join $stage tk_library]
-        set copiedTk 1
+    foreach tkLib [list [file join $TC lib tk9.0] [file join $TC tk_library]] {
+        if {[file isdirectory $tkLib]} {
+            copy_tree $tkLib [file join $stage tk_library]
+            set copiedTk 1
+            break
+        }
     }
 }
-if {!$copiedTk} { error "tk_library not found in wish90s.exe or $TC/tcllib" }
+if {!$copiedTk} { error "tk_library not found under dependency prefix: $TC" }
 
 # The machteld prelude at the archive root.
 file copy -force $PREL [file join $stage machteld.tcl]
+
+# Tcl and Tk both require their notices to be included verbatim in every
+# distribution. They are runtime payload, not distribution-only documentation,
+# because standalone tools are distributions too.
+if {![file isdirectory $opt(--licenses)]} {
+    error "license notice directory not found: $opt(--licenses)"
+}
+foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt} {
+    if {![file isfile [file join $opt(--licenses) $notice]]} {
+        error "required license notice not found: $notice"
+    }
+}
+copy_tree $opt(--licenses) [file join $stage licenses]
+if {![file isfile $opt(--apache-license)]} {
+    error "Apache 2.0 license not found: $opt(--apache-license)"
+}
+file copy -force $opt(--apache-license) [file join $stage licenses Apache-2.0.txt]
 
 # Ship the docs bundle inside the exe (the `help` verb reads //zipfs:/docs/).
 if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
     copy_tree $opt(--docs) [file join $stage docs]
 }
 
-# THE BASEKITS: a console and a GUI copy of the bare host, so `wrap` can stamp a
+# The basekits are console and GUI copies of the bare host, so `wrap` can make a
 # standalone exe with no toolchain, no `sdx` and no Tcl install anywhere. It
 # extracts the one matching the chosen subsystem and appends onto it.
 #
-# These are the whole reason `mt.exe` is 10 MB rather than 6, and that is the
-# deal: 4.5 MB of it is a Windows Tcl/Tk runtime that anyone this exe reaches can
-# be handed a copy of. A wrapped tool carries no basekits of its own, so only
-# `mt.exe` can wrap.
-#
-# What does NOT ride in here, and did for one day: the applications themselves.
-# A front door resolves names; hosting the programs as well made it two things at
-# once. `wrap` is a capability, not an application -- it hands you an exe of your
-# own rather than keeping one of its own.
+# A wrapped tool does not carry these basekits recursively, so only the full
+# machteld.exe can perform another wrap.
 if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
     file mkdir [file join $stage basekit]
     if {$opt(--embed-console) ne ""} {
@@ -110,9 +167,16 @@ if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
     }
 }
 
-file delete -force $OUT
-set entries [zip_entries $stage]
-if {![llength $entries]} { error "package stage is empty: $stage" }
-zipfs lmkimg $OUT $entries {} $WRAP
-file delete -force $stage
+    set entries [zip_entries $stage]
+    if {![llength $entries]} { error "package stage is empty: $stage" }
+    zipfs lmkimg $outputCandidate $entries {} $WRAP
+    # Same-directory rename is the publication boundary. The prior executable
+    # remains intact if any staging, copying, or zip creation step fails.
+    file rename -force $outputCandidate $OUT
+} finally {
+    if {$outputCandidate ne ""} { catch {file delete -force $outputCandidate} }
+    if {$stage ne ""} { catch {file delete -force $stage} }
+    if {$stageMarker ne ""} { catch {close $stageMarker} }
+    if {$stageClaim ne ""} { catch {file delete -force $stageClaim} }
+}
 puts "built [file nativename $OUT] ([file size $OUT] bytes)"

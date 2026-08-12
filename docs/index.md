@@ -1,33 +1,27 @@
 ---
 type: index
-title: machteld — Knowledge Bundle
-description: Entry point and concept map for the machteld documentation.
-tags: [machteld, design, index]
-timestamp: 2026-07-09
+title: machteld documentation
+description: The documentation map for the Machteld 0.4.0 runtime.
+tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld
+# machteld 0.4.0
 
-*A single-exe personal Tcl/Tk toolkit for Windows 11: you write Tcl, the power is added in C. The host, the execution core (run / child / wait / scope / detach), pty, store, the workspace front door (`front`, `mt <name>`) with its journal, and the tool factory (`wrap`) are built — see [the log](log.md).*
+machteld is a compact Windows machine-control runtime. A program is ordinary
+Tcl 9 whose first executable command explicitly requires `machteld`; the runtime
+adds a self-describing command palette and can package that program as one exe.
 
-This is an **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog) v0.1** knowledge bundle. Each concept below is a standalone file with its own frontmatter; links are bundle-relative.
+- [Overview](overview.md) - product boundary and a first program.
+- [Palette](palette.md) - the public command reference.
+- [Contract](contract.md) - entry, values, errors, time, and handles.
+- [Execution model](execution-model.md) - blocking work, evented work, and lifetime.
+- [Parallel work](parallel.md) - `worker`, `pool`, and `pmap`.
+- [Packaging](packaging.md) - direct entries and standalone tools.
+- [Architecture](architecture.md) - hosts, prelude, native core, and metadata.
+- [Creed](creed.md) - the design tests.
+- [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.
+- [Direction](direction.md) - current product decisions and non-goals.
+- [Roadmap](roadmap.md) - built now and possible next work.
 
-## Concepts
-
-- [Overview](overview.md) — what machteld is, and who it's for.
-- [The creed](creed.md) — the seven principles every decision is tested against.
-- [Architecture](architecture.md) — the single-exe C + Tcl/Tk 9 starpack, and its two subsystem bares.
-- [Packaging](packaging.md) — one exe, and what rides inside it: the libraries, the prelude, the docs, and the two hosts `wrap` stamps onto.
-- [The contract](contract.md) — everything is a dict.
-- [Execution model](execution-model.md) — linear by default; no orphans is the law.
-- [The palette](palette.md) — surface conventions and the verb set (what's built, what's deferred).
-- [Ecosystem policy](ecosystem-policy.md) — vendor-and-freeze; TWAPI as a quarry.
-- [The bet](rationale.md) — why a machine takes to Tcl.
-- [Direction](direction.md) — the goal, the eight rules, and the ratified contract for the current stretch.
-- [Roadmap](roadmap.md) — what's built, and what's next.
-- [Parallelism and the store](parallel.md) — measured: what runs in parallel today, what the worker pool is and is not worth against the alternatives, and how far a store-backed queue goes.
-- [The journal](journal.md) — what the front door records about every process it starts, and why SQLite.
-- [The worker pool plan](pool-plan.md) — step by step, and what previous work must change.
-- [The standard library](stdlib.md) — where the scripting surface is thin, and the order for fixing it.
-
-Change history: [the log](log.md).
+The packaged executable carries these files. At runtime, `help` lists topics,
+`help palette` returns one topic, and `help all` returns the bundle.

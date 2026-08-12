@@ -1,5 +1,5 @@
 /*
- * winjob_launch.c -- born-in-job process launch, ported from drang's launch.go.
+ * winjob_launch.c -- born-in-job process launch.
  * The child is placed into its jobs by the kernel at CreateProcess time (the
  * PROC_THREAD_ATTRIBUTE_JOB_LIST attribute), before its first thread runs, so
  * nothing it spawns can escape supervision -- race-free, no suspend/resume dance.
@@ -20,15 +20,18 @@
 #ifndef PROC_THREAD_ATTRIBUTE_JOB_LIST
 #define PROC_THREAD_ATTRIBUTE_JOB_LIST 0x0002000D
 #endif
+#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
+#endif
 
 /* ---- UTF-8 <-> UTF-16 (Tcl strings are UTF-8; Win32 wants UTF-16) ------- */
 
 static wchar_t *u8_to_u16(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
     if (n <= 0) return NULL;
     wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
     if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n) <= 0) {
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) <= 0) {
         free(w);
         return NULL;
     }
@@ -86,7 +89,14 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         *err = "all three stdio handles must be non-NULL";
         return -1;
     }
-    if (njobs <= 0 || job_handles == NULL) { *err = "at least one job is required"; return -1; }
+    if (njobs < 0 || (njobs > 0 && job_handles == NULL) ||
+        (njobs == 0 && !want_breakaway) || (want_breakaway && njobs != 0)) {
+        *err = "a supervised launch requires at least one job";
+        return -1;
+    }
+    for (int i = 0; i < njobs; i++) {
+        if (job_handles[i] == NULL) { *err = "job handle is NULL"; return -1; }
+    }
     if (dir != NULL && dir[0] != '\0' && !path_is_absolute(exe)) {
         *err = "exe must be an absolute path when dir is set";
         return -1;
@@ -117,6 +127,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         appExe = comspec;
     } else {
         cmdText = wj_make_cmdline(argc, argv);
+        if (cmdText == NULL) { *err = "out of memory"; goto done; }
     }
 
     wApp = u8_to_u16(appExe);
@@ -146,26 +157,30 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         inheritList[ninherit++] = d;
     }
 
-    jobs = (HANDLE *)malloc((size_t)njobs * sizeof(HANDLE));
-    if (jobs == NULL) { *err = "out of memory"; goto done; }
-    for (int i = 0; i < njobs; i++) {
-        jobs[i] = (HANDLE)job_handles[i];
+    if (njobs > 0) {
+        jobs = (HANDLE *)malloc((size_t)njobs * sizeof(HANDLE));
+        if (jobs == NULL) { *err = "out of memory"; goto done; }
+        for (int i = 0; i < njobs; i++) jobs[i] = (HANDLE)job_handles[i];
     }
 
     SIZE_T alSize = 0;
-    InitializeProcThreadAttributeList(NULL, 2, 0, &alSize);
+    DWORD attrCount = njobs > 0 ? 2 : 1;
+    InitializeProcThreadAttributeList(NULL, attrCount, 0, &alSize);
+    if (alSize == 0) { *err = "InitializeProcThreadAttributeList failed"; goto done; }
     al = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(alSize);
-    if (al == NULL || !InitializeProcThreadAttributeList(al, 2, 0, &alSize)) {
+    if (al == NULL || !InitializeProcThreadAttributeList(al, attrCount, 0, &alSize)) {
         *err = "InitializeProcThreadAttributeList failed";
         goto done;
     }
     alInited = 1;
     /* JOB_LIST: born into the jobs at spawn time. HANDLE_LIST: restrict
      * inheritance to exactly the stdio dups. Both buffers outlive the spawn. */
-    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-                                   jobs, (size_t)njobs * sizeof(HANDLE), NULL, NULL)) {
-        *err = "UpdateProcThreadAttribute(JOB_LIST) failed";
-        goto done;
+    if (njobs > 0) {
+        if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                                       jobs, (size_t)njobs * sizeof(HANDLE), NULL, NULL)) {
+            *err = "UpdateProcThreadAttribute(JOB_LIST) failed";
+            goto done;
+        }
     }
     if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
                                    inheritList, (size_t)ninherit * sizeof(HANDLE), NULL, NULL)) {
@@ -185,22 +200,36 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
     DWORD flags = EXTENDED_STARTUPINFO_PRESENT;
-    if (want_breakaway) flags |= CREATE_BREAKAWAY_FROM_JOB;
+    if (want_breakaway) flags |= CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED;
     if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT; /* a UTF-16 env block was supplied */
     BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, env_block, wDir, &six.StartupInfo, &pi);
-    if (!ok && want_breakaway) {
-        /* the enclosing job may forbid breakaway (e.g. a CI sandbox): retry
-         * without it so the daemon still starts (it then dies with machteld). */
-        ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags & ~(DWORD)CREATE_BREAKAWAY_FROM_JOB,
-                            env_block, wDir, &six.StartupInfo, &pi);
-    }
     if (!ok) {
         static char cpErr[128];
         snprintf(cpErr, sizeof(cpErr), "CreateProcess failed (error %lu)", (unsigned long)GetLastError());
         *err = cpErr;
         goto done;
     }
-    CloseHandle(pi.hThread); /* the child is already running; we never touch its thread */
+    if (want_breakaway) {
+        BOOL inJob = FALSE;
+        if (!IsProcessInJob(pi.hProcess, NULL, &inJob) || inJob) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            *err = inJob ? "process did not break away from every enclosing job"
+                         : "cannot verify process breakaway";
+            goto done;
+        }
+        if (ResumeThread(pi.hThread) == (DWORD)-1) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            *err = "ResumeThread failed";
+            goto done;
+        }
+    }
+    CloseHandle(pi.hThread);
     *pid = (int)pi.dwProcessId;
     *proc = (void *)pi.hProcess;
     rc = 0;
@@ -212,6 +241,110 @@ done:
     for (int i = 0; i < ninherit; i++) {
         CloseHandle(inheritList[i]); /* the child holds its own inherited copies now */
     }
+    free(wApp);
+    free(wCmd);
+    free(wDir);
+    free(cmdText);
+    free(comspec);
+    return rc;
+}
+
+int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char *dir,
+                  void *const *job_handles, int njobs, void *pseudoconsole,
+                  void *env_block, int *pid, void **proc, const char **err) {
+    if (exe == NULL || exe[0] == '\0') { *err = "empty exe"; return -1; }
+    if (argc <= 0 || argv == NULL) { *err = "empty argv"; return -1; }
+    if (njobs <= 0 || job_handles == NULL) { *err = "at least one job is required"; return -1; }
+    for (int i = 0; i < njobs; i++) {
+        if (job_handles[i] == NULL) { *err = "job handle is NULL"; return -1; }
+    }
+    if (pseudoconsole == NULL) { *err = "pseudoconsole is required"; return -1; }
+    if (dir != NULL && dir[0] != '\0' && !path_is_absolute(exe)) {
+        *err = "exe must be an absolute path when dir is set";
+        return -1;
+    }
+
+    int rc = -1;
+    char *cmdText = NULL, *comspec = NULL;
+    wchar_t *wApp = NULL, *wCmd = NULL, *wDir = NULL;
+    HANDLE *jobs = NULL;
+    LPPROC_THREAD_ATTRIBUTE_LIST al = NULL;
+    int alInited = 0;
+
+    const char *appExe = exe;
+    if (wj_is_batch_target(exe)) {
+        comspec = comspec_path(err);
+        if (comspec == NULL) goto done;
+        const char *e2 = NULL;
+        if (wj_make_batch_cmdline(exe, argc - 1, argv + 1, &cmdText, &e2) != 0) {
+            *err = e2;
+            goto done;
+        }
+        appExe = comspec;
+    } else {
+        cmdText = wj_make_cmdline(argc, argv);
+        if (cmdText == NULL) { *err = "out of memory"; goto done; }
+    }
+
+    wApp = u8_to_u16(appExe);
+    wCmd = u8_to_u16(cmdText);
+    if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
+    if (dir != NULL && dir[0] != '\0') {
+        wDir = u8_to_u16(dir);
+        if (wDir == NULL) { *err = "bad working directory"; goto done; }
+    }
+
+    jobs = (HANDLE *)malloc((size_t)njobs * sizeof(HANDLE));
+    if (jobs == NULL) { *err = "out of memory"; goto done; }
+    for (int i = 0; i < njobs; i++) jobs[i] = (HANDLE)job_handles[i];
+
+    SIZE_T alSize = 0;
+    InitializeProcThreadAttributeList(NULL, 2, 0, &alSize);
+    if (alSize == 0) { *err = "InitializeProcThreadAttributeList failed"; goto done; }
+    al = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(alSize);
+    if (al == NULL) { *err = "out of memory"; goto done; }
+    if (!InitializeProcThreadAttributeList(al, 2, 0, &alSize)) {
+        *err = "InitializeProcThreadAttributeList failed";
+        goto done;
+    }
+    alInited = 1;
+    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                                   jobs, (size_t)njobs * sizeof(HANDLE), NULL, NULL)) {
+        *err = "UpdateProcThreadAttribute(JOB_LIST) failed";
+        goto done;
+    }
+    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                                   pseudoconsole, sizeof(pseudoconsole), NULL, NULL)) {
+        *err = "UpdateProcThreadAttribute(PSEUDOCONSOLE) failed";
+        goto done;
+    }
+
+    STARTUPINFOEXW six;
+    ZeroMemory(&six, sizeof(six));
+    six.StartupInfo.cb = sizeof(six);
+    six.lpAttributeList = al;
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+    DWORD flags = EXTENDED_STARTUPINFO_PRESENT;
+    if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT;
+    if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, flags, env_block, wDir,
+                        &six.StartupInfo, &pi)) {
+        static char cpErr[128];
+        snprintf(cpErr, sizeof(cpErr), "CreateProcess failed (error %lu)",
+                 (unsigned long)GetLastError());
+        *err = cpErr;
+        goto done;
+    }
+    CloseHandle(pi.hThread);
+    *pid = (int)pi.dwProcessId;
+    *proc = (void *)pi.hProcess;
+    rc = 0;
+
+done:
+    if (alInited) DeleteProcThreadAttributeList(al);
+    free(al);
+    free(jobs);
     free(wApp);
     free(wCmd);
     free(wDir);

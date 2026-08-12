@@ -3,30 +3,9 @@
 #   cli parse $argv $spec      -> a dict of values
 #   cli usage $spec ?name?     -> the help text, generated from the same spec
 #
-# machteld is a tool factory, so every program it stamps needs argument parsing,
-# and until now every one wrote its own. `changes` and `tasks` each hand-rolled
-# it; `tasks` got it wrong badly enough that `tasks --interval` with nothing after
-# it set the interval to the empty string, `after ""` threw out of the refresh
-# timer, and the tool died at startup. That is the class of bug this removes: not
-# because two tools happened to duplicate code, but because argument parsing is
-# in every standard library there is (`argparse`, `flag`, `cli`) and machteld had
-# no answer at all.
-#
-# TWO DECISIONS WORTH KNOWING ABOUT.
-#
-# 1. THIS IS PURE. It prints nothing and never exits. An argparse-style "print
-#    usage and exit" is invisible in the place it is most needed: a wrapped GUI
-#    exe is started with no standard channels at all, so a tool that reported a
-#    bad argument on stdout would report it to nowhere. `tasks` already learned
-#    this the hard way. So `--help` comes back as a value in the dict and a bad
-#    argument comes back as an error whose message already contains the usage
-#    block; the tool decides whether that goes to stderr, a dialog, or a log.
-#
-# 2. THE SPEC IS A DICT, NOT A MINI-LANGUAGE. `{--interval int 2000..}` would
-#    mean inventing syntax to parse, which is the thing rule 1 exists to stop.
-#    Each option maps to a dict of attributes, so `min`, `choices` and whatever
-#    comes later are ordinary keys rather than new punctuation -- and the spec is
-#    itself a Tcl dict, readable with `dict get` like everything else here.
+# Parsing is pure: it prints nothing and never exits, which also works in a GUI
+# host with no standard channels. `--help` is a returned flag and usage failures
+# carry generated help text. The declaration is a Tcl dict, not a mini-language.
 #
 #   set spec {
 #       --interval {type int    default 2000 min 100 help "refresh interval, ms"}
@@ -80,6 +59,9 @@ proc ::machteld::CliNorm {spec} {
             Fail CLI badvalue "cli: unknown type \"$type\" for \"$name\" (known: $CLI_TYPES)"
         }
         set kind [expr {[string match --* $name] ? "option" : "positional"}]
+        if {$name eq "--help"} {
+            Fail CLI badvalue "cli: --help is provided by the parser and cannot be redeclared"
+        }
         if {$kind eq "positional" && $type eq "flag"} {
             Fail CLI badvalue "cli: \"$name\" is positional and cannot be a flag"
         }
@@ -93,6 +75,48 @@ proc ::machteld::CliNorm {spec} {
         dict set seen $key 1
         dict set attrs _key $key
         dict set attrs _type $type
+
+        # Everything below describes the declaration, not command-line input.
+        # Validate it now so a broken spec cannot lie dormant until help is
+        # rendered or a particular option happens to be supplied.
+        if {[dict exists $attrs required]
+                && ![string is boolean -strict [dict get $attrs required]]} {
+            Fail CLI badvalue "cli: required for \"$name\" must be a boolean"
+        }
+
+        set hasMin [dict exists $attrs min]
+        set hasMax [dict exists $attrs max]
+        if {$type ne "int" && ($hasMin || $hasMax)} {
+            Fail CLI badvalue "cli: min and max for \"$name\" require type int"
+        }
+        foreach bound {min max} {
+            if {[dict exists $attrs $bound]
+                    && ![string is integer -strict [dict get $attrs $bound]]} {
+                Fail CLI badvalue "cli: $bound for \"$name\" must be a whole number"
+            }
+        }
+        if {$hasMin && $hasMax
+                && [dict get $attrs min] > [dict get $attrs max]} {
+            Fail CLI badvalue "cli: min for \"$name\" cannot exceed max"
+        }
+
+        if {[dict exists $attrs choices]} {
+            set choices [dict get $attrs choices]
+            if {[catch {llength $choices}]} {
+                Fail CLI badvalue "cli: choices for \"$name\" must be a list"
+            }
+            if {$type eq "flag"} {
+                Fail CLI badvalue "cli: \"$name\" is a flag and cannot declare choices"
+            }
+            # A choice that cannot itself pass the declared type/range is dead
+            # data and almost certainly a typo in the spec.
+            foreach choice $choices {
+                CliCheck $name $attrs $choice badvalue
+            }
+        }
+        if {[dict exists $attrs default]} {
+            CliCheck $name $attrs [dict get $attrs default] badvalue
+        }
         lappend out [list $name $kind $attrs]
     }
     return $out
@@ -104,26 +128,31 @@ proc ::machteld::CliDefault {attrs} {
     return ""
 }
 
-# Check one supplied value against its declared constraints. The message names
-# the option and what was expected, because "invalid value" is not a diagnostic.
-proc ::machteld::CliCheck {name attrs v} {
+# Check one value against its declared constraints. Command-line values use
+# `usage`; CliNorm passes `badvalue` for author-supplied defaults and choices.
+proc ::machteld::CliCheck {name attrs v {code usage}} {
     switch -- [dict get $attrs _type] {
+        flag {
+            if {![string is boolean -strict $v]} {
+                Fail CLI $code "$name needs a boolean, got \"$v\""
+            }
+        }
         int {
             if {![string is integer -strict $v]} {
-                Fail CLI usage "$name needs a whole number, got \"$v\""
+                Fail CLI $code "$name needs a whole number, got \"$v\""
             }
             if {[dict exists $attrs min] && $v < [dict get $attrs min]} {
-                Fail CLI usage "$name must be at least [dict get $attrs min], got $v"
+                Fail CLI $code "$name must be at least [dict get $attrs min], got $v"
             }
             if {[dict exists $attrs max] && $v > [dict get $attrs max]} {
-                Fail CLI usage "$name must be at most [dict get $attrs max], got $v"
+                Fail CLI $code "$name must be at most [dict get $attrs max], got $v"
             }
         }
     }
     if {[dict exists $attrs choices]} {
         set ch [dict get $attrs choices]
         if {$v ni $ch} {
-            Fail CLI usage "$name must be one of [join $ch {, }], got \"$v\""
+            Fail CLI $code "$name must be one of [join $ch {, }], got \"$v\""
         }
     }
     return $v
@@ -137,7 +166,7 @@ proc ::machteld::CliUsage {norm name} {
         if {$kind eq "option"} { lappend opts $entry } else { lappend pos $entry }
     }
     set line "usage: $name"
-    if {[llength $opts]} { append line " ?options?" }
+    append line " ?options?"
     foreach entry $pos {
         lassign $entry n kind attrs
         set req [expr {[dict exists $attrs required] && [dict get $attrs required]}]
@@ -151,16 +180,14 @@ proc ::machteld::CliUsage {norm name} {
             append out "\n  [format %-22s $n] [CliHelpText $attrs]"
         }
     }
-    if {[llength $opts]} {
-        append out "\n\noptions:"
-        foreach entry $opts {
-            lassign $entry n kind attrs
-            set label $n
-            if {[dict get $attrs _type] ne "flag"} { append label " <[dict get $attrs _type]>" }
-            append out "\n  [format %-22s $label] [CliHelpText $attrs]"
-        }
-        append out "\n  [format %-22s --help] show this message"
+    append out "\n\noptions:"
+    foreach entry $opts {
+        lassign $entry n kind attrs
+        set label $n
+        if {[dict get $attrs _type] ne "flag"} { append label " <[dict get $attrs _type]>" }
+        append out "\n  [format %-22s $label] [CliHelpText $attrs]"
     }
+    append out "\n  [format %-22s --help] show this message"
     return $out
 }
 
@@ -185,14 +212,7 @@ proc ::machteld::CliHelpText {attrs} {
 }
 
 proc ::machteld::cli {args} {
-    # Named here the way the C verbs name theirs, so the manifest can read the
-    # subcommand table out of the body instead of anyone maintaining a copy.
     set subs {parse usage duration}
-    # And declared empty on purpose. `cli` takes no options of its own -- the
-    # `--help` and `--interval` literals below belong to the PROGRAM being parsed,
-    # not to this verb, and a scanner cannot tell those two apart by looking. An
-    # explicit table beats a guess: without this line the manifest claimed `cli`
-    # accepted `--help`, which is precisely the kind of lie it exists to prevent.
     set opts {}
     if {[llength $args] < 1} {
         Fail CLI usage "usage: cli parse argv spec | cli usage spec ?name?"
@@ -202,18 +222,7 @@ proc ::machteld::cli {args} {
         Fail CLI usage "cli: unknown subcommand \"$sub\": must be [join $subs { or }]"
     }
 
-    # THE CONVENTION, MADE AVAILABLE TO THE TOOLS THAT HAVE TO HONOUR IT. Every
-    # machteld verb demands an explicit unit on a duration -- `-timeout 100` is
-    # refused so it can never silently mean 100 seconds -- and until now nothing
-    # exposed the parser that enforces it. So a stamped tool had two choices: a
-    # second dialect (`--grace 20`, a bare number, exactly what the palette
-    # rejects) or a hand-rolled regexp per tool. `life` and `lifelab` shipped
-    # with the first. A toolkit that insists on a convention owes its tools the
-    # means to keep it.
-    #
-    # Deliberately the SAME `_dur2ms` the verbs use, not a copy: two parsers for
-    # one syntax is how the tools and the palette would drift apart, and the
-    # drift would be silent because both would look right in isolation.
+    # Programs use the same explicit-unit duration parser as runtime commands.
     if {$sub eq "duration"} {
         if {[llength $args] != 2} { Fail CLI usage "usage: cli duration value" }
         return [_dur2ms CLI [lindex $args 1]]
@@ -232,8 +241,18 @@ proc ::machteld::cli {args} {
     lassign $args _ argv spec
     set norm [CliNorm $spec]
 
+    set name [file rootname [file tail [info nameofexecutable]]]
+    try {
+        return [CliParse $argv $norm]
+    } trap {MACHTELD CLI usage} {msg opts} {
+        return -options $opts "$msg\n\n[CliUsage $norm $name]"
+    }
+}
+
+proc ::machteld::CliParse {argv norm} {
     set res {}
     set positional {}
+    set supplied {}
     foreach entry $norm {
         lassign $entry n kind attrs
         dict set res [dict get $attrs _key] [CliDefault $attrs]
@@ -261,34 +280,42 @@ proc ::machteld::cli {args} {
         }
         lassign $found n kind attrs
         if {[dict get $attrs _type] eq "flag"} {
-            dict set res [dict get $attrs _key] 1
+            set key [dict get $attrs _key]
+            dict set res $key 1
+            lappend supplied $key
             continue
         }
-        # The bug this whole verb exists to prevent: an option whose value is
-        # simply absent must be refused here, loudly, and not handed on as an
-        # empty string to be discovered three frames later by whatever consumes
-        # it. `i+1 == llength` is that case, and so is a following `--option`.
+        # Refuse a missing value here instead of passing an ambiguous empty one.
         set nxt [lindex $argv [expr {$i + 1}]]
         if {$i + 1 >= [llength $argv] || ([string match --* $nxt] && $nxt ne "--")} {
             Fail CLI usage "$n needs a value"
         }
         incr i
-        dict set res [dict get $attrs _key] [CliCheck $n $attrs $nxt]
+        set key [dict get $attrs _key]
+        dict set res $key [CliCheck $n $attrs $nxt]
+        lappend supplied $key
     }
 
-    # Positionals, in declaration order, then whatever is left over.
+    # Positionals, in declaration order, then whatever is left over. Help waives
+    # only missing required values: positionals that were actually supplied are
+    # still typed, and unexpected extras remain mistakes.
+    set wantsHelp [dict get $res help]
     set idx 0
     foreach entry $positional {
         lassign $entry n kind attrs
         if {$idx < [llength $rest]} {
             dict set res [dict get $attrs _key] [CliCheck $n $attrs [lindex $rest $idx]]
             incr idx
-        } elseif {[dict exists $attrs required] && [dict get $attrs required]} {
+        } elseif {!$wantsHelp && [dict exists $attrs required] &&
+                  [dict get $attrs required]} {
             Fail CLI usage "missing required argument <$n>"
         }
     }
     if {$idx < [llength $rest]} {
         Fail CLI usage "unexpected argument \"[lindex $rest $idx]\""
+    }
+    if {$wantsHelp} {
+        return $res
     }
 
     # A required option with no value supplied and no default is missing, not
@@ -298,9 +325,15 @@ proc ::machteld::cli {args} {
         lassign $entry n kind attrs
         if {$kind ne "option"} continue
         if {![dict exists $attrs required] || ![dict get $attrs required]} continue
-        if {[dict get $res [dict get $attrs _key]] eq "" && ![dict exists $attrs default]} {
+        if {[dict get $attrs _key] ni $supplied && ![dict exists $attrs default]} {
             Fail CLI usage "missing required option $n"
         }
     }
     return $res
 }
+
+::machteld::MetaDefine cli [dict create kind tcl args args domain CLI \
+    codes {badvalue usage} subcommands [dict create \
+        parse    [dict create options {}] \
+        usage    [dict create options {}] \
+        duration [dict create options {}]]]

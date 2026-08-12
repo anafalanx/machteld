@@ -1,16 +1,7 @@
 /*
  * hash.c -- ::machteld::hash: digests, HMAC and cryptographic random.
  *
- * Over Windows CNG (bcrypt.dll), which is already on every machine this runs on:
- * no vendored crypto, no OpenSSL, nothing to own a snapshot of. The ecosystem
- * policy's question -- "can I own this snapshot?" -- does not arise for a library
- * that ships with the OS.
- *
- * WHY THIS EXISTS. Tcl 9 offers CRC32 and Adler32 through zlib and nothing else,
- * so machteld had no way to answer "are these two files the same?" or "has this
- * content changed?" -- and no source of unguessable bytes at all, since
- * `expr {rand()}` is a PRNG. Crypto/hashing is present in Python, Go and Deno
- * alike and was the one category machteld had entirely empty.
+ * It uses Windows CNG (bcrypt.dll): no vendored crypto or runtime DLLs.
  *
  * WHICH BYTES GET HASHED -- the decision that actually matters here. A Tcl value
  * is not bytes; it is a value that has a byte representation depending on how you
@@ -38,8 +29,10 @@
 #include <bcrypt.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #define HASH_CHUNK (64 * 1024)
+#define HASH_MAX_DIGEST 64
 
 static int hash_error(Tcl_Interp *interp, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg, -1));
@@ -113,7 +106,15 @@ static int alg_open(Tcl_Interp *interp, const alg_t *a, const unsigned char *key
         BCryptCloseAlgorithmProvider(*alg_h, 0);
         return hash_error(interp, "oserror", "cannot read the digest length");
     }
+    if (n == 0 || n > HASH_MAX_DIGEST) {
+        BCryptCloseAlgorithmProvider(*alg_h, 0);
+        return hash_error(interp, "oserror", "the crypto provider returned an invalid digest length");
+    }
     *dlen = n;
+    if (keylen < 0 || (unsigned long long)keylen > ULONG_MAX) {
+        BCryptCloseAlgorithmProvider(*alg_h, 0);
+        return hash_error(interp, "badvalue", "the HMAC key is too large");
+    }
     if (BCryptCreateHash(*alg_h, h, NULL, 0, (PUCHAR)key, (ULONG)keylen, 0) != 0) {
         BCryptCloseAlgorithmProvider(*alg_h, 0);
         return hash_error(interp, "oserror", "cannot create the hash object");
@@ -147,6 +148,7 @@ static const unsigned char *value_bytes(Tcl_Obj *v, Tcl_Size *len) {
 static Tcl_Obj *digest_obj(const unsigned char *d, DWORD n, int binary) {
     if (binary) return Tcl_NewByteArrayObj(d, (Tcl_Size)n);
     char *hex = (char *)malloc((size_t)n * 2 + 1);
+    if (hex == NULL) return NULL;
     static const char *H = "0123456789abcdef";
     for (DWORD i = 0; i < n; i++) { hex[i*2] = H[d[i] >> 4]; hex[i*2+1] = H[d[i] & 15]; }
     hex[n*2] = '\0';
@@ -177,7 +179,7 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
         return TCL_ERROR;
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) return TCL_ERROR;
 
     if (idx == ALGORITHMS) {
         if (objc != 2) { Tcl_WrongNumArgs(interp, 2, objv, ""); return TCL_ERROR; }
@@ -258,6 +260,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             Tcl_Size klen = 0, dlen_in = 0;
             const unsigned char *key = value_bytes(objv[3], &klen);
             const unsigned char *data = value_bytes(objv[4], &dlen_in);
+            if (dlen_in < 0 || (unsigned long long)dlen_in > ULONG_MAX) {
+                return hash_error(interp, "badvalue", "the input is too large");
+            }
             BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
             if (alg_open(interp, a, key, klen, &ah, &hh, &dn) != TCL_OK) return TCL_ERROR;
             unsigned char out[64];
@@ -265,7 +270,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                      (BCryptFinishHash(hh, out, dn, 0) == 0);
             BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
             if (!ok) return hash_error(interp, "oserror", "hmac failed");
-            Tcl_SetObjResult(interp, digest_obj(out, dn, binary));
+            Tcl_Obj *result = digest_obj(out, dn, binary);
+            if (result == NULL) return hash_error(interp, "oserror", "out of memory");
+            Tcl_SetObjResult(interp, result);
             return TCL_OK;
         }
 
@@ -275,6 +282,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             if (binary < 0) return TCL_ERROR;
             Tcl_Size n = 0;
             const unsigned char *data = value_bytes(objv[3], &n);
+            if (n < 0 || (unsigned long long)n > ULONG_MAX) {
+                return hash_error(interp, "badvalue", "the input is too large");
+            }
             BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
             if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) return TCL_ERROR;
             unsigned char out[64];
@@ -282,7 +292,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                      (BCryptFinishHash(hh, out, dn, 0) == 0);
             BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
             if (!ok) return hash_error(interp, "oserror", "hashing failed");
-            Tcl_SetObjResult(interp, digest_obj(out, dn, binary));
+            Tcl_Obj *result = digest_obj(out, dn, binary);
+            if (result == NULL) return hash_error(interp, "oserror", "out of memory");
+            Tcl_SetObjResult(interp, result);
             return TCL_OK;
         }
 
@@ -294,40 +306,48 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         int binary = want_binary(interp, objc, objv, 4);
         if (binary < 0) return TCL_ERROR;
         const char *path = Tcl_GetString(objv[3]);
-        Tcl_Channel ch = Tcl_OpenFileChannel(NULL, path, "rb", 0);
+        Tcl_Channel ch = Tcl_FSOpenFileChannel(interp, objv[3], "rb", 0);
         if (ch == NULL) {
             Tcl_Obj *m = Tcl_NewStringObj("cannot read \"", -1);
             Tcl_AppendToObj(m, path, -1);
             Tcl_AppendToObj(m, "\"", -1);
             Tcl_SetObjResult(interp, m);
-            Tcl_SetErrorCode(interp, "MACHTELD", "HASH", "notfound", (char *)NULL);
+            int eno = Tcl_GetErrno();
+            Tcl_SetErrorCode(interp, "MACHTELD", "HASH",
+                (eno == ENOENT || eno == ENOTDIR) ? "notfound" : "oserror",
+                (char *)NULL);
             return TCL_ERROR;
         }
-        Tcl_SetChannelOption(NULL, ch, "-translation", "binary");
+        if (Tcl_SetChannelOption(interp, ch, "-translation", "binary") != TCL_OK) {
+            Tcl_Close(NULL, ch);
+            return TCL_ERROR;
+        }
         BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
         if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) {
             Tcl_Close(NULL, ch);
             return TCL_ERROR;
         }
-        Tcl_Obj *buf = Tcl_NewObj();
-        Tcl_IncrRefCount(buf);
+        unsigned char buf[HASH_CHUNK];
         int failed = 0;
         for (;;) {
-            Tcl_Size got = Tcl_ReadChars(ch, buf, HASH_CHUNK, 0);
-            if (got <= 0) break;
-            Tcl_Size bl = 0;
-            unsigned char *b = Tcl_GetBytesFromObj(NULL, buf, &bl);
-            if (b == NULL || BCryptHashData(hh, (PUCHAR)b, (ULONG)bl, 0) != 0) { failed = 1; break; }
+            Tcl_Size got = Tcl_ReadRaw(ch, (char *)buf, HASH_CHUNK);
+            if (got < 0) { failed = 1; break; }
+            if (got == 0) break;
+            if (BCryptHashData(hh, buf, (ULONG)got, 0) != 0) {
+                failed = 1;
+                break;
+            }
         }
-        Tcl_DecrRefCount(buf);
-        Tcl_Close(NULL, ch);
+        if (Tcl_Close(interp, ch) != TCL_OK) failed = 1;
         unsigned char out[64];
         if (failed || BCryptFinishHash(hh, out, dn, 0) != 0) {
             BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
             return hash_error(interp, "oserror", "reading the file failed");
         }
         BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
-        Tcl_SetObjResult(interp, digest_obj(out, dn, binary));
+        Tcl_Obj *result = digest_obj(out, dn, binary);
+        if (result == NULL) return hash_error(interp, "oserror", "out of memory");
+        Tcl_SetObjResult(interp, result);
         return TCL_OK;
     }
 
@@ -340,6 +360,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         if (objc != 4) { Tcl_WrongNumArgs(interp, 2, objv, "token data"); return TCL_ERROR; }
         Tcl_Size n = 0;
         const unsigned char *data = value_bytes(objv[3], &n);
+        if (n < 0 || (unsigned long long)n > ULONG_MAX) {
+            return hash_error(interp, "badvalue", "the input is too large");
+        }
         if (BCryptHashData(c->h, (PUCHAR)data, (ULONG)n, 0) != 0) {
             return hash_error(interp, "oserror", "hashing failed");
         }
@@ -355,7 +378,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     int ok = (BCryptFinishHash(c->h, out, dn, 0) == 0);
     hctx_free(st, c);
     if (!ok) return hash_error(interp, "oserror", "finishing the hash failed");
-    Tcl_SetObjResult(interp, digest_obj(out, dn, binary));
+    Tcl_Obj *result = digest_obj(out, dn, binary);
+    if (result == NULL) return hash_error(interp, "oserror", "out of memory");
+    Tcl_SetObjResult(interp, result);
     return TCL_OK;
 }
 
@@ -370,8 +395,15 @@ static void HashDelete(void *cd) {
 
 int Machteldhash_Init(Tcl_Interp *interp) {
     hash_state *st = (hash_state *)calloc(1, sizeof(*st));
-    if (st == NULL) return TCL_ERROR;
-    Tcl_CreateObjCommand(interp, "::machteld::hash", HashCmd, st, HashDelete);
-    Tcl_PkgProvide(interp, "machteld::hash", "0.1");
+    if (st == NULL) return hash_error(interp, "oserror", "out of memory creating hash state");
+    if (Tcl_CreateObjCommand(interp, "::machteld::hash", HashCmd, st,
+                             HashDelete) == NULL) {
+        free(st);
+        return TCL_ERROR;
+    }
+    if (Tcl_PkgProvide(interp, "machteld::hash", "0.4.0") != TCL_OK) {
+        Tcl_DeleteCommand(interp, "::machteld::hash");
+        return TCL_ERROR;
+    }
     return TCL_OK;
 }
