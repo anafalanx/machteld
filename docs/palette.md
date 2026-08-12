@@ -149,6 +149,48 @@ Ask for them once and the rest reads like a script:
 namespace eval ::mytool { namespace path ::machteld }
 ```
 
+## Built — the network
+
+```tcl
+set r [http get https://example.com]
+    → {status 200  headers {content-type text/html …}  rawheaders "…"  body <bytes>  bytes 559}
+http get $url -headers {Accept application/json} -timeout 10s -agent mytool
+http post $url $payload -type application/json
+encoding convertfrom utf-8 [dict get $r body]     ;# decode once you know the charset
+```
+
+**https works, and machteld contains no TLS code.** The transport is **WinHTTP** — Windows' own
+HTTP client — so certificate-chain validation against the machine's trust store, TLS version
+negotiation, redirects, proxy discovery, chunked decoding and keep-alive are all the operating
+system's, serviced by Windows Update rather than by rebuilding this exe. Same reasoning that has
+`wrap` use zipfs and `dirs` use the enumeration API: the OS ships the hard part.
+
+*The alternative was a stacked TLS channel over Schannel — a record layer, a handshake state
+machine and buffer management, roughly a thousand lines of subtle C. This project had just paid for
+a hand-written reparse parser whose bounds check was twelve bytes short and which segfaulted under
+a proof-of-concept. Writing a crypto transport by hand in the same month would have learned
+nothing.*
+
+**What it costs, said here rather than discovered later:** `package require tls` still fails, so
+Tcl code written against the `http` + `tls` idiom does not run under machteld. This verb is
+machteld's own API — a dict in, a dict out. That is the right trade for a personal toolkit and the
+wrong one for a distribution, and machteld is deliberately the former.
+
+- **`body` is a byte array, not a string.** An HTTP body is bytes until the `content-type` says
+  otherwise; guessing an encoding here would corrupt every image and mis-decode every page whose
+  charset disagrees with the guess.
+- **`headers` is cooked, `rawheaders` is raw.** The dict has lower-cased names and joins a repeated
+  field with `", "` — which is lossy for `Set-Cookie` specifically, so the original block is kept
+  verbatim beside it. Convenience that silently discards data would be the wrong half of the trade;
+  convenience *beside* the original is not.
+- **`-maxbody` refuses, it does not truncate.** Default 64 MB, and a response past it raises
+  `toobig` — a short body that looks whole is the one answer this palette never gives.
+- **There is no `-insecure`.** Every such flag is eventually left on in something that matters. A
+  caller who genuinely needs an unverified endpoint has `run -- curl` and has to say so out loud.
+  Verified against `expired`, `self-signed` and `wrong.host` on badssl.com: all three raise `tls`.
+- `tls` is its own code because *"the certificate is bad"* and *"the host is down"* call for
+  different responses.
+
 ## Built — the directory tree
 
 ```tcl

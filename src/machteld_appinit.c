@@ -32,6 +32,9 @@ extern int Machteldhash_Init(Tcl_Interp *interp); /* src/hash.c */
 #ifdef MACHTELD_DIRS
 extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
 #endif
+#ifdef MACHTELD_HTTP
+extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
+#endif
 
 int
 Machteld_RegisterLibs(Tcl_Interp *interp)
@@ -96,6 +99,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machtelddirs", Machtelddirs_Init, NULL);
+#endif
+#ifdef MACHTELD_HTTP
+    /* https, over WinHTTP rather than a hand-written TLS record layer -- the OS
+     * ships certificate validation, redirects and proxy discovery, and services
+     * them through Windows Update instead of through a rebuild here. */
+    if (Machteldhttp_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldhttp", Machteldhttp_Init, NULL);
 #endif
 
     /*
