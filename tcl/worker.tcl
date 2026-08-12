@@ -17,10 +17,8 @@
 # carries `path`, and the dispatcher pulls it out of the request dict by name.
 # Two things follow that are worth having: the protocol documents itself, so
 # `worker ops` can answer what this worker accepts; and a handler is necessarily
-# a PROC, whose body Tcl compiles to local variable slots. That is not a style
-# preference -- the same loop at top level runs 3.6x slower (docs/parallel.md),
-# so a design that invited top-level handler bodies would hand most of the
-# parallelism straight back.
+# a proc, so its declared request fields become ordinary local variables in the
+# namespace where the handler was defined.
 #
 # A HANDLER MUST NOT WRITE TO STDOUT. Stdout *is* the protocol: a stray `puts`
 # injects a line that is not a reply, and the director either skips it or -- far
@@ -47,7 +45,9 @@ proc ::machteld::worker {args} {
     if {$sub eq "on"} {
         if {[llength $args] != 4} { Fail WORKER usage "usage: worker on op arglist body" }
         lassign $args _ op arglist body
-        if {$op eq ""} { Fail WORKER badvalue "worker: an operation needs a name" }
+        if {![regexp {^[A-Za-z_][A-Za-z0-9_.-]*$} $op]} {
+            Fail WORKER badvalue "worker: operation names use letters, digits, _, . and -"
+        }
         # Defined as a real proc rather than kept as a script to eval: a proc body
         # is compiled once, an evaled script is re-parsed on every request.
         #
@@ -107,18 +107,34 @@ proc ::machteld::worker {args} {
 # a malformed line takes its in-flight item with it and forces the director to
 # notice a death, requeue, and respawn -- an expensive way to report a typo.
 proc ::machteld::WorkerAnswer {line} {
+    # WorkerDispatch returns a reply dict. Encoding and writing are kept at this
+    # one boundary so no handler can accidentally split the JSON-lines protocol.
+    if {[catch {WorkerDispatch $line} reply opts]} {
+        set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode]
+                                                   : {MACHTELD WORKER failed}}]
+        set reply [dict create id -1 ok 0 code $code msg $reply]
+    }
+    catch {puts [json encode -dict $reply]}
+    return
+}
+
+proc ::machteld::WorkerDispatch {line} {
     variable WORKER_OPS
     if {[catch {json decode $line} req]} {
-        puts [json encode [dict create id -1 ok 0 code {MACHTELD WORKER parse} \
-                                       msg "request is not valid JSON"]]
-        return
+        return [dict create id -1 ok 0 code {MACHTELD WORKER parse} \
+                            msg "request is not valid JSON"]
+    }
+    # The decoder preserves JSON container type. Re-encoding therefore gives a
+    # reliable public test without peeking at Tcl's internal object type.
+    if {[catch {json encode $req} encoded] || ![string match \{* $encoded]} {
+        return [dict create id -1 ok 0 code {MACHTELD WORKER parse} \
+                            msg "request must be a JSON object"]
     }
     set id [expr {[dict exists $req id] ? [dict get $req id] : -1}]
     set op [expr {[dict exists $req op] ? [dict get $req op] : ""}]
     if {![dict exists $WORKER_OPS $op]} {
-        puts [json encode [dict create id $id ok 0 code {MACHTELD WORKER notfound} \
-                                       msg "no handler for \"$op\""]]
-        return
+        return [dict create id $id ok 0 code {MACHTELD WORKER notfound} \
+                    msg "no handler for \"$op\""]
     }
     set pname [dict get $WORKER_OPS $op]
 
@@ -139,9 +155,8 @@ proc ::machteld::WorkerAnswer {line} {
         } elseif {[info default $pname $aname dflt]} {
             lappend argv $dflt
         } else {
-            puts [json encode [dict create id $id ok 0 code {MACHTELD WORKER usage} \
-                                           msg "$op needs \"$aname\""]]
-            return
+            return [dict create id $id ok 0 code {MACHTELD WORKER usage} \
+                        msg "$op needs \"$aname\""]
         }
     }
 
@@ -151,8 +166,11 @@ proc ::machteld::WorkerAnswer {line} {
         # `trap` on -- an error that arrives as prose has stopped being part of
         # the contract.
         set code [dict get $opts -errorcode]
-        puts [json encode [dict create id $id ok 0 code $code msg $res]]
-        return
+        return [dict create id $id ok 0 code $code msg $res]
     }
-    puts [json encode [dict create id $id ok 1 result $res]]
+    return [dict create id $id ok 1 result $res]
 }
+
+::machteld::MetaDefine worker [dict create kind tcl args args domain WORKER \
+    codes {badvalue usage} replycodes {failed notfound parse usage} subcommands [dict create \
+        on [dict create options {}] ops [dict create options {}] serve [dict create options {}]]]

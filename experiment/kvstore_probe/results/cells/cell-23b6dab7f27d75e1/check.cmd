@@ -1,3 +1,0 @@
-@echo off
-"C:\dev\_machteld\experiment\kvstore_probe\runs\_frozen\python\python.exe" -I -S -B "C:\dev\_machteld\experiment\kvstore_probe\bin\check.py" --arm python --solution "%~dp0solution.py" --cases "%~dp0visible.json" --python-runtime "C:\dev\_machteld\experiment\kvstore_probe\runs\_frozen\python\python.exe" --machteld-runtime "C:\dev\_machteld\experiment\kvstore_probe\runs\_frozen\machteld.exe" --python-sha256 478201058e5eeca3725ce3a6cd115413f67eab4827c82409b87f3b85a632d610 --machteld-sha256 9f222f33b257849ad9ae11a9a4b97752cac4e8d5d6b7ccc9820563d31380ce51 --attempt-root "C:\dev\_machteld\experiment\kvstore_probe\attempts" --cell cell-23b6dab7f27d75e1 --max-checks 8
-exit /b %ERRORLEVEL%

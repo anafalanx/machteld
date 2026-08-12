@@ -21,13 +21,8 @@
 # a fact rather than a correlation, and a worker that dies has exactly one item to
 # put back.
 #
-# STDERR MUST BE DRAINED. This is the one hazard `child start -channels` adds over
-# the spike, and it is not theoretical. The spike used stock Tcl, where a
-# subprocess inherits stderr and it goes to the console; here stderr is a real
-# pipe, and a pipe nobody reads fills and blocks the worker mid-write -- a hang,
-# not an error. So every worker's stderr is drained on its own `chan event` and
-# kept, capped, for `pool info` to report. Worker diagnostics are usually the
-# only evidence of why a pool went wrong, so they are kept rather than discarded.
+# STDERR MUST BE DRAINED. In channel mode it is a pipe; leaving it unread can
+# block a worker mid-write. Keep a capped tail for `pool info` diagnostics.
 
 namespace eval ::machteld {
     variable POOL {}
@@ -40,7 +35,7 @@ proc ::machteld::pool {args} {
     variable POOL
     variable POOL_SEQ
     set subs {create submit wait info close}
-    set opts {-width -maxtries -timeout}
+    set opts {-width -maxtries -timeout -arg0 -cpu -dir -env -mem}
 
     if {![llength $args]} {
         Fail POOL usage "usage: pool create ?-width n? -- command ?arg ...?"
@@ -59,17 +54,19 @@ proc ::machteld::pool {args} {
 
     switch -- $sub {
         submit {
-            # `$rest` is the remaining ARGUMENTS, and `pool submit $p $items`
-            # passes the whole list as one of them -- so `rest` is a one-element
-            # list wrapping the item list, not the item list. Unwrapping it here
-            # is what an earlier "is this a bare dict?" heuristic was really
-            # compensating for; the arity was the bug, and guessing at the shape
-            # would have hidden it rather than fixed it.
+            # The item list is one argument; do not guess whether a Tcl value was
+            # written as a bare dict or a one-element list.
             if {[llength $rest] != 1} { Fail POOL usage "usage: pool submit token items" }
             return [PoolSubmit $tok [lindex $rest 0]]
         }
-        info   { return [PoolInfo $tok] }
-        close  { return [PoolClose $tok] }
+        info {
+            if {[llength $rest]} { Fail POOL usage "usage: pool info token" }
+            return [PoolInfo $tok]
+        }
+        close {
+            if {[llength $rest]} { Fail POOL usage "usage: pool close token" }
+            return [PoolClose $tok]
+        }
         wait   { return [PoolWait $tok $rest] }
     }
 }
@@ -79,6 +76,7 @@ proc ::machteld::PoolCreate {argl} {
     variable POOL_SEQ
     set width 4
     set maxtries 3
+    set launch {}
     set i 0
     for {} {$i < [llength $argl]} {incr i} {
         set a [lindex $argl $i]
@@ -99,6 +97,9 @@ proc ::machteld::PoolCreate {argl} {
                 }
                 set maxtries $v
             }
+            -arg0 - -cpu - -dir - -env - -mem - -timeout {
+                lappend launch $a $v
+            }
             default { Fail POOL usage "pool create: unknown option \"$a\"" }
         }
         incr i
@@ -107,10 +108,15 @@ proc ::machteld::PoolCreate {argl} {
     if {![llength $cmd]} { Fail POOL usage "pool create: no command given" }
 
     set tok pool#[incr POOL_SEQ]
-    dict set POOL $tok [dict create cmd $cmd width $width maxtries $maxtries \
+    dict set POOL $tok [dict create cmd $cmd launch $launch width $width maxtries $maxtries \
         pending {} results {} inflight {} workers {} nextid 0 \
-        dead 0 requeued 0 errbuf "" done 1 submitted 0]
-    for {set k 0} {$k < $width} {incr k} { PoolSpawn $tok }
+        dead 0 requeued 0 errbuf "" fatal "" done 1 submitted 0 submitted_once 0]
+    if {[catch {
+        for {set k 0} {$k < $width} {incr k} { PoolSpawn $tok }
+    } msg opts]} {
+        catch {PoolClose $tok}
+        return -options $opts $msg
+    }
     return $tok
 }
 
@@ -119,7 +125,8 @@ proc ::machteld::PoolCreate {argl} {
 proc ::machteld::PoolSpawn {tok} {
     variable POOL
     set cmd [dict get $POOL $tok cmd]
-    if {[catch {child start -channels -- {*}$cmd} c]} {
+    set launch [dict get $POOL $tok launch]
+    if {[catch {child start -channels {*}$launch -- {*}$cmd} c]} {
         Fail POOL launch "pool: cannot start a worker: $c"
     }
     set ci [child info $c]
@@ -139,7 +146,7 @@ proc ::machteld::PoolStderr {tok c} {
     variable POOL
     variable POOL_ERRCAP
     if {![dict exists $POOL $tok]} return
-    set ci [child info $c]
+    if {[catch {child info $c} ci]} return
     if {![dict exists $ci stderr]} return
     set ch [dict get $ci stderr]
     if {[catch {read $ch} chunk]} return
@@ -155,11 +162,11 @@ proc ::machteld::PoolStderr {tok c} {
 
 proc ::machteld::PoolSubmit {tok items} {
     variable POOL
-    # `items` is always a LIST of request dicts. An earlier version tried to
-    # guess when a single bare dict had been handed in instead; the guess is
-    # unreliable -- a one-element list of dicts and a bare dict are the same
-    # value in Tcl -- and a verb that guesses what it was given is a verb that
-    # occasionally guesses wrong. One shape, stated.
+    if {[dict get $POOL $tok submitted_once]} {
+        Fail POOL usage "pool submit: a pool accepts exactly one batch; create another pool"
+    }
+    # `items` is always a list of request dicts; Tcl values do not preserve how
+    # the caller happened to spell a one-element list.
     set pend [dict get $POOL $tok pending]
     set next [dict get $POOL $tok nextid]
     foreach it $items {
@@ -172,6 +179,7 @@ proc ::machteld::PoolSubmit {tok items} {
     dict set POOL $tok pending $pend
     dict set POOL $tok nextid $next
     dict set POOL $tok submitted $next
+    dict set POOL $tok submitted_once 1
     dict set POOL $tok done 0
     foreach c [dict get $POOL $tok workers] { PoolFeed $tok $c }
     return
@@ -199,7 +207,7 @@ proc ::machteld::PoolFeed {tok c} {
 proc ::machteld::PoolReadable {tok c} {
     variable POOL
     if {![dict exists $POOL $tok]} return
-    set ci [child info $c]
+    if {[catch {child info $c} ci]} { PoolDied $tok $c ; return }
     if {![dict exists $ci stdout]} { PoolDied $tok $c ; return }
     set ch [dict get $ci stdout]
     # A non-blocking `gets` returning -1 means "no COMPLETE line yet" as often as
@@ -207,8 +215,22 @@ proc ::machteld::PoolReadable {tok c} {
     # confusing the two makes a pool either spin or hang.
     while {[gets $ch line] >= 0} {
         if {$line eq ""} continue
-        if {[catch {json decode $line} rep]} continue
-        if {![dict exists $rep id]} continue
+        if {[catch {json decode $line} rep] ||
+            [catch {json encode $rep} encoded] ||
+            ![string match \{* $encoded] ||
+            ![dict exists $rep id] || ![dict exists $rep ok]} {
+            dict set POOL $tok errbuf [string range \
+                "[dict get $POOL $tok errbuf]protocol error: worker wrote a malformed reply\n" end-65535 end]
+            PoolDied $tok $c
+            return
+        }
+        if {![dict exists [dict get $POOL $tok inflight] $c] ||
+            [dict get $rep id] ne [dict get $POOL $tok inflight $c id]} {
+            dict set POOL $tok errbuf [string range \
+                "[dict get $POOL $tok errbuf]protocol error: worker replied with an unexpected id\n" end-65535 end]
+            PoolDied $tok $c
+            return
+        }
         dict set POOL $tok results [linsert [dict get $POOL $tok results] end $rep]
         dict set POOL $tok inflight [dict remove [dict get $POOL $tok inflight] $c]
         PoolFeed $tok $c
@@ -223,6 +245,7 @@ proc ::machteld::PoolReadable {tok c} {
 proc ::machteld::PoolDied {tok c} {
     variable POOL
     if {![dict exists $POOL $tok]} return
+    if {$c ni [dict get $POOL $tok workers]} return
     catch {
         set ci [child info $c]
         foreach k {stdout stderr} {
@@ -236,11 +259,16 @@ proc ::machteld::PoolDied {tok c} {
     set infl [dict get $POOL $tok inflight]
     dict set POOL $tok inflight [dict remove $infl $c]
     PoolRequeue $tok $c $infl
-    # Keep the width while there is work, but never spawn forever: replacing a
-    # worker that a poisoned item keeps killing is a fork bomb with a schedule.
-    if {[llength [dict get $POOL $tok pending]] &&
-        [dict get $POOL $tok dead] < [expr {10 * [dict get $POOL $tok width]}]} {
-        if {![catch {PoolSpawn $tok} new]} { PoolFeed $tok $new }
+    # Per-item maxtries makes replacement finite without a global death ceiling,
+    # which could strand later items after earlier poison consumed the allowance.
+    if {[llength [dict get $POOL $tok pending]]} {
+        if {[catch {PoolSpawn $tok} new]} {
+            dict set POOL $tok fatal $new
+            dict set POOL $tok done 1
+            set ::machteld::POOL_DONE($tok) 1
+        } else {
+            PoolFeed $tok $new
+        }
     }
     PoolCheckDone $tok
 }
@@ -282,6 +310,9 @@ proc ::machteld::PoolWait {tok argl} {
         if {$i + 1 >= [llength $argl]} { Fail POOL usage "pool wait: -timeout needs a value" }
         set ms [_dur2ms POOL [lindex $argl [expr {$i + 1}]]]
     }
+    if {[dict get $POOL $tok fatal] ne ""} {
+        return -code error -errorcode {MACHTELD POOL launch} [dict get $POOL $tok fatal]
+    }
     if {![dict get $POOL $tok done]} {
         set ::machteld::POOL_DONE($tok) 0
         set timer [after $ms [list set ::machteld::POOL_DONE($tok) timeout]]
@@ -290,6 +321,9 @@ proc ::machteld::PoolWait {tok argl} {
         if {$::machteld::POOL_DONE($tok) eq "timeout"} {
             Fail POOL timeout "pool timed out with [dict size [dict get $POOL $tok inflight]] item(s) in flight"
         }
+    }
+    if {[dict get $POOL $tok fatal] ne ""} {
+        return -code error -errorcode {MACHTELD POOL launch} [dict get $POOL $tok fatal]
     }
     # IN SUBMISSION ORDER. Replies arrive in whatever order the workers finish,
     # which is not an order any caller asked for; the id is the item's index, so
@@ -313,6 +347,8 @@ proc ::machteld::PoolInfo {tok} {
         results  [llength [dict get $POOL $tok results]] \
         dead     [dict get $POOL $tok dead] \
         requeued [dict get $POOL $tok requeued] \
+        done     [dict get $POOL $tok done] \
+        fatal    [dict get $POOL $tok fatal] \
         stderr   [dict get $POOL $tok errbuf]]
 }
 
@@ -334,3 +370,12 @@ proc ::machteld::PoolClose {tok} {
     catch {unset ::machteld::POOL_DONE($tok)}
     return
 }
+
+::machteld::MetaDefine pool [dict create kind tcl args args domain POOL \
+    codes {badvalue launch nohandle timeout usage} replycodes {poison} \
+    options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} \
+    subcommands [dict create \
+        create [dict create options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width}] \
+        submit [dict create options {}] wait [dict create options {-timeout}] \
+        info [dict create options {} returns {dead done fatal inflight pending requeued results stderr width workers}] \
+        close [dict create options {}]]]

@@ -1,12 +1,11 @@
-# build outputs (for when code arrives)
+# Generated build, dependency-cache, and release outputs.
 /build/
 /dist/
+/out/
+/.cache/
 *.exe
 *.o
 *.obj
 *.res
 *.a
 *.tmp
-
-# generated diagnostic outputs (written by test/pty_*.tcl)
-/pty_*.txt

@@ -1,32 +1,67 @@
 ---
 type: convention
 title: Execution model
-description: Linear by default; explicit concurrency; and no handle ever outlives the tool.
-tags: [machteld, execution, concurrency, lifetime, jobobject]
-timestamp: 2026-07-07
+description: Linear defaults, explicit evented concurrency, and bounded lifetime.
+tags: [machteld, execution, concurrency, jobobject]
 ---
 
 # Execution model
 
-**Linear by default.** Verbs block (with timeouts); code reads top-to-bottom, which is the most legible thing to a model and a human alike. Concurrency is *explicit*: `child start` returns a handle immediately, and `wait $a $b -any` multiplexes. Interactive control (`pty`) stays linear via **expect**. A callback/event layer exists but is optional — it is what [`pool`](palette.md) is built on, and what a Tk tool uses to stay responsive.
+Machteld is linear by default. `run`, `child wait`, and `pool wait` block until a
+result or explicit deadline. `watch read` and `pty read` poll immediately unless
+given `-timeout`; with one, they block only to that visible bound. Code reads top
+to bottom, and every requested deadline is visible at the call site.
 
-**There are two ways to wait, and which one you are in is not a preference.** [Creed](creed.md) 6 asks for one way to do each thing, so the split is stated rather than left to be discovered:
+Concurrency is explicit:
 
-| | waits for | use it for |
-|---|---|---|
-| **blocking verbs** — `wait`, `child wait`, `watch read`, `run` | a **process** to exit, or a timeout | linear scripts: the default, and what every example here shows |
-| **the event loop** — `chan event` + `vwait` | **data** to arrive on a channel | `pool` and `pmap`; any tool with a window |
+- `child start` returns immediately; `wait -any` multiplexes child and
+  filesystem-watch handles.
+- `pty expect` keeps an interactive exchange linear.
+- `pool` uses nonblocking channels and `chan event` so several persistent workers
+  can progress while Tcl/Tk's event loop remains responsive.
+- `pmap` provides the bounded create/submit/wait/close lifecycle for one batch.
 
-They wait on different events, so neither subsumes the other, and a blocking verb **does not pump the event loop** — `child wait` and a blocking `watch read` both stall `chan event` callbacks and freeze a Tk window until they return. Mixing the two is what makes a GUI hang, and it is why a pool multiplexes with `chan event` instead of waiting on its workers, and why a Tk tool polls with a short `-timeout` from an `after` handler rather than blocking its UI thread.
+Blocking commands do not promise to pump Tcl's event loop. Do not call a long
+blocking wait on a GUI thread that must paint or service channel callbacks. A GUI
+can schedule short timed reads from `after`, or use the evented pool interface.
 
-**Handle lifetime is bounded — no orphans is the law.** No handle ever outlives the tool process (a root Windows **Job Object** with `KILL_ON_JOB_CLOSE`). Within a session, a `scope { … }` block kills any children born inside it at the closing brace; `detach -- cmd` launches a daemon that deliberately survives the tool.
+## Lifetime law
+
+The host owns, but is not a member of, a root Windows Job Object configured for
+kill-on-close. Every supervised child or PTY is born into that root job and a
+narrower per-command job. Closing the host therefore closes the process trees it
+owns, not only their first PIDs, without replacing the host's own exit status
+with a job-termination status.
 
 ```tcl
-set a [child start ping host-a]
-set b [child start ping host-b]
-wait $a $b                                 ;# block for both
-scope { child start db.exe; run migrate.exe }   ;# the db child dies at the brace — guaranteed
-detach -- watchdog.exe                          ;# opt out: a fresh daemon that survives the tool
+scope {
+    set server [child start -- server.exe]
+    run -timeout 30s -- client.exe
+} ;# server and its descendants cannot escape the brace
 ```
 
-This surfaces winjob's kill-on-close guarantee as *language law*: the anti-orphan promise no stock Windows tool offers. The verbs themselves are in [the palette](palette.md).
+`scope` snapshots the child registry, evaluates its body in the caller, closes
+children created inside it on every return/error path, then preserves the body's
+result or error. Scopes nest naturally.
+
+`detach -- daemon.exe` is the deliberate exception. Success means the new process
+has been verified to belong to no Windows job, so its independent tree survives
+the calling host. An enclosing Windows job can forbid breakaway; Machteld then
+reports `{MACHTELD DETACH launch}` instead of returning a still-attached PID.
+Its use should be visible and rare.
+
+Opaque handles have an owner and an explicit `close`. `info` observes without
+draining. A handle is never reconstructed from a PID or accepted after close.
+
+## Process I/O
+
+Capture is the default for automation. `run` returns stdout and stderr in its
+result dict; `child start -channels` exposes pipes for protocols, so its caller
+drains output and closes stdin to signal EOF before an EOF-driven worker can
+complete. `pty` owns terminal semantics. `run -inherit` is the explicit
+human-facing path for color, pagers,
+Ctrl-C, and a child's direct use of the current terminal.
+
+Channels and protocol data have different jobs. A worker's stdout is its
+JSON-lines wire and must contain nothing else; stderr is drained for diagnostics.
+This separation prevents an ordinary log line from becoming a false reply.

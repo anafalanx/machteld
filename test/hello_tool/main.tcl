@@ -1,44 +1,62 @@
-# hello_tool/main.tcl -- a throwaway Tk tool, the first fixture for machteld's
-# tool packaging. It proves three things when wrapped into an exe:
-#   1. app-mode: main.tcl auto-runs (this file executing at all)
-#   2. the machteld prelude loaded alongside it (::machteld::vtstrip present)
-#   3. Tk is available and a window can be built
-# It writes a marker next to the exe so 1-2 are verifiable HEADLESSLY; the actual
-# window (3) is confirmed on a real desktop. Not a real tool -- a test target.
+#!/usr/bin/env machteld
+# Wrapped console/GUI fixture. Its marker proves startup, argv ownership, and
+# that the same static Machteld package (including SQLite/store) is present in
+# both embedded basekits.
+package require machteld 0.4.0
 
 set marker [file join [file dirname [info nameofexecutable]] _hello_ran.txt]
+set database [file join [file dirname [info nameofexecutable]] _hello_store.db]
+set value [binary format H* 0001ff80410042]
+
 set f [open $marker w]
-puts $f "app-mode: main.tcl ran"
-puts $f "exe: [info nameofexecutable]"
-puts $f "prelude: [expr {[llength [info commands ::machteld::vtstrip]] ? {loaded} : {NOT loaded}}]"
-puts $f "proc-in-basekit: [expr {[llength [info commands ::machteld::run]] ? {yes} : {no}}]"
-
-set gui "gui: not attempted"
-if {![catch {
-    package require Tk
-    wm title . "hello -- packaged by machteld"
-    pack [label .l -text "packaged by machteld" -padx 40 -pady 40]
-    update
-} e]} {
-    set gui "gui: window created OK"
+puts $f "version:[package require machteld]"
+puts $f "argc:$argc"
+puts $f "argv:$argv"
+puts $f "tcl_library:$::tcl_library"
+puts $f "tk_library:$::tk_library"
+puts $f "run:[expr {[llength [info commands ::machteld::run]] ? {yes} : {no}}]"
+if {[catch {
+    set msgcat_version [package require msgcat 1.7]
+    set module_path [file normalize [file join [file dirname [info library]] tcl9 9.0]]
+    set modules_embedded [expr {
+        [string match {//zipfs:/*} $module_path] &&
+        $module_path in [tcl::tm::path list]}]
+    set clock_value [clock format 0 -locale nl_BE -timezone :Europe/Brussels]
+    set cp1252_euro [binary encode hex [encoding convertto cp1252 \u20ac]]
+} runtime_error]} {
+    puts $f "runtime:error:$runtime_error"
 } else {
-    set gui "gui: failed ($e)"
+    puts $f "runtime:msgcat:$msgcat_version modules:[expr {$modules_embedded ? {embedded} : {external}}] cp1252:$cp1252_euro clock:$clock_value"
 }
-puts $f $gui
-close $f
 
-# Then go, promptly. This used to linger 4000 ms so a human could see the window
-# -- and nobody was watching: it was 4.4 of the suite's 22.7 seconds, the single
-# most expensive check in it, spent asleep. The evidence this fixture exists to
-# produce is already in the marker above, written before the pause ever started.
-#
-# The linger is still available for the one case it was written for, by asking:
-#   MT_HELLO_LINGER=4000 hello.exe
-if {[string match *OK* $gui]} {
-    wm protocol . WM_DELETE_WINDOW {exit 0}
-    set linger 150
-    if {[info exists env(MT_HELLO_LINGER)]} { set linger $env(MT_HELLO_LINGER) }
-    after $linger {exit 0}
-    vwait forever
+set store_ok 0
+if {![catch {
+    store open $database
+    store put binary $value
+    store close
+    store open $database
+    set restored [store get binary]
+    store close
+    set store_ok [expr {[binary encode hex $restored] eq [binary encode hex $value]}]
+} store_error]} {
+    puts $f "store:[expr {$store_ok ? {yes} : {no}}]"
+} else {
+    puts $f "store:error:$store_error"
 }
-exit 0
+
+if {[info exists env(MACHTELD_WRAP_GUI_SELFTEST)] && $env(MACHTELD_WRAP_GUI_SELFTEST) eq "1"} {
+    set gui_result "not-requested"
+} elseif {[catch {
+    package require Tk
+    wm title . "Machteld wrapped fixture"
+    pack [label .label -text "Machteld wrapped fixture"]
+    update
+    destroy .
+} gui_error]} {
+    set gui_result "unavailable:$gui_error"
+} else {
+    set gui_result ok
+}
+puts $f "gui:$gui_result"
+close $f
+exit [expr {$store_ok ? 0 : 1}]

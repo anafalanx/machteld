@@ -1,5 +1,5 @@
 /*
- * ps.c -- ::machteld::ps: see and signal processes machteld did NOT start.
+ * ps.c -- ::machteld::mtps: see and signal processes machteld did NOT start.
  *
  * The execution core supervises children it launched: born-in-job, tree-kill,
  * caps, timeouts. It has no view of the machine at all -- `child list` returns
@@ -49,11 +49,16 @@ static Tcl_WideInt ft_to_100ns(const FILETIME *ft) {
 }
 
 static char *u16_to_u8_dup(const wchar_t *w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                                w, -1, NULL, 0, NULL, NULL);
     if (n <= 0) return NULL;
     char *s = (char *)malloc((size_t)n);
     if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) { free(s); return NULL; }
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+            w, -1, s, n, NULL, NULL) <= 0) {
+        free(s);
+        return NULL;
+    }
     return s;
 }
 
@@ -88,15 +93,17 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
     }
     dict_put_wide(d, "access", 1);
 
-    wchar_t path[MAX_PATH * 2];
-    DWORD n = (DWORD)(sizeof path / sizeof path[0]);
-    if (QueryFullProcessImageNameW(h, 0, path, &n)) {
+    wchar_t *path = (wchar_t *)malloc(32768u * sizeof(wchar_t));
+    DWORD n = 32768u;
+    if (path != NULL && QueryFullProcessImageNameW(h, 0, path, &n)) {
+        path[n] = L'\0';
         char *p = u16_to_u8_dup(path);
         dict_put_str(d, "exe", p ? p : "");
         free(p);
     } else {
         dict_put_str(d, "exe", "");
     }
+    free(path);
 
     PROCESS_MEMORY_COUNTERS_EX pmc;
     memset(&pmc, 0, sizeof pmc);
@@ -160,6 +167,19 @@ static const char *ps_kill_one(DWORD pid, unsigned code) {
     return r;
 }
 
+typedef struct {
+    DWORD pid;
+    DWORD ppid;
+    int depth;
+} ps_node;
+
+static int ps_depth_desc(const void *a, const void *b) {
+    const ps_node *x = (const ps_node *)a;
+    const ps_node *y = (const ps_node *)b;
+    if (x->depth != y->depth) return y->depth - x->depth;
+    return x->pid < y->pid ? -1 : x->pid > y->pid;
+}
+
 static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     static const char *const subs[] = { "list", "info", "kill", NULL };
@@ -169,7 +189,13 @@ static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) 
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
         return TCL_ERROR;
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) return TCL_ERROR;
+
+    /* `kill` has one exact optional word.  Reject missing/extra words before
+     * PID conversion so every arity failure has the native MTPS contract. */
+    if (idx == KILL && objc != 3 && objc != 4) {
+        return ps_error(interp, "usage", "usage: mtps kill pid ?-tree?");
+    }
 
     if (idx == LIST) {
         if (objc != 2) { Tcl_WrongNumArgs(interp, 2, objv, ""); return TCL_ERROR; }
@@ -178,11 +204,19 @@ static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) 
         PROCESSENTRY32W pe;
         pe.dwSize = sizeof pe;
         Tcl_Obj *out = Tcl_NewListObj(0, NULL);
-        if (Process32FirstW(snap, &pe)) {
+        BOOL more = Process32FirstW(snap, &pe);
+        if (more) {
             do {
                 Tcl_ListObjAppendElement(interp, out,
                     ps_row(pe.th32ProcessID, pe.th32ParentProcessID, pe.szExeFile, pe.cntThreads));
             } while (Process32NextW(snap, &pe));
+            if (GetLastError() != ERROR_NO_MORE_FILES) {
+                CloseHandle(snap);
+                return ps_error(interp, "oserror", "process enumeration failed");
+            }
+        } else if (GetLastError() != ERROR_NO_MORE_FILES) {
+            CloseHandle(snap);
+            return ps_error(interp, "oserror", "process enumeration failed");
         }
         CloseHandle(snap);
         Tcl_SetObjResult(interp, out);
@@ -204,13 +238,22 @@ static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) 
         PROCESSENTRY32W pe;
         pe.dwSize = sizeof pe;
         Tcl_Obj *row = NULL;
-        if (Process32FirstW(snap, &pe)) {
+        BOOL more = Process32FirstW(snap, &pe);
+        if (more) {
             do {
                 if (pe.th32ProcessID == pid) {
                     row = ps_row(pe.th32ProcessID, pe.th32ParentProcessID, pe.szExeFile, pe.cntThreads);
                     break;
                 }
-            } while (Process32NextW(snap, &pe));
+                more = Process32NextW(snap, &pe);
+            } while (more);
+            if (row == NULL && GetLastError() != ERROR_NO_MORE_FILES) {
+                CloseHandle(snap);
+                return ps_error(interp, "oserror", "process enumeration failed");
+            }
+        } else if (GetLastError() != ERROR_NO_MORE_FILES) {
+            CloseHandle(snap);
+            return ps_error(interp, "oserror", "process enumeration failed");
         }
         CloseHandle(snap);
         if (row == NULL) return ps_error(interp, "notfound", "no such process");
@@ -223,75 +266,121 @@ static int PsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) 
      * forking can outrun any snapshot, and a pid that exits mid-walk may be
      * reused. For a tree machteld STARTED, `child kill` is exact instead --
      * the job object holds the whole tree by identity, not by pid. */
-    if (idx == KILL) { /* fallthrough guard for the generator's branch scan */ } else return TCL_ERROR; /* unreachable: the index table is exhaustive */
+    if (idx != KILL) {
+        return TCL_ERROR; /* unreachable: the exact index table is exhaustive */
+    }
     int tree = 0;
     unsigned code = 1;
-    for (int i = 3; i < objc; i++) {
-        const char *a = Tcl_GetString(objv[i]);
-        if (strcmp(a, "-tree") == 0) { tree = 1; continue; }
-        return ps_error(interp, "usage", "unknown option");
+    if (objc == 4) {
+        if (strcmp(Tcl_GetString(objv[3]), "-tree") != 0) {
+            return ps_error(interp, "usage", "unknown option");
+        }
+        tree = 1;
     }
     if (pid == 0 || pid == 4) {
         return ps_error(interp, "denied", "the system process cannot be terminated");
     }
 
-    int killed = 0;
+    Tcl_Obj *killed_list = Tcl_NewListObj(0, NULL);
+    Tcl_Obj *failed_list = Tcl_NewListObj(0, NULL);
     if (tree) {
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap == INVALID_HANDLE_VALUE) return ps_error(interp, "oserror", "cannot snapshot processes");
-        DWORD *pids = NULL, *ppids = NULL;
+        ps_node *nodes = NULL;
         size_t n = 0, cap = 0;
         PROCESSENTRY32W pe;
         pe.dwSize = sizeof pe;
         if (Process32FirstW(snap, &pe)) {
             do {
                 if (n == cap) {
-                    cap = cap ? cap * 2 : 256;
-                    pids  = (DWORD *)realloc(pids, cap * sizeof(DWORD));
-                    ppids = (DWORD *)realloc(ppids, cap * sizeof(DWORD));
-                    if (pids == NULL || ppids == NULL) break;
+                    size_t next = cap ? cap * 2 : 256;
+                    if (next < cap || next > SIZE_MAX / sizeof(*nodes)) {
+                        free(nodes); CloseHandle(snap);
+                        return ps_error(interp, "oserror", "process snapshot is too large");
+                    }
+                    ps_node *grown = (ps_node *)realloc(nodes, next * sizeof(*nodes));
+                    if (grown == NULL) {
+                        free(nodes); CloseHandle(snap);
+                        return ps_error(interp, "oserror", "out of memory taking process snapshot");
+                    }
+                    nodes = grown;
+                    cap = next;
                 }
-                pids[n] = pe.th32ProcessID;
-                ppids[n] = pe.th32ParentProcessID;
+                nodes[n].pid = pe.th32ProcessID;
+                nodes[n].ppid = pe.th32ParentProcessID;
+                nodes[n].depth = nodes[n].pid == pid ? 0 : -1;
                 n++;
             } while (Process32NextW(snap, &pe));
+            if (GetLastError() != ERROR_NO_MORE_FILES) {
+                free(nodes); CloseHandle(snap);
+                return ps_error(interp, "oserror", "process enumeration failed");
+            }
+        } else if (GetLastError() != ERROR_NO_MORE_FILES) {
+            free(nodes); CloseHandle(snap);
+            return ps_error(interp, "oserror", "process enumeration failed");
         }
         CloseHandle(snap);
-        /* Repeatedly sweep for anything whose parent is already marked, so a
-         * grandchild is reached whatever order the snapshot happened to be in. */
-        char *mark = (char *)calloc(n ? n : 1, 1);
-        for (size_t i = 0; i < n; i++) if (pids[i] == pid) mark[i] = 1;
-        for (int pass = 0; pass < 64; pass++) {
+        /* Repeatedly assign depth from the selected root. This reaches an
+         * arbitrary-depth snapshot without assuming enumeration order. */
+        for (size_t pass = 0; pass < n; pass++) {
             int changed = 0;
             for (size_t i = 0; i < n; i++) {
-                if (mark[i]) continue;
+                if (nodes[i].depth >= 0) continue;
                 for (size_t j = 0; j < n; j++) {
-                    if (mark[j] && ppids[i] == pids[j] && pids[i] != 0 && pids[i] != 4) {
-                        mark[i] = 1; changed = 1; break;
+                    if (nodes[j].depth >= 0 && nodes[i].ppid == nodes[j].pid &&
+                            nodes[i].pid != 0 && nodes[i].pid != 4) {
+                        nodes[i].depth = nodes[j].depth + 1;
+                        changed = 1;
+                        break;
                     }
                 }
             }
             if (!changed) break;
         }
-        /* Children first, so a parent cannot spawn a replacement after its own
-         * death is observed. */
+        qsort(nodes, n, sizeof(*nodes), ps_depth_desc);
         for (size_t i = 0; i < n; i++) {
-            if (mark[i] && pids[i] != pid) { if (ps_kill_one(pids[i], code) == NULL) killed++; }
+            if (nodes[i].depth < 0 || nodes[i].pid == pid) continue;
+            const char *err = ps_kill_one(nodes[i].pid, code);
+            if (err == NULL) {
+                Tcl_ListObjAppendElement(interp, killed_list,
+                    Tcl_NewWideIntObj((Tcl_WideInt)nodes[i].pid));
+            } else {
+                Tcl_Obj *row = Tcl_NewDictObj();
+                dict_put_wide(row, "pid", (Tcl_WideInt)nodes[i].pid);
+                dict_put_str(row, "code", err);
+                Tcl_ListObjAppendElement(interp, failed_list, row);
+            }
         }
-        free(pids); free(ppids); free(mark);
+        free(nodes);
     }
     const char *err = ps_kill_one(pid, code);
-    if (err != NULL && killed == 0) {
+    if (!tree && err != NULL) {
         return ps_error(interp, err,
             strcmp(err, "notfound") == 0 ? "no such process" : "cannot terminate that process");
     }
-    if (err == NULL) killed++;
-    Tcl_SetObjResult(interp, Tcl_NewIntObj(killed));
+    if (err == NULL) {
+        Tcl_ListObjAppendElement(interp, killed_list,
+            Tcl_NewWideIntObj((Tcl_WideInt)pid));
+    } else {
+        Tcl_Obj *row = Tcl_NewDictObj();
+        dict_put_wide(row, "pid", (Tcl_WideInt)pid);
+        dict_put_str(row, "code", err);
+        Tcl_ListObjAppendElement(interp, failed_list, row);
+    }
+    Tcl_Obj *result = Tcl_NewDictObj();
+    Tcl_DictObjPut(NULL, result, Tcl_NewStringObj("killed", -1), killed_list);
+    Tcl_DictObjPut(NULL, result, Tcl_NewStringObj("failed", -1), failed_list);
+    Tcl_SetObjResult(interp, result);
     return TCL_OK;
 }
 
 int Machteldps_Init(Tcl_Interp *interp) {
-    Tcl_CreateObjCommand(interp, "::machteld::mtps", PsCmd, NULL, NULL);
-    Tcl_PkgProvide(interp, "machteld::ps", "0.1");
+    if (Tcl_CreateObjCommand(interp, "::machteld::mtps", PsCmd, NULL, NULL) == NULL) {
+        return TCL_ERROR;
+    }
+    if (Tcl_PkgProvide(interp, "machteld::ps", "0.4.0") != TCL_OK) {
+        Tcl_DeleteCommand(interp, "::machteld::mtps");
+        return TCL_ERROR;
+    }
     return TCL_OK;
 }

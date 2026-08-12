@@ -1,21 +1,26 @@
 ---
 type: principles
 title: The creed
-description: The seven design principles every machteld decision is tested against.
+description: The design tests applied to Machteld's public surface.
 tags: [machteld, principles, design]
-timestamp: 2026-07-07
 ---
 
 # The creed
 
-The rubric against which every design decision is tested.
+1. **No AI inside.** Machteld provides deterministic hands; an agent may be an
+   external user, never a runtime dependency.
+2. **Machine-legible is human-legible.** Structured values, plain Tcl, and clear
+   prose must describe the same behavior.
+3. **Determinism over cleverness.** No project-specific resolver or command
+   catalogue, locale-dependent protocol, or guessed unit. A bare executable
+   name uses Machteld's deterministic `PATH`-only search.
+4. **The palette describes itself.** `manifest` facts are explicitly authored,
+   validated at build time, and returned as structured data at runtime.
+5. **Errors are contract.** Machteld-defined public failures carry
+   `{MACHTELD DOMAIN code}`; Tcl language errors keep Tcl's own codes.
+6. **Orthogonal and small.** Prefer one composable primitive over a policy stack.
+   Version 0.x may still remove mistakes; 1.0 will freeze the surface.
+7. **Vanilla Tcl, extended.** Add commands and packages; do not mutate Tcl syntax.
 
-1. **No AI inside.** No embedded model, no "ask-AI" verb, no LLM dependency. Deterministic hands; the agent is an external mind. Unplug every model and it is still an excellent powertool.
-2. **Machine-legible == human-legible.** One axis. A choice that helps agents but hurts the human, or the five-year-old script, is wrong.
-3. **Determinism over cleverness.** Same command, same result. No hidden state, no locale/env surprises.
-4. **The palette describes itself.** Every verb, option, and error is discoverable at runtime as structured data. Docs are generated *from* the truth, not maintained beside it. (See [the contract](contract.md).)
-5. **Errors are part of the contract.** Coded, structured, actionable.
-6. **Orthogonal, frozen, additive-only.** One way to do each thing; the surface only grows, never breaks. *(The freeze is the promise **1.0.0** makes. Pre-1.0.0 the surface is settling — see [direction](direction.md) rule 7 — which is what the `0.x` in the version number has been saying all along.)*
-7. **Vanilla Tcl, extended in C.** We add commands, never mutate the language — so a model's Tcl fluency transfers 1:1 and only the (in-context) palette is new.
-
-The anti-bandwagon summary: *design for the machine as your most exacting reader; put no machine inside.* Why this works is [the bet](rationale.md).
+The practical thesis is simple: design for the machine as the most exacting
+reader, without putting a machine in the product.

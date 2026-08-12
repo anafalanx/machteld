@@ -1,9 +1,0 @@
-runs/*
-!runs/.gitkeep
-attempts/*
-!attempts/.gitkeep
-results/*
-!results/.gitkeep
-/subject-metadata.jsonl
-__pycache__/
-*.py[cod]

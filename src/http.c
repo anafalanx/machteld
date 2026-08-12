@@ -13,14 +13,12 @@
  * negotiation, redirects, proxy discovery, chunked transfer decoding,
  * keep-alive and authentication. It is serviced by Windows Update rather than
  * by a rebuild here, which means a TLS advisory is Microsoft's problem and not
- * this exe's. Same reasoning that has `mirror` drive robocopy instead of
- * writing a copier: the OS ships the hard part, so use it.
+ * this exe's. The OS ships the hard part, so use it.
  *
  * WHAT THIS COSTS, said plainly rather than discovered later: `package require
  * tls` still fails, so Tcl code written against the `http`+`tls` idiom does not
- * run here. This verb is machteld's own API -- a dict in, a dict out, like
- * everything else. That is the right trade for a personal toolkit and the wrong
- * one for a distribution, and machteld is deliberately the former.
+ * run here. This verb is Machteld's deliberately narrow API: a request in and a
+ * structured result out, with the TLS implementation left to Windows.
  *
  * NO `-insecure`. There is no option to skip certificate validation. Every such
  * flag is eventually left on in something that matters, and a caller who really
@@ -39,6 +37,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <limits.h>
 
 /* A body cap that exists so a runaway response cannot become a runaway
  * allocation. 64 MB by default, and `-maxbody` moves it; a response that
@@ -54,16 +53,7 @@ static int http_error(Tcl_Interp *interp, const char *code, const char *msg) {
     return TCL_ERROR;
 }
 
-/* NAMED `..._error` SO THE MANIFEST CAN SEE IT, and that is not cosmetic.
- * tools/genmanifest.tcl finds a verb's codes by matching a call to a function
- * whose name ends in `_error` with a literal code right after `interp`, so the
- * first version of this raiser -- called `http_oserr` -- hid `tls`, `timeout`
- * and `notfound` from the palette completely. The manifest published four codes
- * where the truth was seven: a verb under-reporting what it can throw, which is
- * exactly the false claim self-description exists to prevent. Caught by the
- * registry gate rather than by review.
- *
- * The Win32 code travels with the message for the same reason it does in
+/* The Win32 code travels with the message for the same reason it does in
  * dirs.c: the message cannot be trapped on, and at this layer it does not
  * discriminate -- a refused connection and a DNS failure both arrive as prose. */
 static int http_win_error(Tcl_Interp *interp, const char *code, const char *what, DWORD e) {
@@ -75,20 +65,27 @@ static int http_win_error(Tcl_Interp *interp, const char *code, const char *what
 }
 
 static wchar_t *http_wide(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                s, -1, NULL, 0);
     if (n <= 0) return NULL;
     wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
     if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n) <= 0) { free(w); return NULL; }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+            s, -1, w, n) <= 0) {
+        free(w);
+        return NULL;
+    }
     return w;
 }
 
 static char *http_utf8(const wchar_t *w, int wlen) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, wlen, NULL, 0, NULL, NULL);
-    if (n < 0) return NULL;
+    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                                w, wlen, NULL, 0, NULL, NULL);
+    if (n <= 0) return NULL;
     char *s = (char *)malloc((size_t)n + 1);
     if (s == NULL) return NULL;
-    if (n > 0 && WideCharToMultiByte(CP_UTF8, 0, w, wlen, s, n, NULL, NULL) <= 0) {
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+            w, wlen, s, n, NULL, NULL) <= 0) {
         free(s);
         return NULL;
     }
@@ -105,16 +102,16 @@ static char *http_utf8(const wchar_t *w, int wlen) {
  * the original block verbatim and nothing is actually lost. Convenience that
  * silently discards data would be the wrong half of the trade; convenience
  * beside the original is not. */
-static void http_put_header(Tcl_Obj *d, const char *line, size_t len) {
+static int http_put_header(Tcl_Obj *d, const char *line, size_t len) {
     const char *colon = memchr(line, ':', len);
-    if (colon == NULL || colon == line) return;
+    if (colon == NULL || colon == line) return 1;
     size_t nlen = (size_t)(colon - line);
     const char *v = colon + 1;
     size_t vlen = len - nlen - 1;
     while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
 
     char *name = (char *)malloc(nlen + 1);
-    if (name == NULL) return;
+    if (name == NULL) return 0;
     for (size_t i = 0; i < nlen; i++) {
         name[i] = (line[i] >= 'A' && line[i] <= 'Z') ? (char)(line[i] - 'A' + 'a') : line[i];
     }
@@ -132,6 +129,7 @@ static void http_put_header(Tcl_Obj *d, const char *line, size_t len) {
         Tcl_AppendToObj(joined, v, (Tcl_Size)vlen);
         Tcl_DictObjPut(NULL, d, key, joined);
     }
+    return 1;
 }
 
 typedef struct {
@@ -140,49 +138,138 @@ typedef struct {
     const char *agent;
     Tcl_Obj    *headers;        /* dict, caller's -- borrowed, never freed here */
     const char *type;           /* -type: Content-Type for a body */
+    int         has_content_type;
 } HttpOpts;
 
+static int http_text_safe(Tcl_Obj *obj, int header_name) {
+    Tcl_Size n;
+    const char *s = Tcl_GetStringFromObj(obj, &n);
+    if (n == 0 && header_name) return 0;
+    for (Tcl_Size i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '\0' || c == '\r' || c == '\n') return 0;
+        if (header_name && (c == ':' || c <= 0x20 || c == 0x7f)) return 0;
+    }
+    return 1;
+}
+
+static int http_u64(const char *s, const char **end, unsigned long long *out) {
+    if (*s < '0' || *s > '9') return 0;
+    unsigned long long n = 0;
+    do {
+        unsigned digit = (unsigned)(*s - '0');
+        if (n > (ULLONG_MAX - digit) / 10u) return 0;
+        n = n * 10u + digit;
+        s++;
+    } while (*s >= '0' && *s <= '9');
+    *end = s;
+    *out = n;
+    return 1;
+}
+
+static int http_duration(Tcl_Interp *interp, Tcl_Obj *obj, Tcl_WideInt *out) {
+    if (!http_text_safe(obj, 0)) {
+        return http_error(interp, "badvalue", "-timeout contains NUL or a newline");
+    }
+    const char *end;
+    unsigned long long n, factor;
+    if (!http_u64(Tcl_GetString(obj), &end, &n)) {
+        return http_error(interp, "badvalue", "-timeout takes an integer duration like 30s");
+    }
+    if (strcmp(end, "ms") == 0) factor = 1u;
+    else if (strcmp(end, "s") == 0) factor = 1000u;
+    else if (strcmp(end, "m") == 0) factor = 60000u;
+    else if (strcmp(end, "h") == 0) factor = 3600000u;
+    else return http_error(interp, "badvalue", "-timeout needs a unit: ms, s, m or h");
+    if (n == 0 || n > (unsigned long long)INT_MAX / factor) {
+        return http_error(interp, "badvalue", "-timeout is outside WinHTTP's supported range");
+    }
+    *out = (Tcl_WideInt)(n * factor);
+    return TCL_OK;
+}
+
+static int http_size(Tcl_Interp *interp, Tcl_Obj *obj, Tcl_WideInt *out) {
+    if (!http_text_safe(obj, 0)) {
+        return http_error(interp, "badvalue", "-maxbody contains NUL or a newline");
+    }
+    const char *end;
+    unsigned long long n, factor = 1u;
+    if (!http_u64(Tcl_GetString(obj), &end, &n)) {
+        return http_error(interp, "badvalue", "-maxbody takes a positive byte count like 8M");
+    }
+    if (*end == 'K' || *end == 'k') { factor = 1ull << 10; end++; }
+    else if (*end == 'M' || *end == 'm') { factor = 1ull << 20; end++; }
+    else if (*end == 'G' || *end == 'g') { factor = 1ull << 30; end++; }
+    if (*end == 'B' || *end == 'b') end++;
+    if (*end != '\0' || n == 0 ||
+            n > (unsigned long long)TCL_SIZE_MAX / factor) {
+        return http_error(interp, "badvalue", "-maxbody is outside the supported range");
+    }
+    *out = (Tcl_WideInt)(n * factor);
+    return TCL_OK;
+}
+
+static int http_header_is(Tcl_Obj *obj, const char *expected) {
+    Tcl_Size n;
+    const char *s = Tcl_GetStringFromObj(obj, &n);
+    size_t want = strlen(expected);
+    if (n != (Tcl_Size)want) return 0;
+    for (size_t i = 0; i < want; i++) {
+        char c = s[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != expected[i]) return 0;
+    }
+    return 1;
+}
+
 static int http_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int first,
-                     HttpOpts *o) {
+                     int allow_type, HttpOpts *o) {
     o->timeout = 30000;
     o->maxbody = (Tcl_WideInt)HTTP_MAXBODY_DEFAULT;
     o->agent   = "machteld";
     o->headers = NULL;
     o->type    = NULL;
+    o->has_content_type = 0;
     for (int i = first; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
         if (i + 1 >= objc) return http_error(interp, "usage", "option needs a value");
         Tcl_Obj *v = objv[++i];
         if (strcmp(a, "-timeout") == 0) {
-            /* Durations carry a unit here as everywhere else in the palette: a
-             * bare number can never silently mean seconds. */
-            const char *s = Tcl_GetString(v);
-            char *end = NULL;
-            double n = strtod(s, &end);
-            if (end == s || n < 0) {
-                return http_error(interp, "badvalue", "-timeout takes a duration like 30s");
-            }
-            if (strcmp(end, "ms") == 0)      o->timeout = (Tcl_WideInt)n;
-            else if (strcmp(end, "s") == 0)  o->timeout = (Tcl_WideInt)(n * 1000);
-            else if (strcmp(end, "m") == 0)  o->timeout = (Tcl_WideInt)(n * 60000);
-            else return http_error(interp, "badvalue", "-timeout needs a unit: ms, s or m");
+            if (http_duration(interp, v, &o->timeout) != TCL_OK) return TCL_ERROR;
             continue;
         }
         if (strcmp(a, "-maxbody") == 0) {
-            Tcl_WideInt n;
-            if (Tcl_GetWideIntFromObj(NULL, v, &n) != TCL_OK || n <= 0) {
-                return http_error(interp, "badvalue", "-maxbody takes a positive byte count");
-            }
-            o->maxbody = n;
+            if (http_size(interp, v, &o->maxbody) != TCL_OK) return TCL_ERROR;
             continue;
         }
-        if (strcmp(a, "-agent") == 0) { o->agent = Tcl_GetString(v); continue; }
-        if (strcmp(a, "-type")  == 0) { o->type  = Tcl_GetString(v); continue; }
+        if (strcmp(a, "-agent") == 0) {
+            if (!http_text_safe(v, 0)) return http_error(interp, "badvalue", "-agent contains a forbidden newline or NUL");
+            o->agent = Tcl_GetString(v); continue;
+        }
+        if (strcmp(a, "-type")  == 0) {
+            if (!allow_type) return http_error(interp, "usage", "-type is only valid for http post");
+            if (!http_text_safe(v, 0)) return http_error(interp, "badvalue", "-type contains a forbidden newline or NUL");
+            o->type = Tcl_GetString(v); continue;
+        }
         if (strcmp(a, "-headers") == 0) {
             Tcl_Size n;
             if (Tcl_DictObjSize(interp, v, &n) != TCL_OK) {
                 return http_error(interp, "badvalue", "-headers takes a dict");
             }
+            Tcl_DictSearch search;
+            Tcl_Obj *key, *value;
+            int done;
+            if (Tcl_DictObjFirst(interp, v, &search, &key, &value, &done) != TCL_OK) {
+                return http_error(interp, "badvalue", "-headers takes a dict");
+            }
+            for (; !done; Tcl_DictObjNext(&search, &key, &value, &done)) {
+                if (!http_text_safe(key, 1) || !http_text_safe(value, 0)) {
+                    Tcl_DictObjDone(&search);
+                    return http_error(interp, "badvalue", "header names and values may not contain controls, colon, newline, or NUL");
+                }
+                if (http_header_is(key, "content-type")) o->has_content_type = 1;
+            }
+            Tcl_DictObjDone(&search);
             o->headers = v;
             continue;
         }
@@ -208,10 +295,27 @@ static void http_cleanup(HttpReq *r) {
     free(r->body);
 }
 
+static int http_request_error(Tcl_Interp *interp, DWORD e, const char *what) {
+    if (e == ERROR_WINHTTP_SECURE_FAILURE) {
+        return http_win_error(interp, "tls", "the secure connection was refused", e);
+    }
+    if (e == ERROR_WINHTTP_TIMEOUT) {
+        return http_win_error(interp, "timeout", what, e);
+    }
+    if (e == ERROR_WINHTTP_NAME_NOT_RESOLVED || e == ERROR_WINHTTP_CANNOT_CONNECT) {
+        return http_win_error(interp, "notfound", "cannot reach the host", e);
+    }
+    return http_win_error(interp, "oserror", what, e);
+}
+
 static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
                    const unsigned char *body, Tcl_Size bodylen, HttpOpts *o) {
     HttpReq r;
     memset(&r, 0, sizeof r);
+
+    if (bodylen < 0 || (unsigned long long)bodylen > MAXDWORD) {
+        return http_error(interp, "toobig", "the request body exceeds WinHTTP's size limit");
+    }
 
     r.wurl   = http_wide(url);
     r.wverb  = http_wide(verb);
@@ -252,6 +356,15 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     } else {
         memcpy(r.wpath, uc.lpszUrlPath, plen * sizeof(wchar_t));
         r.wpath[plen] = L'\0';
+        wchar_t *fragment = wcschr(r.wpath, L'#');
+        if (fragment != NULL) *fragment = L'\0';
+        if (r.wpath[0] == L'\0') wcscpy(r.wpath, L"/");
+        else if (r.wpath[0] == L'?') {
+            size_t current = wcslen(r.wpath);
+            memmove(r.wpath + 1, r.wpath,
+                    (current + 1) * sizeof(wchar_t));
+            r.wpath[0] = L'/';
+        }
     }
 
     r.session = WinHttpOpen(r.wagent, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -261,8 +374,24 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         http_cleanup(&r);
         return http_win_error(interp, "oserror", "cannot open an http session", e);
     }
-    DWORD t = (DWORD)o->timeout;
-    WinHttpSetTimeouts(r.session, (int)t, (int)t, (int)t, (int)t);
+    int t = (int)o->timeout;
+    if (!WinHttpSetTimeouts(r.session, t, t, t, t)) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot configure http timeouts", e);
+    }
+    /* WinHttpSetTimeouts' receive value governs socket reads, but WinHTTP has
+     * a separate (90-second by default) deadline for receiving the complete
+     * response headers. The per-request options below make both inherited
+     * receive clocks explicit; either phase then reports ERROR_WINHTTP_TIMEOUT
+     * through http_request_error below. */
+    DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+    if (!WinHttpSetOption(r.session, WINHTTP_OPTION_REDIRECT_POLICY,
+            &redirect_policy, sizeof redirect_policy)) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot configure redirect policy", e);
+    }
 
     r.conn = WinHttpConnect(r.session, r.whost, uc.nPort, 0);
     if (r.conn == NULL) {
@@ -279,6 +408,20 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         http_cleanup(&r);
         return http_win_error(interp, "oserror", "cannot build the request", e);
     }
+    DWORD receive_timeout = (DWORD)t;
+    if (!WinHttpSetOption(r.req, WINHTTP_OPTION_RECEIVE_TIMEOUT,
+            &receive_timeout, sizeof receive_timeout)) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot configure the receive timeout", e);
+    }
+    DWORD response_timeout = (DWORD)t;
+    if (!WinHttpSetOption(r.req, WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT,
+            &response_timeout, sizeof response_timeout)) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot configure the response timeout", e);
+    }
 
     /* The caller's headers, plus a Content-Type when a body was given and no
      * explicit type was. */
@@ -288,15 +431,18 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         Tcl_DictSearch s;
         Tcl_Obj *k, *v;
         int done;
-        if (Tcl_DictObjFirst(NULL, o->headers, &s, &k, &v, &done) == TCL_OK) {
-            for (; !done; Tcl_DictObjNext(&s, &k, &v, &done)) {
-                Tcl_AppendObjToObj(hdrbuf, k);
-                Tcl_AppendToObj(hdrbuf, ": ", 2);
-                Tcl_AppendObjToObj(hdrbuf, v);
-                Tcl_AppendToObj(hdrbuf, "\r\n", 2);
-            }
-            Tcl_DictObjDone(&s);
+        if (Tcl_DictObjFirst(interp, o->headers, &s, &k, &v, &done) != TCL_OK) {
+            Tcl_DecrRefCount(hdrbuf);
+            http_cleanup(&r);
+            return TCL_ERROR;
         }
+        for (; !done; Tcl_DictObjNext(&s, &k, &v, &done)) {
+            Tcl_AppendObjToObj(hdrbuf, k);
+            Tcl_AppendToObj(hdrbuf, ": ", 2);
+            Tcl_AppendObjToObj(hdrbuf, v);
+            Tcl_AppendToObj(hdrbuf, "\r\n", 2);
+        }
+        Tcl_DictObjDone(&s);
     }
     if (o->type != NULL) {
         Tcl_AppendToObj(hdrbuf, "Content-Type: ", -1);
@@ -307,9 +453,13 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     const char *hstr = Tcl_GetStringFromObj(hdrbuf, &hlen);
     if (hlen > 0) {
         r.whdrs = http_wide(hstr);
-        if (r.whdrs != NULL) {
-            WinHttpAddRequestHeaders(r.req, r.whdrs, (DWORD)-1,
-                                     WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+        if (r.whdrs == NULL ||
+                !WinHttpAddRequestHeaders(r.req, r.whdrs, (DWORD)-1,
+                    WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE)) {
+            DWORD e = GetLastError();
+            Tcl_DecrRefCount(hdrbuf);
+            http_cleanup(&r);
+            return http_win_error(interp, "badvalue", "the request headers were refused", e);
         }
     }
     Tcl_DecrRefCount(hdrbuf);
@@ -318,65 +468,87 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
                             (LPVOID)body, (DWORD)bodylen, (DWORD)bodylen, 0)) {
         DWORD e = GetLastError();
         http_cleanup(&r);
-        /* The TLS failures get their own code, because "the certificate was
-         * refused" and "the host is down" call for different responses. */
-        if (e == ERROR_WINHTTP_SECURE_FAILURE) {
-            return http_win_error(interp, "tls", "the secure connection was refused", e);
-        }
-        if (e == ERROR_WINHTTP_TIMEOUT) {
-            return http_win_error(interp, "timeout", "the request timed out", e);
-        }
-        if (e == ERROR_WINHTTP_NAME_NOT_RESOLVED || e == ERROR_WINHTTP_CANNOT_CONNECT) {
-            return http_win_error(interp, "notfound", "cannot reach the host", e);
-        }
-        return http_win_error(interp, "oserror", "the request failed", e);
+        return http_request_error(interp, e, "the request failed");
     }
     if (!WinHttpReceiveResponse(r.req, NULL)) {
         DWORD e = GetLastError();
         http_cleanup(&r);
-        if (e == ERROR_WINHTTP_TIMEOUT) {
-            return http_win_error(interp, "timeout", "the response timed out", e);
-        }
-        return http_win_error(interp, "oserror", "no response", e);
+        return http_request_error(interp, e, "the response could not be received");
     }
 
     DWORD status = 0, slen = sizeof status;
-    WinHttpQueryHeaders(r.req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
+    if (!WinHttpQueryHeaders(r.req,
+            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen,
+            WINHTTP_NO_HEADER_INDEX)) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot read the response status", e);
+    }
 
     /* Raw headers: asked for its size first, the same discipline as every other
      * sized Win32 query in this codebase. */
     DWORD rawlen = 0;
-    WinHttpQueryHeaders(r.req, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX,
-                        NULL, &rawlen, WINHTTP_NO_HEADER_INDEX);
+    if (WinHttpQueryHeaders(r.req, WINHTTP_QUERY_RAW_HEADERS_CRLF,
+            WINHTTP_HEADER_NAME_BY_INDEX, NULL, &rawlen,
+            WINHTTP_NO_HEADER_INDEX) || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        DWORD e = GetLastError();
+        http_cleanup(&r);
+        return http_win_error(interp, "oserror", "cannot size the response headers", e);
+    }
     Tcl_Obj *hdict = Tcl_NewDictObj();
     Tcl_Obj *rawobj = Tcl_NewStringObj("", 0);
+    Tcl_IncrRefCount(hdict);
+    Tcl_IncrRefCount(rawobj);
     if (rawlen > 0) {
         wchar_t *raw = (wchar_t *)malloc(rawlen + sizeof(wchar_t));
-        if (raw != NULL) {
-            if (WinHttpQueryHeaders(r.req, WINHTTP_QUERY_RAW_HEADERS_CRLF,
-                                    WINHTTP_HEADER_NAME_BY_INDEX, raw, &rawlen,
-                                    WINHTTP_NO_HEADER_INDEX)) {
-                char *u = http_utf8(raw, (int)(rawlen / sizeof(wchar_t)));
-                if (u != NULL) {
-                    Tcl_SetStringObj(rawobj, u, -1);
-                    /* Split on CRLF; the first line is the status line, which is
-                     * not a header and is skipped. */
-                    const char *p = u;
-                    int firstline = 1;
-                    while (*p) {
-                        const char *nl = strstr(p, "\r\n");
-                        size_t len = nl ? (size_t)(nl - p) : strlen(p);
-                        if (len > 0 && !firstline) http_put_header(hdict, p, len);
-                        firstline = 0;
-                        if (nl == NULL) break;
-                        p = nl + 2;
-                    }
-                    free(u);
-                }
-            }
-            free(raw);
+        if (raw == NULL) {
+            Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
+            http_cleanup(&r);
+            return http_error(interp, "oserror", "out of memory reading response headers");
         }
+        if (!WinHttpQueryHeaders(r.req, WINHTTP_QUERY_RAW_HEADERS_CRLF,
+                WINHTTP_HEADER_NAME_BY_INDEX, raw, &rawlen,
+                WINHTTP_NO_HEADER_INDEX)) {
+            DWORD e = GetLastError();
+            free(raw);
+            Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
+            http_cleanup(&r);
+            return http_win_error(interp, "oserror", "cannot read the response headers", e);
+        }
+        if ((rawlen % sizeof(wchar_t)) != 0) {
+            free(raw);
+            Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
+            http_cleanup(&r);
+            return http_error(interp, "oserror", "the response headers have an invalid byte length");
+        }
+        raw[rawlen / sizeof(wchar_t)] = L'\0';
+        char *u = http_utf8(raw, -1);
+        free(raw);
+        if (u == NULL) {
+            Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
+            http_cleanup(&r);
+            return http_error(interp, "oserror", "response headers are not representable");
+        }
+        Tcl_SetStringObj(rawobj, u, -1);
+        /* Split on CRLF; the first line is the status line, which is not a
+         * header and is skipped. */
+        const char *p = u;
+        int firstline = 1;
+        while (*p) {
+            const char *nl = strstr(p, "\r\n");
+            size_t len = nl ? (size_t)(nl - p) : strlen(p);
+            if (len > 0 && !firstline && !http_put_header(hdict, p, len)) {
+                free(u);
+                Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
+                http_cleanup(&r);
+                return http_error(interp, "oserror", "out of memory reading response headers");
+            }
+            firstline = 0;
+            if (nl == NULL) break;
+            p = nl + 2;
+        }
+        free(u);
     }
 
     /* The body, grown geometrically and capped. */
@@ -389,21 +561,27 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
             free(buf);
             Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
             http_cleanup(&r);
-            return http_win_error(interp, "oserror", "the response could not be read", e);
+            return http_request_error(interp, e, "the response could not be read");
         }
         if (avail == 0) break;
-        if (used + (Tcl_WideInt)avail > o->maxbody) {
+        Tcl_WideInt chunk = (Tcl_WideInt)avail;
+        if (used > o->maxbody - chunk) {
             free(buf);
             Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
             http_cleanup(&r);
             /* REFUSED, NOT TRUNCATED. A short body that looks whole is the one
              * answer this codebase never gives. */
             return http_error(interp, "toobig",
-                "the response exceeds -maxbody; raise it or stream to a file");
+                "the response exceeds -maxbody; choose a larger explicit cap");
         }
-        if (used + (Tcl_WideInt)avail > cap) {
-            Tcl_WideInt ncap = cap ? cap * 2 : (Tcl_WideInt)HTTP_READ_CHUNK;
-            while (ncap < used + (Tcl_WideInt)avail) ncap *= 2;
+        if (used + chunk > cap) {
+            Tcl_WideInt need = used + chunk;
+            Tcl_WideInt ncap = cap ? cap : (Tcl_WideInt)HTTP_READ_CHUNK;
+            if (ncap > o->maxbody) ncap = o->maxbody;
+            while (ncap < need) {
+                if (ncap > o->maxbody / 2) { ncap = need; break; }
+                ncap *= 2;
+            }
             unsigned char *g = (unsigned char *)realloc(buf, (size_t)ncap);
             if (g == NULL) {
                 free(buf);
@@ -420,7 +598,7 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
             free(buf);
             Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
             http_cleanup(&r);
-            return http_win_error(interp, "oserror", "the response could not be read", e);
+            return http_request_error(interp, e, "the response could not be read");
         }
         if (got == 0) break;
         used += (Tcl_WideInt)got;
@@ -437,6 +615,8 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("body", -1),
                    Tcl_NewByteArrayObj(buf ? buf : (unsigned char *)"", (Tcl_Size)used));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("bytes", -1), Tcl_NewWideIntObj(used));
+    Tcl_DecrRefCount(hdict);
+    Tcl_DecrRefCount(rawobj);
     free(buf);
     http_cleanup(&r);
     Tcl_SetObjResult(interp, d);
@@ -454,28 +634,36 @@ static int HttpCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                                           "?-maxbody n?");
         return TCL_ERROR;
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) {
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) {
         return TCL_ERROR;
+    }
+    if (!http_text_safe(objv[2], 0)) {
+        return http_error(interp, "badvalue", "the url contains NUL or a newline");
     }
     const char *url = Tcl_GetString(objv[2]);
     HttpOpts o;
     if (idx == H_GET) {
-        if (http_opts(interp, objc, objv, 3, &o) != TCL_OK) return TCL_ERROR;
+        if (http_opts(interp, objc, objv, 3, 0, &o) != TCL_OK) return TCL_ERROR;
         return http_do(interp, "GET", url, NULL, 0, &o);
     }
     if (objc < 4) {
         Tcl_WrongNumArgs(interp, 1, objv, "post url body ?options?");
         return TCL_ERROR;
     }
-    if (http_opts(interp, objc, objv, 4, &o) != TCL_OK) return TCL_ERROR;
+    if (http_opts(interp, objc, objv, 4, 1, &o) != TCL_OK) return TCL_ERROR;
     Tcl_Size blen;
     unsigned char *b = Tcl_GetByteArrayFromObj(objv[3], &blen);
-    if (o.type == NULL) o.type = "application/octet-stream";
+    if (o.type == NULL && !o.has_content_type) o.type = "application/octet-stream";
     return http_do(interp, "POST", url, b, blen, &o);
 }
 
 int Machteldhttp_Init(Tcl_Interp *interp) {
-    Tcl_CreateObjCommand(interp, "::machteld::http", HttpCmd, NULL, NULL);
-    Tcl_PkgProvide(interp, "machteld::http", "0.1");
+    if (Tcl_CreateObjCommand(interp, "::machteld::http", HttpCmd, NULL, NULL) == NULL) {
+        return TCL_ERROR;
+    }
+    if (Tcl_PkgProvide(interp, "machteld::http", "0.4.0") != TCL_OK) {
+        Tcl_DeleteCommand(interp, "::machteld::http");
+        return TCL_ERROR;
+    }
     return TCL_OK;
 }

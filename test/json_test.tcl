@@ -1,5 +1,5 @@
 # json_test.tcl -- ::machteld::json against nst/JSONTestSuite plus a mapping suite.
-#   machteld.exe tcl test/json_test.tcl
+#   machteld.exe test/json_test.tcl
 #
 # The suite is VENDORED, the parser is not: docs/ecosystem-policy.md prefers
 # owning a snapshot you can read, and for a parser the thing worth borrowing is
@@ -9,6 +9,8 @@
 #   y_*  MUST parse            n_*  MUST be rejected
 #   i_*  implementation-defined -- we record what we do and why, and a CHANGE in
 #        that behaviour shows up as a diff here rather than as a surprise later.
+
+package require machteld
 
 set HERE [file dirname [file normalize [info script]]]
 set CORPUS [file join $HERE jsontestsuite]
@@ -58,6 +60,10 @@ check "a real dict is an object"    [expr {[json encode [dict create a 1]] eq {{
 check "-dict and -list are exclusive" [expr {
     [catch {json encode -dict -list {}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON usage}}]
+check "-- preserves an option-looking -dict scalar" [expr {
+    [json encode -- -dict] eq {"-dict"}}]
+check "-- preserves an option-looking -list scalar" [expr {
+    [json encode -- -list] eq {"-list"}}]
 
 # THE POSTCODE RULE. `string is integer` would call 01234 a number and emit
 # 1234 -- a silent corruption. A leading zero is not a valid JSON number, so it
@@ -86,7 +92,7 @@ foreach doc {
 
 check "depth is capped, not crashed" [expr {
     [catch {json decode [string repeat {[} 5000]} m opts] &&
-    [lindex [dict get $opts -errorcode] 1] eq "JSON"}]
+    [dict get $opts -errorcode] eq {MACHTELD JSON depth}}]
 check "a parse failure is coded"     [expr {
     [catch {json decode {nope}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON parse}}]

@@ -1,13 +1,9 @@
 /*
- * winjob.h -- machteld's Windows process-supervision substrate, ported from
- * drang's internal/winjob (Go). A child is launched born-in-job (assigned to
+ * winjob.h -- machteld's Windows process-supervision substrate. A supervised
+ * child is launched born-in-job (assigned to
  * its jobs by the kernel at CreateProcess time, before its first thread runs --
  * race-free), giving die-with-parent, whole-tree kill, resource limits, and an
  * event stream without a reaper side-car.
- *
- * This header is filled in per increment. First: command-line quoting -- the
- * security-critical, purely-string part (no Win32), verified against drang's
- * golden vectors before anything builds on it.
  */
 #ifndef MACHTELD_WINJOB_H
 #define MACHTELD_WINJOB_H
@@ -86,12 +82,17 @@ wj_job *wj_job_new(int kill_on_close, const char **err);
  * never drops die-with-parent). Call once, before the child is launched. */
 int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err);
 
-/* Add an already-running process to the job (how the root job takes in machteld
- * itself; the born-in-job launcher does not need this). */
+/* Add an already-running process to a job. Machteld's supervised paths instead
+ * use the born-in-job launcher; the host deliberately never joins its root job. */
 int wj_job_assign(wj_job *j, void *process_handle, const char **err);
 
 /* Kill every process in the job and its nested child jobs -- whole-tree kill. */
 int wj_job_terminate(wj_job *j, unsigned int exit_code);
+
+/* Query the number of processes still active in the job. This is the
+ * supervision completion condition: the direct child may exit while one of
+ * its descendants remains alive and keeps stdout/stderr pipes open. */
+int wj_job_active(wj_job *j, unsigned int *active, const char **err);
 
 /* Release machteld's handle (triggers die-with-parent for a kill_on_close job).
  * Idempotent. wj_job_free also frees the struct. */
@@ -102,12 +103,12 @@ void wj_job_free(wj_job *j);
 void *wj_job_handle(wj_job *j);
 
 /* Allow children of this job to break away from it (CREATE_BREAKAWAY_FROM_JOB),
- * so `detach` can hand a daemon to the OS that outlives machteld. Re-asserts the
- * job's existing kill-on-close flag. */
+ * while re-asserting the job's existing kill-on-close flag. Machteld's `detach`
+ * path joins neither the root nor a per-command job. */
 int wj_job_allow_breakaway(wj_job *j, const char **err);
 
 /* Is process a member of job? 1 yes, 0 no, -1 on error. A NULL job asks whether
- * the process is in ANY job. Used to prove born-in-job membership. */
+ * the process is in ANY job; useful for diagnosing born-in-job membership. */
 int wj_in_job(void *process_handle, void *job_handle);
 
 /* ---- born-in-job launch (winjob_launch.c) ------------------------------ */
@@ -129,11 +130,19 @@ typedef struct {
  * On success sets *pid and *proc (a process HANDLE the caller waits then closes)
  * and returns 0; on failure returns -1 and sets *err. env_block is a UTF-16
  * "K=V\0...\0\0" environment block, or NULL to inherit machteld's environment.
- * want_breakaway adds CREATE_BREAKAWAY_FROM_JOB (for detach); if the enclosing
- * job forbids it the launch retries without, so the child still starts. */
+ * want_breakaway is the detach path: njobs must be zero, the process is created
+ * suspended with CREATE_BREAKAWAY_FROM_JOB, verified to belong to no job, then
+ * resumed. If an enclosing job retains it, launch fails before user code runs. */
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
               int want_breakaway, void *env_block, int *pid, void **proc, const char **err);
+
+/* ConPTY variant of wj_launch. The pseudoconsole supplies the child's stdio,
+ * while the same born-in-job, UTF-8 conversion, custom environment, and safe
+ * batch-file routing rules still apply. */
+int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char *dir,
+                  void *const *job_handles, int njobs, void *pseudoconsole,
+                  void *env_block, int *pid, void **proc, const char **err);
 
 /* Wait up to ms for the child (WJ_INFINITE = forever). Returns 0 and sets *code
  * on exit (the 32-bit exit code, untruncated), 1 on timeout (child still runs),
