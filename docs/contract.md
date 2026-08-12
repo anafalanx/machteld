@@ -87,6 +87,7 @@ trap on the command you typed, never on which internal helper happened to fail.
 | `CLI` | `cli` |
 | `LOG` | `log` (all subcommands) |
 | `FRONT` | `front` — the workspace front door |
+| `HTTP` | `http` — https over WinHTTP, so certificate validation is the OS's |
 | `TCL` | `tcl` — run a script as this process's program |
 | `JOURNAL` | `journal` — the front door's record |
 | `WORKER` | `worker` (all subcommands) |
@@ -115,6 +116,8 @@ errors.
 | `unsupported` | this build cannot do it — `wrap` or `help` on a host with no embedded payload, or a manifest key the front door has yet to implement |
 | `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
 | `noroot` | no workspace was found at or above the executable — there is no `.mt` (nor `.z`) |
+| `tls` | the secure connection was refused -- an expired, self-signed, wrong-host or otherwise untrusted certificate. Its own code because "the certificate is bad" and "the host is down" call for different responses |
+| `toobig` | the response exceeds `-maxbody`. REFUSED, never truncated: a short body that looks whole is the one answer this palette does not give |
 | `dangling` | the name is there and its target is not — a broken junction or symlink. Distinct from `notfound` because a resolver walking up to the nearest existing ancestor must treat "nothing here" as *keep going* and "here, but broken" as *stop* |
 | `manifest` | the workspace manifest is missing, unreadable, or does not describe what was asked for |
 

@@ -1847,7 +1847,7 @@ set M [manifest]
 # Every palette verb, C-written and Tcl-written alike -- a manifest that
 # described only half the palette would be a partial truth.
 check "manifest covers the whole palette" [expr {[lsort [dict keys $M]] eq
-    {canon child cli detach dirs front hash help journal json links log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
+    {canon child cli detach dirs front hash help http journal json links log manifest mtps pmap pool pty run scope store tcl version vtstrip wait watch worker wrap}}]
 foreach v [dict keys $M] {
     check "manifest verb $v exists" [expr {[llength [info commands ::machteld::$v]] == 1}]
 }
@@ -4072,6 +4072,62 @@ if {$LKHAVEH} {
             [lkat $LKH multilinked /sym.txt links] eq ""}]
     }
 }
+# --- `http`: https, and the refusals that make it worth having ----------------
+#
+# THE OFFLINE HALF ALWAYS RUNS; the network half is announced and skipped when
+# there is no route out. A machine with no internet must not silently report
+# that certificate validation works.
+check "http declares its two subcommands" [expr {
+    [lsort [dict keys [valof {dict get [manifest] http subcommands}]]] eq {get post}}]
+check "http declares the codes it can throw" [expr {
+    "tls" in [valof {dict get [manifest] http codes}]
+    && "toobig" in [valof {dict get [manifest] http codes}]}]
+check "http refuses a non-http scheme" [expr {
+    [errcode_of {http get ftp://example.com}] eq {MACHTELD HTTP badvalue}}]
+check "http refuses a bare-number timeout" [expr {
+    [errcode_of {http get https://example.com -timeout 30}] eq {MACHTELD HTTP badvalue}}]
+check "http refuses an unknown option" [expr {
+    [errcode_of {http get https://example.com -nope 1}] eq {MACHTELD HTTP usage}}]
+check "http refuses an option with no value" [expr {
+    [errcode_of {http get https://example.com -timeout}] eq {MACHTELD HTTP usage}}]
+# NO `-insecure`, AND THE MANIFEST IS THE PROOF. A flag that disables
+# certificate checking is eventually left on in something that matters, so the
+# gate is that the option does not exist rather than that it defaults safely.
+check "http has no -insecure to leave on" [expr {
+    "-insecure" ni [valof {dict get [manifest] http options}]}]
+
+set HTTPNET 0
+if {![catch {http get https://example.com -timeout 20s} HTTPR]} { set HTTPNET 1 }
+if {!$HTTPNET} {
+    puts "     (no route to example.com -- the https and certificate checks are skipped)"
+} else {
+    check "http reaches an https endpoint"     [expr {[dict get $HTTPR status] == 200}]
+    check "http returns the body as bytes"     [expr {
+        [string match "*Example Domain*" [encoding convertfrom utf-8 [dict get $HTTPR body]]]}]
+    check "http cooks the headers into a dict" [expr {
+        [string match "text/html*" [valof {dict get $HTTPR headers content-type}]]}]
+    check "http keeps the raw header block"    [expr {
+        [string match "*HTTP/*" [valof {dict get $HTTPR rawheaders}]]}]
+    check "http counts the bytes it read"      [expr {
+        [dict get $HTTPR bytes] == [string length [dict get $HTTPR body]]}]
+    # THE CHECK THIS VERB EXISTS FOR. A client that accepts a bad certificate is
+    # worse than no client, because it looks like it works. Three separate
+    # failure modes -- expired, self-signed, wrong host -- so one misconfigured
+    # trust decision cannot satisfy all three.
+    foreach BAD {https://expired.badssl.com/ https://self-signed.badssl.com/
+                 https://wrong.host.badssl.com/} {
+        check "http refuses [lindex [split $BAD /] 2]" [expr {
+            [errcode_of {http get $BAD -timeout 20s}] eq {MACHTELD HTTP tls}}]
+    }
+    # REFUSED, NOT TRUNCATED.
+    check "http refuses a body past -maxbody" [expr {
+        [errcode_of {http get https://example.com -maxbody 10 -timeout 20s}]
+        eq {MACHTELD HTTP toobig}}]
+}
+check "http names an unreachable host" [expr {
+    [errcode_of {http get https://no-such-host-zzz.invalid -timeout 10s}]
+    eq {MACHTELD HTTP notfound}}]
+
 # LK-UAF: `-prune` HELD A BORROWED POINTER INTO THE CALLER'S OBJECT. Hand the
 # same Tcl_Obj to `-depth` in one command and `Tcl_GetWideIntFromObj` shimmers it
 # to a number, freeing the list rep while `prunec` still says there is a pattern.
