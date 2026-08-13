@@ -1,17 +1,8 @@
 /*
  * json.c -- ::machteld::json encode|decode, hand-rolled straight into Tcl_Obj.
  *
- * The contract says everything is a dict and that dicts are JSON-isomorphic;
- * Tcl 9 core ships no JSON, so this closes the one real gap in it.
- *
- * WHY HAND-ROLLED. The ecosystem policy's gate is "can I own this snapshot",
- * and a vendored parser is a large optimised snapshot admitted on trust. What a
- * borrowed parser would actually save is the tokeniser -- perhaps a third of
- * this file -- because the Tcl_Obj construction, the type mapping, the
- * encode-side ambiguity and the depth limit all have to be written either way.
- * So the SUITE is vendored instead of the implementation: test/jsontestsuite is
- * nst/JSONTestSuite, 318 cases, run as a gate. Correctness comes from the
- * corpus, not from trust.
+ * Tcl 9 core ships no JSON. This small parser maps directly to Tcl objects and
+ * is checked against the JSONTestSuite corpus kept under test/.
  *
  * THE MAPPING, which is the hard part rather than the parsing. Tcl has no type
  * tags, so JSON's types do not survive a round trip unaided:
@@ -32,7 +23,7 @@
  * booleans and nulls do not round-trip. Both are documented in the contract.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -46,6 +37,7 @@ typedef struct {
     const char *p;
     const char *end;
     int         depth;
+    int         depth_error;
     const char *err;
 } jctx;
 
@@ -284,7 +276,11 @@ fail:
 }
 
 static Tcl_Obj *json_value(jctx *j) {
-    if (j->depth >= JSON_MAX_DEPTH) { json_err(j, "too deeply nested"); return NULL; }
+    if (j->depth >= JSON_MAX_DEPTH) {
+        j->depth_error = 1;
+        json_err(j, "too deeply nested");
+        return NULL;
+    }
     json_ws(j);
     if (j->p >= j->end) { json_err(j, "unexpected end of input"); return NULL; }
     char c = *j->p;
@@ -459,13 +455,13 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
         return TCL_ERROR;
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) return TCL_ERROR;
 
     if (idx == DECODE) {
         if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "text"); return TCL_ERROR; }
         Tcl_Size n;
         const char *s = Tcl_GetStringFromObj(objv[2], &n);
-        jctx j = { s, s + n, 0, NULL };
+        jctx j = { s, s + n, 0, 0, NULL };
         Tcl_Obj *v = json_value(&j);
         if (v != NULL) {
             json_ws(&j);
@@ -477,27 +473,24 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         }
         if (v == NULL) {
             Tcl_SetObjResult(interp, Tcl_NewStringObj(j.err ? j.err : "invalid JSON", -1));
-            Tcl_SetErrorCode(interp, "MACHTELD", "JSON", "parse", (char *)NULL);
+            Tcl_SetErrorCode(interp, "MACHTELD", "JSON",
+                j.depth_error ? "depth" : "parse", (char *)NULL);
             return TCL_ERROR;
         }
         Tcl_SetObjResult(interp, v);
         return TCL_OK;
     }
 
-    /* ENCODE. Spelled as a test on idx rather than left as the fall-through it
-     * used to be, because the manifest is DERIVED from this structure: with only
-     * a `/* ENCODE *​/` comment to go on, the scanner ran DECODE's region to the
-     * end of the function and attributed `-dict` and `-list` to **decode** --
-     * false in both directions, since decode takes neither and encode takes
-     * both. The fix belongs here rather than in a scanner taught to read
-     * comments: if the code says which branch it is, both readers can tell. */
+    /* Keep ENCODE explicit rather than relying on fall-through; the two public
+     * branches then remain independently readable and testable. */
     if (idx == ENCODE) {
-    int as_dict = 0, as_list = 0;
+    int as_dict = 0, as_list = 0, options = 1;
     Tcl_Obj *val = NULL;
     for (int i = 2; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
-        if (strcmp(a, "-dict") == 0) { as_dict = 1; continue; }
-        if (strcmp(a, "-list") == 0) { as_list = 1; continue; }
+        if (options && strcmp(a, "--") == 0) { options = 0; continue; }
+        if (options && strcmp(a, "-dict") == 0) { as_dict = 1; continue; }
+        if (options && strcmp(a, "-list") == 0) { as_list = 1; continue; }
         if (val != NULL) {
             Tcl_SetObjResult(interp, Tcl_NewStringObj("unknown option", -1));
             Tcl_SetErrorCode(interp, "MACHTELD", "JSON", "usage", (char *)NULL);
@@ -532,7 +525,12 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 }
 
 int Machteldjson_Init(Tcl_Interp *interp) {
-    Tcl_CreateObjCommand(interp, "::machteld::json", JsonCmd, NULL, NULL);
-    Tcl_PkgProvide(interp, "machteld::json", "0.1");
+    if (Tcl_CreateObjCommand(interp, "::machteld::json", JsonCmd, NULL, NULL) == NULL) {
+        return TCL_ERROR;
+    }
+    if (Tcl_PkgProvide(interp, "machteld::json", MACHTELD_VERSION) != TCL_OK) {
+        Tcl_DeleteCommand(interp, "::machteld::json");
+        return TCL_ERROR;
+    }
     return TCL_OK;
 }

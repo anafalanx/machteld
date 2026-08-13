@@ -1,27 +1,49 @@
 ---
 type: overview
-title: What machteld is
-description: A single-exe Windows 11 Tcl/Tk toolkit — a workspace front door, a tool factory, and a machine-control primitive library.
-tags: [machteld, overview, tcl, windows]
-timestamp: 2026-07-09
+title: Overview
+description: What Machteld is, what it runs, and what it deliberately is not.
+tags: [machteld, windows, tcl, runtime]
 ---
 
-# What machteld is
+# Overview
 
-A single signed Windows executable (Win 11 23H2+) that is two things at once, sharing one statically-linked Tcl/Tk 9 runtime:
+machteld 0.10.0 is a single-executable Windows runtime for small machine-control
+programs. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY, filesystem
+observation, WinHTTP, cryptography, JSON, and SQLite. The surface stays Tcl-like:
+commands return values, options are explicit, and failures have trap-able codes.
 
-1. **A workspace front door.** [`front`](front-door.md) turns a *name* into something runnable under a controlled environment: a builtin verb, one of the tools that ride inside the exe, or one the workspace curates — resolved in that order, with **no system-`PATH` fallback**. `mt rg -n TODO .` is the everyday spelling, and every run lands in a [journal](journal.md). See [architecture](architecture.md) and [packaging](packaging.md).
+It is not an environment-specific resolver, package manager, command catalogue,
+activity recorder, or replacement shell. It does not guess that an arbitrary Tcl file wants Machteld.
+The program says so as its first executable command:
 
-2. **A tool factory.** [`wrap`](palette.md) turns a pure-Tcl/Tk program into its own standalone exe — console or GUI — with **no compiler** and nothing to install on the target. Both subsystem hosts and the Tcl/Tk script libraries ride inside `mt.exe`; it extracts the right one and appends your tool via zipfs, the els/starpack overlay. For when a colleague on a share needs to run what you wrote this afternoon. See [packaging](packaging.md).
+```tcl
+package require machteld 0.10.0
 
-3. **A machine-control primitive library**, present in every tool it runs and in its own REPL: kernel-grade process supervision (born-in-job launch, whole-tree kill, die-with-parent, resource caps, timeouts, capture, per-line streaming), interactive **ConPTY** steering (`pty` / `expect`), and a statically-linked **SQLite** (`store`). All in C, in-process, no DLLs.
+set tree [dirs C:/work -depth 2 -prune {.git node_modules}]
+puts "[dict get $tree dirs] directories"
+```
 
-You write **Tcl**; the power and the packaging are in **C**, exposed as a command palette. *Reach the metal, and ship the tool; don't invent a language.*
+Run it with `machteld.exe program.tcl ?argument ...?`. The `.tcl` extension is a
+convention, not a gate. The runtime parses that first command before evaluation,
+loads the same Machteld package in every host, then lets Tcl handle the file and
+its `argv` normally.
 
-It is **drang in spirit** — the same crown-jewel process supervision — without a bespoke language, because Tcl was built for exactly this role: the **Tool Command Language**, an embeddable command surface extended in C. Its long-awaited consumer has arrived: the machine (see [the bet](rationale.md)).
+The palette has four layers:
 
-## Audience & posture
+1. `run`, `child`, `wait`, `scope`, `detach`, and `pty` control processes.
+2. `watch`, `mtps`, `dirs`, `links`, `canon`, and `http` expose Windows facts.
+3. `store`, `json`, `hash`, `cli`, and `log` support real programs.
+4. `worker`, `pool`, `pmap`, `wrap`, `manifest`, `docs`, and `help` compose,
+   explain, and ship them.
 
-- **For its author first, product-shaped, audience later.** The first users are the small Tcl/Tk tools it builds (an editor; a live change-viewer) and its own machine-control REPL — not build/CI tooling for other projects.
-- **Agents are the primary consumers — as a *quality bar*, not an AI feature.** Enforced by [the creed](creed.md): a surface a model can drive safely and read at a glance.
-- **Dogfood surface:** building and packaging small personal tools, and supervising / steering processes on your own box.
+`wrap` is subordinate to this runtime boundary. It accepts only an opted-in
+Machteld entry and produces a console or GUI exe with the same machine-control
+and data API and version, including static SQLite and the complete offline
+Machteld/Tcl/Tk reference corpus. Nested wrapping remains in the distribution
+host. It is a deployment form, not a second language.
+
+The default model is linear and explicitly owned: long-running operations use
+visible deadlines where their command offers one, supervised children and PTYs
+are born into the host-owned kill-on-close root and a per-command Job Object,
+and `scope` shortens lifetime further. Channel events are used when a pool or GUI
+genuinely needs concurrency.

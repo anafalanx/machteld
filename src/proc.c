@@ -1,8 +1,8 @@
 /*
  * proc.c -- machteld's process-control bridge over the winjob substrate.
  *
- * Machteldproc_Init establishes the root KILL_ON_JOB_CLOSE job (nothing outlives
- * machteld) and registers the execution-core verbs:
+ * Machteldproc_Init establishes the host-owned root KILL_ON_JOB_CLOSE job for
+ * every supervised launch and registers the execution-core verbs:
  *
  *   ::machteld::run   ?-timeout t -mem b -cpu t -dir d? ?--? cmd ?arg...?
  *       blocking one-shot -> dict {exit status out err pid truncated}
@@ -11,17 +11,15 @@
  *   ::machteld::wait  ?-any? token ...
  *       block until all (or any) of the given children exit
  *
- * A child is launched born-in-job into a per-command job (tree-kill + limits);
- * stdout/stderr are captured on drain threads (no pipe-buffer deadlock). `run`
- * and `child start` share one launch/reap core -- run just reaps immediately.
- * Usage/launch failures throw -errorcode {MACHTELD <DOMAIN> <code>}, where the
- * DOMAIN is the verb invoked -- RUN, CHILD, WAIT, DETACH, PTY -- so a caller
- * traps on the command it typed rather than on which internal helper failed. A
- * nonzero exit is a normal dict result, not a failure. Every domain and code is
- * registered in docs/contract.md, held to this file by a test in both directions.
+ * A child is launched born-in-job into the root and a per-command job (tree-kill
+ * + limits); the host owns but never joins the root. stdout/stderr are captured
+ * on drain threads (no pipe-buffer deadlock). `run` and `child start` share one
+ * launch/reap core -- run just reaps immediately. Native failures use
+ * -errorcode {MACHTELD <DOMAIN> <code>}; a nonzero child exit remains a normal
+ * result.
  */
 #include "winjob.h"
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -35,15 +33,17 @@
 #include <string.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <limits.h>
+#include <stdint.h>
 
 /* ---- UTF-8 <-> UTF-16 -------------------------------------------------- */
 
 static wchar_t *u8_to_u16(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
     if (n <= 0) return NULL;
     wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
     if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n) <= 0) { free(w); return NULL; }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) <= 0) { free(w); return NULL; }
     return w;
 }
 
@@ -59,36 +59,47 @@ static char *u16_to_u8(const wchar_t *w) {
 /* ---- human-unit parsing ------------------------------------------------ */
 
 static long long parse_duration_ms(const char *s) {
-    char *end;
-    double v = strtod(s, &end);
-    if (end == s || v < 0) return -1;
-    while (*end == ' ') end++;
-    /* A unit is REQUIRED. A bare number is rejected, so "100" can never be
-     * silently read as 100 SECONDS when 100 ms was meant -- exactly the footgun
-     * that made pty read -timeout 100 block for a hundred seconds. */
-    if (strcmp(end, "ms") == 0) return (long long)v;
-    if (strcmp(end, "s") == 0)  return (long long)(v * 1000.0);
-    if (strcmp(end, "m") == 0)  return (long long)(v * 60000.0);
-    if (strcmp(end, "h") == 0)  return (long long)(v * 3600000.0);
-    return -1;
+    const unsigned char *p = (const unsigned char *)s;
+    if (*p < '0' || *p > '9') return -1;
+    unsigned long long value = 0;
+    while (*p >= '0' && *p <= '9') {
+        unsigned digit = (unsigned)(*p++ - '0');
+        if (value > (unsigned long long)LLONG_MAX / 10ULL ||
+            (value == (unsigned long long)LLONG_MAX / 10ULL &&
+             digit > (unsigned)((unsigned long long)LLONG_MAX % 10ULL))) return -1;
+        value = value * 10ULL + digit;
+    }
+    unsigned long long mul;
+    if (strcmp((const char *)p, "ms") == 0) mul = 1ULL;
+    else if (strcmp((const char *)p, "s") == 0) mul = 1000ULL;
+    else if (strcmp((const char *)p, "m") == 0) mul = 60000ULL;
+    else if (strcmp((const char *)p, "h") == 0) mul = 3600000ULL;
+    else return -1;
+    if (value > (unsigned long long)LLONG_MAX / mul) return -1;
+    return (long long)(value * mul);
 }
 
 static long long parse_bytes(const char *s) {
-    char *end;
-    double v = strtod(s, &end);
-    if (end == s || v < 0) return -1;
-    while (*end == ' ') end++;
-    unsigned long long mul = 1;
-    char c = *end;
-    if (c == 'K' || c == 'k') { mul = 1ULL << 10; end++; }
-    else if (c == 'M' || c == 'm') { mul = 1ULL << 20; end++; }
-    else if (c == 'G' || c == 'g') { mul = 1ULL << 30; end++; }
-    if (*end == 'B' || *end == 'b') end++;
-    if (*end != '\0') return -1;
-    return (long long)(v * (double)mul);
+    const unsigned char *p = (const unsigned char *)s;
+    if (*p < '0' || *p > '9') return -1;
+    unsigned long long value = 0;
+    while (*p >= '0' && *p <= '9') {
+        unsigned digit = (unsigned)(*p++ - '0');
+        if (value > (unsigned long long)LLONG_MAX / 10ULL ||
+            (value == (unsigned long long)LLONG_MAX / 10ULL &&
+             digit > (unsigned)((unsigned long long)LLONG_MAX % 10ULL))) return -1;
+        value = value * 10ULL + digit;
+    }
+    unsigned long long mul = 1ULL;
+    if (*p == 'K' || *p == 'k') { mul = 1ULL << 10; p++; }
+    else if (*p == 'M' || *p == 'm') { mul = 1ULL << 20; p++; }
+    else if (*p == 'G' || *p == 'g') { mul = 1ULL << 30; p++; }
+    if (*p == 'B' || *p == 'b') p++;
+    if (*p != '\0' || value > (unsigned long long)LLONG_MAX / mul) return -1;
+    return (long long)(value * mul);
 }
 
-/* ---- program resolution (PATH + PATHEXT) ------------------------------- */
+/* ---- deterministic program resolution --------------------------------- */
 
 static int has_extension(const char *prog) {
     const char *base = prog;
@@ -112,9 +123,10 @@ static char *resolve_exe(const char *prog) {
     wchar_t *pathEnv = NULL;
     if (bare) {
         DWORD need = GetEnvironmentVariableW(L"PATH", NULL, 0);
-        if (need > 0) {
-            pathEnv = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
-            GetEnvironmentVariableW(L"PATH", pathEnv, need);
+        if (need == 0) { free(wp); return NULL; }
+        pathEnv = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
+        if (pathEnv == NULL || GetEnvironmentVariableW(L"PATH", pathEnv, need) == 0) {
+            free(pathEnv); free(wp); return NULL;
         }
     }
 
@@ -155,13 +167,20 @@ typedef struct {
     size_t cap;
     size_t len;
     int    truncated;
+    DWORD  error;
 } reader_t;
 
 static DWORD WINAPI reader_thread(LPVOID arg) {
     reader_t *r = (reader_t *)arg;
     char tmp[8192];
     DWORD got = 0;
-    while (ReadFile(r->read, tmp, sizeof(tmp), &got, NULL) && got > 0) {
+    for (;;) {
+        if (!ReadFile(r->read, tmp, sizeof(tmp), &got, NULL)) {
+            DWORD e = GetLastError();
+            if (e != ERROR_BROKEN_PIPE && e != ERROR_PIPE_NOT_CONNECTED) r->error = e;
+            break;
+        }
+        if (got == 0) break;
         if (r->len < r->cap) {
             size_t space = r->cap - r->len;
             size_t take = ((size_t)got < space) ? (size_t)got : space;
@@ -175,6 +194,31 @@ static DWORD WINAPI reader_thread(LPVOID arg) {
     return 0;
 }
 
+typedef struct {
+    HANDLE write;
+    char  *buf;
+    size_t len;
+    DWORD  error;
+} writer_t;
+
+static DWORD WINAPI writer_thread(LPVOID arg) {
+    writer_t *w = (writer_t *)arg;
+    size_t off = 0;
+    while (off < w->len) {
+        size_t left = w->len - off;
+        DWORD want = left > (size_t)0x7ffff000u ? 0x7ffff000u : (DWORD)left;
+        DWORD wrote = 0;
+        if (!WriteFile(w->write, w->buf + off, want, &wrote, NULL) || wrote == 0) {
+            w->error = GetLastError();
+            break;
+        }
+        off += wrote;
+    }
+    CloseHandle(w->write);
+    w->write = NULL;
+    return 0;
+}
+
 /* ---- a supervised child ------------------------------------------------ */
 
 typedef struct child_s {
@@ -185,41 +229,33 @@ typedef struct child_s {
     HANDLE          outR, errR;  /* pipe read ends */
     HANDLE          tOut, tErr;  /* reader threads */
     reader_t        ro, re;      /* captured stdout/stderr */
-    /* CHANNEL MODE. The child's pipes become Tcl channels instead of being
-     * drained into buffers, so a caller can talk to it while it runs -- the
-     * persistent-worker case (docs/pool-plan.md). Exclusive with capture,
-     * because one pipe cannot have two consumers: the reader threads are not
-     * started and ro/re keep no buffers, which is also 2 MB per worker saved.
-     *
-     * NAMES, not Tcl_Channel pointers. Once a channel is registered the SCRIPT
-     * may close it, after which the pointer dangles; a name can be looked up and
-     * come back NULL, which is the difference between tidy cleanup and a
-     * use-after-free. */
+    HANDLE          tIn;         /* finite -stdin writer */
+    writer_t        wi;
+    HANDLE          doneEv;      /* whole job exited and owned I/O drained */
+    HANDLE          monitor;     /* enforces deadline without Tcl observation */
+    int             stream;      /* callbacks pump output on interpreter thread */
+    volatile LONG   monitor_failed;
+    /* Channel names are stable lookup keys; scripts may close the corresponding
+     * Tcl channels, so retaining Tcl_Channel pointers would be unsafe. */
     int             channels;    /* -channels was given */
     int             inherit;     /* -inherit: stdio is the parent's, not pipes */
     HANDLE          inherit_in, inherit_out, inherit_err;  /* BORROWED: ours, never closed here */
     HANDLE          inW;         /* stdin write end, kept open (channel mode) */
     char            chIn[24], chOut[24], chErr[24];
-    /* A DEADLINE, IN TICKS, or 0 for none. `child start -timeout` was accepted
-     * and then silently ignored: the option is in the shared parser, so the
-     * manifest declared it for `child` while nothing anywhere enforced it, and
-     * `child wait` waited forever regardless. An option that is documented,
-     * declared and inert is worse than one that does not exist, because a caller
-     * builds on it. Enforced now at the point a caller waits, which is the only
-     * place an asynchronous child is being watched at all. */
     ULONGLONG       deadline;    /* GetTickCount64() by which it must be done */
     int             reaped;      /* wait/reap already collected the exit + output */
-    int             killed;      /* was tree-killed by machteld (child kill) */
-    int             timeout;     /* specifically: killed because -timeout elapsed */
+    volatile LONG   killed;      /* was tree-killed by machteld (child kill) */
+    volatile LONG   timeout;     /* specifically: killed because -timeout elapsed */
     long long       exit_code;
     struct child_s *next;        /* registry chain */
 } child_t;
 
-/* Client data shared by the verbs: the root job, whether machteld is a member of
- * it (decides the born-in-job list), and the live-children registry. */
+/* Client data shared by the verbs: the root job and live resource registries.
+ * The supervisor owns the root job but is deliberately not a member: closing a
+ * KILL_ON_JOB_CLOSE job containing the host would replace its intended process
+ * exit status with the kernel's job-termination status. */
 typedef struct {
     wj_job  *root;
-    int      in_root;
     child_t *children;    /* singly-linked list of tracked children */
     int      counter;     /* child token sequence */
     struct pty_s *ptys;   /* singly-linked list of open ptys */
@@ -266,6 +302,7 @@ typedef struct {
     unsigned long long cpu_100ns;
     const char        *dir;
     const char        *stdin_text; /* NULL => child stdin is the null device */
+    Tcl_Size           stdin_len;
     Tcl_Obj           *env_obj;    /* the -env {K V ...} list, or NULL to inherit */
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
@@ -276,12 +313,21 @@ typedef struct {
     int                cmd_index;  /* objv index where the command begins */
 } run_opts;
 
-/* Every palette failure is {MACHTELD <DOMAIN> <code>}, and the DOMAIN is the
- * verb the caller invoked -- `pty` raises MACHTELD PTY, `wait` raises
- * MACHTELD WAIT. Domain-by-verb rather than domain-by-helper: a caller traps on
- * the command it typed, without having to know which internal function failed.
- * The registry of every domain and code is in docs/contract.md, held to this
- * source by a test. */
+enum {
+    OPT_TIMEOUT  = 1u << 0,
+    OPT_MEM      = 1u << 1,
+    OPT_CPU      = 1u << 2,
+    OPT_DIR      = 1u << 3,
+    OPT_ARG0     = 1u << 4,
+    OPT_STDIN    = 1u << 5,
+    OPT_ENV      = 1u << 6,
+    OPT_ONOUT    = 1u << 7,
+    OPT_ONERR    = 1u << 8,
+    OPT_CHANNELS = 1u << 9,
+    OPT_INHERIT  = 1u << 10
+};
+
+/* The domain names the public command, not the internal helper. */
 static int mt_error(Tcl_Interp *interp, const char *domain, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "command failed", -1));
     Tcl_SetErrorCode(interp, "MACHTELD", domain, code, (char *)NULL);
@@ -294,123 +340,282 @@ static int mt_error(Tcl_Interp *interp, const char *domain, const char *code, co
  * double-NUL-terminated block) or -1 and sets *err on bad input / overflow. buf
  * is the caller's (stack) buffer -- valid only for that frame, which suffices
  * because CreateProcess copies the block into the child at launch. */
+static const char *obj_no_nul(Tcl_Obj *obj, Tcl_Size *len) {
+    const char *s = Tcl_GetStringFromObj(obj, len);
+    return memchr(s, '\0', (size_t)*len) == NULL ? s : NULL;
+}
+
+typedef struct {
+    const wchar_t *text;
+    size_t text_len;
+    size_t name_len;
+    wchar_t *owned;
+} env_item;
+
+/* Ordinary entries are NAME=VALUE. Windows' per-drive current-directory
+ * entries are exceptional: =C:=C:\path has the name =C:, so its separator is
+ * the second '='. They must be copied and sorted with the ordinary entries. */
+static size_t env_name_len(const wchar_t *entry) {
+    size_t n = entry[0] == L'=' ? 1 : 0;
+    while (entry[n] != L'\0' && entry[n] != L'=') n++;
+    return n;
+}
+
+/* Windows requires environment names in case-insensitive Unicode ordinal
+ * order, without locale influence. A zero return is an API failure; otherwise
+ * the result is one of CSTR_LESS_THAN, CSTR_EQUAL, CSTR_GREATER_THAN. */
+static int env_name_compare(const wchar_t *a, size_t na,
+                            const wchar_t *b, size_t nb) {
+    if (na > INT_MAX || nb > INT_MAX) return 0;
+    return CompareStringOrdinal(a, (int)na, b, (int)nb, TRUE);
+}
+
 static int build_env_block(Tcl_Interp *interp, Tcl_Obj *pairs, wchar_t *buf, size_t cap, const char **err) {
     Tcl_Size np;
     Tcl_Obj **pv;
     if (Tcl_ListObjGetElements(interp, pairs, &np, &pv) != TCL_OK) { *err = "bad -env value"; return -1; }
     if (np % 2 != 0) { *err = "-env needs key/value pairs"; return -1; }
+    if (np / 2 > INT_MAX) { *err = "environment too large"; return -1; }
     int nover = (int)(np / 2);
 
     wchar_t **okey = (wchar_t **)calloc((size_t)(nover ? nover : 1), sizeof(wchar_t *));
-    for (int j = 0; j < nover; j++) okey[j] = u8_to_u16(Tcl_GetString(pv[2 * j]));
-
-    size_t pos = 0;
+    size_t *okey_len = (size_t *)calloc((size_t)(nover ? nover : 1), sizeof(size_t));
+    if (okey == NULL || okey_len == NULL) {
+        free(okey);
+        free(okey_len);
+        *err = "out of memory";
+        return -1;
+    }
     int rc = 0;
     const char *e2 = NULL;
+    for (int j = 0; j < nover; j++) {
+        Tcl_Size nk = 0;
+        const char *key = obj_no_nul(pv[2 * j], &nk);
+        if (key == NULL || nk == 0 || memchr(key, '=', (size_t)nk) != NULL) {
+            rc = -1;
+            e2 = "environment keys must be nonempty and contain neither NUL nor '='";
+            break;
+        }
+        okey[j] = u8_to_u16(key);
+        if (okey[j] == NULL) { rc = -1; e2 = "bad -env entry"; break; }
+        okey_len[j] = wcslen(okey[j]);
+        for (int k = 0; k < j; k++) {
+            int comparison = env_name_compare(okey[k], okey_len[k], okey[j], okey_len[j]);
+            if (comparison == 0) {
+                rc = -1;
+                e2 = "cannot compare environment keys";
+                break;
+            }
+            if (comparison == CSTR_EQUAL) {
+                rc = -1;
+                e2 = "duplicate environment key";
+                break;
+            }
+        }
+        if (rc != 0) break;
+    }
 
-    /* inherited entries, skipping any key that is overridden */
-    LPWCH env = GetEnvironmentStringsW();
-    for (wchar_t *e = env; *e && rc == 0; ) {
+    LPWCH env = NULL;
+    env_item *items = NULL;
+    size_t nitems = 0;
+    size_t pos = 0;
+
+    /* Collect inherited entries, including =X: drive-current-directory state,
+     * but skip an ordinary entry when a caller override names it. Keep pointers
+     * into the inherited block until the sorted block has been emitted. */
+    env = rc == 0 ? GetEnvironmentStringsW() : NULL;
+    if (rc == 0 && env == NULL) { rc = -1; e2 = "cannot read inherited environment"; }
+    size_t inherited_count = 0;
+    for (wchar_t *e = env; e != NULL && *e; e += wcslen(e) + 1) inherited_count++;
+    if (rc == 0 && inherited_count > SIZE_MAX - (size_t)nover) {
+        rc = -1;
+        e2 = "environment too large";
+    }
+    if (rc == 0) {
+        size_t capacity = inherited_count + (size_t)nover;
+        items = (env_item *)calloc(capacity ? capacity : 1, sizeof(*items));
+        if (items == NULL) { rc = -1; e2 = "out of memory"; }
+    }
+    for (wchar_t *e = env; e != NULL && *e && rc == 0; ) {
         size_t elen = wcslen(e);
-        size_t klen = 0;
-        while (e[klen] && e[klen] != L'=') klen++;
+        size_t klen = env_name_len(e);
         int overridden = 0;
         for (int j = 0; j < nover; j++) {
-            if (okey[j] && wcslen(okey[j]) == klen && _wcsnicmp(e, okey[j], klen) == 0) { overridden = 1; break; }
+            int comparison = env_name_compare(e, klen, okey[j], okey_len[j]);
+            if (comparison == 0) {
+                rc = -1;
+                e2 = "cannot compare environment keys";
+                break;
+            }
+            if (comparison == CSTR_EQUAL) { overridden = 1; break; }
         }
-        if (!overridden) {
-            if (pos + elen + 1 > cap) { rc = -1; e2 = "environment too large"; }
-            else { memcpy(buf + pos, e, elen * sizeof(wchar_t)); pos += elen; buf[pos++] = L'\0'; }
+        if (rc == 0 && !overridden) {
+            items[nitems].text = e;
+            items[nitems].text_len = elen;
+            items[nitems].name_len = klen;
+            nitems++;
         }
         e += elen + 1;
     }
-    FreeEnvironmentStringsW(env);
 
-    /* then the overrides, as K=V */
+    /* Materialize caller overrides as ordinary NAME=VALUE entries. Keys were
+     * already validated and de-duplicated case-insensitively above. */
     for (int j = 0; j < nover && rc == 0; j++) {
-        wchar_t *wv = u8_to_u16(Tcl_GetString(pv[2 * j + 1]));
-        size_t lk = okey[j] ? wcslen(okey[j]) : 0, lv = wv ? wcslen(wv) : 0;
-        if (okey[j] == NULL || wv == NULL) { rc = -1; e2 = "bad -env entry"; }
-        else if (pos + lk + 1 + lv + 1 > cap) { rc = -1; e2 = "environment too large"; }
+        Tcl_Size nv = 0;
+        const char *value = obj_no_nul(pv[2 * j + 1], &nv);
+        wchar_t *wv = value ? u8_to_u16(value) : NULL;
+        size_t lk = okey_len[j], lv = wv ? wcslen(wv) : 0;
+        if (value == NULL) { rc = -1; e2 = "environment values may not contain NUL"; }
+        else if (okey[j] == NULL || wv == NULL) { rc = -1; e2 = "bad -env entry"; }
+        else if (lk >= cap || lv >= cap || lk + lv + 2 > cap) {
+            rc = -1;
+            e2 = "environment too large";
+        }
         else {
-            memcpy(buf + pos, okey[j], lk * sizeof(wchar_t)); pos += lk;
-            buf[pos++] = L'=';
-            memcpy(buf + pos, wv, lv * sizeof(wchar_t)); pos += lv;
-            buf[pos++] = L'\0';
+            size_t entry_len = lk + 1 + lv;
+            wchar_t *entry = (wchar_t *)malloc((entry_len + 1) * sizeof(wchar_t));
+            if (entry == NULL) {
+                rc = -1;
+                e2 = "out of memory";
+            } else {
+                memcpy(entry, okey[j], lk * sizeof(wchar_t));
+                entry[lk] = L'=';
+                memcpy(entry + lk + 1, wv, lv * sizeof(wchar_t));
+                entry[entry_len] = L'\0';
+                items[nitems].text = entry;
+                items[nitems].text_len = entry_len;
+                items[nitems].name_len = lk;
+                items[nitems].owned = entry;
+                nitems++;
+            }
         }
         free(wv);
     }
-    if (rc == 0) {
-        if (pos + 1 > cap) { rc = -1; e2 = "environment too large"; }
-        else buf[pos++] = L'\0'; /* final NUL => the double-NUL that closes the block */
+
+    /* Stable insertion sort is ample for a block capped at 32K characters and
+     * lets CompareStringOrdinal failures remain reportable. Case-insensitive
+     * equal names retain their inherited order. */
+    for (size_t i = 1; i < nitems && rc == 0; i++) {
+        env_item item = items[i];
+        size_t j = i;
+        while (j > 0) {
+            int comparison = env_name_compare(items[j - 1].text, items[j - 1].name_len,
+                                              item.text, item.name_len);
+            if (comparison == 0) {
+                rc = -1;
+                e2 = "cannot sort environment";
+                break;
+            }
+            if (comparison != CSTR_GREATER_THAN) break;
+            items[j] = items[j - 1];
+            j--;
+        }
+        items[j] = item;
     }
 
+    for (size_t i = 0; i < nitems && rc == 0; i++) {
+        if (pos >= cap || items[i].text_len > cap - pos - 1) {
+            rc = -1;
+            e2 = "environment too large";
+            break;
+        }
+        memcpy(buf + pos, items[i].text, items[i].text_len * sizeof(wchar_t));
+        pos += items[i].text_len;
+        buf[pos++] = L'\0';
+    }
+    if (rc == 0) {
+        size_t closing_nuls = nitems == 0 ? 2 : 1;
+        if (closing_nuls > cap - pos) { rc = -1; e2 = "environment too large"; }
+        else while (closing_nuls-- > 0) buf[pos++] = L'\0';
+    }
+
+    for (size_t i = 0; i < nitems; i++) free(items[i].owned);
+    free(items);
+    if (env != NULL) FreeEnvironmentStringsW(env);
     for (int j = 0; j < nover; j++) free(okey[j]);
     free(okey);
+    free(okey_len);
     if (rc != 0) *err = e2;
     return rc;
 }
 
-static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *const objv[], int i0, run_opts *o) {
+static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
+                      Tcl_Obj *const objv[], int i0, unsigned allowed, run_opts *o) {
     o->timeout_ms = -1;
     o->mem = 0;
     o->cpu_100ns = 0;
     o->dir = NULL;
     o->stdin_text = NULL;
+    o->stdin_len = 0;
     o->env_obj = NULL;
     o->env_block = NULL;
     o->onout = NULL;
     o->onerr = NULL;
     o->channels = 0;
-    /* EVERY FIELD, EVERY TIME. `run_opts` is a stack struct and this is its only
-     * initialiser; a field added to the struct but not to this list holds
-     * whatever was on the stack. `inherit` was, briefly, and `child start` read
-     * garbage as "inherit stdio" -- so it created no pipes and channel mode
-     * dereferenced a NULL handle. A segfault, from one missing line. */
+    /* Initialize every field because this structure lives on the stack. */
     o->inherit = 0;
     o->arg0 = NULL;
     int i = i0;
     for (; i < objc; i++) {
-        const char *a = Tcl_GetString(objv[i]);
+        Tcl_Size alen = 0;
+        const char *a = obj_no_nul(objv[i], &alen);
+        if (a == NULL) return mt_error(interp, dom, "badvalue", "option name may not contain NUL");
         if (strcmp(a, "--") == 0) { i++; break; }
         if (a[0] != '-' || a[1] == '\0') break;
+        if (strcmp(a, "-channels") == 0) {
+            if (!(allowed & OPT_CHANNELS)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->channels = 1;
+            continue;
+        }
+        if (strcmp(a, "-inherit") == 0) {
+            if (!(allowed & OPT_INHERIT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->inherit = 1;
+            continue;
+        }
         if (i + 1 >= objc) return mt_error(interp, dom, "usage", "option needs a value");
-        const char *v = Tcl_GetString(objv[i + 1]);
+        Tcl_Size vlen = 0;
+        const char *v = Tcl_GetStringFromObj(objv[i + 1], &vlen);
+        int has_nul = memchr(v, '\0', (size_t)vlen) != NULL;
         if (strcmp(a, "-timeout") == 0) {
+            if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
             o->timeout_ms = parse_duration_ms(v);
-            if (o->timeout_ms < 0) return mt_error(interp, dom, "badvalue", "bad -timeout value");
+            if (o->timeout_ms < 0 || (unsigned long long)o->timeout_ms >= WJ_INFINITE)
+                return mt_error(interp, dom, "badvalue", "bad -timeout value");
         } else if (strcmp(a, "-mem") == 0) {
+            if (!(allowed & OPT_MEM)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul) return mt_error(interp, dom, "badvalue", "byte size may not contain NUL");
             long long b = parse_bytes(v);
             if (b < 0) return mt_error(interp, dom, "badvalue", "bad -mem value");
             o->mem = (unsigned long long)b;
         } else if (strcmp(a, "-cpu") == 0) {
+            if (!(allowed & OPT_CPU)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
             long long d = parse_duration_ms(v);
-            if (d < 0) return mt_error(interp, dom, "badvalue", "bad -cpu value");
+            if (d < 0 || (unsigned long long)d > (unsigned long long)LLONG_MAX / 10000ULL)
+                return mt_error(interp, dom, "badvalue", "bad -cpu value");
             o->cpu_100ns = (unsigned long long)d * 10000ULL;
         } else if (strcmp(a, "-dir") == 0) {
+            if (!(allowed & OPT_DIR)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul) return mt_error(interp, dom, "badvalue", "working directory may not contain NUL");
             o->dir = v;
         } else if (strcmp(a, "-arg0") == 0) {
-            /* WHAT THE CHILD READS AS ITS OWN NAME, which is not always where it
-             * lives. GNU make is the case that forced this: the workspace
-             * vendors it as `mingw32-make.exe`, and a makefile asking `$(MAKE)`
-             * -- or a recursive build re-invoking itself -- gets that spelling
-             * back unless argv[0] says `make`.
-             *
-             * Nothing in the launcher had to change. `wj_launch` already passes
-             * the executable and the command line to CreateProcessW SEPARATELY,
-             * as lpApplicationName and lpCommandLine, so which file runs and
-             * what it calls itself were always independent; the only thing
-             * missing was a way to say so. The program is still resolved from
-             * argv[0] as given, so `-arg0` renames the child WITHOUT changing
-             * which file is found -- a rename, never a redirection. */
+            if (!(allowed & OPT_ARG0)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul) return mt_error(interp, dom, "badvalue", "-arg0 may not contain NUL");
+            /* Resolution uses the command name; -arg0 only changes argv[0]. */
             o->arg0 = v;
         } else if (strcmp(a, "-stdin") == 0) {
+            if (!(allowed & OPT_STDIN)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->stdin_text = v;
+            o->stdin_len = vlen;
         } else if (strcmp(a, "-env") == 0) {
+            if (!(allowed & OPT_ENV)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->env_obj = objv[i + 1];
         } else if (strcmp(a, "-onout") == 0) {
+            if (!(allowed & OPT_ONOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->onout = objv[i + 1];
         } else if (strcmp(a, "-onerr") == 0) {
+            if (!(allowed & OPT_ONERR)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->onerr = objv[i + 1];
         } else {
             return mt_error(interp, dom, "usage", "unknown option");
@@ -429,26 +634,81 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc, Tcl_Obj *co
  * is a transient run. `stream` suppresses the reader threads so the caller can
  * pump the pipes itself (run -onout/-onerr).
  *
- * *code carries WHICH failure, because the caller cannot tell from the message
- * alone: an unresolvable program is `notfound` -- the code the contract has
- * always documented for it -- and every failure after that point is `launch`.
- * The caller seeds it with "launch", so a new failure path here defaults to the
- * general code rather than silently inheriting a specific one. */
-/* THE ARGV THE CHILD ACTUALLY GETS. Applied AFTER `resolve_exe` at every launch
- * site, never before: the program is found from argv[0] as the caller wrote it,
- * and `-arg0` only changes what the child then reads back. Getting that order
- * wrong would turn a rename into a PATH lookup for a different program, which
- * is the one thing this workspace refuses to do anywhere else.
- *
- * Returns cargv untouched when there is no -arg0, so the common path allocates
- * nothing; the caller frees only what it was given back changed. */
-static const char **argv_with_arg0(run_opts *o, int cargc, const char **cargv) {
+ * *code distinguishes resolution (`notfound`) from later launch failures. */
+/* Apply -arg0 only after executable resolution. */
+static const char **argv_with_arg0(run_opts *o, int cargc, const char **cargv,
+                                   const char **err) {
     if (o->arg0 == NULL) return cargv;
     const char **a = (const char **)malloc(sizeof(*a) * (size_t)cargc);
-    if (a == NULL) return cargv;   /* out of memory: the real name is a safe answer */
+    if (a == NULL) { *err = "out of memory"; return NULL; }
     a[0] = o->arg0;
     for (int i = 1; i < cargc; i++) a[i] = cargv[i];
     return a;
+}
+
+static int handle_signaled(HANDLE h) {
+    if (h == NULL) return 1;
+    return WaitForSingleObject(h, 0) == WAIT_OBJECT_0;
+}
+
+/* A child is complete only when its entire job is empty. The direct process can
+ * exit first while a descendant remains alive and holds capture pipes open.
+ * This monitor also owns the start-time deadline, so expiry does not depend on
+ * a later Tcl command observing the child. */
+static DWORD WINAPI child_monitor_thread(LPVOID arg) {
+    child_t *c = (child_t *)arg;
+    int direct_done = 0;
+    int query_failed = 0;
+    for (;;) {
+        if (!direct_done) {
+            DWORD wr = WaitForSingleObject((HANDLE)c->proc, 0);
+            if (wr == WAIT_OBJECT_0) {
+                DWORD code = 0;
+                if (GetExitCodeProcess((HANDLE)c->proc, &code)) {
+                    c->exit_code = (long long)(unsigned long long)code;
+                    direct_done = 1;
+                } else {
+                    InterlockedExchange(&c->monitor_failed, 1);
+                    query_failed = 1;
+                }
+            } else if (wr == WAIT_FAILED) {
+                InterlockedExchange(&c->monitor_failed, 1);
+                query_failed = 1;
+                direct_done = 1;
+                InterlockedExchange(&c->killed, 1);
+                if (wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
+            }
+        }
+
+        unsigned active = 0;
+        const char *ignore = NULL;
+        if (!query_failed && wj_job_active(c->job, &active, &ignore) != 0) {
+            InterlockedExchange(&c->monitor_failed, 1);
+            query_failed = 1;
+            InterlockedExchange(&c->killed, 1);
+            if (wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
+        }
+
+        int io_done = handle_signaled(c->tIn);
+        if (!c->stream && !c->channels && !c->inherit) {
+            io_done = io_done && handle_signaled(c->tOut) && handle_signaled(c->tErr);
+        }
+        if (direct_done && io_done && (query_failed || active == 0)) break;
+        ULONGLONG now = GetTickCount64();
+        if (c->deadline != 0 && now >= c->deadline) {
+            InterlockedExchange(&c->timeout, 1);
+            InterlockedExchange(&c->killed, 1);
+            if (wj_job_terminate(c->job, 1) != 0) {
+                InterlockedExchange(&c->monitor_failed, 1);
+                query_failed = 1;
+                wj_job_close(c->job); /* KILL_ON_JOB_CLOSE fallback */
+            }
+            c->deadline = 0;
+        }
+        Sleep(5);
+    }
+    SetEvent(c->doneEv);
+    return 0;
 }
 
 static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char **cargv,
@@ -457,6 +717,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
 
     child_t *c = (child_t *)calloc(1, sizeof(*c));
+    if (c == NULL) { free(exe); *err = "out of memory"; return NULL; }
     HANDLE outW = NULL, errW = NULL, nul = NULL, stdinR = NULL, stdinW = NULL;
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa);
@@ -470,8 +731,8 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
      * This needs no change in the launcher: `wj_launch` duplicates whichever
      * handles it is given into inheritable copies and restricts inheritance to
      * exactly those, so handing it the parent's console handles gives the child
-     * the console with every supervision guarantee intact -- born in the job
-     * object, tree-killable, capped, deadline enforced.
+     * the console with every supervision guarantee intact -- born into the root
+     * and per-command jobs, tree-killable, capped, deadline enforced.
      *
      * A handle can legitimately be absent (a GUI process has no console), and a
      * NULL handle cannot be duplicated, so each stream falls back to NUL
@@ -492,21 +753,20 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         c->inherit_out = (so != NULL) ? so : nul;
         c->inherit_err = (se != NULL) ? se : nul;
     } else {
-    if (!CreatePipe(&c->outR, &outW, &sa, 0) || !CreatePipe(&c->errR, &errW, &sa, 0)) {
-        *err = "CreatePipe failed";
-        goto fail;
-    }
-    /* stdin: a pipe pre-loaded with o->stdin_text if given, a pipe left OPEN in
-     * channel mode so the caller can keep writing, else the null device. */
-    if (o->stdin_text != NULL || o->channels) {
-        if (!CreatePipe(&stdinR, &stdinW, &sa, 0)) { *err = "CreatePipe(stdin) failed"; goto fail; }
-    } else {
-        nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-        if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
-    }
+        if (!CreatePipe(&c->outR, &outW, &sa, 0) || !CreatePipe(&c->errR, &errW, &sa, 0)) {
+            *err = "CreatePipe failed";
+            goto fail;
+        }
+        if (o->stdin_text != NULL || o->channels) {
+            if (!CreatePipe(&stdinR, &stdinW, &sa, 0)) { *err = "CreatePipe(stdin) failed"; goto fail; }
+        } else {
+            nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              NULL, OPEN_EXISTING, 0, NULL);
+            if (nul == INVALID_HANDLE_VALUE) { nul = NULL; *err = "open NUL failed"; goto fail; }
+        }
     }
 
-    c->job = wj_job_new(0, err);
+    c->job = wj_job_new(1, err);
     if (c->job == NULL) goto fail;
     if (o->mem || o->cpu_100ns) {
         wj_limits lim = { 0 };
@@ -515,16 +775,12 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         if (wj_job_set_limits(c->job, &lim, err) != 0) goto fail;
     }
 
+    /* Root first, then the narrower per-command job, is the required nesting
+     * order for PROC_THREAD_ATTRIBUTE_JOB_LIST. */
     void *jobh[2];
-    int njobs;
-    if (ctx->in_root) {
-        jobh[0] = wj_job_handle(c->job);
-        njobs = 1;
-    } else {
-        jobh[0] = wj_job_handle(ctx->root);
-        jobh[1] = wj_job_handle(c->job);
-        njobs = 2;
-    }
+    jobh[0] = wj_job_handle(ctx->root);
+    jobh[1] = wj_job_handle(c->job);
+    int njobs = 2;
     wj_stdio io;
     if (o->inherit) {
         io = (wj_stdio){ c->inherit_in, c->inherit_out, c->inherit_err };
@@ -532,47 +788,55 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
         io = (wj_stdio){ (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
     }
     c->inherit = o->inherit;
-    const char **largv = argv_with_arg0(o, cargc, cargv);
+    c->channels = o->channels;
+    c->stream = stream;
+    const char **largv = argv_with_arg0(o, cargc, cargv, err);
+    if (largv == NULL) goto fail;
     int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err);
     if (largv != cargv) free((void *)largv);
     if (lrc != 0) goto fail;
+    if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
 
-    CloseHandle(outW); outW = NULL;
-    CloseHandle(errW); errW = NULL;
+    if (outW) { CloseHandle(outW); outW = NULL; }
+    if (errW) { CloseHandle(errW); errW = NULL; }
     if (nul) { CloseHandle(nul); nul = NULL; }
-    if (o->channels) {
-        /* The read end belongs to the child; ours stays open for writing, and is
-         * what becomes the stdin channel. */
-        CloseHandle(stdinR); stdinR = NULL;
-        c->inW = stdinW; stdinW = NULL;
-        c->channels = 1;
-    } else if (o->stdin_text != NULL) {
-        /* feed the child its stdin, then EOF; the child holds its own dup of stdinR */
-        size_t n = strlen(o->stdin_text);
-        if (n > 0) { DWORD wr; WriteFile(stdinW, o->stdin_text, (DWORD)n, &wr, NULL); }
-        CloseHandle(stdinW); stdinW = NULL;
-        CloseHandle(stdinR); stdinR = NULL;
-    }
+    if (stdinR) { CloseHandle(stdinR); stdinR = NULL; }
 
-    /* Channel mode allocates no capture buffers and starts no reader threads:
-     * the pipes are about to belong to Tcl. child_dict already renders a NULL
-     * buffer as "", so the result dict keeps its documented shape with `out` and
-     * `err` simply empty -- one shape for the verb, which is what the contract
-     * requires. */
+    /* Start output drains before feeding stdin. A child that writes enough
+     * output before reading its input would otherwise deadlock two full pipes. */
     if (!o->channels && !o->inherit) {
         size_t cap = 1u << 20;
         c->ro.read = c->outR; c->ro.cap = cap; c->ro.buf = (char *)malloc(cap);
         c->re.read = c->errR; c->re.cap = cap; c->re.buf = (char *)malloc(cap);
-        /* Streaming pumps the pipes on the interp thread instead of draining them
-         * on reader threads; the buffers still capture any pipe that has no
-         * callback. */
+        if (c->ro.buf == NULL || c->re.buf == NULL) { *err = "out of memory"; goto fail; }
         if (!stream) {
             c->tOut = CreateThread(NULL, 0, reader_thread, &c->ro, 0, NULL);
+            if (c->tOut == NULL) { *err = "cannot start stdout reader thread"; goto fail; }
             c->tErr = CreateThread(NULL, 0, reader_thread, &c->re, 0, NULL);
+            if (c->tErr == NULL) { *err = "cannot start stderr reader thread"; goto fail; }
         }
     }
 
-    if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
+    if (o->channels) {
+        c->inW = stdinW; stdinW = NULL;
+    } else if (o->stdin_text != NULL) {
+        if (o->stdin_len > 0) {
+            c->wi.buf = (char *)malloc((size_t)o->stdin_len);
+            if (c->wi.buf == NULL) { *err = "out of memory"; goto fail; }
+            memcpy(c->wi.buf, o->stdin_text, (size_t)o->stdin_len);
+            c->wi.len = (size_t)o->stdin_len;
+            c->wi.write = stdinW; stdinW = NULL;
+            c->tIn = CreateThread(NULL, 0, writer_thread, &c->wi, 0, NULL);
+            if (c->tIn == NULL) { *err = "cannot start stdin writer thread"; goto fail; }
+        } else {
+            CloseHandle(stdinW); stdinW = NULL;
+        }
+    }
+
+    c->doneEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (c->doneEv == NULL) { *err = "cannot create child completion event"; goto fail; }
+    c->monitor = CreateThread(NULL, 0, child_monitor_thread, c, 0, NULL);
+    if (c->monitor == NULL) { *err = "cannot start child monitor thread"; goto fail; }
 
     free(exe);
     if (track) {
@@ -583,15 +847,26 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     return c;
 
 fail:
+    if (c->proc && c->job) (void)wj_job_terminate(c->job, 1);
     if (outW) CloseHandle(outW);
     if (errW) CloseHandle(errW);
     if (nul) CloseHandle(nul);
     if (stdinR) CloseHandle(stdinR);
     if (stdinW) CloseHandle(stdinW);
     if (c->inW) CloseHandle(c->inW);
+    if (c->wi.write && c->tIn == NULL) { CloseHandle(c->wi.write); c->wi.write = NULL; }
+    if (c->tIn) { WaitForSingleObject(c->tIn, INFINITE); CloseHandle(c->tIn); }
+    if (c->tOut) { WaitForSingleObject(c->tOut, INFINITE); CloseHandle(c->tOut); }
+    if (c->tErr) { WaitForSingleObject(c->tErr, INFINITE); CloseHandle(c->tErr); }
+    if (c->monitor) { WaitForSingleObject(c->monitor, INFINITE); CloseHandle(c->monitor); }
+    if (c->proc) wj_proc_close(c->proc);
+    if (c->doneEv) CloseHandle(c->doneEv);
     if (c->outR) CloseHandle(c->outR);
     if (c->errR) CloseHandle(c->errR);
     if (c->job) wj_job_free(c->job);
+    free(c->wi.buf);
+    free(c->ro.buf);
+    free(c->re.buf);
     free(exe);
     free(c);
     return NULL;
@@ -609,23 +884,43 @@ fail:
  * Registered in the interp so a script can `close` them itself; cleanup looks
  * the names up again rather than keeping pointers, because a name that no longer
  * resolves is a fact while a stale pointer is a crash. */
-static void child_channels(Tcl_Interp *interp, child_t *c) {
+static int child_channels(Tcl_Interp *interp, child_t *c) {
     Tcl_Channel ci = Tcl_MakeFileChannel((void *)c->inW,  TCL_WRITABLE);
-    Tcl_Channel co = Tcl_MakeFileChannel((void *)c->outR, TCL_READABLE);
-    Tcl_Channel ce = Tcl_MakeFileChannel((void *)c->errR, TCL_READABLE);
-    c->inW = NULL; c->outR = NULL; c->errR = NULL;   /* Tcl owns them now */
+    if (ci == NULL) return -1;
+    c->inW = NULL;
     Tcl_RegisterChannel(interp, ci);
+    snprintf(c->chIn, sizeof c->chIn, "%s", Tcl_GetChannelName(ci));
+
+    Tcl_Channel co = Tcl_MakeFileChannel((void *)c->outR, TCL_READABLE);
+    if (co == NULL) { Tcl_UnregisterChannel(interp, ci); c->chIn[0] = '\0'; return -1; }
+    c->outR = NULL;
     Tcl_RegisterChannel(interp, co);
-    Tcl_RegisterChannel(interp, ce);
-    /* Line-oriented UTF-8 by default: the worker protocol is one JSON object per
-     * line, and a caller that wants bytes can fconfigure it back. */
-    Tcl_SetChannelOption(interp, ci, "-translation", "lf");
-    Tcl_SetChannelOption(interp, co, "-translation", "lf");
-    Tcl_SetChannelOption(interp, ce, "-translation", "lf");
-    Tcl_SetChannelOption(interp, ci, "-buffering", "line");
-    snprintf(c->chIn,  sizeof c->chIn,  "%s", Tcl_GetChannelName(ci));
     snprintf(c->chOut, sizeof c->chOut, "%s", Tcl_GetChannelName(co));
+
+    Tcl_Channel ce = Tcl_MakeFileChannel((void *)c->errR, TCL_READABLE);
+    if (ce == NULL) {
+        Tcl_UnregisterChannel(interp, ci);
+        Tcl_UnregisterChannel(interp, co);
+        c->chIn[0] = c->chOut[0] = '\0';
+        return -1;
+    }
+    c->errR = NULL;
+    Tcl_RegisterChannel(interp, ce);
     snprintf(c->chErr, sizeof c->chErr, "%s", Tcl_GetChannelName(ce));
+    /* Tcl 9 folds byte-oriented encoding into `-translation binary`; its old
+     * `-encoding binary` spelling is explicitly unsupported. Line buffering on
+     * stdin preserves the worker protocol default; callers can change it. */
+    if (Tcl_SetChannelOption(interp, ci, "-translation", "binary") != TCL_OK ||
+        Tcl_SetChannelOption(interp, co, "-translation", "binary") != TCL_OK ||
+        Tcl_SetChannelOption(interp, ce, "-translation", "binary") != TCL_OK ||
+        Tcl_SetChannelOption(interp, ci, "-buffering", "line") != TCL_OK) {
+        Tcl_UnregisterChannel(interp, ci);
+        Tcl_UnregisterChannel(interp, co);
+        Tcl_UnregisterChannel(interp, ce);
+        c->chIn[0] = c->chOut[0] = c->chErr[0] = '\0';
+        return -1;
+    }
+    return 0;
 }
 
 /* Close whatever the script has not already closed. */
@@ -640,20 +935,33 @@ static void child_channels_free(Tcl_Interp *interp, child_t *c) {
     c->chIn[0] = c->chOut[0] = c->chErr[0] = '\0';
 }
 
-/* Wait up to wait_ms; 0 = reaped (exit + output collected), 1 = timeout, -1 err. */
+/* Wait for whole-job completion, then join and close all owned I/O. */
 static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
     if (c->reaped) return 0;
-    long long code = 0;
-    int w = wj_wait_timeout(c->proc, wait_ms, &code, err);
-    if (w == 1) return 1;
-    if (w < 0) return -1;
-    c->exit_code = code;
-    if (c->tOut) { WaitForSingleObject(c->tOut, INFINITE); CloseHandle(c->tOut); c->tOut = NULL; }
-    if (c->tErr) { WaitForSingleObject(c->tErr, INFINITE); CloseHandle(c->tErr); c->tErr = NULL; }
+    DWORD w = WaitForSingleObject(c->doneEv, wait_ms);
+    if (w == WAIT_TIMEOUT) return 1;
+    if (w != WAIT_OBJECT_0) { *err = "waiting for child completion failed"; return -1; }
+    HANDLE threads[4] = { c->monitor, c->tIn, c->tOut, c->tErr };
+    int join_failed = 0;
+    for (int i = 0; i < 4; i++) {
+        if (threads[i] == NULL) continue;
+        if (WaitForSingleObject(threads[i], INFINITE) != WAIT_OBJECT_0) {
+            join_failed = 1;
+        }
+        CloseHandle(threads[i]);
+    }
+    c->monitor = c->tIn = c->tOut = c->tErr = NULL;
+    const char *io_error = NULL;
+    if (join_failed) io_error = "joining child I/O thread failed";
+    else if (c->monitor_failed) io_error = "child monitor failed";
+    else if (c->ro.error || c->re.error) io_error = "reading child output failed";
+    else if (c->wi.error && !c->killed) io_error = "writing child input failed";
     if (c->proc) { wj_proc_close(c->proc); c->proc = NULL; }
     if (c->outR) { CloseHandle(c->outR); c->outR = NULL; }
     if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
+    if (c->doneEv) { CloseHandle(c->doneEv); c->doneEv = NULL; }
     c->reaped = 1;
+    if (io_error != NULL) { *err = io_error; return -1; }
     return 0;
 }
 
@@ -670,8 +978,12 @@ static Tcl_Obj *child_dict_ex(Tcl_Interp *interp, child_t *c, int alive) {
     const char *st = alive ? "running"
                    : c->timeout ? "timeout" : c->killed ? "killed" : (c->exit_code == 0 ? "ok" : "error");
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("status", -1), Tcl_NewStringObj(st, -1));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("out", -1), Tcl_NewStringObj(c->ro.buf ? c->ro.buf : "", (Tcl_Size)c->ro.len));
-    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("err", -1), Tcl_NewStringObj(c->re.buf ? c->re.buf : "", (Tcl_Size)c->re.len));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("out", -1),
+                   Tcl_NewByteArrayObj((const unsigned char *)(c->ro.buf ? c->ro.buf : ""),
+                                       (Tcl_Size)c->ro.len));
+    Tcl_DictObjPut(interp, d, Tcl_NewStringObj("err", -1),
+                   Tcl_NewByteArrayObj((const unsigned char *)(c->re.buf ? c->re.buf : ""),
+                                       (Tcl_Size)c->re.len));
     Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(c->pid));
     Tcl_Obj *trunc = Tcl_NewListObj(0, NULL);
     if (c->ro.truncated) Tcl_ListObjAppendElement(interp, trunc, Tcl_NewStringObj("out", -1));
@@ -684,45 +996,44 @@ static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
     return child_dict_ex(interp, c, 0);
 }
 
-/* SETTLE AN EXPIRED CAP. `child start -timeout` is a promise about the child, so
- * it must not depend on which question the supervisor happens to ask. This lives
- * in one function called from EVERY path that observes a child -- `child info`,
- * `child wait`, `child list`, and `wait` -- because the first fix put it in
- * `child wait` alone and left two other doors open: a director polling
- * `child list`, or blocking in `wait -any`, still watched its children run past
- * their cap. Three ways to be wrong about one idea is the signature of a rule
- * enforced at call sites instead of at the thing it is about.
- * Returns 1 if this call ended the child. */
-static int child_settle_deadline(child_t *c) {
-    if (c == NULL || c->reaped || c->deadline == 0) return 0;
-    if (GetTickCount64() < c->deadline) return 0;
-    const char *err = NULL;
-    c->killed = 1;
-    c->timeout = 1;
-    if (c->job) wj_job_terminate(c->job, 1);
-    child_reap(c, WJ_INFINITE, &err);
-    return 1;
-}
-
 static void child_free(child_t *c) {
     if (c == NULL) return;
     if (!c->reaped) {
-        if (c->job) wj_job_terminate(c->job, 1); /* kill so the pipes EOF and readers finish */
+        if (c->job && wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
         const char *e = NULL;
-        child_reap(c, WJ_INFINITE, &e);
+        if (child_reap(c, WJ_INFINITE, &e) != 0 && !c->reaped) {
+            /* A live monitor or I/O thread still owns c. Leak on this exceptional
+             * cleanup path rather than freeing memory another thread may touch. */
+            return;
+        }
     }
     free(c->ro.buf);
     free(c->re.buf);
+    free(c->wi.buf);
+    if (c->doneEv) CloseHandle(c->doneEv);
     if (c->job) wj_job_free(c->job);
     free(c);
 }
 
 /* Build the command argv (UTF-8) from objv[cmd_index..objc). Caller frees. */
-static const char **build_argv(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int cmd_index, int *cargc) {
+static const char **build_argv(Tcl_Interp *interp, const char *dom, int objc,
+                               Tcl_Obj *const objv[], int cmd_index, int *cargc) {
     int n = objc - cmd_index;
     if (n <= 0) return NULL;
     const char **cargv = (const char **)malloc((size_t)n * sizeof(char *));
-    for (int k = 0; k < n; k++) cargv[k] = Tcl_GetString(objv[cmd_index + k]);
+    if (cargv == NULL) {
+        mt_error(interp, dom, "oserror", "out of memory");
+        return NULL;
+    }
+    for (int k = 0; k < n; k++) {
+        Tcl_Size len = 0;
+        cargv[k] = obj_no_nul(objv[cmd_index + k], &len);
+        if (cargv[k] == NULL) {
+            free(cargv);
+            mt_error(interp, dom, "badvalue", "command arguments may not contain NUL");
+            return NULL;
+        }
+    }
     *cargc = n;
     return cargv;
 }
@@ -744,9 +1055,34 @@ typedef struct {
     int       eof;
 } pump_t;
 
+static int valid_utf8(const unsigned char *s, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        unsigned c = s[i++];
+        if (c < 0x80) continue;
+        unsigned need, min, value;
+        if (c >= 0xC2 && c <= 0xDF) { need = 1; min = 0x80; value = c & 0x1F; }
+        else if (c >= 0xE0 && c <= 0xEF) { need = 2; min = 0x800; value = c & 0x0F; }
+        else if (c >= 0xF0 && c <= 0xF4) { need = 3; min = 0x10000; value = c & 0x07; }
+        else return 0;
+        if (n - i < need) return 0;
+        for (unsigned k = 0; k < need; k++) {
+            unsigned d = s[i++];
+            if ((d & 0xC0) != 0x80) return 0;
+            value = (value << 6) | (d & 0x3F);
+        }
+        if (value < min || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) return 0;
+    }
+    return 1;
+}
+
 /* Evaluate `cb line` at global scope (the line is one appended argument, no
  * trailing newline). Returns TCL_OK or the callback's error code. */
 static int pump_emit(Tcl_Interp *interp, Tcl_Obj *cb, const char *line, size_t len) {
+    if (!valid_utf8((const unsigned char *)line, len)) {
+        return mt_error(interp, "RUN", "badvalue",
+                        "callback output is not valid UTF-8; use captured bytearrays or child -channels for bytes");
+    }
     Tcl_Obj *cmd = Tcl_DuplicateObj(cb);
     Tcl_IncrRefCount(cmd);
     int rc = Tcl_ListObjAppendElement(interp, cmd, Tcl_NewStringObj(line, (Tcl_Size)len));
@@ -768,8 +1104,13 @@ static int pump_feed(Tcl_Interp *interp, pump_t *p, const char *data, size_t n) 
             if (rc != TCL_OK) return rc;
         } else {
             if (p->len + 1 > p->cap) {
-                p->cap = p->cap ? p->cap * 2 : 256;
-                p->line = (char *)realloc(p->line, p->cap);
+                size_t cap = p->cap ? p->cap * 2 : 256;
+                char *line = (char *)realloc(p->line, cap);
+                if (line == NULL) {
+                    return mt_error(interp, "RUN", "oserror", "out of memory while buffering callback line");
+                }
+                p->line = line;
+                p->cap = cap;
             }
             p->line[p->len++] = ch;
         }
@@ -822,9 +1163,7 @@ static int pump_flush(Tcl_Interp *interp, pump_t *p) {
 static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
     pump_t po = { c->outR, o->onout, &c->ro, NULL, 0, 0, 0 };
     pump_t pe = { c->errR, o->onerr, &c->re, NULL, 0, 0, 0 };
-    ULONGLONG deadline = (o->timeout_ms < 0) ? 0 : GetTickCount64() + (ULONGLONG)o->timeout_ms;
-    int rc = TCL_OK, exited = 0;
-    long long code = 0;
+    int rc = TCL_OK;
 
     for (;;) {
         int progressed = 0;
@@ -832,29 +1171,19 @@ static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
         if (rc == TCL_OK) rc = pump_once(interp, &pe, &progressed);
         if (rc != TCL_OK) break;
 
-        const char *e = NULL;
-        int w = wj_wait_timeout(c->proc, 0, &code, &e);
-        if (w != 1) { /* 0 = exited, <0 = wait error: drain both pipes and stop */
-            int pr;
-            do { pr = 0; rc = pump_once(interp, &po, &pr); } while (rc == TCL_OK && pr);
-            if (rc == TCL_OK) do { pr = 0; rc = pump_once(interp, &pe, &pr); } while (rc == TCL_OK && pr);
-            if (w == 0) c->exit_code = code;
-            exited = 1;
+        DWORD w = WaitForSingleObject(c->doneEv, 0);
+        if (w == WAIT_OBJECT_0) {
+            if (po.eof && pe.eof) break;
+        } else if (w != WAIT_TIMEOUT) {
+            rc = mt_error(interp, "RUN", "oserror", "waiting for child completion failed");
             break;
-        }
-        if (deadline && GetTickCount64() >= deadline) {
-            c->killed = 1; c->timeout = 1;
-            wj_job_terminate(c->job, 1); /* child will exit; caught on the next poll */
-            deadline = 0;                /* don't re-kill */
         }
         if (!progressed) Sleep(5);
     }
 
-    if (rc != TCL_OK && !exited) { /* callback failed while the child still runs: kill it */
-        wj_job_terminate(c->job, 1);
-        const char *e = NULL;
-        wj_wait_timeout(c->proc, 2000, &c->exit_code, &e);
-        c->killed = 1;
+    if (rc != TCL_OK) {
+        if (wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
+        InterlockedExchange(&c->killed, 1);
     }
     if (rc == TCL_OK) {
         rc = pump_flush(interp, &po);
@@ -863,10 +1192,9 @@ static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
 
     free(po.line);
     free(pe.line);
-    if (c->proc) { wj_proc_close(c->proc); c->proc = NULL; }
-    if (c->outR) { CloseHandle(c->outR); c->outR = NULL; }
-    if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
-    c->reaped = 1;
+    const char *e = NULL;
+    if (child_reap(c, WJ_INFINITE, &e) < 0 && rc == TCL_OK)
+        rc = mt_error(interp, "RUN", "oserror", e);
     return rc;
 }
 
@@ -875,29 +1203,9 @@ static int child_pump(Tcl_Interp *interp, child_t *c, run_opts *o) {
 static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
     run_opts o;
-    /* `-inherit` is a FLAG, and parse_opts takes its options in pairs, so it is
-     * filtered out before the shared parser sees it -- the same treatment
-     * `child start -channels` gets, and for the same reason: the option table is
-     * shared with verbs that must not grow a flag they do not implement. */
-    Tcl_Obj *fobjv[128];
-    int fobjc = 0;
-    int want_inherit = 0;
-    if (objc > 128) return mt_error(interp, "RUN", "usage", "too many arguments");
-    fobjv[fobjc++] = objv[0];
-    int rk = 1;
-    for (; rk < objc; rk++) {
-        const char *a = Tcl_GetString(objv[rk]);
-        if (strcmp(a, "--") == 0) break;
-        if (a[0] != '-' || a[1] == '\0') break;
-        if (strcmp(a, "-inherit") == 0) { want_inherit = 1; continue; }
-        fobjv[fobjc++] = objv[rk];
-        if (rk + 1 < objc) fobjv[fobjc++] = objv[rk + 1];
-        rk++;
-    }
-    for (; rk < objc; rk++) fobjv[fobjc++] = objv[rk];
-
-    if (parse_opts(interp, "RUN", fobjc, fobjv, 1, &o) != TCL_OK) return TCL_ERROR;
-    o.inherit = want_inherit;
+    unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
+                       OPT_STDIN | OPT_ENV | OPT_ONOUT | OPT_ONERR | OPT_INHERIT;
+    if (parse_opts(interp, "RUN", objc, objv, 1, allowed, &o) != TCL_OK) return TCL_ERROR;
     /* Inherit and capture are exclusive, for the reason channels and capture
      * are: there is no pipe of ours to read, so a callback could never fire and
      * `out` would always be empty. Refused rather than silently doing nothing. */
@@ -910,8 +1218,10 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
                         "-inherit cannot be combined with -stdin: the child reads our stdin");
     }
     int cargc = 0;
-    const char **cargv = build_argv(interp, fobjc, fobjv, o.cmd_index, &cargc);
-    if (cargv == NULL) return mt_error(interp, "RUN", "usage", "run ?-opt val ...? ?--? command ?arg ...?");
+    if (o.cmd_index >= objc)
+        return mt_error(interp, "RUN", "usage", "run ?-opt val ...? ?--? command ?arg ...?");
+    const char **cargv = build_argv(interp, "RUN", objc, objv, o.cmd_index, &cargc);
+    if (cargv == NULL) return TCL_ERROR;
 
     wchar_t envbuf[32768];
     if (o.env_obj != NULL) {
@@ -936,14 +1246,7 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
          * the callback's error is already in the interp result. */
         if (child_pump(interp, c, &o) != TCL_OK) { child_free(c); return TCL_ERROR; }
     } else {
-        unsigned wait_ms = (o.timeout_ms < 0) ? WJ_INFINITE : (unsigned)o.timeout_ms;
-        int w = child_reap(c, wait_ms, &err);
-        if (w == 1) { /* timed out: tree-kill and reap */
-            c->killed = 1;
-            c->timeout = 1;
-            wj_job_terminate(c->job, 1);
-            w = child_reap(c, WJ_INFINITE, &err);
-        }
+        int w = child_reap(c, WJ_INFINITE, &err);
         if (w < 0) { child_free(c); return mt_error(interp, "RUN", "oserror", err); }
     }
 
@@ -960,61 +1263,25 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     enum { START, WAIT, KILL, INFO, LIST, CLOSE };
     int idx;
     if (objc < 2) {
-        Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
-        return TCL_ERROR;
+        return mt_error(interp, "CHILD", "usage", "child subcommand ?arg ...?");
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK)
+        return mt_error(interp, "CHILD", "usage", "unknown child subcommand");
 
     if (idx == START) {
         run_opts o;
-        /* `-channels` is a FLAG, and parse_opts requires every option it sees to
-         * carry a value. It is lifted out here rather than taught to the shared
-         * parser, and that is a manifest decision as much as a parsing one:
-         * parse_opts's option set belongs to run, detach and pty spawn as well,
-         * none of which can hand back a channel, so a flag added there would have
-         * all four verbs declaring an option only one of them honours.
-         * `watch start -recursive` is the same shape for the same reason.
-         *
-         * The scan stops where parse_opts's does -- at `--` or at the first
-         * non-option -- because `child start -- worker.exe -channels` passes
-         * -channels to the CHILD, and eating it there would silently change the
-         * command being run. */
-        Tcl_Obj *fobjv[128];
-        int fobjc = 0;
-        int want_channels = 0;
-        if (objc > 128) return mt_error(interp, "CHILD", "usage", "too many arguments");
-        fobjv[fobjc++] = objv[0];
-        fobjv[fobjc++] = objv[1];
-        int k = 2;
-        for (; k < objc; k++) {
-            const char *a = Tcl_GetString(objv[k]);
-            if (strcmp(a, "--") == 0) break;
-            if (a[0] != '-' || a[1] == '\0') break;
-            if (strcmp(a, "-channels") == 0) { want_channels = 1; continue; }
-            fobjv[fobjc++] = objv[k];
-            if (k + 1 < objc) fobjv[fobjc++] = objv[k + 1];
-            k++;
-        }
-        for (; k < objc; k++) fobjv[fobjc++] = objv[k];
-
-        if (parse_opts(interp, "CHILD", fobjc, fobjv, 2, &o) != TCL_OK) return TCL_ERROR;
-        o.channels = want_channels;
-        /* Capture and channels are exclusive: one pipe cannot have two
-         * consumers, and -onout/-onerr are the capture path. Refused here rather
-         * than silently ignoring one of them. */
-        if (o.channels && (o.onout != NULL || o.onerr != NULL)) {
-            return mt_error(interp, "CHILD", "usage",
-                            "-channels cannot be combined with -onout or -onerr");
-        }
+        unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
+                           OPT_STDIN | OPT_ENV | OPT_CHANNELS;
+        if (parse_opts(interp, "CHILD", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
         if (o.channels && o.stdin_text != NULL) {
             return mt_error(interp, "CHILD", "usage",
                             "-channels cannot be combined with -stdin: write to the stdin channel instead");
         }
-        objc = fobjc;
-        objv = fobjv;
         int cargc = 0;
-        const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-        if (cargv == NULL) return mt_error(interp, "CHILD", "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
+        if (o.cmd_index >= objc)
+            return mt_error(interp, "CHILD", "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
+        const char **cargv = build_argv(interp, "CHILD", objc, objv, o.cmd_index, &cargc);
+        if (cargv == NULL) return TCL_ERROR;
         wchar_t envbuf[32768];
         if (o.env_obj != NULL) {
             const char *ee = NULL;
@@ -1028,15 +1295,25 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err, &code);
         free(cargv);
         if (c == NULL) return mt_error(interp, "CHILD", code, err);
-        if (o.channels) child_channels(interp, c);
+        if (o.channels && child_channels(interp, c) != 0) {
+            Tcl_Obj *detail = Tcl_DuplicateObj(Tcl_GetObjResult(interp));
+            Tcl_IncrRefCount(detail);
+            registry_remove(ctx, c);
+            child_free(c);
+            Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+                "cannot configure child channels: %s", Tcl_GetString(detail)));
+            Tcl_DecrRefCount(detail);
+            Tcl_SetErrorCode(interp, "MACHTELD", "CHILD", "oserror", NULL);
+            return TCL_ERROR;
+        }
         Tcl_SetObjResult(interp, Tcl_NewStringObj(c->token, -1));
         return TCL_OK;
     }
 
     if (idx == LIST) {
+        if (objc != 2) return mt_error(interp, "CHILD", "usage", "child list");
         Tcl_Obj *l = Tcl_NewListObj(0, NULL);
         for (child_t *c = ctx->children; c; c = c->next) {
-            child_settle_deadline(c);   /* listing is observing */
             Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(c->token, -1));
         }
         Tcl_SetObjResult(interp, l);
@@ -1044,60 +1321,32 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     }
 
     /* the rest take a token */
-    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    if (objc < 3) return mt_error(interp, "CHILD", "usage", "child subcommand token ?arg ...?");
     const char *token = Tcl_GetString(objv[2]);
     child_t *c = registry_find(ctx, token);
     if (c == NULL) return mt_error(interp, "CHILD", "nohandle", "no such child");
 
-    /* Every question about a child settles its cap first. The job object remains
-     * the backstop if this process dies without asking anything at all. */
-    child_settle_deadline(c);
-
     switch (idx) {
     case WAIT: {
         const char *err = NULL;
-        /* Two deadlines can apply: the one this call asks for, and the one the
-         * child was started with. The earlier wins -- a child given 5s at start
-         * does not get 30 more because someone waited generously. */
+        /* This timeout only bounds the wait; the autonomous start deadline is
+         * enforced by the monitor thread. */
+        if (objc != 3 && objc != 5)
+            return mt_error(interp, "CHILD", "usage", "child wait token ?-timeout duration?");
         long long want = -1;
-        for (int k = 3; k < objc; k++) {
-            const char *a = Tcl_GetString(objv[k]);
-            if (strcmp(a, "-timeout") != 0) return mt_error(interp, "CHILD", "usage", "unknown option");
-            if (k + 1 >= objc) return mt_error(interp, "CHILD", "usage", "option needs a value");
-            want = parse_duration_ms(Tcl_GetString(objv[k + 1]));
+        if (objc == 5) {
+            if (strcmp(Tcl_GetString(objv[3]), "-timeout") != 0)
+                return mt_error(interp, "CHILD", "usage", "unknown option");
+            want = parse_duration_ms(Tcl_GetString(objv[4]));
             if (want < 0) return mt_error(interp, "CHILD", "badvalue", "bad -timeout value");
-            k++;
+            if ((unsigned long long)want >= WJ_INFINITE)
+                return mt_error(interp, "CHILD", "badvalue", "bad -timeout value");
         }
-        /* WHICH deadline binds decides what expiry MEANS, and the first version
-         * of this got it wrong: it killed on either. That is right for the
-         * child's own deadline and wrong for the caller's bound -- "wait up to
-         * 2s for this" must not mean "and shoot it if it is not done". It made
-         * the polling pattern the docs recommend for a Tk tool silently fatal to
-         * every child it asked about. Found by building a supervisor that needed
-         * exactly that poll. */
         unsigned wait_ms = WJ_INFINITE;
-        int deadline_binds = 0;         /* the START deadline is the earlier one */
         if (want >= 0) wait_ms = (unsigned)want;
-        if (c->deadline != 0 && !c->reaped) {
-            ULONGLONG now = GetTickCount64();
-            ULONGLONG left = (now >= c->deadline) ? 0 : (c->deadline - now);
-            if (wait_ms == WJ_INFINITE || (ULONGLONG)wait_ms > left) {
-                wait_ms = (unsigned)left;
-                deadline_binds = 1;
-            }
-        }
         if (!c->reaped) {
             int w = child_reap(c, wait_ms, &err);
-            if (w == 1 && deadline_binds) {
-                /* The child's OWN deadline, declared at `child start -timeout`.
-                 * Tree-kill and reap: that is the contract it was launched under. */
-                c->killed = 1;
-                c->timeout = 1;
-                if (c->job) wj_job_terminate(c->job, 1);
-                w = child_reap(c, WJ_INFINITE, &err);
-            } else if (w == 1) {
-                /* The CALLER's bound. The child is untouched and still running;
-                 * say so and let them ask again. */
+            if (w == 1) {
                 Tcl_SetObjResult(interp, child_dict_ex(interp, c, 1));
                 return TCL_OK;
             }
@@ -1107,16 +1356,23 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         return TCL_OK;
     }
     case KILL: {
+        if (objc != 3 && objc != 4) return mt_error(interp, "CHILD", "usage", "child kill token ?exitCode?");
         unsigned code = 1;
         if (objc >= 4) {
             int v;
-            if (Tcl_GetIntFromObj(interp, objv[3], &v) != TCL_OK) return TCL_ERROR;
+            if (Tcl_GetIntFromObj(interp, objv[3], &v) != TCL_OK)
+                return mt_error(interp, "CHILD", "badvalue", "bad exit code");
             code = (unsigned)v;
         }
-        if (!c->reaped) { c->killed = 1; wj_job_terminate(c->job, code); }
+        if (!c->reaped) {
+            if (wj_job_terminate(c->job, code) != 0)
+                return mt_error(interp, "CHILD", "oserror", "cannot terminate child job");
+            InterlockedExchange(&c->killed, 1);
+        }
         return TCL_OK;
     }
     case INFO: {
+        if (objc != 3) return mt_error(interp, "CHILD", "usage", "child info token");
         Tcl_Obj *d = Tcl_NewDictObj();
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(c->token, -1));
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(c->pid));
@@ -1124,18 +1380,13 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         if (c->reaped) {
             running = 0;
         } else {
-            long long code = 0;
-            const char *e = NULL;
-            running = (wj_wait_timeout(c->proc, 0, &code, &e) == 1); /* 1 => still running */
+            running = WaitForSingleObject(c->doneEv, 0) == WAIT_TIMEOUT;
         }
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
         if (c->reaped) {
             Tcl_DictObjPut(interp, d, Tcl_NewStringObj("exit", -1), Tcl_NewWideIntObj((Tcl_WideInt)c->exit_code));
         }
-        /* The channels live HERE and not in the result of `child wait`, because
-         * `run` and `child wait` share one dict builder and the manifest derives
-         * `returns` from it -- a second result shape behind one verb would break
-         * the contract to save a field. Absent unless -channels was given. */
+        /* Channel names are present only for children started with -channels. */
         if (c->channels) {
             Tcl_DictObjPut(interp, d, Tcl_NewStringObj("stdin", -1), Tcl_NewStringObj(c->chIn, -1));
             Tcl_DictObjPut(interp, d, Tcl_NewStringObj("stdout", -1), Tcl_NewStringObj(c->chOut, -1));
@@ -1145,6 +1396,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         return TCL_OK;
     }
     case CLOSE:
+        if (objc != 3) return mt_error(interp, "CHILD", "usage", "child close token");
         /* Channels first: closing the stdin channel is what gives the worker its
          * EOF, so a well-behaved worker exits on its own and child_free has
          * nothing to kill. Doing it the other way round would terminate every
@@ -1164,16 +1416,21 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     int any = 0;
     int i = 1;
     if (i < objc && strcmp(Tcl_GetString(objv[i]), "-any") == 0) { any = 1; i++; }
+    else if (i < objc && Tcl_GetString(objv[i])[0] == '-')
+        return mt_error(interp, "WAIT", "usage", "unknown option");
     int n = objc - i;
     if (n <= 0) return mt_error(interp, "WAIT", "usage", "wait ?-any? token ...");
     if (n > MAXIMUM_WAIT_OBJECTS) return mt_error(interp, "WAIT", "usage", "too many children to wait on (max 64)");
+    for (int k = 0; k < n; k++) {
+        Tcl_Size len = 0;
+        const char *tok = obj_no_nul(objv[i + k], &len);
+        if (tok == NULL) return mt_error(interp, "WAIT", "badvalue", "handle token may not contain NUL");
+        for (int j = 0; j < k; j++) {
+            if (strcmp(tok, Tcl_GetString(objv[i + j])) == 0)
+                return mt_error(interp, "WAIT", "usage", "duplicate handle token");
+        }
+    }
 
-    /* THIS WAITS UNDER THE CAPS, not past them. `wait -any` used to block
-     * INFINITE, so a child given `-timeout 10m` would be waited on forever if it
-     * never exited -- the third door left open by enforcing the deadline at call
-     * sites. The wait is bounded by the nearest deadline among the children being
-     * waited on; when that comes due the loop settles it and comes round again,
-     * and the killed child is then simply one of the ready ones. */
     Tcl_Obj *done = Tcl_NewListObj(0, NULL);
     Tcl_IncrRefCount(done);
     HANDLE h[MAXIMUM_WAIT_OBJECTS];
@@ -1181,7 +1438,6 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     for (;;) {
         Tcl_SetListObj(done, 0, NULL);
         int nh = 0;
-        ULONGLONG nearest = 0;
         for (int k = 0; k < n; k++) {
             const char *tok = Tcl_GetString(objv[i + k]);
             waitable w;
@@ -1190,12 +1446,9 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
              * "either the build finished or a file changed" without polling. */
             child_t *c = registry_find(ctx, tok);
             if (c != NULL) {
-                child_settle_deadline(c);            /* waiting is observing */
                 w.token = c->token;
-                w.h     = (HANDLE)c->proc;
-                w.ready = c->reaped;
-                if (!c->reaped && c->deadline != 0 &&
-                    (nearest == 0 || c->deadline < nearest)) nearest = c->deadline;
+                w.h     = c->doneEv;
+                w.ready = c->reaped || WaitForSingleObject(c->doneEv, 0) == WAIT_OBJECT_0;
             } else if (!watch_waitable(ctx, tok, &w)) {
                 Tcl_DecrRefCount(done);
                 return mt_error(interp, "WAIT", "nohandle", "no such child or watch");
@@ -1211,18 +1464,23 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         /* -any and some are already done, or nothing left to wait on. */
         if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) break;
 
-        DWORD ms = INFINITE;
-        if (nearest != 0) {
-            ULONGLONG now = GetTickCount64();
-            ms = (now >= nearest) ? 0 : (DWORD)(nearest - now);
+        DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
+        if (r == WAIT_FAILED) {
+            Tcl_DecrRefCount(done);
+            return mt_error(interp, "WAIT", "oserror", "waiting for handles failed");
         }
-        DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, ms);
-        if (r == WAIT_TIMEOUT) continue;     /* a cap came due: settle, then re-ask */
         if (any) {
             if (r < WAIT_OBJECT_0 + (DWORD)nh) {
                 Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[r - WAIT_OBJECT_0].token, -1));
+            } else {
+                Tcl_DecrRefCount(done);
+                return mt_error(interp, "WAIT", "oserror", "unexpected wait result");
             }
         } else {
+            if (r != WAIT_OBJECT_0) {
+                Tcl_DecrRefCount(done);
+                return mt_error(interp, "WAIT", "oserror", "unexpected wait result");
+            }
             for (int k = 0; k < nh; k++) {
                 Tcl_ListObjAppendElement(interp, done, Tcl_NewStringObj(ws[k].token, -1));
             }
@@ -1236,24 +1494,24 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 
 /* ---- ::machteld::detach ------------------------------------------------ */
 
-/* Launch a fire-and-forget daemon: NUL stdio (no capture), broken away from the
- * root job so it outlives machteld (CREATE_BREAKAWAY_FROM_JOB; where the OS
- * forbids breakaway it falls back to a normal launch and dies with machteld).
- * Not tracked -- returns the pid. */
+/* Launch a fire-and-forget daemon with NUL stdio. Breakaway is strict: failure
+ * is reported rather than returning a PID for a process still tied to us. */
 static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     run_opts o;
-    if (parse_opts(interp, "DETACH", objc, objv, 1, &o) != TCL_OK) return TCL_ERROR;
+    unsigned allowed = OPT_DIR | OPT_ARG0 | OPT_ENV;
+    if (parse_opts(interp, "DETACH", objc, objv, 1, allowed, &o) != TCL_OK) return TCL_ERROR;
     int cargc = 0;
-    const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-    if (cargv == NULL) return mt_error(interp, "DETACH", "usage", "detach ?-opt val ...? ?--? command ?arg ...?");
+    if (o.cmd_index >= objc)
+        return mt_error(interp, "DETACH", "usage", "detach ?-opt val ...? ?--? command ?arg ...?");
+    const char **cargv = build_argv(interp, "DETACH", objc, objv, o.cmd_index, &cargc);
+    if (cargv == NULL) return TCL_ERROR;
     char *exe = resolve_exe(cargv[0]);
     if (exe == NULL) { free(cargv); return mt_error(interp, "DETACH", "notfound", "command not found on PATH"); }
 
     int         result = TCL_ERROR;
     const char *err = NULL;
     HANDLE      nul = NULL;
-    wj_job     *djob = NULL;
     void       *proch = NULL;
     int         pid = 0;
 
@@ -1270,18 +1528,11 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                       NULL, OPEN_EXISTING, 0, NULL);
     if (nul == INVALID_HANDLE_VALUE) { nul = NULL; mt_error(interp, "DETACH", "oserror", "open NUL failed"); goto cleanup; }
-    djob = wj_job_new(0, &err); /* plain job: closing our handle later won't kill it */
-    if (djob == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
-    if (o.mem || o.cpu_100ns) {
-        wj_limits lim = { 0 };
-        lim.process_memory_bytes = o.mem;
-        lim.process_cpu_100ns = o.cpu_100ns;
-        if (wj_job_set_limits(djob, &lim, &err) != 0) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
-    }
-    void *jobh[1] = { wj_job_handle(djob) };
     wj_stdio io = { nul, nul, nul };
-    const char **dargv = argv_with_arg0(&o, cargc, cargv);
-    int drc = wj_launch(exe, cargc, dargv, o.dir, jobh, 1, &io, 1 /*breakaway*/, o.env_block, &pid, &proch, &err);
+    const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
+    if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
+    int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
+                        1 /* strict breakaway */, o.env_block, &pid, &proch, &err);
     if (dargv != cargv) free((void *)dargv);
     if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);
@@ -1292,7 +1543,6 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
 
 cleanup:
     if (proch) wj_proc_close(proch); /* stop supervising; the daemon runs on */
-    if (djob) wj_job_free(djob);      /* close our handle -- plain job, no kill */
     if (nul) CloseHandle(nul);
     free(exe);
     free(cargv);
@@ -1304,9 +1554,8 @@ cleanup:
  * A ConPTY-backed child: the OS gives it a real pseudo-console (so isatty() is
  * true and it line-edits / colours / prompts as it would in a terminal), while
  * machteld drives its keyboard (send) and reads its screen (read) over two
- * pipes. Born-in-job like every other child, so it stays supervised. Output is
- * the raw VT/ANSI byte stream -- the `expect` loop matches on it as text;
- * clean-text terminal emulation is a later layer.
+ * pipes. It is born into the root and its per-PTY job like every supervised
+ * child, so it stays supervised. Output is the raw VT/ANSI byte stream.
  */
 
 typedef struct pty_s {
@@ -1336,23 +1585,40 @@ static DWORD WINAPI pty_drain_thread(LPVOID arg) {
     return 0;
 }
 
-static void pty_free(proc_ctx *ctx, pty_t *p) {
+static int pty_free(proc_ctx *ctx, pty_t *p) {
+    int failed = 0;
+    /* Drain concurrently while closing the pseudo-console so its final output
+     * cannot block console-host teardown. */
+    HANDLE drain = NULL;
+    if (p->outR != NULL) {
+        drain = CreateThread(NULL, 0, pty_drain_thread, p->outR, 0, NULL);
+        if (drain == NULL) return -1;
+    }
     pty_t **pp = &ctx->ptys;
     while (*pp) { if (*pp == p) { *pp = p->next; break; } pp = &(*pp)->next; }
-    /* Kill the child, then tear the pseudo-console down the way the ConPTY docs
-     * prescribe: DRAIN the output pipe on a thread WHILE ClosePseudoConsole runs,
-     * so the console host's final flush never blocks on an unread pipe. (Closing
-     * the read end first -- my earlier guess -- is exactly what deadlocked: the
-     * host blocks writing its shutdown output to a dead pipe.) */
-    if (p->job) wj_job_terminate(p->job, 1);
-    HANDLE drain = (p->outR != NULL) ? CreateThread(NULL, 0, pty_drain_thread, p->outR, 0, NULL) : NULL;
+    if (p->job && wj_job_terminate(p->job, 1) != 0) {
+        wj_job_close(p->job);
+        failed = 1;
+    }
     if (p->inW) { CloseHandle(p->inW); p->inW = NULL; }
     if (p->hpc) { ClosePseudoConsole(p->hpc); p->hpc = NULL; }
-    if (drain) { WaitForSingleObject(drain, 5000); CloseHandle(drain); }
+    if (drain) {
+        DWORD wr = WaitForSingleObject(drain, 5000);
+        if (wr != WAIT_OBJECT_0) {
+            CancelSynchronousIo(drain);
+            wr = WaitForSingleObject(drain, 5000);
+        }
+        if (wr != WAIT_OBJECT_0) {
+            CloseHandle(drain);
+            return -1; /* p remains allocated because the thread may still read its handle */
+        }
+        CloseHandle(drain);
+    }
     if (p->outR) { CloseHandle(p->outR); p->outR = NULL; }
     if (p->proc) wj_proc_close(p->proc);
     if (p->job) wj_job_free(p->job);
     free(p);
+    return failed ? -1 : 0;
 }
 
 /* *code as in child_launch: `notfound` for an unresolvable program, `launch`
@@ -1361,20 +1627,15 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
                         int cols, int rows, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
     if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
-    /* Same rename, same order: resolve from argv[0] as written, then say what
-     * the child reads. A pty child is as entitled to its own name as any other,
-     * and a `-arg0` the manifest advertises on `pty` must work on `pty`. */
-    const char **pargv = argv_with_arg0(o, cargc, cargv);
-    char *cmdText = wj_make_cmdline(cargc, pargv);
-    if (pargv != cargv) free((void *)pargv);
+    const char **pargv = argv_with_arg0(o, cargc, cargv, err);
+    if (pargv == NULL) { free(exe); return NULL; }
 
     HANDLE   inR = NULL, inW = NULL, outR = NULL, outW = NULL;
     HPCON    hpc = NULL;
     wj_job  *job = NULL;
-    LPPROC_THREAD_ATTRIBUTE_LIST al = NULL;
-    int      alInited = 0;
-    wchar_t *wApp = NULL, *wCmd = NULL, *wDir = NULL;
     pty_t   *result = NULL;
+    void    *proc = NULL;
+    int      pid = 0;
 
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(sa); sa.lpSecurityDescriptor = NULL; sa.bInheritHandle = FALSE;
@@ -1391,7 +1652,7 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
     CloseHandle(inR);  inR = NULL;
     CloseHandle(outW); outW = NULL;
 
-    job = wj_job_new(0, err);
+    job = wj_job_new(1, err);
     if (job == NULL) goto done;
     if (o->mem || o->cpu_100ns) {
         wj_limits lim = { 0 };
@@ -1400,63 +1661,36 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
     }
 
     void *jobh[2];
-    int njobs;
-    if (ctx->in_root) { jobh[0] = wj_job_handle(job); njobs = 1; }
-    else { jobh[0] = wj_job_handle(ctx->root); jobh[1] = wj_job_handle(job); njobs = 2; }
-
-    SIZE_T alSize = 0;
-    InitializeProcThreadAttributeList(NULL, 2, 0, &alSize);
-    al = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(alSize);
-    if (al == NULL || !InitializeProcThreadAttributeList(al, 2, 0, &alSize)) {
-        *err = "InitializeProcThreadAttributeList failed"; goto done;
-    }
-    alInited = 1;
-    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
-                                   jobh, (size_t)njobs * sizeof(HANDLE), NULL, NULL)) {
-        *err = "UpdateProcThreadAttribute(JOB_LIST) failed"; goto done;
-    }
-    if (!UpdateProcThreadAttribute(al, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-                                   hpc, sizeof(hpc), NULL, NULL)) {
-        *err = "UpdateProcThreadAttribute(PSEUDOCONSOLE) failed"; goto done;
-    }
-
-    wApp = u8_to_u16(exe);
-    wCmd = u8_to_u16(cmdText);
-    if (o->dir && o->dir[0]) wDir = u8_to_u16(o->dir);
-    if (wApp == NULL || wCmd == NULL) { *err = "bad exe or command line"; goto done; }
-
-    STARTUPINFOEXW si;
-    ZeroMemory(&si, sizeof si);
-    si.StartupInfo.cb = sizeof si;
-    si.lpAttributeList = al; /* ConPTY supplies stdio; no STARTF_USESTDHANDLES */
-
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof pi);
-    DWORD cflags = EXTENDED_STARTUPINFO_PRESENT;
-    if (o->env_block) cflags |= CREATE_UNICODE_ENVIRONMENT; /* -env supplied a UTF-16 block */
-    if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, cflags,
-                        o->env_block, wDir, &si.StartupInfo, &pi)) {
-        static char e[128];
-        snprintf(e, sizeof e, "CreateProcess failed (error %lu)", (unsigned long)GetLastError());
-        *err = e; goto done;
-    }
-    CloseHandle(pi.hThread);
+    jobh[0] = wj_job_handle(ctx->root);
+    jobh[1] = wj_job_handle(job);
+    int njobs = 2;
 
     result = (pty_t *)calloc(1, sizeof(*result));
-    result->hpc = hpc; result->job = job; result->proc = pi.hProcess;
-    result->pid = (int)pi.dwProcessId; result->inW = inW; result->outR = outR;
+    if (result == NULL) { *err = "out of memory"; goto done; }
+    if (wj_launch_pty(exe, cargc, pargv, o->dir, jobh, njobs, hpc,
+                      o->env_block, &pid, &proc, err) != 0) goto done;
+
+    result->hpc = hpc; result->job = job; result->proc = proc;
+    result->pid = pid; result->inW = inW; result->outR = outR;
     snprintf(result->token, sizeof result->token, "pty#%d", ++ctx->pty_counter);
     result->next = ctx->ptys; ctx->ptys = result;
     hpc = NULL; job = NULL; inW = NULL; outR = NULL; /* ownership moved to result */
 
 done:
-    if (alInited) DeleteProcThreadAttributeList(al);
-    free(al);
-    free(wApp); free(wCmd); free(wDir);
-    free(exe); free(cmdText);
+    if (pargv != cargv) free((void *)pargv);
+    free(exe);
     if (inR) CloseHandle(inR);
     if (outW) CloseHandle(outW);
     if (result == NULL) { /* failure: unwind what we made */
+        if (proc && job) (void)wj_job_terminate(job, 1);
+        if (proc) wj_proc_close(proc);
+        if (inW) CloseHandle(inW);
+        if (outR) CloseHandle(outR);
+        if (hpc) ClosePseudoConsole(hpc);
+        if (job) wj_job_free(job);
+    } else if (result->proc == NULL) {
+        free(result);
+        result = NULL;
         if (inW) CloseHandle(inW);
         if (outR) CloseHandle(outR);
         if (hpc) ClosePseudoConsole(hpc);
@@ -1470,15 +1704,19 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     static const char *const subs[] = { "spawn", "send", "read", "close", "list", "info", NULL };
     enum { SPAWN, SEND, READ, CLOSE, LIST, INFO };
     int idx;
-    if (objc < 2) { Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?"); return TCL_ERROR; }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (objc < 2) return mt_error(interp, "PTY", "usage", "pty subcommand ?arg ...?");
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK)
+        return mt_error(interp, "PTY", "usage", "unknown pty subcommand");
 
     if (idx == SPAWN) {
         run_opts o;
-        if (parse_opts(interp, "PTY", objc, objv, 2, &o) != TCL_OK) return TCL_ERROR;
+        unsigned allowed = OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 | OPT_ENV;
+        if (parse_opts(interp, "PTY", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
         int cargc = 0;
-        const char **cargv = build_argv(interp, objc, objv, o.cmd_index, &cargc);
-        if (cargv == NULL) return mt_error(interp, "PTY", "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
+        if (o.cmd_index >= objc)
+            return mt_error(interp, "PTY", "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
+        const char **cargv = build_argv(interp, "PTY", objc, objv, o.cmd_index, &cargc);
+        if (cargv == NULL) return TCL_ERROR;
         wchar_t envbuf[32768];
         if (o.env_obj != NULL) {
             const char *ee = NULL;
@@ -1496,6 +1734,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         return TCL_OK;
     }
     if (idx == LIST) {
+        if (objc != 2) return mt_error(interp, "PTY", "usage", "pty list");
         Tcl_Obj *l = Tcl_NewListObj(0, NULL);
         for (pty_t *p = ctx->ptys; p; p = p->next) {
             Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(p->token, -1));
@@ -1504,7 +1743,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         return TCL_OK;
     }
 
-    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    if (objc < 3) return mt_error(interp, "PTY", "usage", "pty subcommand token ?arg ...?");
     pty_t *p = pty_find(ctx, Tcl_GetString(objv[2]));
     if (p == NULL) return mt_error(interp, "PTY", "nohandle", "no such pty");
 
@@ -1514,13 +1753,15 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
      * PeekNamedPipe reports how much is waiting and leaves it in the pipe, which
      * is the only honest way to show "this terminal has something to say". */
     case INFO: {
-        if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "token"); return TCL_ERROR; }
+        if (objc != 3) return mt_error(interp, "PTY", "usage", "pty info token");
         Tcl_Obj *d = Tcl_NewDictObj();
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(p->token, -1));
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(p->pid));
-        long long code = 0;
         const char *e = NULL;
-        int running = (p->proc != NULL) && (wj_wait_timeout(p->proc, 0, &code, &e) == 1);
+        unsigned active = 0;
+        if (wj_job_active(p->job, &active, &e) != 0)
+            return mt_error(interp, "PTY", "oserror", e);
+        int running = active > 0;
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
         DWORD avail = 0;
         if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &avail, NULL)) avail = 0;
@@ -1529,21 +1770,31 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         return TCL_OK;
     }
     case SEND: {
-        if (objc != 4) { Tcl_WrongNumArgs(interp, 2, objv, "token text"); return TCL_ERROR; }
+        if (objc != 4) return mt_error(interp, "PTY", "usage", "pty send token bytes");
         Tcl_Size len;
         const char *s = Tcl_GetStringFromObj(objv[3], &len);
-        DWORD written = 0;
-        if (!WriteFile(p->inW, s, (DWORD)len, &written, NULL)) {
-            return mt_error(interp, "PTY", "oserror", "write to pty failed");
+        size_t off = 0;
+        while (off < (size_t)len) {
+            size_t left = (size_t)len - off;
+            DWORD want = left > (size_t)0x7ffff000u ? 0x7ffff000u : (DWORD)left;
+            DWORD written = 0;
+            if (!WriteFile(p->inW, s + off, want, &written, NULL) || written == 0)
+                return mt_error(interp, "PTY", "oserror", "write to pty failed");
+            off += written;
         }
         return TCL_OK;
     }
     case READ: {
-        int timeout_ms = 0;
-        if (objc >= 5 && strcmp(Tcl_GetString(objv[3]), "-timeout") == 0) {
+        if (objc != 3 && objc != 5)
+            return mt_error(interp, "PTY", "usage", "pty read token ?-timeout duration?");
+        DWORD timeout_ms = 0;
+        if (objc == 5) {
+            if (strcmp(Tcl_GetString(objv[3]), "-timeout") != 0)
+                return mt_error(interp, "PTY", "usage", "unknown option");
             long long t = parse_duration_ms(Tcl_GetString(objv[4]));
-            if (t < 0) return mt_error(interp, "PTY", "badvalue", "bad -timeout value");
-            timeout_ms = (int)t;
+            if (t < 0 || (unsigned long long)t >= WJ_INFINITE)
+                return mt_error(interp, "PTY", "badvalue", "bad -timeout value");
+            timeout_ms = (DWORD)t;
         }
         char buf[8192];
         ULONGLONG deadline = GetTickCount64() + (ULONGLONG)(timeout_ms > 0 ? timeout_ms : 0);
@@ -1567,27 +1818,17 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         return TCL_OK;
     }
     case CLOSE:
-        pty_free(ctx, p);
+        if (objc != 3) return mt_error(interp, "PTY", "usage", "pty close token");
+        if (pty_free(ctx, p) != 0)
+            return mt_error(interp, "PTY", "oserror", "pty teardown failed");
         return TCL_OK;
     }
     return TCL_OK;
 }
 
 /* ---- ::machteld::watch (ReadDirectoryChangesW) -------------------------- *
- *
- * A directory watch: the OS reports changes, a reader thread queues them, and
- * `watch read` drains the queue. Handle + blocking read, exactly like a child --
- * one lifetime model for the whole palette, and no event loop is required, so a
- * watch works the same in a script, in the REPL, and inside a Tk tool.
- *
- * Overlapped I/O with a stop event, rather than a synchronous read cancelled
- * from outside: teardown then needs no CancelSynchronousIo race, the thread
- * simply observes the stop event and leaves. (The ConPTY teardown further up is
- * the cautionary tale about guessing at shutdown order.)
- *
- * The reader thread never touches a Tcl_Obj -- Tcl values belong to the
- * interpreter's thread. It queues plain UTF-8, and `watch read` builds the dicts.
- */
+ * A worker owns overlapped directory I/O and queues plain UTF-8 records. Tcl
+ * objects are created only on the interpreter thread. */
 
 typedef struct {
     int   action;   /* FILE_ACTION_* */
@@ -1606,6 +1847,8 @@ typedef struct watch_s {
     HANDLE  dataEv;     /* manual-reset: events are queued (what `wait` blocks on) */
     HANDLE  readyEv;    /* manual-reset: the first read is ISSUED, so nothing is missed */
     int     armed;      /* did that first read actually take? */
+    int     failed;
+    DWORD   error;
     CRITICAL_SECTION lock;
     wevent *ev;
     size_t  n, cap;
@@ -1614,6 +1857,15 @@ typedef struct watch_s {
     char   *dir_path;   /* for diagnostics */
     struct watch_s *next;
 } watch_t;
+
+static void watch_fail(watch_t *w, DWORD error) {
+    EnterCriticalSection(&w->lock);
+    w->failed = 1;
+    w->error = error ? error : ERROR_GEN_FAILURE;
+    LeaveCriticalSection(&w->lock);
+    SetEvent(w->readyEv);
+    SetEvent(w->dataEv);
+}
 
 static watch_t *watch_find(proc_ctx *ctx, const char *token) {
     for (watch_t *w = ctx->watches; w; w = w->next) {
@@ -1650,10 +1902,10 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
     watch_t *w = (watch_t *)arg;
     /* DWORD-aligned, and large enough that ordinary bursts do not overflow it. */
     char *buf = (char *)malloc(64 * 1024);
-    if (buf == NULL) return 0;
+    if (buf == NULL) { watch_fail(w, ERROR_NOT_ENOUGH_MEMORY); return 0; }
     OVERLAPPED ov;
     HANDLE ioEv = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (ioEv == NULL) { free(buf); return 0; }
+    if (ioEv == NULL) { DWORD e = GetLastError(); free(buf); watch_fail(w, e); return 0; }
 
     const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
                          FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
@@ -1676,10 +1928,10 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
             w->armed = ok ? 1 : 0;
             SetEvent(w->readyEv);
         }
-        if (!ok) break;
+        if (!ok) { watch_fail(w, GetLastError()); break; }
         HANDLE hs[2] = { ioEv, w->stopEv };
         DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
-        if (r != WAIT_OBJECT_0) {
+        if (r == WAIT_OBJECT_0 + 1) {
             /* Stop requested: withdraw the read and reap it before leaving, so
              * the buffer is not written after this thread frees it. */
             CancelIoEx(w->dir, &ov);
@@ -1687,8 +1939,15 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
             GetOverlappedResult(w->dir, &ov, &got, TRUE);
             break;
         }
+        if (r != WAIT_OBJECT_0) {
+            watch_fail(w, GetLastError());
+            break;
+        }
         DWORD got = 0;
-        if (!GetOverlappedResult(w->dir, &ov, &got, FALSE)) break;
+        if (!GetOverlappedResult(w->dir, &ov, &got, FALSE)) {
+            watch_fail(w, GetLastError());
+            break;
+        }
 
         EnterCriticalSection(&w->lock);
         if (got == 0) {
@@ -1696,9 +1955,16 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
              * describe. Say so rather than pretending nothing did. */
             w->dropped++;
         } else {
-            char *p = buf;
-            for (;;) {
+            size_t off = 0;
+            const size_t header = offsetof(FILE_NOTIFY_INFORMATION, FileName);
+            while (off + header <= (size_t)got) {
+                char *p = buf + off;
                 FILE_NOTIFY_INFORMATION *fni = (FILE_NOTIFY_INFORMATION *)p;
+                if ((fni->FileNameLength & 1u) != 0 ||
+                    (size_t)fni->FileNameLength > (size_t)got - off - header) {
+                    w->failed = 1; w->error = ERROR_INVALID_DATA;
+                    break;
+                }
                 int wlen = (int)(fni->FileNameLength / sizeof(WCHAR));
                 int need = WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, NULL, 0, NULL, NULL);
                 if (need > 0) {
@@ -1712,23 +1978,43 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
                     }
                 }
                 if (fni->NextEntryOffset == 0) break;
-                p += fni->NextEntryOffset;
+                if ((size_t)fni->NextEntryOffset < header ||
+                    (size_t)fni->NextEntryOffset > (size_t)got - off) {
+                    w->failed = 1; w->error = ERROR_INVALID_DATA;
+                    break;
+                }
+                off += fni->NextEntryOffset;
             }
         }
-        if (w->n > 0 || w->dropped > 0) SetEvent(w->dataEv);
+        if (w->n > 0 || w->dropped > 0 || w->failed) SetEvent(w->dataEv);
+        int failed = w->failed;
         LeaveCriticalSection(&w->lock);
+        if (failed) break;
     }
     CloseHandle(ioEv);
     free(buf);
     return 0;
 }
 
-static void watch_free(proc_ctx *ctx, watch_t *w) {
+static int watch_free(proc_ctx *ctx, watch_t *w) {
     watch_t **pp = &ctx->watches;
     while (*pp) { if (*pp == w) { *pp = w->next; break; } pp = &(*pp)->next; }
     if (w->stopEv) SetEvent(w->stopEv);
     if (w->thread) {
-        WaitForSingleObject(w->thread, 5000);
+        DWORD r = WaitForSingleObject(w->thread, 5000);
+        if (r == WAIT_TIMEOUT) {
+            CancelIoEx(w->dir, NULL);
+            if (w->dir && w->dir != INVALID_HANDLE_VALUE) {
+                CloseHandle(w->dir);
+                w->dir = NULL;
+            }
+            r = WaitForSingleObject(w->thread, 5000);
+        }
+        if (r != WAIT_OBJECT_0) {
+            /* The thread still owns this structure. Leak it rather than freeing
+             * memory it may access; the close command reports the failure. */
+            return -1;
+        }
         CloseHandle(w->thread);
     }
     if (w->dir && w->dir != INVALID_HANDLE_VALUE) CloseHandle(w->dir);
@@ -1740,6 +2026,7 @@ static void watch_free(proc_ctx *ctx, watch_t *w) {
     free(w->ev);
     free(w->dir_path);
     free(w);
+    return 0;
 }
 
 /* The `wait` seam: a watch is ready when it has something queued. */
@@ -1747,7 +2034,7 @@ static int watch_waitable(proc_ctx *ctx, const char *token, waitable *out) {
     watch_t *w = watch_find(ctx, token);
     if (w == NULL) return 0;
     EnterCriticalSection(&w->lock);
-    int ready = (w->n > 0 || w->dropped > 0);
+    int ready = (w->n > 0 || w->dropped > 0 || w->failed);
     LeaveCriticalSection(&w->lock);
     out->token = w->token;
     out->h     = w->dataEv;
@@ -1782,13 +2069,14 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     enum { START, READ, CLOSE, LIST, INFO };
     int idx;
     if (objc < 2) {
-        Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
-        return TCL_ERROR;
+        return mt_error(interp, "WATCH", "usage", "watch subcommand ?arg ...?");
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", 0, &idx) != TCL_OK) return TCL_ERROR;
+    if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK)
+        return mt_error(interp, "WATCH", "usage", "unknown watch subcommand");
 
     if (idx == START) {
-        if (objc < 3) return mt_error(interp, "WATCH", "usage", "watch start dir ?-recursive?");
+        if (objc != 3 && objc != 4)
+            return mt_error(interp, "WATCH", "usage", "watch start dir ?-recursive?");
         const char *dir = Tcl_GetString(objv[2]);
         int recursive = 0;
         for (int i = 3; i < objc; i++) {
@@ -1815,6 +2103,10 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         w->stopEv  = CreateEventW(NULL, TRUE, FALSE, NULL);
         w->dataEv  = CreateEventW(NULL, TRUE, FALSE, NULL);
         w->readyEv = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (w->dir_path == NULL || w->stopEv == NULL || w->dataEv == NULL || w->readyEv == NULL) {
+            watch_free(ctx, w);
+            return mt_error(interp, "WATCH", "oserror", "cannot allocate watch resources");
+        }
         snprintf(w->token, sizeof w->token, "watch#%d", ++ctx->watch_counter);
         w->next = ctx->watches;
         ctx->watches = w;
@@ -1833,6 +2125,7 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     }
 
     if (idx == LIST) {
+        if (objc != 2) return mt_error(interp, "WATCH", "usage", "watch list");
         Tcl_Obj *l = Tcl_NewListObj(0, NULL);
         for (watch_t *w = ctx->watches; w; w = w->next) {
             Tcl_ListObjAppendElement(interp, l, Tcl_NewStringObj(w->token, -1));
@@ -1841,58 +2134,61 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         return TCL_OK;
     }
 
-    if (objc < 3) { Tcl_WrongNumArgs(interp, 2, objv, "token ?arg?"); return TCL_ERROR; }
+    if (objc < 3) return mt_error(interp, "WATCH", "usage", "watch subcommand token ?arg ...?");
     watch_t *w = watch_find(ctx, Tcl_GetString(objv[2]));
     if (w == NULL) return mt_error(interp, "WATCH", "nohandle", "no such watch");
 
-    /* INFO ANSWERS WITHOUT CONSUMING. `watch read` drains the queue, so a monitor
-     * that used it to show "what is pending" would be stealing events from the
-     * program it is monitoring -- an observer that changes what it observes is
-     * worse than no observer. `pending` is the queue depth read under the same
-     * lock the reader thread takes, and nothing is dequeued. */
+    /* Info reads queue state without consuming events. */
     if (idx == INFO) {
-        if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "token"); return TCL_ERROR; }
+        if (objc != 3) return mt_error(interp, "WATCH", "usage", "watch info token");
         Tcl_Obj *d = Tcl_NewDictObj();
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(w->token, -1));
-        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("dir", -1),
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("directory", -1),
                        Tcl_NewStringObj(w->dir_path ? w->dir_path : "", -1));
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("recursive", -1), Tcl_NewIntObj(w->recursive));
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("armed", -1), Tcl_NewIntObj(w->armed));
         EnterCriticalSection(&w->lock);
         size_t pending = w->n;
         int dropped = w->dropped;
+        int failed = w->failed;
+        DWORD watch_error = w->error;
         LeaveCriticalSection(&w->lock);
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pending", -1), Tcl_NewWideIntObj((Tcl_WideInt)pending));
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("dropped", -1), Tcl_NewIntObj(dropped));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("failed", -1), Tcl_NewIntObj(failed));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("win32", -1),
+                       Tcl_NewWideIntObj(watch_error));
         Tcl_SetObjResult(interp, d);
         return TCL_OK;
     }
 
     if (idx == CLOSE) {
-        watch_free(ctx, w);
+        if (objc != 3) return mt_error(interp, "WATCH", "usage", "watch close token");
+        if (watch_free(ctx, w) != 0)
+            return mt_error(interp, "WATCH", "oserror", "watch thread did not stop");
         return TCL_OK;
     }
     if (idx != READ) return TCL_OK;
 
-    /* READ. -timeout blocks for up to that long for the FIRST event; without it
-     * the read returns whatever is queued right now, which is what `pty read`
-     * does -- one habit for both. -raw returns the OS's stream unmerged.
-     *
-     * The `idx != READ` guard above is not dead code: this branch used to be an
-     * implicit fallthrough, and the manifest generator -- which attributes an
-     * option to the subcommand branch it sits in -- read these as belonging to
-     * `close`. Saying which subcommand this is makes the self-description right
-     * and the code plainer at once. */
+    /* -timeout waits for the first event; -raw disables coalescing. */
     long long tmo = 0;
     int raw = 0;
+    int saw_timeout = 0;
     if (idx == READ) {
         for (int i = 3; i < objc; i++) {
             const char *a = Tcl_GetString(objv[i]);
-            if (strcmp(a, "-raw") == 0) { raw = 1; continue; }
+            if (strcmp(a, "-raw") == 0) {
+                if (raw) return mt_error(interp, "WATCH", "usage", "duplicate -raw option");
+                raw = 1;
+                continue;
+            }
             if (strcmp(a, "-timeout") == 0) {
+                if (saw_timeout) return mt_error(interp, "WATCH", "usage", "duplicate -timeout option");
                 if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
                 tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
-                if (tmo < 0) return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
+                if (tmo < 0 || (unsigned long long)tmo >= WJ_INFINITE)
+                    return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
+                saw_timeout = 1;
                 continue;
             }
             return mt_error(interp, "WATCH", "usage", "unknown option");
@@ -1902,10 +2198,21 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         EnterCriticalSection(&w->lock);
         int have = (w->n > 0 || w->dropped > 0);
         LeaveCriticalSection(&w->lock);
-        if (!have) WaitForSingleObject(w->dataEv, (DWORD)tmo);
+        if (!have) {
+            DWORD wr = WaitForSingleObject(w->dataEv, (DWORD)tmo);
+            if (wr != WAIT_OBJECT_0 && wr != WAIT_TIMEOUT)
+                return mt_error(interp, "WATCH", "oserror", "waiting for watch events failed");
+        }
     }
 
     EnterCriticalSection(&w->lock);
+    if (w->failed) {
+        DWORD watch_error = w->error;
+        LeaveCriticalSection(&w->lock);
+        char msg[96];
+        snprintf(msg, sizeof msg, "directory watch failed (error %lu)", (unsigned long)watch_error);
+        return mt_error(interp, "WATCH", "oserror", msg);
+    }
     size_t n = w->n;
     wevent *ev = w->ev;
     int dropped = w->dropped;
@@ -1925,20 +2232,8 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
                 watch_event_obj(ev[i].path, watch_action_name(ev[i].action), NULL));
         }
     } else {
-        /* Coalesce to ONE event per path. The batch is "everything since your
-         * last read", so the merge is a function of the event sequence and the
-         * read points, with no hidden timer -- same reads, same answer (creed
-         * 3). A debounce window would have made the result depend on the clock.
-         *
-         * Which action survives is a precedence, not "the last one": saving a
-         * new file emits added THEN modified, and reporting `modified` would
-         * throw away the more informative half. So: gone beats new beats moved
-         * beats touched.
-         *   removed  -- the last thing that happened was its removal
-         *   added    -- it appeared in this batch and is still there
-         *   renamed  -- it moved (and `from` names where it came from)
-         *   modified -- it was only written to
-         */
+        /* Coalesce deterministically per read batch. Action precedence is
+         * removed, added, renamed, then modified. */
         for (size_t i = 0; i < n; i++) {
             if (ev[i].action != FILE_ACTION_RENAMED_OLD_NAME || ev[i].done) continue;
             for (size_t j = i + 1; j < n; j++) {
@@ -1957,8 +2252,12 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             for (size_t j = i; j < n; j++) {
                 if (ev[j].done || ev[j].path == NULL || strcmp(ev[j].path, path) != 0) continue;
                 switch (ev[j].action) {
-                    case FILE_ACTION_REMOVED:          removed = 1; added = 0; break;
-                    case FILE_ACTION_ADDED:            added = 1; removed = 0; break;
+                    /* These are monotonic observations. Clearing the opposite
+                     * flag made the last of removed/added win, so an identical
+                     * batch could violate the documented precedence solely
+                     * because Windows reported its lower-priority event later. */
+                    case FILE_ACTION_REMOVED:          removed = 1; break;
+                    case FILE_ACTION_ADDED:            added = 1; break;
                     case FILE_ACTION_RENAMED_NEW_NAME: renamed = 1; if (ev[j].from) from = ev[j].from; break;
                     default: break;
                 }
@@ -1979,30 +2278,47 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
 /* Tear down any open pseudo-consoles and watches at exit, so a REPL user who
  * spawns one and just quits leaves no wedged console host or reader thread. */
-static void proc_atexit(void *cd) {
+static void proc_cleanup(void *cd) {
     proc_ctx *ctx = (proc_ctx *)cd;
-    while (ctx->ptys) pty_free(ctx, ctx->ptys);
-    while (ctx->watches) watch_free(ctx, ctx->watches);
+    while (ctx->children) {
+        child_t *c = ctx->children;
+        ctx->children = c->next;
+        child_free(c);
+    }
+    while (ctx->ptys) {
+        if (pty_free(ctx, ctx->ptys) != 0) break;
+    }
+    while (ctx->watches) {
+        if (watch_free(ctx, ctx->watches) != 0) break;
+    }
+    if (ctx->root) wj_job_free(ctx->root);
+}
+
+static void proc_atexit(void *cd) {
+    proc_cleanup(cd);
 }
 
 int Machteldproc_Init(Tcl_Interp *interp) {
     const char *err = NULL;
-    wj_job *root = wj_job_new(1, &err); /* KILL_ON_JOB_CLOSE: nothing outlives machteld */
+    wj_job *root = wj_job_new(1, &err); /* closing the root kills every supervised tree */
     if (root == NULL) {
         Tcl_SetObjResult(interp, Tcl_NewStringObj(err ? err : "root job creation failed", -1));
         return TCL_ERROR;
     }
-    const char *ignore = NULL;
-    int in_root = (wj_job_assign(root, (void *)GetCurrentProcess(), &ignore) == 0);
-    /* Let detached daemons break away from root (so they outlive machteld).
-     * Non-fatal: where the OS refuses, detach falls back to a normal launch. */
-    (void)wj_job_allow_breakaway(root, &ignore);
-
     proc_ctx *ctx = (proc_ctx *)calloc(1, sizeof(*ctx));
+    if (ctx == NULL) {
+        wj_job_free(root);
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("out of memory", -1));
+        return TCL_ERROR;
+    }
     ctx->root = root;
-    ctx->in_root = in_root;
 
-    Tcl_Eval(interp, "namespace eval ::machteld {}");
+    if (Tcl_Eval(interp, "namespace eval ::machteld {}") != TCL_OK ||
+        Tcl_PkgProvide(interp, "machteld::proc", MACHTELD_VERSION) != TCL_OK) {
+        proc_cleanup(ctx);
+        free(ctx);
+        return TCL_ERROR;
+    }
     Tcl_CreateObjCommand(interp, "::machteld::run", RunCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::child", ChildCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::wait", WaitCmd, ctx, NULL);
@@ -2010,6 +2326,5 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::pty", PtyCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::watch", WatchCmd, ctx, NULL);
     Tcl_CreateExitHandler(proc_atexit, ctx);
-    Tcl_PkgProvide(interp, "machteld::proc", "0.1");
     return TCL_OK;
 }

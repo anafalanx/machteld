@@ -1,22 +1,5 @@
-/*
- * machteld_gui_main.c -- Windows GUI (no-console) entry point for machteld tools.
- *
- * The sibling of machteld_main.c: the same statically-linked Tcl/Tk 9 and the
- * same appended-zipfs self-mount, but GUI-subsystem (WinMain, -mwindows) so a
- * windowed tool packaged on this bare shows no console window. It runs Tk_Main --
- * Tk is initialized up front (a GUI tool always wants it) -- and the tool's
- * main.tcl in the appended archive is the startup script. The native libraries
- * and the prelude come from the SHARED Machteld_RegisterLibs (machteld_appinit.c),
- * identical to the console host: the two bares differ ONLY here, in entry point
- * and PE subsystem.
- *
- * Modeled on Tk's win/winMain.c (the source of wish90s.exe) and els_main.c, the
- * lineage's proven GUI starpack host.
- *
- * Build: -municode -DUNICODE -D_UNICODE -DSTATIC_BUILD=1 -mwindows;
- *        USE_TCL_STUBS undefined (else Tk_Main is a TIP-596 thunk that
- *        LoadLibrary's tcl90.dll and crashes in a static exe).
- */
+/* Windows GUI host for wrapped tools. It requires a Unicode, static Tcl/Tk
+ * build and an embedded main.tcl selected by AppHook. */
 #undef USE_TCL_STUBS
 #include "tk.h"
 #define WIN32_LEAN_AND_MEAN
@@ -31,10 +14,11 @@ int _CRT_glob = 0; /* keep the mingw CRT from glob-expanding argv */
 #endif
 
 static int Machteld_GuiAppInit(Tcl_Interp *interp);
+static int init_tk_preserving_args(Tcl_Interp *interp);
 
 /*
  * _tWinMain -- GUI entry (WinMain under -municode). Normalize argv[0], let
- * TclZipfs_AppHook self-mount the zip appended to THIS exe (which registers the
+ * TclZipfs_AppHook self-mount the appended zip (which registers the
  * tool's main.tcl as the startup script), then hand off to Tk_Main.
  */
 int APIENTRY
@@ -68,13 +52,26 @@ _tWinMain(
     TclZipfs_AppHook(&argc, &argv);
 #endif
 
+    /* Wrapped applications own their command line except for this explicit,
+     * namespaced runtime-introspection escape.  Keep Tk-looking arguments and
+     * every other spelling untouched. */
+    if (Tcl_GetStartupScript(NULL) != NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--machteld-docs")) == 0) {
+        for (int i = 1; i + 1 < argc; i++) {
+            argv[i] = argv[i + 1];
+        }
+        argc--;
+        argv[argc] = NULL;
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS_GUI);
+    }
+
     /*
      * Refuse to run as a bare Tcl-script host. If the appended payload did NOT
      * mount (a stripped/corrupt exe), TclZipfs_AppHook registered no startup
-     * script, and Tk_Main would fall back to wish semantics and SOURCE the first
+     * script, and Tk_Main would fall back to wish semantics and source the first
      * file argument -- a double-clicked "document" would then execute arbitrary
      * Tcl. A packaged tool always registers its main.tcl here, so this only fires
-     * on a damaged binary. (Carried from els_main.c.)
+     * on a damaged binary.
      */
     if (Tcl_GetStartupScript(NULL) == NULL) {
         MessageBoxW(NULL,
@@ -94,17 +91,63 @@ _tWinMain(
  * interactive REPL: a GUI tool runs its main.tcl and lives in its event loop.
  */
 static int
+init_tk_preserving_args(Tcl_Interp *interp)
+{
+    Tcl_Obj *argv = Tcl_GetVar2Ex(interp, "argv", NULL, TCL_GLOBAL_ONLY);
+    Tcl_Obj *argc = Tcl_GetVar2Ex(interp, "argc", NULL, TCL_GLOBAL_ONLY);
+    if (argv == NULL || argc == NULL) {
+        return Machteld_EntryError(interp, "state",
+            "host application arguments are unavailable before Tk initialization");
+    }
+
+    Tcl_Obj *saved_argv = Tcl_DuplicateObj(argv);
+    Tcl_Obj *saved_argc = Tcl_DuplicateObj(argc);
+    Tcl_IncrRefCount(saved_argv);
+    Tcl_IncrRefCount(saved_argc);
+
+    int status = Tk_Init(interp);
+    Tcl_InterpState tk_state = Tcl_SaveInterpState(interp, status);
+
+    int argv_ok = Tcl_SetVar2Ex(interp, "argv", NULL, saved_argv,
+        TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) != NULL;
+    int argc_ok = Tcl_SetVar2Ex(interp, "argc", NULL, saved_argc,
+        TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) != NULL;
+    Tcl_DecrRefCount(saved_argv);
+    Tcl_DecrRefCount(saved_argc);
+
+    if (!argv_ok || !argc_ok) {
+        Tcl_DiscardInterpState(tk_state);
+        return Machteld_EntryError(interp, "state",
+            "cannot restore application arguments after Tk initialization");
+    }
+    return Tcl_RestoreInterpState(interp, tk_state);
+}
+
+static int
 Machteld_GuiAppInit(
     Tcl_Interp *interp)
 {
+    if (Machteld_PreInit(interp) != TCL_OK) {
+        Machteld_Fatal(interp);
+    }
     if (Tcl_Init(interp) == TCL_ERROR) {
-        return TCL_ERROR;
+        Machteld_Fatal(interp);
     }
-    if (Tk_Init(interp) == TCL_ERROR) {
-        return TCL_ERROR;
+    if (Machteld_GetHostMode() == MACHTELD_HOST_DOCS_GUI) {
+        /* Runtime documentation is a headless control route even in a GUI
+         * wrapper.  Make Tk available exactly as the console host does, but do
+         * not create a transient root window merely to answer a query. */
+        Tcl_StaticLibrary(NULL, "Tk", Tk_Init, Tk_SafeInit);
+    } else {
+        if (init_tk_preserving_args(interp) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+        Tcl_StaticLibrary(interp, "Tk", Tk_Init, Tk_SafeInit);
     }
-    Tcl_StaticLibrary(interp, "Tk", Tk_Init, Tk_SafeInit);
 
     /* Native libraries + the prelude are shared with the console host. */
-    return Machteld_RegisterLibs(interp);
+    if (Machteld_RegisterLibs(interp) != TCL_OK) {
+        Machteld_Fatal(interp);
+    }
+    return TCL_OK;
 }

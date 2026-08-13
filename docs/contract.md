@@ -1,163 +1,184 @@
 ---
-type: convention
-title: The contract — everything is a dict
-description: Data, failure, and self-knowledge share one shape — a Tcl dict.
-tags: [machteld, contract, dict, errors, introspection]
-timestamp: 2026-07-07
+type: contract
+title: Runtime contract
+description: Entry, value, option, time, error, handle, and metadata conventions.
+tags: [machteld, contract, api, errors]
 ---
 
-# The contract — everything is a dict
+# Runtime contract
 
-The whole surface obeys one invariant: **data, failure, and self-knowledge are the same shape — a Tcl dict** (JSON-isomorphic). One mental model covers output, errors, and the capability manifest.
+This file states the cross-command rules. Command-specific vocabulary is in the
+[palette](palette.md); the live authority is `manifest`.
 
-- **Return values.** Data verbs return dicts; stateful verbs return an **opaque handle token** (see [execution model](execution-model.md)).
-- **Errors.** Native Tcl `try` / `throw`; every palette error carries a structured `-errorcode {DOMAIN CODE detail}` plus a machine-readable detail dict. Errors are part of the contract, not prose to string-match.
-- **Introspection.** The **manifest** ([the creed](creed.md) principle 4). `manifest` takes no arguments and returns one dict describing the whole palette — navigate it with `dict get`, so no subcommand vocabulary is invented and none has to be frozen.
+## Platform
+
+The 0.10.0 artifact targets x64 Windows 10 version 1809 or newer, including
+Windows 11 and corresponding Windows Server releases. ConPTY determines the OS
+floor. Other architectures and older Windows versions are not release targets.
+
+## Entry and package
+
+A direct program is a readable UTF-8 file whose first executable command is one
+of these literal forms. `.tcl` is conventional, not required:
 
 ```tcl
-set r [run -timeout 30s -- some.exe]      ;# → {exit 0  status ok  out "…"  err ""  pid 8123  truncated {}}
-try { run -- missing.exe } trap {MACHTELD RUN notfound} {m opts} {
-    dict get $opts -errorcode             ;# {MACHTELD RUN notfound}
+package require machteld
+package require machteld 0.10.0
+package require -exact machteld 0.10.0
+```
+
+The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
+is accepted. The host parses this boundary before evaluating the file. A missing
+file fails with `{MACHTELD ENTRY notfound}` and a file without the opt-in fails
+with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
+`{MACHTELD ENTRY payload}`. These startup failures exit before the program can
+be evaluated. Programs from stdin are not accepted.
+
+Once loaded, `package require machteld` returns `0.10.0`. Palette commands are in
+`::machteld`, which is on the global namespace path. A nested namespace may add
+`namespace path ::machteld` or use qualified names.
+
+## Values
+
+- Commands return Tcl values; they do not print as a side effect unless output
+  is their stated purpose (`log`, `worker serve`, or an inherited child).
+- Records are dicts, collections are lists, flags are `0` or `1`, and byte
+  payloads are bytearrays. JSON container identity is preserved by `json`.
+- Filesystem results use normalized Tcl paths. A returned path is data, not a
+  shell command line.
+- Process capture returns a dict containing `status`, `exit`, `pid`, `out`,
+  `err`, and `truncated`. `status` distinguishes normal exit, timeout, and other
+  termination outcomes; consult the value rather than parsing prose. Buffered
+  capture retains the first 1 MiB of each stream. `truncated` lists `out`
+  and/or `err` when that limit was exceeded. Use `run -onout/-onerr`, `child
+  start -channels`, or inherited output when a stream can be larger. `exit` is
+  the root process's exit code; `status` describes the supervised tree. A root
+  can therefore exit `0` before its surviving descendant reaches a lifetime
+  deadline, producing `status timeout` with `exit 0`.
+
+## Options, commands, and durations
+
+Palette options use a single leading dash. Program arguments after a launcher
+are separated with `--` whenever an option-shaped argument would be ambiguous:
+
+```tcl
+run -timeout 30s -dir C:/work -- tool.exe -its-own-option
+```
+
+Durations are exactly one or more decimal digits followed by `ms`, `s`, `m`, or
+`h`: no sign, decimal point, whitespace, or bare number. Thus `500ms` and `2h`
+are valid while `0.5s`, `+5s`, and `100` are not. HTTP additionally refuses a
+zero timeout because WinHTTP defines zero as infinite, which would violate an
+explicit timeout. For `http`, this timeout is applied by WinHTTP to each network
+phase, not as one wall-clock deadline over the complete operation.
+
+Sizes are a non-negative decimal integer followed by an optional binary suffix
+`B`, `K`, `KB`, `M`, `MB`, `G`, or `GB`, case-insensitively. No decimal point,
+sign, or whitespace is accepted. `8M` and `8388608` therefore name the same
+size. The grammar is shared by byte/body and memory limits. A process memory cap
+may be zero to mean "no cap"; HTTP `-maxbody` must be positive.
+
+Unknown options, missing values, and wrong public arity are errors. Subcommand
+options are not silently accepted by another branch.
+
+## Errors
+
+A domain failure defined by Machteld has a three-part Tcl `-errorcode`:
+
+```text
+MACHTELD DOMAIN code
+```
+
+The domain identifies the command family, not the internal helper. The lowercase
+code is stable enough to trap; the message is a diagnostic for a person and may
+contain operating-system or SQLite text.
+
+Tcl itself can reject a call before a Machteld domain failure is appropriate.
+Wrong arity, a failed ensemble/subcommand lookup, or Tcl value conversion may
+therefore retain core codes such as `TCL WRONGARGS`, `TCL LOOKUP`, or `TCL VALUE`.
+Manifest `codes` is the closed set of `{MACHTELD DOMAIN code}` failures for that
+command, not a claim to replace Tcl's own language-level errors.
+
+```tcl
+try {
+    store get missing
+} trap {MACHTELD STORE notfound} {message options} {
+    # expected absence
 }
 ```
 
-## The manifest — the palette describing itself
+The current domains are `ENTRY`, `RUN`, `CHILD`, `WAIT`, `DETACH`, `PTY`,
+`WATCH`, `MTPS`, `DIRS`, `HTTP`, `HASH`, `JSON`, `STORE`, `CLI`, `LOG`,
+`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
+`badvalue`, `notfound`, `nohandle`, `timeout`, `launch`, and `oserror`; each
+manifest entry lists its closed set of Machteld-domain codes.
 
-```tcl
-dict keys [manifest]                              ;# every palette verb
-dict get [manifest] run options                   ;# {-cpu -dir -env -mem -onerr -onout -stdin -timeout}
-dict get [manifest] run returns                   ;# {err exit out pid status truncated}
-dict get [manifest] pty subcommands read options  ;# -timeout
-dict get [manifest] child codes                   ;# what `child` can throw
-```
+A failure raised by a worker handler crosses the JSON-lines boundary as data.
+`pmap` re-raises a handler's meaningful error code unchanged. Protocol failures
+use `WORKER parse/notfound/usage/failed`; an item that repeatedly kills workers
+is returned by the pool with code `{MACHTELD POOL poison}`. Manifest
+`replycodes` records these data-level protocol codes separately from raised
+`codes`; handler-defined reply codes are necessarily open-ended.
 
-Fields: `kind` (`c` or `tcl`), `domain`, `codes`, `options`, `returns`, `subcommands` (a dict
-of subcommand → `{options …}`), and `args` for Tcl-written verbs.
+## Handles and lifetime
 
-**Nothing here is hand-maintained**, which is what separates self-description from a second
-copy of the truth. The two halves are derived by two means, for one reason — C cannot be asked
-about itself at runtime and Tcl can:
+`child`, `pty`, `watch`, `hash start`, and `pool create` return opaque tokens.
+Only their owning command accepts them; stale or foreign tokens fail instead of
+being guessed. `info` observes a handle without consuming it. `close` is the
+explicit release operation except for incremental hashes, where `hash final`
+returns the digest and consumes the token.
 
-- **The C half** is extracted from `src/*.c` at build time by `tools/genmanifest.tcl`: the
-  `Tcl_GetIndexFromObj` subcommand tables, the option literals the parser compares against, the
-  result-dict keys, and every domain and code reaching `Tcl_SetErrorCode`.
-- **The Tcl half** is read out of the live interpreter by `manifest` itself, from `info args`
-  and **`info body`** — the verb's actual body in the actual interpreter, so it cannot drift and
-  it works inside a tool sourced from the exe's own zipfs. A prelude verb's `domain` and `codes` come from its `Fail`
-  calls, its `options` from the two idioms the prelude uses to test them (a `switch` arm and an
-  equality against a literal), and a shared helper told its caller's domain (`_dur2ms PTY $v`)
-  has what it raises attributed to the verb that called it — the same problem `parse_opts` poses
-  on the C side, solved the same way.
-  `namespace ensemble configure -map` covers a C verb the prelude extends, which is how
-  `pty expect` appears beside the five subcommands written in C **with its own `-timeout` and its
-  own `timeout` code**: a subcommand written in Tcl is exactly as visible as one written in C.
+The host owns, but does not belong to, its root kill-on-close Job Object. All
+supervised child and PTY trees are born into that root job and a per-command job.
+`scope` closes children born inside its body on every exit path. `detach` joins
+neither job: success means the new process has been verified outside every
+Windows job. It is the only API that intentionally creates a process tree
+outside that lifetime. If an enclosing Windows job forbids breakaway, it fails
+with `{MACHTELD DETACH launch}` rather than return a still-attached PID.
 
-  Until 2026-08-09 this half stopped at `kind tcl` plus `args`, so the prelude's verbs had no
-  domain, no codes and no options at all. That was survivable for two verbs and would not have
-  been for [the standard library](stdlib.md), which lands in the prelude — creed 4 would have
-  decayed in exact proportion to how much library got added.
+## Store
 
-The suite holds the result to the *running binary*: subcommands are compared against what
-`Tcl_GetIndexFromObj` actually enumerates in its error message, `returns` against the dict `run`
-actually answers with, and declared options against what the parser actually accepts. Adding a
-subcommand to the C table without exposing it fails the suite.
+`store` is a narrow key/value API over statically linked SQLite, not an SQL
+escape hatch. Keys are text. Values are binary-safe: `put` stores the exact Tcl
+bytes of a bytearray; other Tcl values are stored using their UTF-8 string
+representation. `get` always returns a bytearray. A missing key raises
+`{MACHTELD STORE notfound}`. `del` returns `1` when it removed a key and `0` when
+the key did not exist. Operations before `open` raise `STORE notopen`.
 
-This invariant is why [the creed](creed.md)'s "palette describes itself" and "errors are the contract" are cheap to honour.
+`store open` creates an in-memory database. `store open path` creates the
+key/value table when needed in a durable database. Both configure a five-second
+SQLite busy timeout, allowing independent Machteld processes to wait through
+ordinary writer contention. Engine failures use `STORE sqlite`.
+Every full, console-wrapped, and GUI-wrapped 0.10.0 host includes this same static
+implementation.
 
-## The error-code registry
+## Manifest
 
-Every failure is `{MACHTELD <DOMAIN> <code>}`. **The domain is the verb you called** — so you
-trap on the command you typed, never on which internal helper happened to fail.
+`manifest` returns a dict keyed by public command. An entry can contain:
 
-| Domain | Raised by |
-|---|---|
-| `RUN` | `run` |
-| `CHILD` | `child` (all subcommands) |
-| `WAIT` | `wait` |
-| `DETACH` | `detach` |
-| `DIRS` | `dirs`, `links` and `canon` — one file's answers about paths, so one domain |
-| `PTY` | `pty` (all subcommands) |
-| `WATCH` | `watch` (all subcommands) |
-| `STORE` | `store` (all subcommands) |
-| `JSON` | `json` (all subcommands) |
-| `MTPS` | `mtps` (all subcommands) |
-| `WRAP` | `wrap` — stamp a Tcl/Tk directory into a standalone exe |
-| `HELP` | `help` |
-| `HASH` | `hash` (all subcommands) |
-| `CLI` | `cli` |
-| `LOG` | `log` (all subcommands) |
-| `FRONT` | `front` — the workspace front door |
-| `HTTP` | `http` — https over WinHTTP, so certificate validation is the OS's |
-| `TCL` | `tcl` — run a script as this process's program |
-| `JOURNAL` | `journal` — the front door's record |
-| `WORKER` | `worker` (all subcommands) |
-| `POOL` | `pool` (all subcommands) |
-| `PMAP` | `pmap` — its own failures only; a worker's failure keeps its own domain |
+- `kind`: `c` or `tcl`;
+- `domain` and `codes` for structured failures;
+- `replycodes` for fixed codes carried as protocol data rather than raised;
+- `doc`: the stable `machteld/command/<verb>` reference identifier;
+- `options` for the command as a whole;
+- `subcommands`, each with its own `options`;
+- `returns` for fixed-shape result dicts.
 
-**The code set below is closed.** A test (`test/run_test.tcl`) scans the C sources and fails if
-they can throw a code this table does not name, *and* fails if the table names a code the C
-cannot throw — so trapping by code is safe to rely on, which is the whole point of structured
-errors.
+Native facts are authored in the build metadata and checked against registered C
+commands. Tcl commands call an explicit metadata registry. Duplicate facts fail
+the build/runtime merge unless they are the intentional Tcl extension of `pty`.
+Implementation-body scanning is not part of the contract.
 
-| Code | Meaning |
-|---|---|
-| `notfound` | the program could not be resolved on PATH — `run`, `child start`, `pty spawn`, `detach` |
-| `nohandle` | the token does not name a live child or pty |
-| `launch` | the program was found, but starting it failed (pipe, job, ConPTY, `CreateProcess`) |
-| `usage` | malformed invocation — unknown option, missing option value, too many children to wait on |
-| `badvalue` | an option's value is ill-formed — a duration without a unit, a bad byte size, a bad exit code |
-| `oserror` | a Win32 call failed after launch — reading, writing, killing, waiting; or `dirs` could not allocate the walk |
-| `notopen` | a `store` operation was attempted before `store open` |
-| `sqlite` | SQLite reported an error; the *message* is SQLite's wording, the *code* is ours |
-| `parse` | the text is not valid JSON; the message says what was wrong and where it stopped |
-| `depth` | nesting past the 512 limit, on the way in or out — refused rather than crashing the stack |
-| `denied` | the OS refused the operation on a process you do not have the rights to touch |
-| `timeout` | a bounded wait ran out — `pty expect` with no pattern matched in time |
-| `unsupported` | this build cannot do it — `wrap` or `help` on a host with no embedded payload, or a manifest key the front door has yet to implement |
-| `failed` | a pooled item failed with no code a caller could trap on — its handler raised a plain `error` |
-| `noroot` | no workspace was found at or above the executable — there is no `.mt` (nor `.z`) |
-| `tls` | the secure connection was refused -- an expired, self-signed, wrong-host or otherwise untrusted certificate. Its own code because "the certificate is bad" and "the host is down" call for different responses |
-| `toobig` | the response exceeds `-maxbody`. REFUSED, never truncated: a short body that looks whole is the one answer this palette does not give |
-| `dangling` | the name is there and its target is not — a broken junction or symlink. Distinct from `notfound` because a resolver walking up to the nearest existing ancestor must treat "nothing here" as *keep going* and "here, but broken" as *stop* |
-| `manifest` | the workspace manifest is missing, unreadable, or does not describe what was asked for |
+## Compatibility
 
-Not every domain raises every code: `store` raises only `notopen` and `sqlite`; `nohandle`
-comes from `child`, `wait`, `pty` and `watch`. The pairs that matter are pinned by behavioural
-tests. `watch start` on a directory it cannot open raises `notfound`, the same code a missing
-program gets — in both cases the thing you named is not there.
+The executable, wrapped console host, and wrapped GUI host all provide Machteld
+0.10.0 and the same machine-control, data, process, and Tcl composition commands,
+including `package require Tk`, static `store`, and the complete exact-version
+reference corpus. Nested wrapping alone is intentionally nonrecursive: `wrap`
+reports `WRAP unsupported` because tools carry no nested basekits. Deliberately
+bare internal hosts can report `DOCS unsupported`/`HELP unsupported` because
+they carry no reference payload.
 
-The registry scan reads the prelude as well as `src/*.c`, because creed 5 says errors are part
-of the contract without saying "the errors written in C". **Every** prelude error now carries a
-code: the prelude used to raise eleven bare `return -code error` with none, which put its verbs
-outside the registry entirely, and the suite now *fails* if an uncoded one reappears rather than
-merely counting them.
-
-Several domains are raised from Tcl rather than C — `FRONT`, `HELP`, `LOG`, `POOL` among them — and the prelude has its own
-raiser, `Fail domain code msg`, mirroring the C's `mt_error`. A shared helper is told which
-domain to raise in (`_dur2ms PTY $v`), for the same reason the C option parser is: **the domain
-is the verb you called**, never the helper that happened to fail.
-
-`denied` is the one code that reports a *permission*, and it is confined to `mtps`, because `mtps`
-is the one verb that reaches processes machteld did not start. Note what it does **not** cover:
-a process `mtps list` cannot open is not an error at all — it comes back as a row with
-`access 0` and its unreadable fields empty. Failing the whole listing over a process you may
-not inspect would make the verb useless on exactly the machines it is for.
-
-```tcl
-try { pty spawn -- missing.exe } trap {MACHTELD PTY notfound} {m opts} { … }
-try { wait child#99 }            trap {MACHTELD WAIT nohandle} {m opts} { … }
-```
-
-**Errors that carry Tcl's own codes, deliberately.** Wrong argument counts throw
-`TCL WRONGARGS` (via `Tcl_WrongNumArgs`) and an unknown subcommand throws `TCL LOOKUP INDEX`
-(via `Tcl_GetIndexFromObj`). These are structured, trappable and standard, and using Tcl's
-vocabulary for Tcl's own failure modes is [creed](creed.md) 7 — extend the language, do not
-restate it. They are named here so the registry is complete about what a caller can see, not
-only about what machteld itself raises.
-
-**`MACHTELD TCL` and Tcl's own `TCL` are not the same thing, and cannot be confused by a trap.**
-The `tcl` verb raises in domain `TCL` because the rule is *the domain is the verb you called*, and
-the verb is called `tcl`. Tcl's own codes begin with `TCL` in the **first** position
-(`{TCL WRONGARGS}`); every machteld code begins with `MACHTELD` (`{MACHTELD TCL usage}`). A `trap`
-matches on a prefix of the list, so the two never overlap — but they read alike, which is why it is
-said here rather than left to be noticed.
+The API remains pre-1.0: 0.x releases may remove a mistaken surface. Within a
+release, `version`, `manifest`, package version, docs, and both wrapper hosts must
+agree.

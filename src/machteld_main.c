@@ -1,27 +1,5 @@
-/*
- * machteld_main.c -- Windows CONSOLE entry point for machteld (the toolkit
- * itself, and any console tool packaged on it).
- *
- * machteld is a single exe: a C host with statically-linked Tcl/Tk 9 and an
- * appended zipfs (the prelude + the Tcl/Tk script libraries). This host is
- * CONSOLE-subsystem and runs Tcl_Main, so machteld behaves like a branded tclsh
- * -- run a script, or an interactive REPL -- with the palette preloaded and Tk
- * available on demand. Its sibling machteld_gui_main.c is the GUI-subsystem
- * (WinMain) host for windowed tools; both share Machteld_RegisterLibs
- * (machteld_appinit.c), which registers the native libraries and sources the
- * prelude -- so a new C library is added once and both hosts inherit it.
- *
- * Build flags that matter (carried from els/sturm, verified there):
- *   -municode -DUNICODE -D_UNICODE : _tmain is wmain; TclZipfs_AppHook uses the
- *                                    WCHAR signature -- without UNICODE the
- *                                    self-mount silently no-ops and the prelude
- *                                    is never found.
- *   -DSTATIC_BUILD=1               : tcl.h/tk.h must not mark symbols dllimport.
- *   USE_TCL_STUBS undefined        : with stubs, Tcl_Main/Tk_Init become TIP-596
- *                                    thunks that LoadLibrary tcl90.dll and crash
- *                                    in a static exe with no such DLL.
- *   (no -mwindows)                 : console subsystem -- machteld IS a shell.
- */
+/* Windows console host for opted-in programs and the interactive REPL.
+ * It requires a Unicode, static Tcl/Tk build so AppHook can self-mount zipfs. */
 #undef USE_TCL_STUBS
 #include "tk.h"
 #define WIN32_LEAN_AND_MEAN
@@ -39,7 +17,7 @@ static int Machteld_AppInit(Tcl_Interp *interp);
 
 /*
  * _tmain -- console entry (wmain under -municode). Normalize argv[0], let
- * TclZipfs_AppHook self-mount the zip appended to THIS exe, then hand off to
+ * TclZipfs_AppHook self-mount the zip appended to this executable, then hand off to
  * Tcl_Main. argv[1..] reach the interpreter as $argv.
  */
 int
@@ -61,21 +39,63 @@ _tmain(
     TclZipfs_AppHook(&argc, &argv);
 #endif
 
+    /* These switches belong to the runtime executable, not to tools made
+     * with `wrap`.  AppHook has now told us whether this executable carries an
+     * embedded main.tcl, so wrapped programs receive their own --help and
+     * --version arguments unchanged. */
+    Tcl_Obj *startup = Tcl_GetStartupScript(NULL);
+    if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--docs")) == 0) {
+        /* Tcl_Main needs a startup-shaped word in order to preserve the
+         * remaining words as $argv until AppInit dispatches the host route.
+         * The replacement is shorter than the writable CRT argument buffer. */
+        _tcscpy(argv[1], _T("docs"));
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS);
+    } else if (startup != NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--machteld-docs")) == 0) {
+        /* A wrapped application owns every ordinary argument.  This one
+         * deliberately names the embedded runtime, so remove only the escape
+         * word and pass its tail to ::machteld::DocsHost. */
+        for (int i = 1; i + 1 < argc; i++) {
+            argv[i] = argv[i + 1];
+        }
+        argc--;
+        argv[argc] = NULL;
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS);
+    } else if (startup == NULL && argc == 2 &&
+            _tcscmp(argv[1], _T("--help")) == 0) {
+        Machteld_SetHostMode(MACHTELD_HOST_HELP);
+        argc = 1;
+    } else if (startup == NULL && argc == 2 &&
+            _tcscmp(argv[1], _T("--version")) == 0) {
+        Machteld_SetHostMode(MACHTELD_HOST_VERSION);
+        argc = 1;
+    } else if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("-encoding")) == 0) {
+        Machteld_SetHostMode(MACHTELD_HOST_ENCODING);
+    } else if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("-")) == 0) {
+        Machteld_SetHostMode(MACHTELD_HOST_STDIN);
+    }
+
     Tcl_Main(argc, argv, Machteld_AppInit);
     return 0; /* Tcl_Main does not return; silences a warning. */
 }
 
 /*
  * Machteld_AppInit -- console per-interpreter init: Tcl core, Tk registered as a
- * static package (loaded on demand -- machteld is a console shell first, nothing
- * creates a window at startup), then the shared native libraries + prelude.
+ * static package for on-demand loading, then register the native libraries and
+ * prelude.
  */
 static int
 Machteld_AppInit(
     Tcl_Interp *interp)
 {
+    if (Machteld_PreInit(interp) != TCL_OK) {
+        Machteld_Fatal(interp);
+    }
     if (Tcl_Init(interp) == TCL_ERROR) {
-        return TCL_ERROR;
+        Machteld_Fatal(interp);
     }
 
     /*
@@ -88,5 +108,8 @@ Machteld_AppInit(
     Tcl_StaticLibrary(NULL, "Tk", Tk_Init, Tk_SafeInit);
 
     /* Native libraries + the prelude are shared with the GUI host. */
-    return Machteld_RegisterLibs(interp);
+    if (Machteld_RegisterLibs(interp) != TCL_OK) {
+        Machteld_Fatal(interp);
+    }
+    return TCL_OK;
 }
