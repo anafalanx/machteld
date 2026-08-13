@@ -1,27 +1,67 @@
 ---
 type: architecture
 title: Architecture
-description: The single-exe starpack — a C host with statically-linked Tcl/Tk 9, an appended zipfs, and two subsystem bares.
-tags: [machteld, architecture, starpack, tcl]
-timestamp: 2026-07-09
+description: How the executable, native palette, prelude, entry gate, and wrappers fit.
+tags: [machteld, architecture, tcl, windows]
 ---
 
 # Architecture
 
-A **starpack**: a C host + statically-linked **Tcl/Tk 9** + an appended **zipfs**. One signed exe, no install. Carved from the proven **sturm / els** host and its `.toolchain` (UCRT64 gcc, static `tcl9s` libs); SQLite is statically compiled in via the sturm bridge, so [`store`](palette.md) needs no DLL.
+The product has three layers:
 
-## Two hosts, one shared core
+1. **Native core.** C commands wrap Win32 Job Objects and process creation,
+   ConPTY, directory and reparse-point traversal, ReadDirectoryChangesW,
+   WinHTTP, BCrypt, JSON, and statically linked SQLite.
+2. **Tcl runtime.** The prelude adds `scope`, `pty expect/strip`, `cli`, `log`,
+   `worker`, `pool`, `pmap`, `docs`, `help`, and `wrap`, then provides package
+   `machteld 0.10.0`.
+3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
+   `argv` and resolves palette commands through `::machteld` on the global
+   namespace path.
 
-The C is split so the *same* object files serve two entry points:
+Startup registers the native commands, loads the embedded prelude, and applies
+the entry gate before Tcl evaluates a program. The gate parses the first command
+without evaluating it. Interactive startup is still available when no file is
+selected; `--help`, `--version`, `--docs`, and the subordinate `wrap` route are
+handled by the host.
 
-- **`machteld_appinit.c`** — `Machteld_RegisterLibs`: registers the native libraries (`store`, the `run` / `child` / `pty` process substrate) and sources the Tcl prelude. **Shared.**
-- **`machteld_main.c`** — the **console** host: `wmain` → `Tcl_Main`, Tk on demand. This is machteld itself — a branded `tclsh` with the palette preloaded (run a script, or a REPL).
-- **`machteld_gui_main.c`** — the **GUI** host: `WinMain` (`-mwindows`) → `Tk_Main`, Tk up front, no console window. For windowed tools.
+## Hosts and archives
 
-Linking those against the shared core yields two **bares**: `machteld-bare.exe` (console) and `machteld-bare-gui.exe` (GUI). A native library added to `Machteld_RegisterLibs` lands in **both** automatically — the two bares differ only in entry point and PE subsystem. (Why a compiled GUI host and not a subsystem byte-flip: see [packaging](packaging.md).)
+The distribution executable contains Tcl/Tk libraries, docs, the prelude, and
+console and GUI basekits. The console host enters `Tcl_Main`; the GUI host enters
+`Tk_Main` without creating a console. The console host initializes Tk only after
+`package require Tk`; the GUI host initializes Tk at startup because it is a
+windowed host.
 
-## The exe
+`wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
+the program into an appended zipfs. Both basekits link the same native core and
+SQLite, so a wrapped entry sees the same programmatic Machteld 0.10.0 API. The
+complete versioned reference corpus is copied into wrapped tools; nested
+wrapping basekits remain distribution-only and are not copied recursively.
 
-`machteld.exe` is the console host with an appended zipfs carrying the Tcl/Tk script libraries, the prelude (`machteld.tcl`), the docs bundle, and **both bare hosts** (`basekit/console.exe`, `basekit/gui.exe`, compressed) so that [`wrap`](packaging.md) can stamp a standalone tool exe with no toolchain. The five tools that used to ride along as well were removed on 2026-08-10; the hosts stayed, at a measured 130 ms of startup. See [packaging](packaging.md).
+## Self-description
 
-`TclZipfs_AppHook` self-mounts the appended zip at startup. The prelude is named `machteld.tcl`, not `main.tcl`, so it is *not* auto-run — machteld reaches its [dispatcher](front-door.md), which resolves the first argument as a NAME -- a script is named with the `tcl` verb (`mt tcl app.tcl`) -- and with no arguments drops to its REPL. 
+Native metadata is an explicit table checked against the C registrations while
+building. Tcl commands register explicit facts with `MetaDefine`. `manifest`
+merges the two tables; an incompatible duplicate fails loudly. The sole planned
+extension is `pty`: Tcl adds `expect` and `strip` to the native ensemble.
+
+No command body, helper name, option-looking comment, or trailing function is
+scanned to infer public behavior. Refactoring implementation text cannot change
+the advertised API.
+
+The documentation build transforms pinned upstream Tcl/Tk manpages into
+normalized Markdown while preserving source and HTML representations. It
+combines those pages with authored Machteld command references, creates a
+deterministic catalog/search index, and hashes the corpus. `docs` reads only
+this trusted self-mounted payload and exposes exact lookup, sections, bounded
+search, verification, provenance, and safe extraction.
+
+## Lifetime
+
+The host owns, but does not join, a root Job Object configured to kill its
+members when the host closes its last handle. `child`, `run`, pool workers, and
+PTYs are born into both that root job and a narrower per-command job. `scope`
+gives a lexical lifetime inside the process. `detach` is the explicit exception:
+on success it belongs to no Windows job and creates an independent process tree.
+An enclosing Windows job may forbid breakaway, in which case launch is rejected.

@@ -1,11 +1,7 @@
 /*
- * winjob_job.c -- Windows Job Object wrapper, ported from drang's winjob.go.
+ * winjob_job.c -- Windows Job Object wrapper.
  * The kernel container machteld supervises processes through: die-with-parent
  * (KILL_ON_JOB_CLOSE), whole-tree kill (Terminate), resource caps, accounting.
- *
- * Single-threaded for now (the Tcl interpreter is), so no lock yet guards
- * Terminate against Close as drang's mutex does; that synchronization arrives
- * with async child events (the IOCP monitor), not with blocking `run`.
  */
 #include "winjob.h"
 
@@ -17,6 +13,7 @@ struct wj_job {
     HANDLE handle;
     int    closed;
     int    kill_on_close;
+    CRITICAL_SECTION lock;
 };
 
 wj_job *wj_job_new(int kill_on_close, const char **err) {
@@ -43,10 +40,21 @@ wj_job *wj_job_new(int kill_on_close, const char **err) {
     }
     j->handle = h;
     j->kill_on_close = kill_on_close;
+    InitializeCriticalSection(&j->lock);
     return j;
 }
 
 int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err) {
+    if (j == NULL || l == NULL) {
+        if (err) *err = "job is closed or limits are NULL";
+        return -1;
+    }
+    EnterCriticalSection(&j->lock);
+    if (j->closed) {
+        LeaveCriticalSection(&j->lock);
+        if (err) *err = "job is closed";
+        return -1;
+    }
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
     ZeroMemory(&info, sizeof(info));
 
@@ -79,13 +87,25 @@ int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err) {
     info.BasicLimitInformation.LimitFlags = flags;
 
     if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+        LeaveCriticalSection(&j->lock);
         *err = "SetInformationJobObject(limits) failed";
         return -1;
     }
+    LeaveCriticalSection(&j->lock);
     return 0;
 }
 
 int wj_job_allow_breakaway(wj_job *j, const char **err) {
+    if (j == NULL) {
+        if (err) *err = "job is closed";
+        return -1;
+    }
+    EnterCriticalSection(&j->lock);
+    if (j->closed) {
+        LeaveCriticalSection(&j->lock);
+        if (err) *err = "job is closed";
+        return -1;
+    }
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
     ZeroMemory(&info, sizeof(info));
     DWORD flags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
@@ -94,37 +114,74 @@ int wj_job_allow_breakaway(wj_job *j, const char **err) {
     }
     info.BasicLimitInformation.LimitFlags = flags;
     if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
+        LeaveCriticalSection(&j->lock);
         *err = "SetInformationJobObject(BREAKAWAY_OK) failed";
         return -1;
     }
+    LeaveCriticalSection(&j->lock);
     return 0;
 }
 
 int wj_job_assign(wj_job *j, void *process_handle, const char **err) {
+    if (j == NULL || process_handle == NULL) {
+        *err = "job is closed";
+        return -1;
+    }
+    EnterCriticalSection(&j->lock);
     if (j->closed) {
+        LeaveCriticalSection(&j->lock);
         *err = "job is closed";
         return -1;
     }
     if (!AssignProcessToJobObject(j->handle, (HANDLE)process_handle)) {
+        LeaveCriticalSection(&j->lock);
         *err = "AssignProcessToJobObject failed";
         return -1;
     }
+    LeaveCriticalSection(&j->lock);
     return 0;
 }
 
 int wj_job_terminate(wj_job *j, unsigned int exit_code) {
-    if (j->closed) {
-        return 0; /* already released; nothing to terminate */
+    if (j == NULL) return -1;
+    EnterCriticalSection(&j->lock);
+    int rc = j->closed || !TerminateJobObject(j->handle, (UINT)exit_code) ? -1 : 0;
+    LeaveCriticalSection(&j->lock);
+    return rc;
+}
+
+int wj_job_active(wj_job *j, unsigned int *active, const char **err) {
+    if (j == NULL) {
+        if (err) *err = "job is closed";
+        return -1;
     }
-    return TerminateJobObject(j->handle, (UINT)exit_code) ? 0 : -1;
+    EnterCriticalSection(&j->lock);
+    if (j->closed) {
+        LeaveCriticalSection(&j->lock);
+        if (err) *err = "job is closed";
+        return -1;
+    }
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info;
+    ZeroMemory(&info, sizeof(info));
+    if (!QueryInformationJobObject(j->handle, JobObjectBasicAccountingInformation,
+                                   &info, sizeof(info), NULL)) {
+        LeaveCriticalSection(&j->lock);
+        if (err) *err = "QueryInformationJobObject(accounting) failed";
+        return -1;
+    }
+    if (active) *active = (unsigned int)info.ActiveProcesses;
+    LeaveCriticalSection(&j->lock);
+    return 0;
 }
 
 void wj_job_close(wj_job *j) {
-    if (j == NULL || j->closed) {
-        return;
+    if (j == NULL) return;
+    EnterCriticalSection(&j->lock);
+    if (!j->closed) {
+        j->closed = 1;
+        CloseHandle(j->handle);
     }
-    j->closed = 1;
-    CloseHandle(j->handle);
+    LeaveCriticalSection(&j->lock);
 }
 
 void wj_job_free(wj_job *j) {
@@ -132,11 +189,16 @@ void wj_job_free(wj_job *j) {
         return;
     }
     wj_job_close(j);
+    DeleteCriticalSection(&j->lock);
     free(j);
 }
 
 void *wj_job_handle(wj_job *j) {
-    return (void *)j->handle;
+    if (j == NULL) return NULL;
+    EnterCriticalSection(&j->lock);
+    void *h = j->closed ? NULL : (void *)j->handle;
+    LeaveCriticalSection(&j->lock);
+    return h;
 }
 
 int wj_in_job(void *process_handle, void *job_handle) {

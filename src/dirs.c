@@ -1,90 +1,20 @@
 /*
- * dirs.c -- ::machteld::dirs: walk a directory tree, listing DIRECTORIES.
+ * dirs.c -- directory walking, reparse-point inspection, and canonical identity.
  *
- * This verb exists because the Tcl version was written three times and was
- * wrong three times, silently, each time in a different way. The record is in
- * docs/direction.md, "cdirs does not become Tcl": `glob -types d *` came back
- * 786 directories short, `glob -- * .*` came back 16,504 over (a 77% overcount,
- * terminating normally), and deduplicating the second fix lost the missing 786
- * again. No error was raised by any of them. The only reason anyone knew is
- * that the full list was diffed against a Go walker's.
+ * Native enumeration is used because Tcl's glob filters do not express "all
+ * directories, including entries with the Windows hidden attribute" directly.
+ * A walk never presents a silent partial result: every omitted branch is
+ * accounted for by `errors`, `pruned`, `depthlimited`, or a `links` row.
  *
- * WHAT `glob` ACTUALLY GETS WRONG, since direction.md named the wrong cause and
- * a fixture built around the wrong cause would not reproduce it. Measured on a
- * controlled directory: `glob -types d *` DOES return `.dotname`. What it misses
- * is the HIDDEN ATTRIBUTE -- and `.git` is `+h`, which is where the 786 came
- * from. `-types {d hidden}` is an exclusive filter, not an addition: it returns
- * the hidden entries ONLY. And `glob -- * .*` returns `.` and `..` as well as
- * matching every dot-name twice. Three separate misreadings of one pattern
- * language, none of which announces itself.
- *
- * So the job here is not speed. It is that the three failures above must be
- * impossible to have without noticing, and the way to get that is arithmetic:
- * every directory under the root is either in `paths`, or its absence is
- * attributable to exactly one counted cause -- an ancestor in `errors`, an
- * ancestor counted in `pruned` or `depthlimited`, or a `links` row saying we
- * stopped at a name that stands for somewhere else. Nothing may go missing
- * without a row that says so. The speed (a C walk instead of 12.2 s of `glob`)
- * is a consequence of doing the enumeration properly, not the reason for it.
- *
- * WHAT THIS DELIBERATELY DOES NOT DO, because rule 4 says C is for what Tcl
- * cannot reach and everything else stays in the prelude where it is readable and
- * patchable in the shipped exe:
- *
- *   - It does not write a file. `-out FILE` was specified and refused: three
- *     lines of prelude (`open`, `fconfigure -translation lf -encoding utf-8`,
- *     `puts [join $paths \n]`) do it, and putting it here would have bought a
- *     second emission path whose only purpose is to be checked against the
- *     first, plus a result key that is silently EMPTY whenever the option is
- *     used -- reintroducing the exact silence this verb exists to abolish.
- *   - It does not call back. A progress callback fixed at every 10,000
- *     directories is presentation, it belongs to whoever is drawing the
- *     spinner, and a fixture small enough to test would never reach 10,000.
- *   - It does not report `elapsed`. `clock milliseconds` on either side of the
- *     call is the same number, from Tcl, and a result that is never twice the
- *     same is creed 3's problem, not creed 3's solution.
- *   - It does not resolve links to their targets. That is a subsystem --
- *     canonicalisation, containment, volume+file-id identity, a `seen` set,
- *     four more dispositions -- and rule 3's test for a verb is "one small C
- *     verb, and if it needs a subsystem it belongs to a different project".
- *     Nothing in the workspace has asked to follow a junction. A surrogate is
- *     listed and not entered; when a receiver appears, it arrives with its own
- *     measurement.
- *
- * WHICH REPARSE POINTS ARE NOT ENTERED, and why this is not z's rule. Go's
- * cdirs refuses to descend anything with FILE_ATTRIBUTE_REPARSE_POINT at all.
- * That is too broad: measured on this machine, a junction is 0xa0000003 and a
- * symlink 0xa000000c -- both with the NAME SURROGATE bit 0x20000000 set, both
- * genuinely another name for somewhere else -- while a OneDrive Files-On-Demand
- * root is 0x9000701a, which does NOT set it. A cloud placeholder, a DEDUP
- * chunk store, a WIM or WCI projection is ordinary content behind a filter, and
- * z silently omits every directory beneath it. So the test is the surrogate
- * bit, and the tag is reported in every `links` row so the choice is auditable
- * rather than asserted. The bit is the usual SPELLING of "a name for somewhere
- * else" and not the rule itself, so DFS and DFSR -- redirections that do not set
- * it -- are named beside it below; that pair is the one place this file reasons
- * from documentation instead of from a measurement, and it says so.
- *
- * THE CLASSIFICATION IS MADE ON A HANDLE, NOT ON THE PARENT'S SCAN. A scan says
- * what a name was when the parent was read; the descent happens later, and in
- * between the name can be replaced. Opening the child with
- * FILE_FLAG_OPEN_REPARSE_POINT and asking FileAttributeTagInfo closes that
- * window -- measured, a directory swapped for a junction between enumeration and
- * descent reports attrs=00000410 tag=a0000003 through the handle while the stale
- * scan still says "plain directory", and a walker trusting the scan enumerates
- * the junction's target from inside the tree it was told to stay in.
- *
- * The handle's answer is used to VETO descent and never to authorise it: the
- * same measurement shows the OneDrive root reading 0x9000701a from the directory
- * scan and tag 0 through a handle, because the cloud filter consumes its own
- * reparse point on open. A classifier that believed the handle alone would call
- * every cloud root a plain directory -- correct here by luck, wrong the moment a
- * filter behaves differently.
- *
- * Registered by Machtelddirs_Init behind MACHTELD_DIRS.
+ * Name-surrogate reparse points (junctions, symlinks, mount points, DFS) are
+ * reported and not entered. Other reparse tags, such as cloud placeholders,
+ * remain ordinary content. Classification is rechecked on a handle immediately
+ * before descent so replacing a scanned directory with a junction cannot escape
+ * the requested tree. The handle may veto descent but never overrides a
+ * surrogate classification already observed in the directory scan.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -103,18 +33,7 @@
  * symlink, volume mount point). Everything else is content behind a filter. */
 #define DIRS_SURROGATE 0x20000000u
 
-/* TWO DOCUMENTED EXCEPTIONS, because the RULE is "a name for somewhere else"
- * and the surrogate bit is only its usual spelling. IO_REPARSE_TAG_DFS and
- * IO_REPARSE_TAG_DFSR are namespace redirections and do NOT set 0x20000000: on
- * a server hosting a DFS namespace they send the walk to another machine
- * entirely, and a namespace that links back at an ancestor is a genuine cycle
- * bounded only by the 32,767-character path limit rather than by this veto --
- * the one hole the surrogate rule has that z's blanket rule does not.
- *
- * REASONED, NOT MEASURED, and that is said out loud because every other number
- * in this file is an observation. There is no DFS namespace on the machine this
- * was built on, so unlike the junction/symlink/OneDrive tags below it, this pair
- * is taken from the tags' documented meaning and has never been seen here. */
+/* DFS and DFSR are namespace redirections but do not set the surrogate bit. */
 #define DIRS_TAG_DFS  0x8000000Au
 #define DIRS_TAG_DFSR 0x80000012u
 
@@ -207,7 +126,7 @@ typedef struct {
     int          hardlinks;  /* -hardlinks: also report files with nlinks > 1 */
     Tcl_Obj     *entries;    /* {path .. type .. target ..} per name surrogate */
     Tcl_Obj     *multi;      /* {path .. links N} per multiply-linked file */
-    Tcl_Obj     *entered;    /* non-surrogate reparse dirs the walk went into */
+    Tcl_Obj     *entered;    /* non-surrogate reparse dirs successfully enumerated */
     Tcl_WideInt  files;
     Tcl_WideInt  multilink;
 } DirsWalk;
@@ -291,8 +210,7 @@ static wchar_t *dirs_join(const wchar_t *parent, size_t plen, const wchar_t *nam
 }
 
 /* The \\?\ prefix comes off on the way out, and backslashes become forward
- * slashes -- palette.md settled that for every path machteld hands back, so
- * there is no option here to get it wrong with. A UNC root needs its own case:
+ * slashes. A UNC root needs its own case:
  * \\?\UNC\server\share is EIGHT characters of prefix standing in for two, and
  * stripping the usual four yields UNC/server/share, a path that does not
  * exist. */
@@ -395,13 +313,7 @@ static void dirs_fault(DirsWalk *w, const wchar_t *path, DWORD e) {
  * body runs zero times, `paths` comes back holding the root alone, `errors` is
  * empty, and the verb reports a clean, plausible, entirely empty answer. Hence
  * the do/while shape: process what you were given, then ask for more. */
-/* --- links mode: naming a reparse point, and reading where it points --------
- *
- * THE TYPE NAMES ARE z's, DELIBERATELY. `mirror` writes them into
- * `<runid>-links.json`, the manifest a restore reads to rebuild links a
- * robocopy /XJ run refused to copy -- so the strings are a FILE FORMAT shared
- * with the front door being replaced, not a rendering choice. Same reasoning as
- * the ledger's `generatedBy`. */
+/* --- links mode: naming a reparse point, and reading where it points -------- */
 static const char *links_type(DWORD tag, int isdir) {
     if (tag == IO_REPARSE_TAG_SYMLINK) {
         return isdir ? "directory symlink" : "file symlink";
@@ -439,9 +351,8 @@ typedef struct {
 
 #define LINKS_SYMLINK_RELATIVE 0x00000001u
 
-/* WHERE IT POINTS, spelled the way `os.Readlink` spells it, because the manifest
- * is compared against z's. That means the SUBSTITUTE name (not the print name,
- * which a junction may leave empty), with the object-manager prefix `\??\`
+/* Return the substitute name rather than the optional (and possibly empty)
+ * print name, with the object-manager prefix `\??\`
  * stripped and `\??\UNC\` folded back to `\\` -- and a RELATIVE symlink left
  * exactly as written, since there is nothing to strip and prefixing one would
  * invent a target. Returns malloc'd UTF-8, or NULL. */
@@ -502,11 +413,8 @@ static char *links_target(const wchar_t *path, int isdir) {
      * `off = 0, len = 16376, got = 16384` passed and read 12 bytes past a
      * 16 KB malloc -- demonstrated, with a guard page, as a segfault.
      *
-     * Unreachable on local NTFS, where a real link always leaves slack. Reachable
-     * from anything that services FSCTL_GET_REPARSE_POINT and can contradict
-     * itself: the SMB redirector, a WinFsp/Dokan filesystem, a mounted image --
-     * and `mirror` runs this over DESTINATION trees, which is exactly where a
-     * redirector is plausible. */
+     * Local NTFS leaves slack, but network and user-space filesystems can return
+     * malformed payloads, so the bounds check remains mandatory. */
     if (hdr + (size_t)off + (size_t)len > (size_t)got) {
         free(raw);
         return NULL;
@@ -540,10 +448,8 @@ static char *links_target(const wchar_t *path, int isdir) {
     return out;
 }
 
-/* The link count, the one fact that needs a handle -- see spike/mirrorlinks.
- * FILES ONLY is not an optimisation to be revisited: NTFS does not permit
- * hardlinks to directories, so a directory's count is always 1, and z opens
- * 17,512 destination directory handles that can never report anything. */
+/* Link counts need one handle per file. NTFS does not permit hard links to
+ * directories, so directory handles cannot contribute useful information. */
 /* Returns 0 ONLY when the answer could not be obtained, and leaves GetLastError
  * set for the caller's error row. NTFS never reports zero links for a file that
  * exists, so 0 is unambiguous as a failure signal. */
@@ -583,10 +489,8 @@ static void links_record(DirsWalk *w, const wchar_t *full, const char *shown,
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("tag", -1), Tcl_NewStringObj(hex, -1));
     Tcl_ListObjAppendElement(NULL, w->entries, d);
     free(target);
-    /* z REFUSES a surrogate it cannot name and refuses one whose target it
-     * cannot read, and a refusal is what makes `mirror` decline a destructive
-     * run rather than write an incomplete restore manifest. Both are error rows
-     * here, so the Tcl side reaches the same decision from the same facts. */
+    /* An unclassified surrogate or unreadable target is an error row; returning
+     * an apparently complete link inventory would be unsafe. */
     if (type == NULL) {
         dirs_fault(w, full, ERROR_NOT_SUPPORTED);
     } else if (target == NULL) {
@@ -652,6 +556,7 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
              * that leaves the buffer is a counted row like everything else. */
             if (off + offsetof(FILE_ID_BOTH_DIR_INFO, FileName) > bufsz) { overrun = 1; break; }
             FILE_ID_BOTH_DIR_INFO *e = (FILE_ID_BOTH_DIR_INFO *)(buf + off);
+            if ((e->FileNameLength % sizeof(wchar_t)) != 0) { overrun = 1; break; }
             size_t nlen = e->FileNameLength / sizeof(wchar_t);
             if (off + offsetof(FILE_ID_BOTH_DIR_INFO, FileName) + e->FileNameLength > bufsz) {
                 overrun = 1;
@@ -660,16 +565,9 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
             int skip = 0;
             if (nlen == 1 && e->FileName[0] == L'.') skip = 1;
             if (nlen == 2 && e->FileName[0] == L'.' && e->FileName[1] == L'.') skip = 1;
-            /* FILES ARE NEVER LISTED BY `dirs`. This verb answers one question.
-             *
-             * AND THIS IS WHERE `links` DIVERGES. The entry in hand already
-             * carries the file's attributes AND, for a reparse point, its tag
-             * in EaSize -- both read out of the directory enumeration, at no
-             * per-file cost. spike/mirrorlinks priced classifying every file
-             * here rather than discarding it: 986 ms against 1,013 ms over
-             * 302,654 entries, i.e. free. The handle for a link COUNT is the
-             * one thing that is not free (~66 us), which is why -hardlinks is
-             * an option and not the default.
+            /* Files are never listed by `dirs`. In links mode the enumeration
+             * already carries file attributes and reparse tags; only the link
+             * count requires an extra handle, so `-hardlinks` stays opt-in.
              *
              * A file is never pushed on the stack in either mode -- there is
              * nothing under it to walk -- so it is dealt with here, entirely,
@@ -787,7 +685,13 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                 }
             }
             if (e->NextEntryOffset == 0) break;
-            if (e->NextEntryOffset > bufsz - off) { overrun = 1; break; }
+            size_t used = offsetof(FILE_ID_BOTH_DIR_INFO, FileName) + e->FileNameLength;
+            if ((e->NextEntryOffset % sizeof(LONGLONG)) != 0
+                || e->NextEntryOffset < used
+                || e->NextEntryOffset > bufsz - off) {
+                overrun = 1;
+                break;
+            }
             off += e->NextEntryOffset;
         }
         if (overrun) break;
@@ -878,6 +782,7 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
 
         const char *action = "descended";
         int stop = 0;
+        int entered = 0;
         HANDLE h = INVALID_HANDLE_VALUE;
 
         /* The order of these three is the order the caller reads them in: a
@@ -955,6 +860,13 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
             int got = dirs_children(w, h, &it, &kids, &kn);
             CloseHandle(h);
             h = INVALID_HANDLE_VALUE;
+            /* Opening a directory is not yet entering it for this result
+             * contract: `entered` means its directory stream was successfully
+             * obtained. A failed first enumeration already has an error row;
+             * mark the reparse decision failed as well instead of returning a
+             * contradictory `descended` row. */
+            if (got) entered = 1;
+            else action = "failed";
             if (got && kn > 0) {
                 if (n + kn > cap) {
                     size_t ncap = cap;
@@ -993,36 +905,22 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
         }
         if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); h = INVALID_HANDLE_VALUE; }
 
-        /* EVERY reparse directory gets a row, surrogate or not -- that is what
-         * makes the decision above auditable instead of asserted. A row saying
-         * {surrogate 0 action descended} is the one place a reader can see this
-         * walker deliberately going somewhere z will not. */
+        /* Every reparse directory gets a row, surrogate or not, making the
+         * decision to stop or descend visible to the caller. */
         if (it.reparse) {
             Tcl_ListObjAppendElement(NULL, w->links,
                 dirs_link_row(shown ? shown : "", it.tag, it.surrogate, action));
             /* DIRECTORY surrogates are recorded HERE and file surrogates in
              * dirs_children, because a directory reaches the stack and a file
              * never does. Gated on `dirs_isname` rather than on the surrogate
-             * BIT so the two DFS tags -- which redirect the namespace without
-             * setting it -- are named as links too, which is the one place this
-             * walker is deliberately stricter than z. */
+             * bit so the two DFS tags are named as links too. */
             if (w->mode == DIRS_MODE_LINKS && dirs_isname(it.tag)) {
                 links_record(w, it.path, shown, it.tag, 1);
             }
-            /* AND EVERY OTHER REPARSE DIRECTORY IS STILL DISCLOSED. `links`
-             * built the row above and then `links_dict` threw the whole list
-             * away, so a NON-surrogate reparse point -- a OneDrive
-             * Files-On-Demand root, tag 0x9000701a -- vanished from the answer
-             * entirely: `links C:/Users/anafa/OneDrive` came back
-             * `links {} multilinked {} errors {}`, clean, plausible and silent
-             * about a cloud placeholder the walk had just descended.
-             *
-             * That is the exact silence `dirs` was fixed for once already, in
-             * this same directory, reintroduced by a new verb through a
-             * different route. The row is kept in its own key so the two
-             * questions stay separate: `links` is where the walk stopped,
-             * `entered` is where it went that z would not. */
-            if (w->mode == DIRS_MODE_LINKS && !dirs_isname(it.tag)) {
+            /* `entered` is deliberately narrower than "followable": a depth
+             * cap, prune rule, failed open, or failed first enumeration did
+             * not enter this directory and must not claim that it did. */
+            if (w->mode == DIRS_MODE_LINKS && !dirs_isname(it.tag) && entered) {
                 Tcl_ListObjAppendElement(NULL, w->entered,
                     dirs_link_row(shown ? shown : "", it.tag, it.surrogate, action));
             }
@@ -1044,18 +942,8 @@ static Tcl_Obj *dirs_dict(DirsWalk *w, Tcl_Obj *root) {
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("pruned", -1), Tcl_NewWideIntObj(w->pruned));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("depthlimited", -1), Tcl_NewWideIntObj(w->depthlimited));
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("maxdepth", -1), Tcl_NewWideIntObj(w->maxdepth));
-    /* THE TWO LISTS THIS MODE DOES NOT USE, RELEASED -- and their absence here
-     * was a LEAK OF 93 BYTES PER CALL, measured at 2 x sizeof(Tcl_Obj) over
-     * 200,000 calls on the shipped exe. `dirs_init` creates `entries` and
-     * `multi` in BOTH modes; only what a dict adopts is owned, and this dict
-     * adopts neither, so every successful `dirs` dropped two list objects on
-     * the floor while every error path (which runs `dirs_free`) was clean.
-     *
-     * This is the bug the nineteen-line comment above `dirs_free` exists to
-     * memorialise -- 144 bytes a call, `notfound`, a long-lived front door --
-     * reintroduced by the commit that added `links`, in the verb that comment
-     * was written to protect. `links_dict` does the mirror image for `paths`
-     * and `links`; neither is optional. */
+    /* This result adopts only the dirs-mode lists; release the three links-mode
+     * lists allocated by the shared initializer. */
     Tcl_DecrRefCount(w->entries);
     Tcl_DecrRefCount(w->multi);
     Tcl_DecrRefCount(w->entered);
@@ -1079,11 +967,8 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
     *out = NULL;
     *unc = 0;
     if (given[0] == '\0') return dirs_error(interp, "badvalue", "the root must not be empty");
-    /* A drive-relative root -- `C:` or `C:sub` -- resolves against the PER-DRIVE
-     * current directory, a piece of process state nobody set and nobody can see.
-     * It looks absolute and is not, and creed 3 does not allow a verb to derive
-     * its subject from hidden state, so it is refused with the spelling that
-     * works. */
+    /* A drive-relative root (`C:` or `C:sub`) depends on hidden per-drive
+     * process state, so require an explicit absolute spelling. */
     if (((given[0] >= 'A' && given[0] <= 'Z') || (given[0] >= 'a' && given[0] <= 'z'))
         && given[1] == ':' && given[2] != '\\' && given[2] != '/') {
         return dirs_error(interp, "badvalue",
@@ -1204,25 +1089,8 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
     return TCL_OK;
 }
 
-/* THE THREE RESULT LISTS ARE BORN AT REFCOUNT 0 AND ARE ADOPTED ONLY BY
- * `dirs_dict`, so every path that returns before the dict is built has to free
- * them by hand -- the convention json.c:245 and journal.c:122 already keep.
- * Eight error returns did not, and the cost was measured on the shipped exe:
- * 144 bytes a call (3 x sizeof(Tcl_Obj) in Tcl 9), linear, no plateau, against a
- * success path that plateaus at zero. `notfound` is what a directory that
- * vanished between two walks answers -- the ordinary failure for a walker -- and
- * the host is a long-lived front door, so `foreach p $roots {catch {dirs $p}}`
- * leaked without bound.
- *
- * IT FREES AND DOES NOT RAISE, which is a deliberate shape rather than a clumsy
- * one. Folding the raise in as `dirs_bail(interp, &w, "usage", msg)` reads
- * better and costs the manifest: tools/genmanifest.tcl finds a verb's codes with
- * `\w+_error\(interp,\s*"([a-z]+)"`, so the literal has to sit right after
- * `interp` in a call whose name ends in `_error`. Measured -- the folded version
- * built cleanly, passed all 600 checks, and reported `dirs ... codes=1` where
- * the truth is four. Creed 4 says the palette describes itself; a helper that
- * hides three of a verb's four codes from the generator is that promise
- * decaying silently, in the file whose subject is silent decay. */
+/* Result lists start at refcount zero and are adopted only by the final result
+ * dict. Every earlier return must release them explicitly. */
 /* SEPARATE FROM dirs_free, because the prune copy has to be released on the
  * SUCCESS path too -- where the five result lists must NOT be, three of them
  * having been adopted by the dict. Called from both. */
@@ -1268,19 +1136,8 @@ static Tcl_Obj *links_dict(DirsWalk *w, Tcl_Obj *root) {
     return d;
 }
 
-/* THE OPTION LOOPS ARE PER VERB, AND THAT IS THE MANIFEST'S DOING.
- *
- * One shared loop with `if (mode == LINKS && ...-hardlinks...)` in it is the
- * obvious code and it makes the palette LIE: tools/genmanifest.tcl derives a
- * verb's options from the `strcmp(a, "-x")` literals its implementation can
- * reach, and reachability is a fact about the call graph, not about a runtime
- * branch it cannot evaluate. With one loop, `dirs` was reported as taking
- * `-hardlinks` -- an option it refuses -- which is exactly the class of false
- * claim [creed 4] exists to prevent. Two loops, each reached from one command,
- * make the derivation true by construction.
- *
- * `-depth` and `-prune` stay in ONE function, because both verbs really do take
- * them and the manifest should say so from one place. */
+/* Common key/value options are shared; `links` has a separate outer parser for
+ * its value-less `-hardlinks` switch. */
 static int dirs_opt_kv(Tcl_Interp *interp, const char *a, Tcl_Obj *v, DirsWalk *w) {
     if (strcmp(a, "-depth") == 0) {
         Tcl_WideInt d;
@@ -1328,11 +1185,7 @@ static int dirs_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], DirsW
     return TCL_OK;
 }
 
-/* `-hardlinks` IS THE ONLY VALUELESS OPTION EITHER VERB TAKES, and only `links`
- * takes it: it is the switch that buys one handle per file -- ~66 us, measured
- * in spike/mirrorlinks -- for the one question a directory enumeration cannot
- * answer. `dirs` refuses it as an unknown option rather than accepting and
- * ignoring it, which is why this literal must not be reachable from `dirs`. */
+/* Only `links` accepts `-hardlinks`; it buys one extra handle per file. */
 static int links_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], DirsWalk *w) {
     for (int i = 2; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
@@ -1493,11 +1346,9 @@ static int DirsCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     return dirs_core(interp, objv, &w);
 }
 
-/* `links` -- every name surrogate under a tree, with where it points, and on
- * request every file whose bytes are shared. The two questions `mirror` asks of
- * a tree before it will touch it, and the reason they are one verb is that they
- * are one walk: the reparse tag comes free with the enumeration, and only the
- * link count needs a handle. See spike/mirrorlinks. */
+/* `links` reports every name surrogate and, on request, files with shared bytes.
+ * Both use the same walk because reparse tags come with enumeration; only link
+ * counts require another handle. */
 static int LinksCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     if (objc < 2) {
@@ -1512,36 +1363,10 @@ static int LinksCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
 /* --- `canon`: which object is this path, and where does it really live? -----
  *
- * THE THIRD QUESTION THIS FILE ANSWERS, and the one `mirror` could not ask.
- *
- * `file normalize` DOES NOT RESOLVE A REPARSE POINT THAT IS THE FINAL
- * COMPONENT. Measured: `file normalize C:/dev/.z/r/winsdk/10.0.26100.0` returns
- * the junction itself, while normalising one component deeper follows it. So a
- * front door that resolves `--dest <a junction>` through Tcl gets the
- * junction's own name back and every containment test it then performs is
- * asking about the wrong object. Reproduced end to end before this verb
- * existed: a destination junction pointing into the mirror source passed every
- * clause, and robocopy's own /L verdict named a file INSIDE THE SOURCE as a
- * destination extra -- which is to say a real /MIR would have deleted it.
- *
- * `file stat` CANNOT SUPPLY THE IDENTITY EITHER. Its `dev` is the drive-letter
- * index -- every path on C: reports 2, where the volume serial is 0xeb960d30 --
- * and on a junction it describes the JUNCTION rather than its target (measured,
- * 2/26741 against 2/53249). Two names for one file do share an `ino`, which is
- * why the containment checks were self-consistent while being wrong, and it is
- * the most dangerous kind of nearly-right.
- *
- * So: one open that FOLLOWS, and two questions asked of that handle.
- * GetFinalPathNameByHandleW is where the object actually is;
- * GetFileInformationByHandle is which object it is. Both are things Tcl has no
- * spelling for, which is [rule 4] -- C only for what Tcl cannot reach -- and
- * this is the second time the answer to "can Tcl host this" has been "yes,
- * except for one syscall".
- *
- * THE NUMBERS ARE z's NUMBERS. `volume` and `file` are the same
- * dwVolumeSerialNumber and 64-bit file index z hashes into its mirror-state
- * filename, so a workspace key computed from these lands on the file z reads
- * rather than beside it. */
+ * Tcl's lexical path normalization does not follow a reparse point in the final
+ * component, and `file stat` cannot expose Windows' volume/file identity. Open
+ * the target with following enabled, then ask that handle for its final path,
+ * volume serial, and 64-bit file index. */
 static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     if (objc != 2) {
@@ -1558,25 +1383,15 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
      * entered, and here the opposite is wanted -- the target is the answer. */
     HANDLE h = dirs_open(pathw, 1);
     if (h == INVALID_HANDLE_VALUE) {
-        /* A DANGLING LINK IS NOT A MISSING PATH, and the caller has to be able
-         * to tell them apart: projecting a destination through a parent that
-         * turns out to be a broken junction is how you mirror into the wrong
-         * tree. The reparse-point open answers "the name exists"; the followed
-         * open above answers "and it leads somewhere". */
+        /* A dangling link is not a missing path. A raw reparse-point open tells
+         * us whether the name exists even though the followed open failed. */
         DWORD e = GetLastError();
         HANDLE raw = dirs_open(pathw, 0);
         if (raw != INVALID_HANDLE_VALUE) {
             CloseHandle(raw);
             free(pathw);
-            /* ITS OWN CODE, because the caller's decision turns on it. A
-             * resolver walking UP to the nearest existing ancestor must treat
-             * "nothing here" as "keep going" and "here, but broken" as STOP:
-             * projecting a destination beneath a dangling junction puts it in
-             * whatever tree that name later comes to mean. Reported as
-             * `notfound` the two are indistinguishable, and mirror's first
-             * attempt to tell them apart in Tcl -- `file exists` false AND
-             * `file type` succeeding -- was dead code, because `file exists`
-             * answers TRUE for a dangling junction. */
+            /* Keep this distinct from `notfound`: a resolver may continue past
+             * a missing component but must stop at an existing broken link. */
             return dirs_error(interp, "dangling",
                 "the path exists but its target cannot be resolved");
         }
@@ -1625,7 +1440,7 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     Tcl_Obj *d = Tcl_NewDictObj();
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj("path", -1), Tcl_NewStringObj(shown, -1));
     free(shown);
-    /* HEX STRINGS, NOT INTEGERS, and the width is z's `%016x`. A 64-bit file
+    /* Fixed-width hex strings, not integers. A 64-bit file
      * index does not fit a Tcl_WideInt's signed range on every volume, and a
      * caller comparing identities wants a token to compare rather than a number
      * to do arithmetic on. */
@@ -1646,9 +1461,10 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 }
 
 int Machtelddirs_Init(Tcl_Interp *interp) {
-    Tcl_CreateObjCommand(interp, "::machteld::dirs", DirsCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "::machteld::links", LinksCmd, NULL, NULL);
-    Tcl_CreateObjCommand(interp, "::machteld::canon", CanonCmd, NULL, NULL);
-    Tcl_PkgProvide(interp, "machteld::dirs", "0.1");
-    return TCL_OK;
+    if (Tcl_CreateObjCommand(interp, "::machteld::dirs", DirsCmd, NULL, NULL) == NULL
+        || Tcl_CreateObjCommand(interp, "::machteld::links", LinksCmd, NULL, NULL) == NULL
+        || Tcl_CreateObjCommand(interp, "::machteld::canon", CanonCmd, NULL, NULL) == NULL) {
+        return TCL_ERROR;
+    }
+    return Tcl_PkgProvide(interp, "machteld::dirs", MACHTELD_VERSION);
 }

@@ -1,3 +1,0 @@
-@echo off
-"C:\dev\_machteld\experiment\serious\runs\_frozen\python\python.exe" -I -S -B "C:\dev\_machteld\experiment\serious\bin\check.py" --arm machteld --solution "%~dp0solution.tcl" --cases "%~dp0visible.json" --fn "fnv1a32" --inputs 1 --outputs 1 --python-runtime "C:\dev\_machteld\experiment\serious\runs\_frozen\python\python.exe" --machteld-runtime "C:\dev\_machteld\experiment\serious\runs\_frozen\machteld.exe" --python-sha256 478201058e5eeca3725ce3a6cd115413f67eab4827c82409b87f3b85a632d610 --machteld-sha256 9f222f33b257849ad9ae11a9a4b97752cac4e8d5d6b7ccc9820563d31380ce51 --attempt-root "C:\dev\_machteld\experiment\serious\attempts" --cell cell-f4958bbd214fd81d --max-checks 8
-exit /b %ERRORLEVEL%

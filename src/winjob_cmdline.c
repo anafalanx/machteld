@@ -1,13 +1,11 @@
 /*
  * winjob_cmdline.c -- Windows command-line quoting for machteld's process
- * launcher, ported byte-for-byte from drang's launch.go (makeCmdLine) and
- * batch.go (the CVE-2024-24576 mitigation). Pure string work -- no Win32 -- so
- * it is unit-tested standalone against drang's golden vectors (see
- * test/cmdline_test.c) before the launcher builds on it.
+ * launcher, including defensive batch-file quoting for CVE-2024-24576.
  */
 
 #include "winjob.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,42 +15,67 @@ typedef struct {
     char  *p;
     size_t len;
     size_t cap;
+    int    failed;
 } sb_t;
 
-static void sb_init(sb_t *b) {
+static int sb_init(sb_t *b) {
     b->cap = 64;
     b->len = 0;
+    b->failed = 0;
     b->p = (char *)malloc(b->cap);
-    b->p[0] = '\0';
-}
-
-static void sb_ensure(sb_t *b, size_t extra) {
-    if (b->len + extra + 1 > b->cap) {
-        while (b->len + extra + 1 > b->cap) {
-            b->cap *= 2;
-        }
-        b->p = (char *)realloc(b->p, b->cap);
+    if (b->p == NULL) {
+        b->cap = 0;
+        b->failed = 1;
+        return -1;
     }
+    b->p[0] = '\0';
+    return 0;
 }
 
-static void sb_putc(sb_t *b, char c) {
-    sb_ensure(b, 1);
+static int sb_ensure(sb_t *b, size_t extra) {
+    if (b->failed) return -1;
+    if (extra > SIZE_MAX - b->len - 1) {
+        b->failed = 1;
+        return -1;
+    }
+    size_t need = b->len + extra + 1;
+    if (need > b->cap) {
+        size_t cap = b->cap;
+        while (cap < need) {
+            if (cap > SIZE_MAX / 2) { cap = need; break; }
+            cap *= 2;
+        }
+        char *p = (char *)realloc(b->p, cap);
+        if (p == NULL) {
+            b->failed = 1;
+            return -1;
+        }
+        b->p = p;
+        b->cap = cap;
+    }
+    return 0;
+}
+
+static int sb_putc(sb_t *b, char c) {
+    if (sb_ensure(b, 1) != 0) return -1;
     b->p[b->len++] = c;
     b->p[b->len] = '\0';
+    return 0;
 }
 
-static void sb_puts(sb_t *b, const char *s) {
+static int sb_puts(sb_t *b, const char *s) {
     size_t n = strlen(s);
-    sb_ensure(b, n);
+    if (sb_ensure(b, n) != 0) return -1;
     memcpy(b->p + b->len, s, n);
     b->len += n;
     b->p[b->len] = '\0';
+    return 0;
 }
 
 static char *xstrdup(const char *s) {
     size_t n = strlen(s) + 1;
     char *r = (char *)malloc(n);
-    memcpy(r, s, n);
+    if (r != NULL) memcpy(r, s, n);
     return r;
 }
 
@@ -63,6 +86,7 @@ static char *xstrdup(const char *s) {
  * precede a double-quote or the closing quote; embedded quotes become \".
  */
 char *wj_escape_arg(const char *s) {
+    if (s == NULL) return NULL;
     size_t len = strlen(s);
     if (len == 0) {
         return xstrdup("\"\"");
@@ -83,7 +107,7 @@ char *wj_escape_arg(const char *s) {
     }
 
     sb_t b;
-    sb_init(&b);
+    if (sb_init(&b) != 0) return NULL;
     if (hasSpace) {
         sb_putc(&b, '"');
     }
@@ -110,20 +134,27 @@ char *wj_escape_arg(const char *s) {
         }
         sb_putc(&b, '"');
     }
+    if (b.failed) { free(b.p); return NULL; }
     return b.p;
 }
 
 char *wj_make_cmdline(int argc, const char *const *argv) {
+    if (argc < 0 || (argc > 0 && argv == NULL)) return NULL;
     sb_t b;
-    sb_init(&b);
+    if (sb_init(&b) != 0) return NULL;
     for (int i = 0; i < argc; i++) {
         if (i > 0) {
             sb_putc(&b, ' ');
         }
         char *e = wj_escape_arg(argv[i]);
-        sb_puts(&b, e);
+        if (e == NULL || sb_puts(&b, e) != 0) {
+            free(e);
+            free(b.p);
+            return NULL;
+        }
         free(e);
     }
+    if (b.failed) { free(b.p); return NULL; }
     return b.p;
 }
 
@@ -166,8 +197,7 @@ int wj_is_batch_target(const char *exe) {
  * individually quoted, embedded quotes are DOUBLED ("") -- cmd's literal-quote
  * convention -- with backslash runs doubled so the batch's own argv parse still
  * round-trips, and every '%' is rewritten `%%cd:~,%` (a zero-length substring of
- * the always-present %cd%) so cmd cannot expand %VAR% out of the text. Ported
- * from Rust's std::process, drang's reference fix.
+ * the always-present %cd%) so cmd cannot expand %VAR% out of the text.
  */
 
 /* Append s with every '%' neutralized to `%%cd:~,%`. Used for the script path,
@@ -248,6 +278,12 @@ static int has_cr_or_lf(const char *s) {
 
 int wj_make_batch_cmdline(const char *script, int argc, const char *const *args,
                           char **out, const char **err) {
+    if (out != NULL) *out = NULL;
+    if (script == NULL || out == NULL || err == NULL || argc < 0 ||
+        (argc > 0 && args == NULL)) {
+        if (err != NULL) *err = "invalid batch command-line input";
+        return -1;
+    }
     size_t slen = strlen(script);
     if (strchr(script, '"') != NULL || (slen > 0 && script[slen - 1] == '\\')) {
         *err = "batch script path may not contain a quote or end with a backslash";
@@ -261,7 +297,10 @@ int wj_make_batch_cmdline(const char *script, int argc, const char *const *args,
     }
 
     sb_t b;
-    sb_init(&b);
+    if (sb_init(&b) != 0) {
+        *err = "out of memory";
+        return -1;
+    }
     sb_puts(&b, "cmd.exe /e:ON /v:OFF /d /c \""); /* opens the outer /c quote */
     sb_putc(&b, '"');                             /* opens the script's own quote */
     append_neutralized(&b, script);
@@ -276,8 +315,19 @@ int wj_make_batch_cmdline(const char *script, int argc, const char *const *args,
         }
         sb_putc(&b, ' ');
         append_batch_arg(&b, a);
+        if (b.failed) {
+            free(b.p);
+            *err = "out of memory";
+            return -1;
+        }
     }
     sb_putc(&b, '"'); /* closes the outer /c quote */
+
+    if (b.failed) {
+        free(b.p);
+        *err = "out of memory";
+        return -1;
+    }
 
     *out = b.p;
     return 0;

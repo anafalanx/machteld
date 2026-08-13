@@ -1,21 +1,39 @@
-/*
- * machteld.h -- the shared surface between machteld's two hosts.
- *
- * The console host (machteld_main.c: wmain -> Tcl_Main) and the GUI host
- * (machteld_gui_main.c: WinMain -> Tk_Main) differ ONLY in their entry point and
- * PE subsystem. Every native library and the prelude bootstrap live behind
- * Machteld_RegisterLibs (machteld_appinit.c), so a new C library is added in ONE
- * place and BOTH bares pick it up -- no per-subsystem duplication.
- */
+/* Shared initialization and entry policy for the console and GUI hosts. */
 #ifndef MACHTELD_H
 #define MACHTELD_H
 
 #include "tcl.h"
 
-/* Register machteld's statically-linked native libraries (the SQLite store, the
- * process-control substrate, and anything added later) and source the Tcl
- * prelude from the appended zipfs. Called from each host's AppInit once Tcl
- * (and, for the GUI host, Tk) are initialized. Returns TCL_OK / TCL_ERROR. */
+#define MACHTELD_VERSION "0.10.0"
+
+/* Locate and pin the script libraries in the executable's own zipfs mount.
+ * Called by each host before Tcl_Init (and therefore before Tk_Init). */
+int Machteld_PreInit(Tcl_Interp *interp);
+
+/* Register the statically-linked native libraries and source the Tcl prelude
+ * from the payload retained by Machteld_PreInit. */
 int Machteld_RegisterLibs(Tcl_Interp *interp);
+
+/*
+ * Validate or dispatch the program Tcl_Main selected.  This runs from AppInit,
+ * after the machteld package has been registered but before Tcl_Main evaluates
+ * a user entry file.  It is the opt-in boundary for direct script execution.
+ */
+int Machteld_EntryGate(Tcl_Interp *interp);
+int Machteld_EntryError(Tcl_Interp *interp, const char *code,
+                        const char *message);
+TCL_NORETURN void Machteld_Fatal(Tcl_Interp *interp);
+
+enum {
+    MACHTELD_HOST_NORMAL = 0,
+    MACHTELD_HOST_HELP,
+    MACHTELD_HOST_VERSION,
+    MACHTELD_HOST_DOCS,
+    MACHTELD_HOST_DOCS_GUI,
+    MACHTELD_HOST_STDIN,
+    MACHTELD_HOST_ENCODING
+};
+void Machteld_SetHostMode(int mode);
+int Machteld_GetHostMode(void);
 
 #endif /* MACHTELD_H */
