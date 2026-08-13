@@ -380,10 +380,14 @@ puts "TK-LIB:$::tk_library"
 
     $help = Invoke-Host @('--help')
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
-    Check '--help makes the embedded reference discoverable' `
-        ($help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') ($help.Err + $help.Out)
+    Check '--help identifies the complete Machteld, Tcl, and Tk reference' `
+        ($help.Out -match '(?i)complete offline reference' -and
+         $help.Out -match 'Machteld 0\.10\.1' -and
+         $help.Out -match 'Tcl 9\.0\.4' -and $help.Out -match 'Tk 9\.0\.4' -and
+         $help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') `
+        ($help.Err + $help.Out)
     $version = Invoke-Host @('--version')
-    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.10\.0') $version.Err
+    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.10\.1') $version.Err
 
     $docsStatus = Invoke-Host @('--docs', 'status', '--json')
     $statusObject = $null
@@ -396,7 +400,7 @@ puts "TK-LIB:$::tk_library"
         ($docsStatus.Err + $docsStatus.Out)
     Check 'embedded reference status names exact runtime versions' `
         ($null -ne $statusObject -and $statusObject.ok -eq 1 -and
-         $docsStatus.Out -match '0\.10\.0' -and
+         $docsStatus.Out -match '0\.10\.1' -and
          $docsStatus.Out -match '9\.0\.4' -and $docsStatus.Out -match '(?i)sha256') `
         ($docsStatus.Err + $docsStatus.Out)
 
@@ -404,6 +408,8 @@ puts "TK-LIB:$::tk_library"
     Check '--docs with no operation returns the agent documentation bootstrap' `
         ($docsBootstrap.Exit -eq 0 -and
          $docsBootstrap.Out -match '(?m)^# Agent documentation bootstrap' -and
+         $docsBootstrap.Out -match '(?i)complete, exact-version offline references' -and
+         $docsBootstrap.Out -match 'Tcl 9\.0\.4' -and $docsBootstrap.Out -match 'Tk 9\.0\.4' -and
          $docsBootstrap.Out -match 'docs status' -and $docsBootstrap.Out -match 'docs get' -and
          $docsBootstrap.Out -match 'docs search' -and $docsBootstrap.Out -match 'docs extract') `
         ($docsBootstrap.Err + $docsBootstrap.Out)

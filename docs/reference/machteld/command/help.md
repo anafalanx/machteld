@@ -16,10 +16,12 @@ help ?query ...?
 
 ## Arguments and options
 
-With no query, returns the short agent/human documentation bootstrap. A query
-can be an exact stable document ID such as `machteld/command/run` or natural
-search words. Multiple words are joined as one search query. For stable,
-structured programmatic access use `docs` directly.
+With no query, returns the short agent/human documentation bootstrap. Its first
+screen explicitly identifies the complete offline Machteld 0.10.1, Tcl 9.0.4,
+and Tk 9.0.4 references carried by the executable. A query can be an exact
+stable document ID such as `machteld/command/run` or natural search words.
+Multiple words are joined as one search query. For stable, structured
+programmatic access use `docs` directly.
 
 ## Results
 
@@ -30,7 +32,7 @@ format and wording are not a machine protocol.
 ## Errors
 
 Documentation failures use `HELP notfound`, `HELP oserror`, or
-`HELP unsupported`. The complete 0.10.0 hosts and newly wrapped tools carry the
+`HELP unsupported`. The complete 0.10.1 hosts and newly wrapped tools carry the
 reference pack; `unsupported` protects deliberately bare/internal hosts.
 
 ## Lifetime and timeouts

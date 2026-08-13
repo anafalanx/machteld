@@ -3,7 +3,7 @@
 # Sourced by the C host from zipfs before Tcl_Main evaluates an entry file.
 
 namespace eval ::machteld {
-    variable version 0.10.0
+    variable version 0.10.1
     # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl
     # from the explicit native specification, after checking its command set
     # against src/*.c. Declared empty here so an unpackaged prelude never invents
@@ -362,7 +362,7 @@ proc ::machteld::_write_launcher {path archiveEntry} {
     set channel [open $path {WRONLY CREAT EXCL}]
     try {
         fconfigure $channel -encoding utf-8 -translation lf
-        puts $channel {package require machteld 0.10.0}
+        puts $channel {package require machteld 0.10.1}
         puts $channel "set argv0 \[file join \[file dirname \[info script\]\] [list $archiveEntry]\]"
         puts $channel {source $argv0}
     } finally {

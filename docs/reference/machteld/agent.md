@@ -8,9 +8,14 @@ commands: docs, help
 
 # Agent documentation bootstrap
 
-Ground every answer and code change in this executable's embedded reference.
-It matches the runtime exactly and works offline; web memory may describe a
-different Tcl/Tk or Machteld release.
+This executable contains the complete, exact-version offline references for
+Machteld 0.10.1, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
+API manuals and the Tk application, widget, and C API manuals—not merely a
+short Machteld guide.
+
+Ground every answer and code change in this embedded corpus. It matches the
+runtime exactly; web memory may describe a different Tcl/Tk or Machteld
+release.
 
 ```tcl
 # 1. Establish versions, corpus identity, and available products.
