@@ -66,7 +66,7 @@ into a misleading failure.
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 0.10.0 prelude and public palette;
+- the full Machteld 0.10.1 prelude and public palette;
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl/Tk distribution notices
   under `licenses/`;
@@ -75,7 +75,7 @@ A wrapped executable contains:
 - the same native Windows core and statically linked SQLite store.
 
 There is no prelude-free or reduced-capability option. `package require machteld`
-inside a wrapped tool returns 0.10.0, `manifest` describes the same API, and
+inside a wrapped tool returns 0.10.1, `manifest` describes the same API, and
 binary-safe `store` has the same behavior and five-second busy timeout. Wrapping
 does not change the programmatic machine-control API. The reference corpus is
 copied so `docs`, `help`, and the reserved `--machteld-docs` host route remain
@@ -89,7 +89,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 0.10.0
+package require machteld 0.10.1
 package require Tk
 ```
 
