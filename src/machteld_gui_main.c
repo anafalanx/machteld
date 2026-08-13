@@ -52,6 +52,19 @@ _tWinMain(
     TclZipfs_AppHook(&argc, &argv);
 #endif
 
+    /* Wrapped applications own their command line except for this explicit,
+     * namespaced runtime-introspection escape.  Keep Tk-looking arguments and
+     * every other spelling untouched. */
+    if (Tcl_GetStartupScript(NULL) != NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--machteld-docs")) == 0) {
+        for (int i = 1; i + 1 < argc; i++) {
+            argv[i] = argv[i + 1];
+        }
+        argc--;
+        argv[argc] = NULL;
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS_GUI);
+    }
+
     /*
      * Refuse to run as a bare Tcl-script host. If the appended payload did NOT
      * mount (a stripped/corrupt exe), TclZipfs_AppHook registered no startup
@@ -120,10 +133,17 @@ Machteld_GuiAppInit(
     if (Tcl_Init(interp) == TCL_ERROR) {
         Machteld_Fatal(interp);
     }
-    if (init_tk_preserving_args(interp) != TCL_OK) {
-        Machteld_Fatal(interp);
+    if (Machteld_GetHostMode() == MACHTELD_HOST_DOCS_GUI) {
+        /* Runtime documentation is a headless control route even in a GUI
+         * wrapper.  Make Tk available exactly as the console host does, but do
+         * not create a transient root window merely to answer a query. */
+        Tcl_StaticLibrary(NULL, "Tk", Tk_Init, Tk_SafeInit);
+    } else {
+        if (init_tk_preserving_args(interp) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+        Tcl_StaticLibrary(interp, "Tk", Tk_Init, Tk_SafeInit);
     }
-    Tcl_StaticLibrary(interp, "Tk", Tk_Init, Tk_SafeInit);
 
     /* Native libraries + the prelude are shared with the console host. */
     if (Machteld_RegisterLibs(interp) != TCL_OK) {

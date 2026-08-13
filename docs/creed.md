@@ -15,7 +15,9 @@ tags: [machteld, principles, design]
    catalogue, locale-dependent protocol, or guessed unit. A bare executable
    name uses Machteld's deterministic `PATH`-only search.
 4. **The palette describes itself.** `manifest` facts are explicitly authored,
-   validated at build time, and returned as structured data at runtime.
+   validated at build time, and returned as structured data at runtime. `docs`
+   carries the complete exact-version Machteld/Tcl/Tk reference, with stable
+   identifiers, bounded retrieval, search, hashes, and extraction for agents.
 5. **Errors are contract.** Machteld-defined public failures carry
    `{MACHTELD DOMAIN code}`; Tcl language errors keep Tcl's own codes.
 6. **Orthogonal and small.** Prefer one composable primitive over a policy stack.

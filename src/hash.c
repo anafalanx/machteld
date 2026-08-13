@@ -19,7 +19,7 @@
  * implementation.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -401,7 +401,7 @@ int Machteldhash_Init(Tcl_Interp *interp) {
         free(st);
         return TCL_ERROR;
     }
-    if (Tcl_PkgProvide(interp, "machteld::hash", "0.4.0") != TCL_OK) {
+    if (Tcl_PkgProvide(interp, "machteld::hash", MACHTELD_VERSION) != TCL_OK) {
         Tcl_DeleteCommand(interp, "::machteld::hash");
         return TCL_ERROR;
     }

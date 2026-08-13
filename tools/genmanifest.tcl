@@ -54,13 +54,16 @@ if {$registered ne $expected} {
 }
 
 dict for {verb entry} $manifest {
-    foreach required {kind domain codes options} {
+    foreach required {kind domain codes options doc} {
         if {![dict exists $entry $required]} {
             error "manifest_spec: $verb has no $required field"
         }
     }
     if {[dict get $entry kind] ne "c"} {
         error "manifest_spec: native verb $verb must have kind c"
+    }
+    if {[dict get $entry doc] ne "machteld/command/$verb"} {
+        error "manifest_spec: $verb doc must be machteld/command/$verb"
     }
     set domain [dict get $entry domain]
     if {![regexp {^[A-Z][A-Z0-9_]*$} $domain]} {
@@ -79,6 +82,11 @@ dict for {verb entry} $manifest {
         dict for {subcommand subentry} [dict get $entry subcommands] {
             if {![dict exists $subentry options]} {
                 error "manifest_spec: $verb $subcommand has no options field"
+            }
+            set expectedDoc "machteld/command/$verb#$subcommand"
+            if {![dict exists $subentry doc] ||
+                    [dict get $subentry doc] ne $expectedDoc} {
+                error "manifest_spec: $verb $subcommand doc must be $expectedDoc"
             }
             foreach option [dict get $subentry options] {
                 if {$option ni $options} {

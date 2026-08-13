@@ -373,9 +373,10 @@ proc ::machteld::PoolClose {tok} {
 
 ::machteld::MetaDefine pool [dict create kind tcl args args domain POOL \
     codes {badvalue launch nohandle timeout usage} replycodes {poison} \
-    options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} \
+    options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} doc machteld/command/pool \
     subcommands [dict create \
-        create [dict create options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width}] \
-        submit [dict create options {}] wait [dict create options {-timeout}] \
-        info [dict create options {} returns {dead done fatal inflight pending requeued results stderr width workers}] \
-        close [dict create options {}]]]
+        create [dict create options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} doc machteld/command/pool#create] \
+        submit [dict create options {} doc machteld/command/pool#submit] \
+        wait [dict create options {-timeout} doc machteld/command/pool#wait] \
+        info [dict create options {} returns {dead done fatal inflight pending requeued results stderr width workers} doc machteld/command/pool#info] \
+        close [dict create options {} doc machteld/command/pool#close]]]

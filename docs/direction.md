@@ -1,13 +1,13 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.4.0.
+description: Current product boundary and decision rules for Machteld 0.10.0.
 tags: [machteld, direction, scope]
 ---
 
 # Direction
 
-The 0.4.0 product sentence is the decision filter:
+The 0.10.0 product sentence is the decision filter:
 
 > machteld is a compact Windows machine-control runtime.
 
@@ -22,8 +22,10 @@ Current decisions:
   only general program entry; `.tcl` is conventional, not required.
 - `wrap` is subordinate deployment machinery and accepts the same opt-in.
 - Every full or wrapped host exposes one Machteld version and the same
-  machine-control/data API, including static SQLite `store`; documentation and
-  nested wrapping are distribution-host services, not recursive payloads.
+  machine-control/data API, including static SQLite `store`, plus the complete
+  exact-version reference corpus. Nested wrapping remains distribution-only.
+- Documentation is a runtime interface: offline, versioned, machine-readable,
+  provenance-bearing, and equally discoverable by people and agents.
 - Native and Tcl manifest facts are explicit metadata, never inferred from
   implementation bodies.
 - Linear blocking operations remain the default; concurrency is explicit and

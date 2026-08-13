@@ -1,15 +1,16 @@
 ---
 type: reference
 title: Command palette
-description: The public Machteld 0.4.0 commands and their intended composition.
+description: The public Machteld 0.10.0 commands and their intended composition.
 tags: [machteld, api, tcl, windows]
 ---
 
 # Command palette
 
 All commands are in `::machteld` and resolve as bare names in a top-level entry.
-This page is the readable reference; `[manifest]` is the structured description
-of the exact running build.
+This page is a composition tour. The [complete reference](reference/machteld/index.md)
+has the exact command pages; `[manifest]` describes the running build and `docs`
+queries the complete embedded Machteld/Tcl/Tk corpus.
 
 ## Process control
 
@@ -244,6 +245,9 @@ becomes `PMAP failed`. See [parallel work](parallel.md).
 ```tcl
 version
 manifest
+docs status
+docs get machteld/command/run
+docs search {process lifetime timeout} -scope machteld -limit 10
 dict get [manifest] run options
 help
 help contract
@@ -252,21 +256,22 @@ wrap app.tcl -o app.exe --console
 wrap appdir -o app.exe --entry src/main.tcl --gui
 ```
 
-`version` and `package require machteld` return `0.4.0`. `manifest` describes the
+`version` and `package require machteld` return `0.10.0`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
-`replycodes` are fixed protocol failures carried as data. `help` serves the
-embedded docs in the full distribution host.
+`replycodes` are fixed protocol failures carried as data. `docs` provides exact,
+bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9
+references; `help` is its human-facing shorthand.
 
 `wrap` accepts only an opted-in Machteld entry. A directory defaults to
 `main.tcl`; `--entry` selects another file inside it. It includes hidden assets
 under an application subtree, validates the staged entry, publishes atomically,
 and produces a console or GUI host with the same machine-control/data API,
-static SQLite, Tcl/Tk libraries, and version. Documentation and nested wrapping
-are not copied recursively. See
+static SQLite, Tcl/Tk libraries, version, and complete reference. Basekits are
+not copied recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).
 
 ## Complete verb list
 
-`canon`, `child`, `cli`, `detach`, `dirs`, `hash`, `help`, `http`, `json`,
+`canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
 `links`, `log`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`, `scope`,
 `store`, `version`, `wait`, `watch`, `worker`, and `wrap`.

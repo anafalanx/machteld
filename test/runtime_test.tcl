@@ -21,8 +21,8 @@ proc result_of {reply} {
     return [expr {[dict exists $reply result] ? [dict get $reply result] : ""}]
 }
 
-set expected {canon child cli detach dirs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
-check "package version is 0.4.0" [expr {[package require machteld] eq "0.4.0"}]
+set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+check "package version is 0.10.0" [expr {[package require machteld] eq "0.10.0"}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
 set metadata [manifest]
@@ -36,9 +36,10 @@ check "worker separates reply-only protocol codes" [expr {
 check "pool separates poison reply from raised codes" [expr {
     [dict get $metadata pool codes] eq {badvalue launch nohandle timeout usage} &&
     [dict get $metadata pool replycodes] eq {poison}}]
-check "help indexes the runtime commands" [expr {
-    [string match *run* [help]] && [string match *store* [help]] && [string match *wrap* [help]]}]
-check "version command agrees with the package" [expr {[version] eq "0.4.0"}]
+check "help advertises bounded embedded-reference discovery" [expr {
+    [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
+    [string match {*docs schema*} [help]]}]
+check "version command agrees with the package" [expr {[version] eq "0.10.0"}]
 set embedded_module_path [file normalize \
     [file join [file dirname [info library]] tcl9 9.0]]
 check "embedded Tcl modules include msgcat" [expr {
@@ -116,6 +117,13 @@ check "CLI preserves valid boolean declarations" [expr {
     [dict get [cli parse {} $booleanSpec] quiet] eq "off"}]
 check "CLI durations require units" [expr {
     [cli duration 2s] == 2000 && [errcode_of {cli duration 2}] eq {MACHTELD CLI badvalue}}]
+check "CLI durations accept the finite DWORD boundary" [expr {
+    [cli duration 4294967294ms] == 4294967294 &&
+    [cli duration 0000000001193h] == 4294800000}]
+foreach value {4294967295ms 4294968s 71583m 1194h 999999999999999999999999999999999999999999ms} {
+    check "CLI durations reject out-of-range $value" [expr {
+        [errcode_of [list cli duration $value]] eq {MACHTELD CLI badvalue}}]
+}
 
 set logfile [file join $WORK runtime.log]
 log configure -level info -file $logfile

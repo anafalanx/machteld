@@ -58,12 +58,21 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
     [void]$quoted.Append('"')
     return $quoted.ToString()
 }
-function Invoke-Host([string[]]$Arguments) {
+function Invoke-Host([string[]]$Arguments, [string]$WorkingDirectory = '') {
     $stdout = Join-Path $Work "stdout-$([Guid]::NewGuid().ToString('n')).txt"
     $stderr = Join-Path $Work "stderr-$([Guid]::NewGuid().ToString('n')).txt"
     $argumentLine = (($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
-    $process = Start-Process -FilePath $Machteld -ArgumentList $argumentLine -Wait -PassThru `
-        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
+    $start = @{
+        FilePath = $Machteld
+        ArgumentList = $argumentLine
+        Wait = $true
+        PassThru = $true
+        RedirectStandardOutput = $stdout
+        RedirectStandardError = $stderr
+        WindowStyle = 'Hidden'
+    }
+    if ($WorkingDirectory) { $start.WorkingDirectory = $WorkingDirectory }
+    $process = Start-Process @start
     [pscustomobject]@{
         Exit = $process.ExitCode
         Out = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
@@ -371,8 +380,104 @@ puts "TK-LIB:$::tk_library"
 
     $help = Invoke-Host @('--help')
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
+    Check '--help makes the embedded reference discoverable' `
+        ($help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') ($help.Err + $help.Out)
     $version = Invoke-Host @('--version')
-    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.4\.0') $version.Err
+    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.10\.0') $version.Err
+
+    $docsStatus = Invoke-Host @('--docs', 'status', '--json')
+    $statusObject = $null
+    if ($docsStatus.Exit -eq 0) {
+        try { $statusObject = $docsStatus.Out | ConvertFrom-Json } catch {}
+    }
+    Check '--docs exposes a machine-readable host route' `
+        ($docsStatus.Exit -eq 0 -and $null -ne $statusObject -and
+         $statusObject.ok -eq 1 -and $null -ne $statusObject.result) `
+        ($docsStatus.Err + $docsStatus.Out)
+    Check 'embedded reference status names exact runtime versions' `
+        ($null -ne $statusObject -and $statusObject.ok -eq 1 -and
+         $docsStatus.Out -match '0\.10\.0' -and
+         $docsStatus.Out -match '9\.0\.4' -and $docsStatus.Out -match '(?i)sha256') `
+        ($docsStatus.Err + $docsStatus.Out)
+
+    $docsBootstrap = Invoke-Host @('--docs')
+    Check '--docs with no operation returns the agent documentation bootstrap' `
+        ($docsBootstrap.Exit -eq 0 -and
+         $docsBootstrap.Out -match '(?m)^# Agent documentation bootstrap' -and
+         $docsBootstrap.Out -match 'docs status' -and $docsBootstrap.Out -match 'docs get' -and
+         $docsBootstrap.Out -match 'docs search' -and $docsBootstrap.Out -match 'docs extract') `
+        ($docsBootstrap.Err + $docsBootstrap.Out)
+
+    $docsStatusFile = Join-Path $Work 'reference-status.json'
+    $docsOutput = Invoke-Host @('--docs', 'status', '--json', '--output', $docsStatusFile)
+    $outputObject = $null
+    if ($docsOutput.Exit -eq 0 -and (Test-Path -LiteralPath $docsStatusFile -PathType Leaf)) {
+        try { $outputObject = Get-Content -LiteralPath $docsStatusFile -Raw | ConvertFrom-Json } catch {}
+    }
+    Check '--docs writes its JSON envelope to an explicit output file' `
+        ($docsOutput.Exit -eq 0 -and $null -ne $outputObject -and
+         $outputObject.ok -eq 1 -and $null -ne $outputObject.result) `
+        ($docsOutput.Err + $docsOutput.Out)
+
+    $docsGet = Invoke-Host @('docs', 'get', 'tcl/command/dict',
+        '--section', 'synopsis', '--limit', '4096', '--json')
+    $getObject = $null
+    if ($docsGet.Exit -eq 0) {
+        try { $getObject = $docsGet.Out | ConvertFrom-Json } catch {}
+    }
+    Check 'docs convenience route retrieves a bounded Tcl reference section' `
+        ($docsGet.Exit -eq 0 -and $null -ne $getObject -and
+         $getObject.ok -eq 1 -and $null -ne $getObject.result -and
+         $docsGet.Out -match 'tcl/command/dict' -and $docsGet.Out -match '(?i)synopsis') `
+        ($docsGet.Err + $docsGet.Out)
+
+    $routeDirectory = Join-Path $Work 'route-directory-shadow'
+    New-Item -ItemType Directory -Force -Path `
+        (Join-Path $routeDirectory 'docs'), (Join-Path $routeDirectory 'wrap') | Out-Null
+    $directoryDocs = Invoke-Host -Arguments @('docs', 'status', '--json') `
+        -WorkingDirectory $routeDirectory
+    $directoryObject = $null
+    if ($directoryDocs.Exit -eq 0) {
+        try { $directoryObject = $directoryDocs.Out | ConvertFrom-Json } catch {}
+    }
+    Check 'a same-name directory does not hide the docs convenience route' `
+        ($directoryDocs.Exit -eq 0 -and $null -ne $directoryObject -and
+         $directoryObject.ok -eq 1 -and $null -ne $directoryObject.result) `
+        ($directoryDocs.Err + $directoryDocs.Out)
+
+    $directoryWrap = Invoke-Host -Arguments @('wrap') -WorkingDirectory $routeDirectory
+    Check 'a same-name directory does not hide the wrap convenience route' `
+        ($directoryWrap.Exit -eq 1 -and
+         ($directoryWrap.Err + $directoryWrap.Out) -match '(?i)wrap' -and
+         ($directoryWrap.Err + $directoryWrap.Out) -notmatch '(?i)regular file|startup program') `
+        ($directoryWrap.Err + $directoryWrap.Out)
+
+    $docsUnknown = Invoke-Host @('--docs', 'get', 'no-such-product/no-such-page', '--json')
+    $unknownObject = $null
+    try { $unknownObject = ($docsUnknown.Err + $docsUnknown.Out) | ConvertFrom-Json } catch {}
+    Check 'docs host route fails closed for an unknown page' `
+        ($docsUnknown.Exit -eq 1 -and $null -ne $unknownObject -and
+         $unknownObject.ok -eq 0 -and
+         ($docsUnknown.Err + $docsUnknown.Out) -match '(?i)not found|notfound') `
+        ($docsUnknown.Err + $docsUnknown.Out)
+
+    $docsProgram = Join-Path $Work 'docs'
+    Write-Utf8 $docsProgram "package require machteld`nputs REAL-DOCS-PROGRAM`n"
+    $realDocs = Invoke-Host -Arguments @('docs') -WorkingDirectory $Work
+    Check 'a real opted-in file named docs wins over the convenience route' `
+        ($realDocs.Exit -eq 0 -and $realDocs.Out -match 'REAL-DOCS-PROGRAM') `
+        ($realDocs.Err + $realDocs.Out)
+    $reservedDocs = Invoke-Host -Arguments @('--docs', 'status', '--json') `
+        -WorkingDirectory $Work
+    $reservedObject = $null
+    if ($reservedDocs.Exit -eq 0) {
+        try { $reservedObject = $reservedDocs.Out | ConvertFrom-Json } catch {}
+    }
+    Check 'the reserved --docs route wins even beside a real file named docs' `
+        ($reservedDocs.Exit -eq 0 -and $null -ne $reservedObject -and
+         $reservedObject.ok -eq 1 -and $null -ne $reservedObject.result -and
+         $reservedDocs.Out -notmatch 'REAL-DOCS-PROGRAM') `
+        ($reservedDocs.Err + $reservedDocs.Out)
 
     if ($Bare) {
         $Bare = [IO.Path]::GetFullPath($Bare)

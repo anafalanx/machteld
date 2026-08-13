@@ -3,7 +3,7 @@
 # Sourced by the C host from zipfs before Tcl_Main evaluates an entry file.
 
 namespace eval ::machteld {
-    variable version 0.4.0
+    variable version 0.10.0
     # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl
     # from the explicit native specification, after checking its command set
     # against src/*.c. Declared empty here so an unpackaged prelude never invents
@@ -97,9 +97,9 @@ proc ::machteld::manifest {} {
     return $m
 }
 
-::machteld::MetaDefine version [dict create kind tcl args {}]
-::machteld::MetaDefine manifest [dict create kind tcl args {}]
-::machteld::MetaDefine scope [dict create kind tcl args {body}]
+::machteld::MetaDefine version [dict create kind tcl args {} doc machteld/command/version]
+::machteld::MetaDefine manifest [dict create kind tcl args {} doc machteld/command/manifest]
+::machteld::MetaDefine scope [dict create kind tcl args {body} doc machteld/command/scope]
 
 # scope { body }: run body, then close (tree-kill) any children started within
 # it that are still alive at the closing brace -- bounded lifetime by lexical
@@ -143,13 +143,26 @@ proc ::machteld::Fail {domain code msg} {
 # _dur2ms: parse a duration with an explicit unit (500ms, 30s, 5m, 2h) to
 # milliseconds. Bare numbers are rejected -- the same rule the C option parser
 # enforces, so a stray `-timeout 100` can never silently mean "100 seconds".
+# The maximum is one less than Win32's INFINITE sentinel (0xFFFFFFFF), matching
+# the native timeout options. Compare the decimal text before arithmetic so an
+# enormous input cannot force Tcl to construct an enormous bignum.
 # Takes the caller's domain, the same way the C option parser does: the domain
 # is the verb you invoked, never the helper that happened to fail.
 proc ::machteld::_dur2ms {dom d} {
     if {![regexp {^([0-9]+)(ms|s|m|h)$} $d -> n u]} {
         Fail $dom badvalue "bad duration \"$d\": use an explicit unit (500ms, 30s, 5m, 2h)"
     }
-    return [expr {$n * [dict get {ms 1 s 1000 m 60000 h 3600000} $u]}]
+    set factor [dict get {ms 1 s 1000 m 60000 h 3600000} $u]
+    set maximum 4294967294
+    set limit [expr {$maximum / $factor}]
+    set normalized [string trimleft $n 0]
+    if {$normalized eq ""} { set normalized 0 }
+    if {[string length $normalized] > [string length $limit] ||
+            ([string length $normalized] == [string length $limit] &&
+             [string compare $normalized $limit] > 0)} {
+        Fail $dom badvalue "bad duration \"$d\": maximum is 4294967294ms"
+    }
+    return [expr {$normalized * $factor}]
 }
 
 # pty: extend the C core (spawn/send/read/close/list) with a Tcl-level `expect`,
@@ -223,9 +236,10 @@ if {[info commands ::machteld::pty] ne ""} {
         strip  ::machteld::PtyStrip
     }
     ::machteld::MetaDefine pty [dict create kind tcl args args domain PTY codes {badvalue timeout usage} \
+        doc machteld/command/pty \
         options {-timeout} subcommands [dict create \
-            expect [dict create options {-timeout}] \
-            strip  [dict create options {}]]]
+            expect [dict create options {-timeout} doc machteld/command/pty#expect] \
+            strip  [dict create options {} doc machteld/command/pty#strip]]]
 }
 
 
@@ -348,7 +362,7 @@ proc ::machteld::_write_launcher {path archiveEntry} {
     set channel [open $path {WRONLY CREAT EXCL}]
     try {
         fconfigure $channel -encoding utf-8 -translation lf
-        puts $channel {package require machteld 0.4.0}
+        puts $channel {package require machteld 0.10.0}
         puts $channel "set argv0 \[file join \[file dirname \[info script\]\] [list $archiveEntry]\]"
         puts $channel {source $argv0}
     } finally {
@@ -450,19 +464,26 @@ proc ::machteld::wrap {args} {
             [info commands ::machteld::Publish] eq ""} {
         Fail WRAP unsupported "wrap: this host lacks packaging support"
     }
-    if {![info exists ::machteld::prelude]} {
+    if {[info commands ::machteld::PayloadRoot] eq "" ||
+            [catch {::machteld::PayloadRoot} root]} {
         Fail WRAP unsupported "wrap: the embedded runtime root is unavailable"
     }
-    set root [file dirname $::machteld::prelude]
     if {![file isdirectory [file join $root tcl_library]] ||
             ![file isdirectory [file join $root tcl9]] ||
             ![file isdirectory [file join $root tk_library]] ||
             ![file isdirectory [file join $root licenses]] ||
+            ![file isdirectory [file join $root reference]] ||
             ![file isdirectory [file join $root basekit]]} {
         Fail WRAP unsupported "wrap: this executable carries no wrapper basekits"
     }
     set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
     if {![file isfile $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
+    if {[info commands ::machteld::DocsPackFiles] eq ""} {
+        Fail WRAP unsupported "wrap: embedded reference validation is unavailable"
+    }
+    if {[catch {::machteld::DocsPackFiles} referenceError]} {
+        Fail WRAP unsupported "wrap: embedded reference pack is unavailable or invalid: $referenceError"
+    }
 
     lassign [_new_workdir $outParent] work workKey
     try {
@@ -472,6 +493,7 @@ proc ::machteld::wrap {args} {
         ::machteld::_copy_tree [file join $root tcl9]        [file join $stage tcl9]
         ::machteld::_copy_tree [file join $root tk_library]  [file join $stage tk_library]
         ::machteld::_copy_tree [file join $root licenses]    [file join $stage licenses]
+        ::machteld::_copy_tree [file join $root reference]   [file join $stage reference]
         file copy [file join $root machteld.tcl] [file join $stage machteld.tcl]
         set app [file join $stage app]
         if {$single} {
@@ -522,52 +544,8 @@ proc ::machteld::wrap {args} {
 }
 
 ::machteld::MetaDefine wrap [dict create kind tcl args args domain WRAP \
-    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui -o}]
-
-# Serve the documentation carried in zipfs. Return text so callers choose where
-# to display it.
-proc ::machteld::HelpRead {path} {
-    set ch ""
-    if {[catch {
-        set ch [open $path r]
-        fconfigure $ch -encoding utf-8
-        set text [read $ch]
-        close $ch
-        set ch ""
-    } msg]} {
-        if {$ch ne ""} { catch {close $ch} }
-        Fail HELP oserror "help: cannot read \"$path\": $msg"
-    }
-    return $text
-}
-
-proc ::machteld::help {{topic ""}} {
-    set docs ""
-    foreach _m [dict keys [zipfs mount]] {
-        if {[file isdirectory $_m/docs]} { set docs $_m/docs; break }
-    }
-    if {$docs eq ""} { Fail HELP unsupported "help: this build carries no embedded docs" }
-    set files [lsort [glob -nocomplain -tails -directory $docs *.md]]
-    if {$topic eq ""} {
-        set out "machteld [::machteld::version] -- help <topic>:\n"
-        foreach f $files { append out "  [file rootname $f]\n" }
-        append out "  all   (the whole bundle)\n"
-        append out "\nCommands:\n  [join [lsort [dict keys [manifest]]] { }]\n"
-        return $out
-    }
-    if {$topic eq "all"} {
-        set out ""
-        foreach f $files {
-            append out [HelpRead [file join $docs $f]] "\n\n---\n\n"
-        }
-        return $out
-    }
-    set f [file join $docs $topic.md]
-    if {![file exists $f]} { Fail HELP notfound "help: no topic \"$topic\" (try: help)" }
-    return [HelpRead $f]
-}
-
-::machteld::MetaDefine help [dict create kind tcl args {{topic {}}} domain HELP codes {notfound oserror unsupported}]
+    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui -o} \
+    doc machteld/command/wrap]
 
 # Expose the palette as bare verbs: unqualified run / child / pty / wait / scope
 # / detach / store resolve to ::machteld::* -- so the REPL and scripts read like
@@ -588,8 +566,8 @@ package provide machteld $::machteld::version
 # (tcl_prompt1 is never invoked in non-interactive/script mode, so scripts stay
 # silent.)
 set ::tcl_prompt1 {
-    puts "machteld [::machteld::version] - a Windows machine-control shell (Tcl [info patchlevel])"
-    set ::tcl_prompt1 {puts -nonewline "mt % "; flush stdout}
-    puts -nonewline "mt % "
+    puts "machteld [::machteld::version] - compact Windows machine-control runtime (Tcl [info patchlevel])"
+    set ::tcl_prompt1 {puts -nonewline "machteld % "; flush stdout}
+    puts -nonewline "machteld % "
     flush stdout
 }

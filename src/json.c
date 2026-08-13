@@ -23,7 +23,7 @@
  * booleans and nulls do not round-trip. Both are documented in the contract.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -528,7 +528,7 @@ int Machteldjson_Init(Tcl_Interp *interp) {
     if (Tcl_CreateObjCommand(interp, "::machteld::json", JsonCmd, NULL, NULL) == NULL) {
         return TCL_ERROR;
     }
-    if (Tcl_PkgProvide(interp, "machteld::json", "0.4.0") != TCL_OK) {
+    if (Tcl_PkgProvide(interp, "machteld::json", MACHTELD_VERSION) != TCL_OK) {
         Tcl_DeleteCommand(interp, "::machteld::json");
         return TCL_ERROR;
     }

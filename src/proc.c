@@ -19,7 +19,7 @@
  * result.
  */
 #include "winjob.h"
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -2252,8 +2252,12 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             for (size_t j = i; j < n; j++) {
                 if (ev[j].done || ev[j].path == NULL || strcmp(ev[j].path, path) != 0) continue;
                 switch (ev[j].action) {
-                    case FILE_ACTION_REMOVED:          removed = 1; added = 0; break;
-                    case FILE_ACTION_ADDED:            added = 1; removed = 0; break;
+                    /* These are monotonic observations. Clearing the opposite
+                     * flag made the last of removed/added win, so an identical
+                     * batch could violate the documented precedence solely
+                     * because Windows reported its lower-priority event later. */
+                    case FILE_ACTION_REMOVED:          removed = 1; break;
+                    case FILE_ACTION_ADDED:            added = 1; break;
                     case FILE_ACTION_RENAMED_NEW_NAME: renamed = 1; if (ev[j].from) from = ev[j].from; break;
                     default: break;
                 }
@@ -2310,7 +2314,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     ctx->root = root;
 
     if (Tcl_Eval(interp, "namespace eval ::machteld {}") != TCL_OK ||
-        Tcl_PkgProvide(interp, "machteld::proc", "0.4.0") != TCL_OK) {
+        Tcl_PkgProvide(interp, "machteld::proc", MACHTELD_VERSION) != TCL_OK) {
         proc_cleanup(ctx);
         free(ctx);
         return TCL_ERROR;

@@ -22,7 +22,7 @@
  * percentage takes two readings and divides -- determinism over cleverness.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -378,7 +378,7 @@ int Machteldps_Init(Tcl_Interp *interp) {
     if (Tcl_CreateObjCommand(interp, "::machteld::mtps", PsCmd, NULL, NULL) == NULL) {
         return TCL_ERROR;
     }
-    if (Tcl_PkgProvide(interp, "machteld::ps", "0.4.0") != TCL_OK) {
+    if (Tcl_PkgProvide(interp, "machteld::ps", MACHTELD_VERSION) != TCL_OK) {
         Tcl_DeleteCommand(interp, "::machteld::mtps");
         return TCL_ERROR;
     }

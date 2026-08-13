@@ -151,6 +151,28 @@ require_payload_file(Tcl_Interp *interp, Tcl_Obj *root, const char *directory,
     return TCL_OK;
 }
 
+/* Private accessor for services that must stay anchored to the executable's
+ * identity-checked mount.  In particular, documentation must never select an
+ * ambient zipfs mount merely because it happens to contain /reference. */
+static int
+PayloadRootCmd(void *client_data, Tcl_Interp *interp, int objc,
+               Tcl_Obj *const objv[])
+{
+    (void)client_data;
+    (void)objv;
+    if (objc != 1) {
+        return Machteld_EntryError(interp, "badvalue",
+            "wrong # args: should be \"::machteld::PayloadRoot\"");
+    }
+    Tcl_Obj *root = Tcl_GetAssocData(interp, MACHTELD_PAYLOAD_ASSOC, NULL);
+    if (root == NULL) {
+        return Machteld_EntryError(interp, "state",
+            "embedded runtime payload root is unavailable");
+    }
+    Tcl_SetObjResult(interp, root);
+    return TCL_OK;
+}
+
 int
 Machteld_PreInit(Tcl_Interp *interp)
 {
@@ -206,6 +228,12 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     if (payload_root == NULL) {
         return Machteld_EntryError(interp, "state",
             "runtime payload was not pinned before initialization");
+    }
+
+    if (Tcl_CreateObjCommand(interp, "::machteld::PayloadRoot",
+            PayloadRootCmd, NULL, NULL) == NULL) {
+        return Machteld_EntryError(interp, "state",
+            "cannot register the trusted payload accessor");
     }
 
 #ifdef MACHTELD_STATIC_SQLITE

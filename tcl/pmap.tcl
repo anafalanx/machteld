@@ -113,4 +113,5 @@ proc ::machteld::pmap {args} {
 }
 
 ::machteld::MetaDefine pmap [dict create kind tcl args args domain PMAP \
-    codes {badvalue failed launch timeout usage} options {-maxtries -raw -timeout -width}]
+    codes {badvalue failed launch timeout usage} options {-maxtries -raw -timeout -width} \
+    doc machteld/command/pmap]

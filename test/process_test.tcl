@@ -156,7 +156,11 @@ check "child wait timeout does not kill the child" [expr {
     ![catch {mtps info $child_pid}]}]
 child kill $token
 child wait $token
-child close $token
+set close_result [child close $token]
+check "child close is successful best-effort teardown" [expr {
+    $close_result eq "" && $token ni [child list]}]
+check "child close rejects an already-released token" [expr {
+    [errcode_of [list child close $token]] eq {MACHTELD CHILD nohandle}}]
 
 # The archived run-probe failure: the direct parent exits while its descendant
 # retains both capture-pipe write handles. Without a timeout, run owns the whole

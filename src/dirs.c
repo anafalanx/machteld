@@ -14,7 +14,7 @@
  * surrogate classification already observed in the directory scan.
  */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -126,7 +126,7 @@ typedef struct {
     int          hardlinks;  /* -hardlinks: also report files with nlinks > 1 */
     Tcl_Obj     *entries;    /* {path .. type .. target ..} per name surrogate */
     Tcl_Obj     *multi;      /* {path .. links N} per multiply-linked file */
-    Tcl_Obj     *entered;    /* non-surrogate reparse dirs the walk went into */
+    Tcl_Obj     *entered;    /* non-surrogate reparse dirs successfully enumerated */
     Tcl_WideInt  files;
     Tcl_WideInt  multilink;
 } DirsWalk;
@@ -782,6 +782,7 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
 
         const char *action = "descended";
         int stop = 0;
+        int entered = 0;
         HANDLE h = INVALID_HANDLE_VALUE;
 
         /* The order of these three is the order the caller reads them in: a
@@ -859,6 +860,13 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
             int got = dirs_children(w, h, &it, &kids, &kn);
             CloseHandle(h);
             h = INVALID_HANDLE_VALUE;
+            /* Opening a directory is not yet entering it for this result
+             * contract: `entered` means its directory stream was successfully
+             * obtained. A failed first enumeration already has an error row;
+             * mark the reparse decision failed as well instead of returning a
+             * contradictory `descended` row. */
+            if (got) entered = 1;
+            else action = "failed";
             if (got && kn > 0) {
                 if (n + kn > cap) {
                     size_t ncap = cap;
@@ -909,10 +917,10 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
             if (w->mode == DIRS_MODE_LINKS && dirs_isname(it.tag)) {
                 links_record(w, it.path, shown, it.tag, 1);
             }
-            /* Non-surrogate reparse directories are disclosed separately:
-             * `links` records where traversal stopped, `entered` where it
-             * deliberately continued. */
-            if (w->mode == DIRS_MODE_LINKS && !dirs_isname(it.tag)) {
+            /* `entered` is deliberately narrower than "followable": a depth
+             * cap, prune rule, failed open, or failed first enumeration did
+             * not enter this directory and must not claim that it did. */
+            if (w->mode == DIRS_MODE_LINKS && !dirs_isname(it.tag) && entered) {
                 Tcl_ListObjAppendElement(NULL, w->entered,
                     dirs_link_row(shown ? shown : "", it.tag, it.surrogate, action));
             }
@@ -1458,5 +1466,5 @@ int Machtelddirs_Init(Tcl_Interp *interp) {
         || Tcl_CreateObjCommand(interp, "::machteld::canon", CanonCmd, NULL, NULL) == NULL) {
         return TCL_ERROR;
     }
-    return Tcl_PkgProvide(interp, "machteld::dirs", "0.4.0");
+    return Tcl_PkgProvide(interp, "machteld::dirs", MACHTELD_VERSION);
 }

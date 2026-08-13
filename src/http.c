@@ -25,7 +25,7 @@
  * needs an unverified endpoint has `run -- curl` and has to say so out loud.
  */
 
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -661,7 +661,7 @@ int Machteldhttp_Init(Tcl_Interp *interp) {
     if (Tcl_CreateObjCommand(interp, "::machteld::http", HttpCmd, NULL, NULL) == NULL) {
         return TCL_ERROR;
     }
-    if (Tcl_PkgProvide(interp, "machteld::http", "0.4.0") != TCL_OK) {
+    if (Tcl_PkgProvide(interp, "machteld::http", MACHTELD_VERSION) != TCL_OK) {
         Tcl_DeleteCommand(interp, "::machteld::http");
         return TCL_ERROR;
     }

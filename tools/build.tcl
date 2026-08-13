@@ -1,8 +1,9 @@
 # Build the self-contained Windows hosts from the repository-local dependency
 # prefix created by tools/bootstrap.ps1.
 #
-# Prefer tools/build.ps1, which verifies/bootstrap the cache first. Direct use:
-#   .cache/deps/prefix/bin/tclsh90s.exe tools/build.tcl ?out/machteld.exe?
+# Prefer tools/build.ps1, which verifies/bootstrap the cache and owns a unique
+# work directory plus an absent output candidate. Direct callers must provide
+# MACHTELD_BUILD_ROOT and MACHTELD_REFERENCE_ROOT with the same guarantees.
 
 proc repository_root {} {
     set script [file normalize [info script]]
@@ -45,7 +46,26 @@ set OUT [lindex $argv 0]
 if {$OUT eq ""} { set OUT [Rp out machteld.exe] }
 set OUT [file normalize $OUT]
 set OUTDIR [file dirname $OUT]
-set OBJDIR [file join $OUTDIR obj]
+if {![catch {file lstat $OUT ignored}]} {
+    error "build.tcl: output already exists (an absent candidate is required): $OUT"
+}
+if {![info exists ::env(MACHTELD_BUILD_ROOT)] ||
+        $::env(MACHTELD_BUILD_ROOT) eq ""} {
+    error "MACHTELD_BUILD_ROOT is not set by tools/build.ps1"
+}
+set BUILDROOT [file normalize $::env(MACHTELD_BUILD_ROOT)]
+if {![file isdirectory $BUILDROOT]} {
+    error "invocation build directory not found: $BUILDROOT"
+}
+if {![regexp {^\.machteld-build-([0-9a-f]{32})\.exe$} \
+        [file tail $OUT] -> outputBuildId] ||
+        ![regexp {^\.machteld-build-([0-9a-f]{32})\.work$} \
+        [file tail $BUILDROOT] -> rootBuildId] ||
+        $outputBuildId ne $rootBuildId ||
+        ![string equal -nocase [file dirname $BUILDROOT] $OUTDIR]} {
+    error "build.tcl: output and build root are not one same-parent invocation pair"
+}
+set OBJDIR [file join $BUILDROOT obj]
 file mkdir $OUTDIR $OBJDIR
 
 set toolBin [file dirname [file normalize $GCC]]
@@ -106,14 +126,14 @@ set syslibs {
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
     -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp
 }
-set bare [file join $OUTDIR machteld-bare.exe]
+set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 run $GCC -municode -static-libgcc -Wl,--gc-sections \
     $consoleObj {*}$objects $sqliteObj $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bare
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bare }
 
-set bareGui [file join $OUTDIR machteld-bare-gui.exe]
+set bareGui [file join $BUILDROOT machteld-bare-gui.exe]
 puts "ld   [file tail $bareGui]"
 run $GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
     $guiObj {*}$objects $sqliteObj $TKLIB $TCLLIB $TCLSTUB \
@@ -126,7 +146,7 @@ run $TCLSH [Rp tools genmanifest.tcl] [Rp src] $generatedManifest
 set staged [file join $OBJDIR prelude.tcl]
 set output [open $staged w]
 fconfigure $output -translation lf
-foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] \
+foreach part [list [Rp tcl machteld.tcl] [Rp tcl docs.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] \
         [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] $generatedManifest] {
     set input [open $part r]
     fconfigure $input -translation lf
@@ -135,9 +155,19 @@ foreach part [list [Rp tcl machteld.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] \
 }
 close $output
 
+if {![info exists ::env(MACHTELD_REFERENCE_ROOT)] ||
+        $::env(MACHTELD_REFERENCE_ROOT) eq ""} {
+    error "MACHTELD_REFERENCE_ROOT is not set by tools/build.ps1"
+}
+set referenceRoot [file normalize $::env(MACHTELD_REFERENCE_ROOT)]
+if {![file isdirectory $referenceRoot]} {
+    error "generated reference pack not found: $referenceRoot"
+}
+
 run $TCLSH [Rp tools package.tcl] \
     --prefix $PREFIX --prelude $staged --wrapper $bare --out $OUT \
     --licenses [Rp licenses] --apache-license [Rp LICENSE] \
-    --docs [Rp docs] --embed-console $bare --embed-gui $bareGui
+    --reference $referenceRoot \
+    --embed-console $bare --embed-gui $bareGui
 
 puts "built [file nativename $OUT] ([file size $OUT] bytes)"

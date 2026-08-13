@@ -46,6 +46,35 @@ proc carries_runtime_notices {image} {
     }
     return 1
 }
+proc carries_reference_pack {image} {
+    set mount "reference-[pid]-[clock clicks]"
+    if {[catch {zipfs mount $image $mount}]} { return 0 }
+    try {
+        set root [file join //zipfs:/$mount reference]
+        foreach relative {catalog.dict START-HERE.md AGENTS.md schema.json} {
+            set path [file join $root $relative]
+            if {![file isfile $path] || [file size $path] == 0} { return 0 }
+        }
+        foreach choices {
+            {markdown/tcl/command/dict.md markdown/tcl/command/dict.txt}
+            {source/tcl/doc/dict.n}
+            {html/TclCmd/dict.html}
+            {markdown/tk/command/bind.md markdown/tk/command/bind.txt}
+            {source/tk/doc/bind.n}
+            {html/TkCmd/bind.html}
+            {markdown/machteld/command/run.md}
+        } {
+            set found 0
+            foreach relative $choices {
+                if {[file isfile [file join $root $relative]]} { set found 1; break }
+            }
+            if {!$found} { return 0 }
+        }
+    } finally {
+        catch {zipfs unmount $mount}
+    }
+    return 1
+}
 
 set console [file join $WORK wrapped-console.exe]
 wrap $TOOL -o $console --console
@@ -54,18 +83,44 @@ check "wrapped console needs no sidecar DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped console carries exact runtime license notices" \
     [carries_runtime_notices $console]
+check "wrapped console carries the complete reference pack" \
+    [carries_reference_pack $console]
 set marker [file join $WORK _hello_ran.txt]
 set result [run -- $console --help payload]
 check "wrapped console receives its own --help argument" [expr {
     [dict get $result status] eq "ok" && [wait_for_file $marker]}]
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
-check "wrapped console loads package 0.4.0" [string match *version:0.4.0* $text]
+check "wrapped console loads package 0.10.0" [string match *version:0.10.0* $text]
 check "wrapped console owns --help/--version spelling" [string match *argv:--help\ payload* $text]
 check "wrapped console carries native process API" [string match *run:yes* $text]
 check "wrapped console carries static binary store" [string match *store:yes* $text]
 check "wrapped console carries Tcl modules and timezone data" [expr {
     [string match *runtime:msgcat:1.7.1\ modules:embedded\ cp1252:80\ clock:*1970* $text] &&
     ![string match *runtime:error:* $text]}]
+
+# Ordinary application switches remain application-owned. Only the explicitly
+# namespaced escape bypasses the wrapped entry and queries its embedded runtime.
+file delete -force $marker
+set result [run -- $console --docs application-owned]
+check "wrapped console leaves ordinary --docs to its application" [expr {
+    [dict get $result status] eq "ok" && [wait_for_file $marker] &&
+    [string match *argv:--docs\ application-owned* [slurp $marker]]}]
+file delete -force $marker
+set result [run -- $console --machteld-docs status --json]
+check "wrapped console exposes the namespaced documentation escape" [expr {
+    [dict get $result status] eq "ok" &&
+    [string match *\"ok\":true* [dict get $result out]] &&
+    [string match *\"result\"* [dict get $result out]] &&
+    [string match *\"schema\"* [dict get $result out]] &&
+    [string match *9.0.4* [dict get $result out]] &&
+    ![file exists $marker]}]
+set result [run -- $console --machteld-docs get no-such-product/no-such-page --json]
+set failure_json "[dict get $result out][dict get $result err]"
+check "wrapped console emits a JSON failure envelope and nonzero exit" [expr {
+    [dict get $result status] eq "error" && [dict get $result exit] == 1 &&
+    [string match *\"ok\":false* $failure_json] &&
+    [string match *\"error\"* $failure_json] &&
+    [string match -nocase *notfound* $failure_json] && ![file exists $marker]}]
 
 # Application files are namespaced below archive-root app/, so nested entries
 # retain their own script-relative assets and may use runtime-looking names.
@@ -82,7 +137,7 @@ foreach relative {docs/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.
     close $channel
 }
 set channel [open [file join $nested src main.tcl] w]
-puts $channel {package require machteld 0.4.0}
+puts $channel {package require machteld 0.10.0}
 puts $channel {set f [open [file join [file dirname [info script]] sibling.txt] r]}
 puts $channel {puts [read $f]}
 puts $channel {close $f}
@@ -146,6 +201,8 @@ check "wrapped GUI needs no sidecar DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped GUI carries exact runtime license notices" \
     [carries_runtime_notices $gui]
+check "wrapped GUI carries the complete reference pack" \
+    [carries_reference_pack $gui]
 file delete -force $marker [file join $WORK _hello_store.db]
 set hostile_tcl [file join $WORK hostile-tcl]
 set hostile_tk [file join $WORK hostile-tk]
@@ -174,7 +231,7 @@ check "wrapped GUI selftest exits cleanly" [expr {
     [dict get $gui_result status] eq "ok" && [dict get $gui_result exit] == 0}]
 child close $gui_child
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
-check "wrapped GUI loads package 0.4.0" [string match *version:0.4.0* $text]
+check "wrapped GUI loads package 0.10.0" [string match *version:0.10.0* $text]
 regexp -line {^argc:(.*)$} $text _ observed_argc
 regexp -line {^argv:(.*)$} $text _ observed_argv
 check "wrapped GUI preserves exact original argc" [expr {
@@ -190,6 +247,43 @@ check "wrapped GUI carries Tcl modules and timezone data" [expr {
     [string match *runtime:msgcat:1.7.1\ modules:embedded\ cp1252:80\ clock:*1970* $text] &&
     ![string match *runtime:error:* $text]}]
 unset ::env(MACHTELD_WRAP_GUI_SELFTEST)
+
+# Ordinary GUI application switches remain application-owned, just as they do
+# in a console wrapper.  Only the namespaced first argument selects the runtime
+# documentation route.
+file delete -force $marker [file join $WORK _hello_store.db]
+set gui_owned_child [child start -env [list MACHTELD_WRAP_GUI_SELFTEST 1] -- \
+    $gui --docs application-owned]
+set gui_owned_result [child wait $gui_owned_child -timeout 5s]
+child close $gui_owned_child
+set gui_owned_text [expr {[file exists $marker] ? [slurp $marker] : ""}]
+check "wrapped GUI leaves ordinary --docs to its application" [expr {
+    [dict get $gui_owned_result status] eq "ok" &&
+    [dict get $gui_owned_result exit] == 0 &&
+    [string match *argv:--docs\ application-owned* $gui_owned_text]}]
+
+# A GUI documentation query is headless and writes explicitly because the GUI
+# subsystem has no standard output channel.  Omitting the required output is a
+# closed failure and still must not evaluate the application entry.
+file delete -force $marker [file join $WORK _hello_store.db]
+set gui_no_output_child [child start -- $gui --machteld-docs status --json]
+set gui_no_output_result [child wait $gui_no_output_child -timeout 5s]
+child close $gui_no_output_child
+check "wrapped GUI documentation requires explicit output" [expr {
+    [dict get $gui_no_output_result status] eq "error" &&
+    [dict get $gui_no_output_result exit] == 1 && ![file exists $marker]}]
+
+set gui_docs [file join $WORK gui-reference-status.json]
+set gui_child [child start -- $gui --machteld-docs status --json --output $gui_docs]
+set gui_result [child wait $gui_child -timeout 5s]
+child close $gui_child
+set gui_docs_text [expr {[file exists $gui_docs] ? [slurp $gui_docs] : ""}]
+check "wrapped GUI exposes a headless documentation escape" [expr {
+    [dict get $gui_result status] eq "ok" && [dict get $gui_result exit] == 0 &&
+    [string match *\"ok\":true* $gui_docs_text] &&
+    [string match *\"result\"* $gui_docs_text] &&
+    [string match *\"schema\"* $gui_docs_text] &&
+    [string match *9.0.4* $gui_docs_text] && ![file exists $marker]}]
 
 file delete -force $WORK
 if {$fails} {

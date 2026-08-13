@@ -18,7 +18,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <tcl.h>
+#include "machteld.h"
 #include "sqlite3.h"
 
 typedef struct {
@@ -261,7 +261,7 @@ int Machteldstore_Init(Tcl_Interp *interp) {
         free(ctx);
         return TCL_ERROR;
     }
-    if (Tcl_PkgProvide(interp, "machteld::store", "0.4.0") != TCL_OK) {
+    if (Tcl_PkgProvide(interp, "machteld::store", MACHTELD_VERSION) != TCL_OK) {
         Tcl_DeleteCommand(interp, "::machteld::store");
         return TCL_ERROR;
     }

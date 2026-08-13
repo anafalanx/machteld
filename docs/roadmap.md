@@ -1,22 +1,23 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.4.0 contains and how possible additions are ordered.
+description: What Machteld 0.10.0 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 0.4.0 baseline
+## 0.10.0 baseline
 
-- Direct opted-in Tcl entry and package `machteld 0.4.0`.
+- Direct opted-in Tcl entry and package `machteld 0.10.0`.
 - Process control: supervised `run`, `child`, `wait`, and `scope`; independent
   `detach`.
 - ConPTY interaction with `pty expect` and `pty strip`.
 - Filesystem observation and traversal: `watch`, `dirs`, `links`, and `canon`.
 - Machine processes, WinHTTP, JSON, CNG hashes/random, and static SQLite store.
 - Program support: `cli`, `log`, `worker`, `pool`, and `pmap`.
-- Explicit native/Tcl manifest metadata and embedded documentation.
+- Explicit native/Tcl manifest metadata and complete embedded Machteld, Tcl 9,
+  and Tk 9 reference with agent-oriented query, verification, and extraction.
 - Atomic console/GUI `wrap` with hidden assets and the complete runtime.
 
 ## Stabilization before breadth
@@ -34,7 +35,7 @@ tags: [machteld, roadmap, windows]
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.4.0. Each needs a
+selected WMI queries remain candidates. None is promised by 0.10.0. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 
