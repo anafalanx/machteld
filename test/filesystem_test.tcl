@@ -140,6 +140,10 @@ try {
     set link_result [links $ROOT -hardlinks]
     check "links counts the same directories as dirs" [expr {
         [dict get $link_result dirs] == [dict get [dirs $ROOT] dirs]}]
+    check "links entered rows describe actual descents" [expr {
+        [lsearch -not -exact [lmap row [dict get $link_result entered] {
+            dict get $row action
+        }] descended] < 0}]
     if {$have_hardlink} {
         check "links reports both names of shared content" [expr {
             [llength [dict get $link_result multilinked]] == 2}]

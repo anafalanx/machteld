@@ -164,8 +164,10 @@ proc ::machteld::log {args} {
 }
 
 ::machteld::MetaDefine log [dict create kind tcl args args domain LOG \
-    codes {badvalue oserror usage} options {-channel -file -level} \
+    codes {badvalue oserror usage} options {-channel -file -level} doc machteld/command/log \
     subcommands [dict create \
-        configure [dict create options {-channel -file -level}] \
-        debug [dict create options {}] info [dict create options {}] \
-        warn [dict create options {}] error [dict create options {}]]]
+        configure [dict create options {-channel -file -level} doc machteld/command/log#configure] \
+        debug [dict create options {} doc machteld/command/log#debug] \
+        info [dict create options {} doc machteld/command/log#info] \
+        warn [dict create options {} doc machteld/command/log#warn] \
+        error [dict create options {} doc machteld/command/log#error]]]

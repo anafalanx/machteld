@@ -43,18 +43,37 @@ _tmain(
      * with `wrap`.  AppHook has now told us whether this executable carries an
      * embedded main.tcl, so wrapped programs receive their own --help and
      * --version arguments unchanged. */
-    if (Tcl_GetStartupScript(NULL) == NULL && argc == 2 &&
+    Tcl_Obj *startup = Tcl_GetStartupScript(NULL);
+    if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--docs")) == 0) {
+        /* Tcl_Main needs a startup-shaped word in order to preserve the
+         * remaining words as $argv until AppInit dispatches the host route.
+         * The replacement is shorter than the writable CRT argument buffer. */
+        _tcscpy(argv[1], _T("docs"));
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS);
+    } else if (startup != NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--machteld-docs")) == 0) {
+        /* A wrapped application owns every ordinary argument.  This one
+         * deliberately names the embedded runtime, so remove only the escape
+         * word and pass its tail to ::machteld::DocsHost. */
+        for (int i = 1; i + 1 < argc; i++) {
+            argv[i] = argv[i + 1];
+        }
+        argc--;
+        argv[argc] = NULL;
+        Machteld_SetHostMode(MACHTELD_HOST_DOCS);
+    } else if (startup == NULL && argc == 2 &&
             _tcscmp(argv[1], _T("--help")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_HELP);
         argc = 1;
-    } else if (Tcl_GetStartupScript(NULL) == NULL && argc == 2 &&
+    } else if (startup == NULL && argc == 2 &&
             _tcscmp(argv[1], _T("--version")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_VERSION);
         argc = 1;
-    } else if (Tcl_GetStartupScript(NULL) == NULL && argc >= 2 &&
+    } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("-encoding")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_ENCODING);
-    } else if (Tcl_GetStartupScript(NULL) == NULL && argc >= 2 &&
+    } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("-")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_STDIN);
     }

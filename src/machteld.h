@@ -4,6 +4,8 @@
 
 #include "tcl.h"
 
+#define MACHTELD_VERSION "0.10.0"
+
 /* Locate and pin the script libraries in the executable's own zipfs mount.
  * Called by each host before Tcl_Init (and therefore before Tk_Init). */
 int Machteld_PreInit(Tcl_Interp *interp);
@@ -26,9 +28,12 @@ enum {
     MACHTELD_HOST_NORMAL = 0,
     MACHTELD_HOST_HELP,
     MACHTELD_HOST_VERSION,
+    MACHTELD_HOST_DOCS,
+    MACHTELD_HOST_DOCS_GUI,
     MACHTELD_HOST_STDIN,
     MACHTELD_HOST_ENCODING
 };
 void Machteld_SetHostMode(int mode);
+int Machteld_GetHostMode(void);
 
 #endif /* MACHTELD_H */

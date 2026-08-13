@@ -66,13 +66,33 @@ if ($LASTEXITCODE) { throw 'cmdline fixture compile failed' }
 & $cmdline
 if ($LASTEXITCODE) { throw "cmdline golden vectors failed with exit code $LASTEXITCODE" }
 
-$bareHost = Join-Path ([IO.Path]::GetDirectoryName($Machteld)) 'machteld-bare.exe'
-$entryArgs = @{ Machteld = $Machteld; ProcessFixture = $processFixture }
-if (Test-Path -LiteralPath $bareHost -PathType Leaf) { $entryArgs.Bare = $bareHost }
-& (Join-Path $RepoRoot 'test\entry_test.ps1') @entryArgs
-if ($LASTEXITCODE) { throw "entry tests failed with exit code $LASTEXITCODE" }
+$bareLeaf = ".machteld-entry-basekit-$PID-$([Guid]::NewGuid().ToString('n')).exe"
+$bareHost = Join-Path $OutputDir $bareLeaf
+$bareOwned = $false
+try {
+    & $tclsh (Join-Path $RepoRoot 'test\extract_basekit.tcl') $Machteld $bareHost
+    if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $bareHost -PathType Leaf)) {
+        throw "console basekit extraction failed with exit code $LASTEXITCODE"
+    }
+    $bareOwned = $true
+    & (Join-Path $RepoRoot 'test\entry_test.ps1') `
+        -Machteld $Machteld -ProcessFixture $processFixture -Bare $bareHost
+    if ($LASTEXITCODE) { throw "entry tests failed with exit code $LASTEXITCODE" }
+} finally {
+    if ($bareOwned -and (Split-Path -Leaf $bareHost) -ceq $bareLeaf -and
+            [StringComparer]::OrdinalIgnoreCase.Equals(
+                [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($bareHost)),
+                [IO.Path]::GetFullPath($OutputDir)) -and
+            (Test-Path -LiteralPath $bareHost -PathType Leaf)) {
+        Remove-Item -LiteralPath $bareHost -Force -ErrorAction SilentlyContinue
+    }
+}
 & (Join-Path $RepoRoot 'test\package_test.ps1') -Tclsh $tclsh
 if ($LASTEXITCODE) { throw "package parser tests failed with exit code $LASTEXITCODE" }
+& (Join-Path $RepoRoot 'test\reference_generator_test.ps1') -CacheRoot $CacheRoot -Tclsh $tclsh
+if ($LASTEXITCODE) { throw "reference generator tests failed with exit code $LASTEXITCODE" }
+& $tclsh (Join-Path $RepoRoot 'tools\check_reference.tcl')
+if ($LASTEXITCODE) { throw "reference coverage checks failed with exit code $LASTEXITCODE" }
 
 if ($PublicTls) { $env:MACHTELD_TEST_PUBLIC_TLS = '1' }
 if ($InteractivePty) { $env:MACHTELD_TEST_PTY_IO = '1' }
@@ -82,6 +102,7 @@ try {
     Run-Test 'native' @((Join-Path $RepoRoot 'test\native_test.tcl'), $httpFixture, $processFixture)
     Run-Test 'filesystem' @((Join-Path $RepoRoot 'test\filesystem_test.tcl'))
     Run-Test 'runtime services' @((Join-Path $RepoRoot 'test\runtime_test.tcl'))
+    Run-Test 'embedded reference' @((Join-Path $RepoRoot 'test\reference_test.tcl'))
     Run-Test 'JSONTestSuite' @((Join-Path $RepoRoot 'test\json_test.tcl'))
     Run-Test 'wrap/basekits' @((Join-Path $RepoRoot 'test\wrap_test.tcl'))
 } finally {

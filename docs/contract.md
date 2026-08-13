@@ -12,7 +12,7 @@ This file states the cross-command rules. Command-specific vocabulary is in the
 
 ## Platform
 
-The 0.4.0 artifact targets x64 Windows 10 version 1809 or newer, including
+The 0.10.0 artifact targets x64 Windows 10 version 1809 or newer, including
 Windows 11 and corresponding Windows Server releases. ConPTY determines the OS
 floor. Other architectures and older Windows versions are not release targets.
 
@@ -23,8 +23,8 @@ of these literal forms. `.tcl` is conventional, not required:
 
 ```tcl
 package require machteld
-package require machteld 0.4.0
-package require -exact machteld 0.4.0
+package require machteld 0.10.0
+package require -exact machteld 0.10.0
 ```
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
@@ -34,7 +34,7 @@ with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
 `{MACHTELD ENTRY payload}`. These startup failures exit before the program can
 be evaluated. Programs from stdin are not accepted.
 
-Once loaded, `package require machteld` returns `0.4.0`. Palette commands are in
+Once loaded, `package require machteld` returns `0.10.0`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add
 `namespace path ::machteld` or use qualified names.
 
@@ -76,7 +76,7 @@ Sizes are a non-negative decimal integer followed by an optional binary suffix
 `B`, `K`, `KB`, `M`, `MB`, `G`, or `GB`, case-insensitively. No decimal point,
 sign, or whitespace is accepted. `8M` and `8388608` therefore name the same
 size. The grammar is shared by byte/body and memory limits. A process memory cap
-may be zero to mean “no cap”; HTTP `-maxbody` must be positive.
+may be zero to mean "no cap"; HTTP `-maxbody` must be positive.
 
 Unknown options, missing values, and wrong public arity are errors. Subcommand
 options are not silently accepted by another branch.
@@ -109,7 +109,7 @@ try {
 
 The current domains are `ENTRY`, `RUN`, `CHILD`, `WAIT`, `DETACH`, `PTY`,
 `WATCH`, `MTPS`, `DIRS`, `HTTP`, `HASH`, `JSON`, `STORE`, `CLI`, `LOG`,
-`WORKER`, `POOL`, `PMAP`, `HELP`, and `WRAP`. Common codes include `usage`,
+`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
 `badvalue`, `notfound`, `nohandle`, `timeout`, `launch`, and `oserror`; each
 manifest entry lists its closed set of Machteld-domain codes.
 
@@ -149,7 +149,7 @@ the key did not exist. Operations before `open` raise `STORE notopen`.
 key/value table when needed in a durable database. Both configure a five-second
 SQLite busy timeout, allowing independent Machteld processes to wait through
 ordinary writer contention. Engine failures use `STORE sqlite`.
-Every full, console-wrapped, and GUI-wrapped 0.4.0 host includes this same static
+Every full, console-wrapped, and GUI-wrapped 0.10.0 host includes this same static
 implementation.
 
 ## Manifest
@@ -159,6 +159,7 @@ implementation.
 - `kind`: `c` or `tcl`;
 - `domain` and `codes` for structured failures;
 - `replycodes` for fixed codes carried as protocol data rather than raised;
+- `doc`: the stable `machteld/command/<verb>` reference identifier;
 - `options` for the command as a whole;
 - `subcommands`, each with its own `options`;
 - `returns` for fixed-shape result dicts.
@@ -171,12 +172,12 @@ Implementation-body scanning is not part of the contract.
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-0.4.0 and the same machine-control, data, process, and Tcl composition commands,
-including `package require Tk` and static `store`. Two distribution-host
-operations are intentionally nonrecursive: `wrap` reports `WRAP unsupported`
-because tools carry no nested basekits, and `help` reports `HELP unsupported`
-because tools carry no documentation bundle. Both commands remain present and
-their availability failure is part of the manifest contract.
+0.10.0 and the same machine-control, data, process, and Tcl composition commands,
+including `package require Tk`, static `store`, and the complete exact-version
+reference corpus. Nested wrapping alone is intentionally nonrecursive: `wrap`
+reports `WRAP unsupported` because tools carry no nested basekits. Deliberately
+bare internal hosts can report `DOCS unsupported`/`HELP unsupported` because
+they carry no reference payload.
 
 The API remains pre-1.0: 0.x releases may remove a mistaken surface. Within a
 release, `version`, `manifest`, package version, docs, and both wrapper hosts must

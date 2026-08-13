@@ -54,32 +54,33 @@ The staged entry is checked with the exact parser used by direct startup, so the
 bytes selected for the executable—not merely an earlier source pathname—must opt
 in. `wrap` builds in a randomly named directory on the destination volume and
 publishes only the completed candidate. Cleanup of interrupted work is best
-effort and is not part of the publication guarantee. Existing output is replaced with the
-native Windows atomic-replacement primitive; a failure leaves the previous
-output intact. After replacement has committed, cleanup of its randomly named
-recovery backup is best effort; a filesystem refusal can leave that old backup
-beside the successfully published executable, without turning success into a
-misleading failure.
+effort and is not part of the publication guarantee. Existing output is replaced
+with the native Windows atomic-replacement primitive; a failure leaves the
+previous output intact. After replacement has committed, cleanup of its randomly
+named recovery backup is best effort; a filesystem refusal can leave that old
+backup beside the successfully published executable, without turning success
+into a misleading failure.
 
 ## What is inside
 
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 0.4.0 prelude and public palette;
+- the full Machteld 0.10.0 prelude and public palette;
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl/Tk distribution notices
   under `licenses/`;
+- the complete indexed Machteld, Tcl 9, and Tk 9 reference corpus;
 - the application entry and assets in zipfs;
 - the same native Windows core and statically linked SQLite store.
 
 There is no prelude-free or reduced-capability option. `package require machteld`
-inside a wrapped tool returns 0.4.0, `manifest` describes the same API, and
+inside a wrapped tool returns 0.10.0, `manifest` describes the same API, and
 binary-safe `store` has the same behavior and five-second busy timeout. Wrapping
-does not change the programmatic machine-control API. Distribution-only payloads
-are not copied recursively: a wrapped tool cannot run `wrap` again, and `help`
-reports `HELP unsupported` because the reference documentation stays in the full
-`machteld.exe`.
+does not change the programmatic machine-control API. The reference corpus is
+copied so `docs`, `help`, and the reserved `--machteld-docs` host route remain
+self-contained. Only basekits are distribution-only: a wrapped tool cannot run
+`wrap` again.
 
 `--console` is the default and provides standard channels. `--gui` selects the
 Windows GUI subsystem and does not create a console; use `log -file` or a Tk
@@ -88,7 +89,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 0.4.0
+package require machteld 0.10.0
 package require Tk
 ```
 

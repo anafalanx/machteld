@@ -36,6 +36,18 @@ proc wait_for_file {path {milliseconds 3000}} {
     }
     return 0
 }
+proc wait_for_watch_pending {token minimum {milliseconds 3000}} {
+    set deadline [expr {[clock milliseconds] + $milliseconds}]
+    while {[clock milliseconds] < $deadline} {
+        set state [watch info $token]
+        if {[dict get $state pending] >= $minimum ||
+                [dict get $state dropped] || [dict get $state failed]} {
+            return 1
+        }
+        after 10
+    }
+    return 0
+}
 proc slurp {path} {
     set channel [open $path rb]
     set value [read $channel]
@@ -109,6 +121,30 @@ check "watch manifest declares stable info keys" [expr {
     [dict get $metadata watch subcommands info returns]
         eq {armed directory dropped failed pending recursive token win32}}]
 watch close $watcher
+
+# A remove followed by an add for the same path is deliberately one batch: the
+# default coalescer promises priority, not last-event-wins behavior.
+set precedence_path [file join $watch_root precedence.txt]
+set channel [open $precedence_path w]
+puts $channel old
+close $channel
+set precedence_watcher [watch start $watch_root]
+file delete -force $precedence_path
+set channel [open $precedence_path w]
+puts $channel new
+close $channel
+set precedence_ready [wait_for_watch_pending $precedence_watcher 2]
+set precedence_events [watch read $precedence_watcher]
+set precedence_action ""
+foreach event $precedence_events {
+    if {[dict get $event path] eq "precedence.txt"} {
+        set precedence_action [dict get $event action]
+        break
+    }
+}
+check "watch precedence batch becomes ready" $precedence_ready
+check_equal "watch removal outranks a later addition" $precedence_action removed
+watch close $precedence_watcher
 
 # WinHTTP is tested without public DNS or TLS dependencies. The fixture binds
 # only the loopback interface and exits after the exact number of requests.

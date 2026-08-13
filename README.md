@@ -1,20 +1,20 @@
 # machteld
 
-machteld is a compact Windows machine-control runtime: Tcl 9 plus a small,
+machteld is a compact Windows machine-control runtime: Tcl/Tk 9.0.4 plus a small,
 structured command palette implemented in C and Tcl. It ships as one executable,
 starts no service, needs no installed Tcl, and keeps Windows process, ConPTY,
 filesystem, HTTP, hashing, JSON, and SQLite machinery behind Tcl-shaped commands.
 
-The 0.4.0 release target is 64-bit Windows 10 version 1809 or newer (including
+The 0.10.0 release target is 64-bit Windows 10 version 1809 or newer (including
 Windows 11 and corresponding Windows Server releases). ConPTY sets that floor;
 the shipped artifact is x64, not a claim to run on every historical Windows box.
 
-Version 0.4.0 deliberately has one entry route: a readable UTF-8 program file.
+Version 0.10.0 deliberately has one entry route: a readable UTF-8 program file.
 The conventional extension is `.tcl`, but the runtime does not require it. The file must
 begin with a literal opt-in command:
 
 ```tcl
-package require machteld 0.4.0
+package require machteld 0.10.0
 
 set result [run -timeout 30s -- git status --short]
 puts [dict get $result out]
@@ -39,13 +39,23 @@ an explicit dependency, not an inference from a filename.
 - Machine observation: `watch`, `mtps`, `dirs`, `links`, and `canon`.
 - Data and network: `store`, `json`, `hash`, and `http`.
 - Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
-- Runtime support: `version`, `manifest`, `help`, and `wrap`.
+- Runtime support: `version`, `manifest`, `docs`, `help`, and `wrap`.
 
 Commands live in `::machteld`; the prelude adds that namespace to the global
 command path, so small programs can use the bare names shown above. `manifest`
 returns the exact verbs, options, subcommands, declared fixed result shapes, and
-raised/protocol error codes in the running executable. `help` reads bundled
-documentation when the distribution host carries it.
+raised/protocol error codes in the running executable. `docs` searches and reads
+the exact Machteld, Tcl 9, and Tk 9 references embedded in every normal host:
+
+```text
+machteld.exe --docs status --json
+machteld.exe --docs get tcl/command/dict --json
+machteld.exe --docs search "channel binary encoding" --limit 10 --json
+```
+
+Agents should query this corpus instead of relying on web memory from a
+different runtime version. `docs extract` publishes the complete corpus to a
+directory for ordinary filesystem search; `help` is a concise human shorthand.
 
 Machteld failures use Tcl's structured error code, while a supervised program's
 timeout is a normal result state:
@@ -72,13 +82,13 @@ machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically. There is no
 reduced runtime mode: every wrapped console or GUI tool exposes the same
-programmatic Machteld 0.4.0 machine-control API, including the statically linked,
-binary-safe SQLite `store`. Distribution-only documentation and wrapping
-basekits are not embedded recursively in tools.
+programmatic Machteld 0.10.0 machine-control API, including the statically linked,
+binary-safe SQLite `store`. Wrapped tools also retain the complete offline
+reference corpus; wrapping basekits are not embedded recursively.
 
-Start with [the documentation index](docs/index.md), then use
-[the palette](docs/palette.md) as the command reference and
-[the contract](docs/contract.md) for stable conventions.
+Start with [the documentation index](docs/index.md), the concise
+[agent bootstrap](docs/reference/machteld/agent.md), and the
+[complete Machteld reference](docs/reference/machteld/index.md).
 
 Machteld's own code is licensed under the [Apache License 2.0](LICENSE).
 Bundled material retains its own terms, including the verbatim

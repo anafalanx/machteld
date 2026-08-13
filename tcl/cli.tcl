@@ -333,7 +333,7 @@ proc ::machteld::CliParse {argv norm} {
 }
 
 ::machteld::MetaDefine cli [dict create kind tcl args args domain CLI \
-    codes {badvalue usage} subcommands [dict create \
-        parse    [dict create options {}] \
-        usage    [dict create options {}] \
-        duration [dict create options {}]]]
+    codes {badvalue usage} doc machteld/command/cli subcommands [dict create \
+        parse    [dict create options {} doc machteld/command/cli#parse] \
+        usage    [dict create options {} doc machteld/command/cli#usage] \
+        duration [dict create options {} doc machteld/command/cli#duration]]]

@@ -172,5 +172,8 @@ proc ::machteld::WorkerDispatch {line} {
 }
 
 ::machteld::MetaDefine worker [dict create kind tcl args args domain WORKER \
-    codes {badvalue usage} replycodes {failed notfound parse usage} subcommands [dict create \
-        on [dict create options {}] ops [dict create options {}] serve [dict create options {}]]]
+    codes {badvalue usage} replycodes {failed notfound parse usage} doc machteld/command/worker \
+    subcommands [dict create \
+        on [dict create options {} doc machteld/command/worker#on] \
+        ops [dict create options {} doc machteld/command/worker#ops] \
+        serve [dict create options {} doc machteld/command/worker#serve]]]

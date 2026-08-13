@@ -5,7 +5,6 @@
  * captured, checked, and evaluated here so the same bytes cross the opt-in
  * boundary; immutable embedded startup stays on Tcl_Main's source path.
  */
-#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +21,12 @@ void
 Machteld_SetHostMode(int mode)
 {
     host_mode = mode;
+}
+
+int
+Machteld_GetHostMode(void)
+{
+    return host_mode;
 }
 
 int
@@ -488,14 +493,10 @@ dispatch_command(Tcl_Interp *interp, const char *command, int with_argv)
 }
 
 static int
-startup_path_absent(Tcl_Obj *path)
+startup_path_is_regular_file(Tcl_Obj *path)
 {
     Tcl_StatBuf info;
-    if (Tcl_FSStat(path, &info) == 0) {
-        return 0;
-    }
-    int error = Tcl_GetErrno();
-    return error == ENOENT || error == ENOTDIR;
+    return Tcl_FSStat(path, &info) == 0 && S_ISREG(info.st_mode);
 }
 
 int
@@ -513,6 +514,12 @@ Machteld_EntryGate(Tcl_Interp *interp)
     }
     if (host_mode == MACHTELD_HOST_VERSION) {
         dispatch_command(interp, "::machteld::version", 0);
+    }
+    if (host_mode == MACHTELD_HOST_DOCS) {
+        dispatch_command(interp, "::machteld::DocsHost", 1);
+    }
+    if (host_mode == MACHTELD_HOST_DOCS_GUI) {
+        dispatch_command(interp, "::machteld::DocsHostGui", 1);
     }
     if (host_mode == MACHTELD_HOST_STDIN) {
         Machteld_EntryError(interp, "usage",
@@ -545,9 +552,17 @@ Machteld_EntryGate(Tcl_Interp *interp)
     }
     const char *selected = Tcl_GetString(startup);
 
-    /* A real path always wins over the convenience `wrap` route. */
-    if (strcmp(selected, "wrap") == 0 && startup_path_absent(startup)) {
+    /* A real program file always wins over a convenience route.  A same-name
+     * directory is not executable input and must not hide the host command. */
+    if (strcmp(selected, "wrap") == 0 &&
+            !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::wrap", 1);
+    }
+    /* `machteld docs ...` is the readable counterpart of the reserved
+     * `--docs` route.  As with `wrap`, a real program file named docs wins. */
+    if (strcmp(selected, "docs") == 0 &&
+            !startup_path_is_regular_file(startup)) {
+        dispatch_command(interp, "::machteld::DocsHost", 1);
     }
 
     if (strcmp(selected, "-") == 0 || selected[0] == '\0') {

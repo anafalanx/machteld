@@ -7,10 +7,10 @@
 # host sources it explicitly and leaves Tcl_Main's REPL/script handling intact.
 #
 #   tclsh90s package.tcl --prefix <dir> --prelude <machteld.tcl> --wrapper <exe> \
-#           --licenses <dir> --apache-license <file> --out <exe> ?--docs <dir>? \
+#           --licenses <dir> --apache-license <file> --reference <dir> --out <exe> \
 #           ?--embed-console <exe>? ?--embed-gui <exe>?
 
-array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --out "" --docs "" --embed-console "" --embed-gui ""}
+array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --embed-console "" --embed-gui ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {![info exists opt($a)]} { error "package.tcl: unknown option $a" }
@@ -18,13 +18,25 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
     incr i
     set opt($a) [lindex $argv $i]
 }
-foreach k {--prefix --prelude --wrapper --licenses --apache-license --out} {
+foreach k {--prefix --prelude --wrapper --licenses --apache-license --reference --out} {
     if {$opt($k) eq ""} { error "package.tcl: missing $k" }
 }
 set TC   $opt(--prefix)
 set PREL $opt(--prelude)
 set WRAP $opt(--wrapper)
-set OUT  $opt(--out)
+set OUT  [file normalize $opt(--out)]
+
+# package.tcl is deliberately not a release-file replacer. Its caller gives it
+# an absent, invocation-owned candidate path; tools/build.ps1 performs the one
+# native Windows operation that publishes that candidate as the requested
+# release name. Tcl's `file rename -force` replacement path is multi-step on
+# Windows and cannot provide this prior-output guarantee.
+if {![regexp {^\.machteld-build-[0-9a-f]{32}\.exe$} [file tail $OUT]]} {
+    error "package output is not an invocation-owned build candidate: $OUT"
+}
+if {![catch {file lstat $OUT ignored}]} {
+    error "package output already exists (an absent candidate is required): $OUT"
+}
 
 proc children {directory} {
     set seen {}
@@ -146,10 +158,18 @@ if {![file isfile $opt(--apache-license)]} {
 }
 file copy -force $opt(--apache-license) [file join $stage licenses Apache-2.0.txt]
 
-# Ship the docs bundle inside the exe (the `help` verb reads //zipfs:/docs/).
-if {$opt(--docs) ne "" && [file isdirectory $opt(--docs)]} {
-    copy_tree $opt(--docs) [file join $stage docs]
+# Reference is a required runtime payload.  The generator publishes it only
+# after validating inventories, indexes and hashes; packaging still checks the
+# discovery/inert-index boundary instead of silently accepting an empty tree.
+if {![file isdirectory $opt(--reference)]} {
+    error "reference pack directory not found: $opt(--reference)"
 }
+foreach relative {catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
+    if {![file isfile [file join $opt(--reference) $relative]]} {
+        error "reference pack is incomplete: $relative"
+    }
+}
+copy_tree $opt(--reference) [file join $stage reference]
 
 # The basekits are console and GUI copies of the bare host, so `wrap` can make a
 # standalone exe with no toolchain, no `sdx` and no Tcl install anywhere. It
@@ -170,9 +190,9 @@ if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
     set entries [zip_entries $stage]
     if {![llength $entries]} { error "package stage is empty: $stage" }
     zipfs lmkimg $outputCandidate $entries {} $WRAP
-    # Same-directory rename is the publication boundary. The prior executable
-    # remains intact if any staging, copying, or zip creation step fails.
-    file rename -force $outputCandidate $OUT
+    # Both paths are in outputDir. The destination was absent at entry and this
+    # non-replacing rename also refuses a path that appears during packaging.
+    file rename $outputCandidate $OUT
 } finally {
     if {$outputCandidate ne ""} { catch {file delete -force $outputCandidate} }
     if {$stage ne ""} { catch {file delete -force $stage} }
