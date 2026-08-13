@@ -212,7 +212,7 @@ foreach {label script} [list \
     check "HTTP rejects $label" [expr {[errcode_of $script] eq {MACHTELD HTTP badvalue}}]
 }
 
-# Public certificate probes are deliberately outside the hermetic CI lane.
+# Public certificate probes are deliberately outside the hermetic local lane.
 if {[info exists ::env(MACHTELD_TEST_PUBLIC_TLS)] && $::env(MACHTELD_TEST_PUBLIC_TLS) eq "1"} {
     foreach endpoint {expired.badssl.com self-signed.badssl.com wrong.host.badssl.com} {
         check "HTTP rejects $endpoint" [expr {

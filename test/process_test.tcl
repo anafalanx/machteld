@@ -273,7 +273,7 @@ if {[dict get $outer status] eq "ok"} {
         ![file exists $marker]}]
 }
 
-# A direct detach has the same strict contract. Some CI/agent hosts are inside
+# A direct detach has the same strict contract. Some managed/agent hosts are inside
 # an outer job that forbids breakaway; success must be demonstrated, and denial
 # must be the exact launch error with no user code silently started attached.
 set marker [file join $WORK direct-daemon.marker]
