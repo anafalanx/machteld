@@ -1,5 +1,5 @@
 # Complete live contract for the embedded agent reference.
-package require machteld 0.10.1
+package require machteld 0.10.2
 
 set fails 0
 proc check {name condition {detail ""}} {
@@ -12,7 +12,7 @@ proc errorcode {script} {
 
 set status [docs status]
 check {status identifies schema and runtime} [expr {
-    [dict get $status schema] == 1 && [dict get $status machteld] eq "0.10.1" &&
+    [dict get $status schema] == 1 && [dict get $status machteld] eq "0.10.2" &&
     [dict get $status root] eq "self" && [string length [dict get $status corpus_sha256]] == 64}]
 check {status inventories exact Tcl/Tk manuals} [expr {
     [dict get $status products tcl version] eq "9.0.4" &&

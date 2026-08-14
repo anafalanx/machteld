@@ -14,7 +14,7 @@ The product has three layers:
    WinHTTP, BCrypt, JSON, and statically linked SQLite.
 2. **Tcl runtime.** The prelude adds `scope`, `pty expect/strip`, `cli`, `log`,
    `worker`, `pool`, `pmap`, `docs`, `help`, and `wrap`, then provides package
-   `machteld 0.10.1`.
+   `machteld 0.10.2`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
    `argv` and resolves palette commands through `::machteld` on the global
    namespace path.
@@ -35,9 +35,15 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 0.10.1 API. The
+SQLite, so a wrapped entry sees the same programmatic Machteld 0.10.2 API. The
 complete versioned reference corpus is copied into wrapped tools; nested
 wrapping basekits remain distribution-only and are not copied recursively.
+
+Tcl 9.0.4 predates the upstream fix for ACL-restricted Windows path
+normalization. Dependency bootstrap applies Tcl core check-in `0ac314cb96`
+verbatim to `win/tclWinFile.c`, after verifying the archive input, patch, and
+patched-output hashes. This prevents standalone zipfs startup from losing an
+executable path component when an ancestor can be traversed but not enumerated.
 
 ## Self-description
 
