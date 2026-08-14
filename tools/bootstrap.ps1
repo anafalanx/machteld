@@ -11,7 +11,14 @@ $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
 $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
 $LockPath = Join-Path $PSScriptRoot 'dependencies.lock.json'
-$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh'))
+$Lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
+$PatchPaths = @($Lock.patches | ForEach-Object {
+    if (-not $_.file -or [IO.Path]::IsPathRooted($_.file) -or $_.file -match '(^|[/\\])\.\.([/\\]|$)') {
+        throw "invalid dependency patch path: $($_.file)"
+    }
+    Join-Path $PSScriptRoot ($_.file.Replace('/', '\'))
+})
+$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh')) + $PatchPaths
 $StateMaterial = foreach ($path in $StateInputs) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing bootstrap input: $path" }
     "{0} {1}" -f ([IO.Path]::GetFileName($path)),
@@ -24,7 +31,6 @@ try {
 } finally {
     $StateHasher.Dispose()
 }
-$Lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
 $Prefix = Join-Path $CacheRoot 'prefix'
 $SourceRoot = Join-Path $CacheRoot 'src'
 $Downloads = Join-Path $CacheRoot 'downloads'
@@ -52,6 +58,97 @@ function Assert-Hash([string]$Path, [string]$Expected, [string]$Label) {
     if ($actual -ne $Expected.ToLowerInvariant()) {
         throw "$Label SHA-256 mismatch: expected $Expected, got $actual ($Path)"
     }
+}
+
+function Apply-PinnedUnifiedPatch(
+    [string]$PatchPath,
+    [string]$TargetPath,
+    [string]$ExpectedTarget
+) {
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $patchText = [IO.File]::ReadAllText($PatchPath, $utf8).Replace("`r`n", "`n")
+    $sourceText = [IO.File]::ReadAllText($TargetPath, $utf8).Replace("`r`n", "`n")
+    $patchLines = $patchText.Split("`n")
+    $sourceLines = $sourceText.Split("`n")
+    $oldHeader = "--- a/$ExpectedTarget"
+    $newHeader = "+++ b/$ExpectedTarget"
+    if (($patchLines -notcontains $oldHeader) -or ($patchLines -notcontains $newHeader)) {
+        throw "patch headers do not name the locked target: $ExpectedTarget"
+    }
+
+    $result = [Collections.Generic.List[string]]::new()
+    $sourceIndex = 0
+    $patchIndex = 0
+    $hunks = 0
+    while ($patchIndex -lt $patchLines.Length) {
+        $header = [regex]::Match(
+            $patchLines[$patchIndex],
+            '^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@'
+        )
+        if (-not $header.Success) { $patchIndex++; continue }
+
+        $hunks++
+        $oldStart = [int]$header.Groups[1].Value
+        $oldExpected = if ($header.Groups[2].Success) {
+            [int]$header.Groups[2].Value
+        } else { 1 }
+        $newExpected = if ($header.Groups[4].Success) {
+            [int]$header.Groups[4].Value
+        } else { 1 }
+        $hunkSourceIndex = $oldStart - 1
+        if ($hunkSourceIndex -lt $sourceIndex -or $hunkSourceIndex -gt $sourceLines.Length) {
+            throw "patch hunk has invalid source position: $($patchLines[$patchIndex])"
+        }
+        while ($sourceIndex -lt $hunkSourceIndex) {
+            $result.Add($sourceLines[$sourceIndex++])
+        }
+
+        $oldSeen = 0
+        $newSeen = 0
+        $patchIndex++
+        while ($patchIndex -lt $patchLines.Length -and
+                $patchLines[$patchIndex] -notmatch '^@@ ') {
+            $line = $patchLines[$patchIndex]
+            if ($line.StartsWith(' ')) {
+                $expected = $line.Substring(1)
+                if ($sourceIndex -ge $sourceLines.Length -or
+                        $sourceLines[$sourceIndex] -cne $expected) {
+                    throw "patch context mismatch at source line $($sourceIndex + 1)"
+                }
+                $result.Add($expected)
+                $sourceIndex++
+                $oldSeen++
+                $newSeen++
+            } elseif ($line.StartsWith('-')) {
+                $expected = $line.Substring(1)
+                if ($sourceIndex -ge $sourceLines.Length -or
+                        $sourceLines[$sourceIndex] -cne $expected) {
+                    throw "patch removal mismatch at source line $($sourceIndex + 1)"
+                }
+                $sourceIndex++
+                $oldSeen++
+            } elseif ($line.StartsWith('+')) {
+                $result.Add($line.Substring(1))
+                $newSeen++
+            } elseif ($line -eq '\ No newline at end of file') {
+                # All locked Machteld patches and targets end with LF. The
+                # marker is accepted only so malformed input fails by hash.
+            } elseif ($line.Length -ne 0) {
+                throw "invalid unified patch line: $line"
+            } else {
+                break
+            }
+            $patchIndex++
+        }
+        if ($oldSeen -ne $oldExpected -or $newSeen -ne $newExpected) {
+            throw "patch hunk count mismatch: expected -$oldExpected +$newExpected, got -$oldSeen +$newSeen"
+        }
+    }
+    if ($hunks -eq 0) { throw 'patch contains no unified-diff hunks' }
+    while ($sourceIndex -lt $sourceLines.Length) {
+        $result.Add($sourceLines[$sourceIndex++])
+    }
+    [IO.File]::WriteAllText($TargetPath, ($result -join "`n"), [Text.UTF8Encoding]::new($false))
 }
 
 function Get-CacheRelativePath([string]$Path) {
@@ -255,6 +352,19 @@ if (-not ((Test-Path -LiteralPath $tclConfigure) -and (Test-Path -LiteralPath $t
         }
     }
 }
+
+$tclPatchEntries = @($Lock.patches | Where-Object id -eq 'tcl-windows-acl-normalize')
+if ($tclPatchEntries.Count -ne 1) {
+    throw 'dependency lock must contain exactly one tcl-windows-acl-normalize patch'
+}
+$tclPatch = $tclPatchEntries[0]
+$tclPatchPath = Join-Path $PSScriptRoot ($tclPatch.file.Replace('/', '\'))
+$tclPatchTarget = Join-Path $extract ($tclPatch.target.Replace('/', '\'))
+Assert-Hash $tclPatchPath $tclPatch.sha256 $tclPatch.id
+Assert-Hash $tclPatchTarget $tclPatch.beforeSha256 "$($tclPatch.id) input"
+Apply-PinnedUnifiedPatch $tclPatchPath $tclPatchTarget $tclPatch.target
+Assert-Hash $tclPatchTarget $tclPatch.afterSha256 "$($tclPatch.id) output"
+
 $cygpath = Join-Path $MsysRoot 'usr\bin\cygpath.exe'
 $sourceUnix = (& $cygpath -u $extract).Trim()
 $prefixUnix = (& $cygpath -u $Prefix).Trim()

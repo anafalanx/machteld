@@ -22,7 +22,7 @@ proc result_of {reply} {
 }
 
 set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
-check "package version is 0.10.1" [expr {[package require machteld] eq "0.10.1"}]
+check "package version is 0.10.2" [expr {[package require machteld] eq "0.10.2"}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
 set metadata [manifest]
@@ -39,7 +39,7 @@ check "pool separates poison reply from raised codes" [expr {
 check "help advertises bounded embedded-reference discovery" [expr {
     [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
     [string match {*docs schema*} [help]]}]
-check "version command agrees with the package" [expr {[version] eq "0.10.1"}]
+check "version command agrees with the package" [expr {[version] eq "0.10.2"}]
 set embedded_module_path [file normalize \
     [file join [file dirname [info library]] tcl9 9.0]]
 check "embedded Tcl modules include msgcat" [expr {

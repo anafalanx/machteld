@@ -38,5 +38,18 @@
       "url": "https://www.sqlite.org/2025/sqlite-amalgamation-3510000.zip",
       "sha256": "1caf7116f2910600d04473ad69d37ec538fa62fa36adccd37b5e0e43647c98be"
     }
+  ],
+  "patches": [
+    {
+      "id": "tcl-windows-acl-normalize",
+      "appliesTo": "tcltk@9.0.4",
+      "file": "patches/tcl-9.0.4-d40d8db3.patch",
+      "upstream": "https://core.tcl-lang.org/tcl/info/0ac314cb96",
+      "upstreamSha3_256": "0ac314cb960fb92d724c46e165a5836ffedef540e5a0d7ebff7cb97f78b4d8c9",
+      "sha256": "90162baf5f74329fc7462dee3da1dcfeea00f61fe23ac95e888c0658eefb8bce",
+      "target": "tcl9.0.4/win/tclWinFile.c",
+      "beforeSha256": "7f331af6c728b0608f2fd78575ba08c1ab915416bda1da6d6fd0a3113ddb48e4",
+      "afterSha256": "e11debfcf3a5ff6cdb75b9d3fc54f9b0120c5fa8e1a0b6dc8313551c3a404094"
+    }
   ]
 }

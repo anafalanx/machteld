@@ -7,7 +7,7 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-machteld 0.10.1 is a single-executable Windows runtime for small machine-control
+machteld 0.10.2 is a single-executable Windows runtime for small machine-control
 programs. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY, filesystem
 observation, WinHTTP, cryptography, JSON, and SQLite. The surface stays Tcl-like:
 commands return values, options are explicit, and failures have trap-able codes.
@@ -17,7 +17,7 @@ activity recorder, or replacement shell. It does not guess that an arbitrary Tcl
 The program says so as its first executable command:
 
 ```tcl
-package require machteld 0.10.1
+package require machteld 0.10.2
 
 set tree [dirs C:/work -depth 2 -prune {.git node_modules}]
 puts "[dict get $tree dirs] directories"

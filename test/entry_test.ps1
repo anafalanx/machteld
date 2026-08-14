@@ -58,12 +58,16 @@ function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
     [void]$quoted.Append('"')
     return $quoted.ToString()
 }
-function Invoke-Host([string[]]$Arguments, [string]$WorkingDirectory = '') {
+function Invoke-Host(
+    [string[]]$Arguments,
+    [string]$WorkingDirectory = '',
+    [string]$Executable = $Machteld
+) {
     $stdout = Join-Path $Work "stdout-$([Guid]::NewGuid().ToString('n')).txt"
     $stderr = Join-Path $Work "stderr-$([Guid]::NewGuid().ToString('n')).txt"
     $argumentLine = (($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
     $start = @{
-        FilePath = $Machteld
+        FilePath = $Executable
         ArgumentList = $argumentLine
         Wait = $true
         PassThru = $true
@@ -81,6 +85,83 @@ function Invoke-Host([string[]]$Arguments, [string]$WorkingDirectory = '') {
 }
 
 try {
+    # Tcl ticket d40d8db3: an exact descendant can be opened while a parent
+    # directory cannot be enumerated. Tcl 9.0.4 used to drop one component
+    # while normalizing the executable path, preventing standalone zipfs
+    # startup. Exercise the actual packaged host and wrap route under that ACL.
+    $aclRoot = Join-Path $Work 'acl-normalize'
+    $aclBlocked = Join-Path $aclRoot 'profilecomponent'
+    $aclChild = Join-Path $aclBlocked 'app'
+    $aclHost = Join-Path $aclChild 'machteld.exe'
+    New-Item -ItemType Directory -Path $aclChild | Out-Null
+    Copy-Item -LiteralPath $Machteld -Destination $aclHost
+    $aclOriginalSddl = $null
+    $aclChanged = $false
+    try {
+        $acl = Get-Acl -LiteralPath $aclBlocked
+        $aclOriginalSddl = $acl.Sddl
+        $denyList = [Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.WindowsIdentity]::GetCurrent().User,
+            [Security.AccessControl.FileSystemRights]::ListDirectory,
+            [Security.AccessControl.InheritanceFlags]::None,
+            [Security.AccessControl.PropagationFlags]::None,
+            [Security.AccessControl.AccessControlType]::Deny
+        )
+        [void]$acl.AddAccessRule($denyList)
+        Set-Acl -LiteralPath $aclBlocked -AclObject $acl
+        $aclChanged = $true
+
+        $directOpen = $false
+        try {
+            $stream = [IO.File]::Open(
+                $aclHost,
+                [IO.FileMode]::Open,
+                [IO.FileAccess]::Read,
+                ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            )
+            $stream.Dispose()
+            $directOpen = $true
+        } catch {}
+        $enumerationDenied = $false
+        try {
+            [void][IO.Directory]::GetFileSystemEntries($aclBlocked)
+        } catch [UnauthorizedAccessException] {
+            $enumerationDenied = $true
+        }
+        Check 'ACL regression fixture permits exact open but denies parent enumeration' `
+            ($directOpen -and $enumerationDenied)
+
+        $result = Invoke-Host -Arguments @('--version') -Executable $aclHost
+        Check 'standalone zipfs starts below an ACL-denied parent' `
+            ($result.Exit -eq 0 -and $result.Out -match '0\.10\.2') `
+            ($result.Err + $result.Out)
+
+        $aclProgram = Join-Path $Work 'acl-entry.tcl'
+        Write-Utf8 $aclProgram @'
+package require machteld 0.10.2
+set normalized [file normalize [info nameofexecutable]]
+puts "ACL-ENTRY:[file exists $normalized]:[version]"
+'@
+        $result = Invoke-Host -Arguments @($aclProgram) -Executable $aclHost
+        Check 'direct entry runs below an ACL-denied parent without losing a path component' `
+            ($result.Exit -eq 0 -and $result.Out -match 'ACL-ENTRY:1:0\.10\.2') `
+            ($result.Err + $result.Out)
+
+        $aclWrapped = Join-Path $Work 'acl-wrapped.exe'
+        $result = Invoke-Host -Arguments @(
+            'wrap', $aclProgram, '-o', $aclWrapped, '--console'
+        ) -Executable $aclHost
+        Check 'wrap runs from a host below an ACL-denied parent' `
+            ($result.Exit -eq 0 -and (Test-Path -LiteralPath $aclWrapped -PathType Leaf)) `
+            ($result.Err + $result.Out)
+    } finally {
+        if ($aclChanged) {
+            $restoredAcl = [Security.AccessControl.DirectorySecurity]::new()
+            $restoredAcl.SetSecurityDescriptorSddlForm($aclOriginalSddl)
+            Set-Acl -LiteralPath $aclBlocked -AclObject $restoredAcl
+        }
+    }
+
     $accepted = Join-Path $Work 'accepted.program'
     Write-Utf8 $accepted @'
 #!/usr/bin/env machteld
@@ -382,12 +463,12 @@ puts "TK-LIB:$::tk_library"
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
     Check '--help identifies the complete Machteld, Tcl, and Tk reference' `
         ($help.Out -match '(?i)complete offline reference' -and
-         $help.Out -match 'Machteld 0\.10\.1' -and
+         $help.Out -match 'Machteld 0\.10\.2' -and
          $help.Out -match 'Tcl 9\.0\.4' -and $help.Out -match 'Tk 9\.0\.4' -and
          $help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') `
         ($help.Err + $help.Out)
     $version = Invoke-Host @('--version')
-    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.10\.1') $version.Err
+    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0\.10\.2') $version.Err
 
     $docsStatus = Invoke-Host @('--docs', 'status', '--json')
     $statusObject = $null
@@ -400,7 +481,7 @@ puts "TK-LIB:$::tk_library"
         ($docsStatus.Err + $docsStatus.Out)
     Check 'embedded reference status names exact runtime versions' `
         ($null -ne $statusObject -and $statusObject.ok -eq 1 -and
-         $docsStatus.Out -match '0\.10\.1' -and
+         $docsStatus.Out -match '0\.10\.2' -and
          $docsStatus.Out -match '9\.0\.4' -and $docsStatus.Out -match '(?i)sha256') `
         ($docsStatus.Err + $docsStatus.Out)
 
