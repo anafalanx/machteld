@@ -1,0 +1,7 @@
+{
+  "commands": {
+    "run": ["out/machteld.exe"],
+    "docs": ["out/machteld.exe", "--docs"],
+    "wrap": ["out/machteld.exe", "wrap"]
+  }
+}
