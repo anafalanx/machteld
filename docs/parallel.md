@@ -110,3 +110,13 @@ becomes `PMAP failed`. Pool setup/wait failures are restated in the PMAP domain.
 Use a pool when items are expensive enough to amortize JSON framing and process
 scheduling, or when a responsive event loop matters. For tiny operations, an
 ordinary Tcl loop is clearer and often faster.
+
+## Kernel-level parallelism (macht)
+
+`worker`, `pool`, and `pmap` parallelize at the PROCESS level: separate
+machteld hosts, message passing, tools and IO. `macht -parallel`
+parallelizes at the KERNEL level: one process, N metered Lua states,
+contiguous shards of a loaded table, integer partials reduced in Tcl. Use
+pmap when the unit of work is a tool; use macht when the unit is arithmetic
+over rows. They compose: a pmap worker may itself run macht. See
+[the contract](contract.md) and `machteld/command/macht`.

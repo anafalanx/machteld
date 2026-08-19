@@ -152,6 +152,32 @@ ordinary writer contention. Engine failures use `STORE sqlite`.
 Every full, console-wrapped, and GUI-wrapped 0.11.0 host includes this same static
 implementation.
 
+## Macht
+
+`macht` is compiled calculation, not an embedded language. The condition and
+expression surfaces are Tcl expr syntax over a declared row schema; macht
+parses and type-checks them, runs the user's own text verbatim as the Tcl
+body, and generates a Lua body for the metered cell from the same parse.
+Before any route trusts the Lua body it must equal the Tcl body on a sample,
+and that differential run doubles as the calibration that prices the route.
+Constructs whose Tcl and Lua meanings diverge are refused by name
+(`{MACHTELD MACHT refused}`): `?`/`[]` match patterns, `string length`,
+string ordering. Results are exact 64-bit integers.
+
+Routing is declared or accounted, never guessed: `once` always runs Tcl;
+`{sweep K}` buys the data marshal when the measured saving exceeds it;
+`auto` rents Tcl until the accumulated spend reaches the marshal price, then
+calibrates and promotes only on a measured ratio; `-parallel` shards across
+an in-process pool of metered states and reduces integer partials (sum and
+count are monoids). Every decision is a `macht stats` entry. `sandboxed` is
+the exception that is law rather than economics: the metered cell, an
+instruction `-budget`, a hard memory cap, no io, no os — and it never
+silently downgrades, and does not combine with `-parallel`.
+
+The cell is `::machteld::LuaCell`, a private primitive absent from the
+public manifest; there is no way to submit Lua text. Cell failures raise
+`{MACHTELD MACHT call}` with the budget or memory reason in the message.
+
 ## Manifest
 
 `manifest` returns a dict keyed by public command. An entry can contain:

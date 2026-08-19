@@ -21,7 +21,7 @@ proc result_of {reply} {
     return [expr {[dict exists $reply result] ? [dict get $reply result] : ""}]
 }
 
-set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+set expected {canon child cli detach dirs docs hash help http json links log macht manifest mtps pmap pool pty run scope store version wait watch worker wrap}
 check "package version is 0.11.0" [expr {[package require machteld] eq "0.11.0"}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
