@@ -1,15 +1,15 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.10.2 contains and how possible additions are ordered.
+description: What Machteld 0.11.0 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 0.10.2 baseline
+## 0.11.0 baseline
 
-- Direct opted-in Tcl entry and package `machteld 0.10.2`.
+- Direct opted-in Tcl entry and package `machteld 0.11.0`.
 - Process control: supervised `run`, `child`, `wait`, and `scope`; independent
   `detach`.
 - ConPTY interaction with `pty expect` and `pty strip`.
@@ -35,7 +35,7 @@ tags: [machteld, roadmap, windows]
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.10.2. Each needs a
+selected WMI queries remain candidates. None is promised by 0.11.0. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 

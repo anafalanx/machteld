@@ -18,6 +18,7 @@ set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] &&
                  : [Rp .cache deps]}]
 set PREFIX [file join $CACHE prefix]
 set SQLITE [file join $CACHE sqlite]
+set LUA [file join $CACHE lua]
 set GCC [expr {[info exists ::env(MACHTELD_GCC)] ? $::env(MACHTELD_GCC) : ""}]
 set STRIP [expr {[info exists ::env(MACHTELD_STRIP)] ? $::env(MACHTELD_STRIP) : ""}]
 if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/build.ps1" }
@@ -38,7 +39,8 @@ set TKLIB [first_existing "static Tk library" [list \
 set TCLSTUB [first_existing "Tcl stub library" [list \
     [file join $PREFIX lib libtclstub.a] [file join $PREFIX lib libtclstub90.a]]]
 foreach {label path} [list gcc $GCC tcl.h [file join $INCLUDE tcl.h] \
-        sqlite3.c [file join $SQLITE sqlite3.c] sqlite3.h [file join $SQLITE sqlite3.h]] {
+        sqlite3.c [file join $SQLITE sqlite3.c] sqlite3.h [file join $SQLITE sqlite3.h] \
+        lua.h [file join $LUA lua.h] lvm.c [file join $LUA lvm.c]] {
     if {![file exists $path]} { error "build.tcl: missing $label: $path" }
 }
 
@@ -90,9 +92,10 @@ set defines {
     -DUNICODE -D_UNICODE -DSTATIC_BUILD=1
     -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
+    -DMACHTELD_LUA
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE]
+    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA]
 
 # SQLite is third-party generated source. It is pinned and compiled separately;
 # the warning gate applies to every authored C translation unit under src/.
@@ -100,6 +103,17 @@ set sqliteObj [file join $OBJDIR sqlite3.o]
 puts "cc   sqlite3.c (pinned amalgamation)"
 run $GCC -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION \
     -c [file join $SQLITE sqlite3.c] -o $sqliteObj
+
+# Lua is third-party pinned source, compiled AS C: its error model is longjmp,
+# and compiling it as C++ would turn errors into exceptions. Same separation
+# from the warning gate as SQLite; the frontends never reached the cache.
+set luaObjs {}
+puts "cc   lua 5.5.0 (pinned interpreter sources)"
+foreach luaSource [lsort [glob [file join $LUA *.c]]] {
+    set luaObj [file join $OBJDIR lua_[file rootname [file tail $luaSource]].o]
+    run $GCC -O2 -c $luaSource -o $luaObj
+    lappend luaObjs $luaObj
+}
 
 set consoleMain [Rp src machteld_main.c]
 set guiMain [Rp src machteld_gui_main.c]
@@ -129,14 +143,14 @@ set syslibs {
 set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 run $GCC -municode -static-libgcc -Wl,--gc-sections \
-    $consoleObj {*}$objects $sqliteObj $TKLIB $TCLLIB $TCLSTUB \
+    $consoleObj {*}$objects $sqliteObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bare
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bare }
 
 set bareGui [file join $BUILDROOT machteld-bare-gui.exe]
 puts "ld   [file tail $bareGui]"
 run $GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    $guiObj {*}$objects $sqliteObj $TKLIB $TCLLIB $TCLSTUB \
+    $guiObj {*}$objects $sqliteObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bareGui
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bareGui }
 

@@ -166,7 +166,8 @@ function Get-ArtifactManifestLines {
         (Join-Path $Prefix 'include'),
         (Join-Path $Prefix 'lib\tcl9'),
         (Join-Path $Prefix 'lib\tcl9.0'),
-        (Join-Path $Prefix 'lib\tk9.0')
+        (Join-Path $Prefix 'lib\tk9.0'),
+        (Join-Path $CacheRoot 'lua')
     )
     $files = @(
         (Join-Path $Prefix 'bin\tclsh90s.exe'),
@@ -316,7 +317,8 @@ New-Item -ItemType Directory -Force -Path $CacheRoot, $SourceRoot, $Prefix | Out
 # A stale or interrupted cache is never configured in place. Preserve only the
 # downloaded archives, whose hashes are rechecked by Get-Archive, and rebuild
 # every derived tree from a known-empty directory.
-foreach ($derived in @($Prefix, $SourceRoot, (Join-Path $CacheRoot 'sqlite'))) {
+foreach ($derived in @($Prefix, $SourceRoot, (Join-Path $CacheRoot 'sqlite'),
+                       (Join-Path $CacheRoot 'lua'))) {
     Assert-UnderCache $derived
     if (Test-Path -LiteralPath $derived) {
         Get-ChildItem -LiteralPath $derived -Recurse -Force -ErrorAction SilentlyContinue |
@@ -385,6 +387,40 @@ if (-not (Test-Path -LiteralPath (Join-Path $sqliteExtract 'sqlite3.c'))) {
     $sqliteDir = $sqliteC.Directory.FullName
     New-Item -ItemType Directory -Force -Path (Join-Path $CacheRoot 'sqlite') | Out-Null
     Copy-Item -LiteralPath (Join-Path $sqliteDir 'sqlite3.c'), (Join-Path $sqliteDir 'sqlite3.h') -Destination (Join-Path $CacheRoot 'sqlite') -Force
+}
+
+# Lua 5.5 ships as .tar.gz; Windows' in-box bsdtar extracts it (present by
+# contract since Windows 10 1803, and the build floor is far above that).
+$luaEntry = $Lock.archives | Where-Object id -eq 'lua'
+$luaArchive = Get-Archive $luaEntry
+$luaStage = Join-Path $CacheRoot 'lua'
+if (-not (Test-Path -LiteralPath (Join-Path $luaStage 'lua.h'))) {
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
+        throw 'in-box tar.exe not found; cannot extract the Lua archive'
+    }
+    $luaExtract = Join-Path $SourceRoot ('.lua-extract-' + [Guid]::NewGuid().ToString('n'))
+    Assert-UnderCache $luaExtract
+    New-Item -ItemType Directory -Force -Path $luaExtract | Out-Null
+    try {
+        & $tar -xzf $luaArchive -C $luaExtract
+        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
+        $luaSrc = Join-Path $luaExtract ('lua-' + $luaEntry.version + '\src')
+        if (-not (Test-Path -LiteralPath (Join-Path $luaSrc 'lua.h'))) {
+            throw 'Lua archive contains no src/lua.h after extraction'
+        }
+        New-Item -ItemType Directory -Force -Path $luaStage | Out-Null
+        # The interpreter sources only: the standalone frontends (lua.c, luac.c)
+        # never enter the build, so they never enter the cache either.
+        Get-ChildItem -LiteralPath $luaSrc -File |
+            Where-Object { $_.Extension -in @('.c', '.h') -and
+                           $_.Name -notin @('lua.c', 'luac.c') } |
+            Copy-Item -Destination $luaStage -Force
+    } finally {
+        if (Test-Path -LiteralPath $luaExtract) {
+            [IO.Directory]::Delete($luaExtract, $true)
+        }
+    }
 }
 
 Write-ArtifactManifest

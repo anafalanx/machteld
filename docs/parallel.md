@@ -14,7 +14,7 @@ Code is installed once in a worker; requests carry data.
 ## Worker
 
 ```tcl
-package require machteld 0.10.2
+package require machteld 0.11.0
 
 worker on digest {path {alg sha256}} {
     hash file $alg $path
