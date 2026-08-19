@@ -61,7 +61,8 @@ set expected $::machteld::manifest::native
 # values, including subcommands and documentation IDs.
 set tclFiles [list [file join $ROOT tcl machteld.tcl] [file join $ROOT tcl cli.tcl] \
     [file join $ROOT tcl log.tcl] [file join $ROOT tcl worker.tcl] \
-    [file join $ROOT tcl pool.tcl] [file join $ROOT tcl pmap.tcl]]
+    [file join $ROOT tcl pool.tcl] [file join $ROOT tcl pmap.tcl] \
+    [file join $ROOT tcl macht.tcl]]
 set docsTcl [file join $ROOT tcl docs.tcl]
 if {[file exists $docsTcl]} { lappend tclFiles $docsTcl }
 set slave [interp create]

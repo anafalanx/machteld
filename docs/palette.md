@@ -240,6 +240,21 @@ poison` reply rather than looping.
 handler's structured error is re-raised unchanged; an unstructured handler error
 becomes `PMAP failed`. See [parallel work](parallel.md).
 
+## Serious calculation
+
+```tcl
+set h [macht load $rows -schema {naam s pad s status i bytes i}]
+set waste [macht sum {$bytes} where {$status == 404 && [string match "/api/*" $pad]} -data $h]
+set fast [macht sum {($a * $b + $c) % 97} where {$status < 500} -data $h -parallel auto]
+```
+
+`macht` compiles plain Tcl expr conditions into proven-equal bodies and
+routes each run to whichever body the measurements earn — the Tcl arm, the
+metered Lua cell, or an in-process shard pool for every core. Constructs
+whose Tcl and Lua meanings diverge are refused by name; `macht stats` shows
+every routing decision. See [the contract](contract.md) and
+`machteld/command/macht`.
+
 ## Packaging and introspection
 
 ```tcl
@@ -273,5 +288,5 @@ not copied recursively, so a wrapped tool cannot perform another wrap. See
 ## Complete verb list
 
 `canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
-`links`, `log`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`, `scope`,
-`store`, `version`, `wait`, `watch`, `worker`, and `wrap`.
+`links`, `log`, `macht`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`,
+`scope`, `store`, `version`, `wait`, `watch`, `worker`, and `wrap`.
