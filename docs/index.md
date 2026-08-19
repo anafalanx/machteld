@@ -23,6 +23,7 @@ own exact command reference.
 - [Execution model](execution-model.md) - blocking work, evented work, and lifetime.
 - [Parallel work](parallel.md) - `worker`, `pool`, and `pmap`.
 - [Packaging](packaging.md) - direct entries and standalone tools.
+- [External libraries](extensions.md) - Tcl extensions, precedence, and the deployment covenant.
 - [Architecture](architecture.md) - hosts, prelude, native core, and metadata.
 - [Creed](creed.md) - the design tests.
 - [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.
