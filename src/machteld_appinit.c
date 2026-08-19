@@ -27,6 +27,9 @@ extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
 #ifdef MACHTELD_HTTP
 extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
 #endif
+#ifdef MACHTELD_LUA
+extern int Machteldlua_Init(Tcl_Interp *interp); /* src/lua.c */
+#endif
 extern int Machteldpublish_Init(Tcl_Interp *interp); /* src/publish.c */
 
 static void
@@ -289,6 +292,14 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldhttp", Machteldhttp_Init, NULL);
+#endif
+#ifdef MACHTELD_LUA
+    /* Metered Lua cells for macht's generated kernels; private primitive,
+     * never a user-facing language (the seam is closed by decision). */
+    if (Machteldlua_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldlua", Machteldlua_Init, NULL);
 #endif
 
     if (Machteldpublish_Init(interp) == TCL_ERROR) {
