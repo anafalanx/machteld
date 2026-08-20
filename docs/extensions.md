@@ -1,16 +1,17 @@
 ---
 type: guide
 title: External libraries
-description: How a Machteld program uses Tcl extensions, and the covenant that governs shipping them.
-tags: [machteld, extensions, tcl, packages, deployment]
+description: How a Machteld program uses Tcl extensions, the covenant that governs shipping them, and when a port beats a dependency.
+tags: [machteld, extensions, tcl, packages, deployment, porting]
 ---
 
 # External libraries
 
 A Machteld program can use binary Tcl extensions and script packages beyond
 the built-in palette. This page records the mechanics that work today, the
-precedence rule that keeps the palette honest, and the deployment covenant
-that governs what a shipped program may depend on.
+precedence rule that keeps the palette honest, the deployment covenant
+that governs what a shipped program may depend on — and the fourth way,
+which is to take no dependency at all.
 
 ## The mechanics
 
@@ -79,6 +80,45 @@ preferred for shipped programs.
   over the Office-installed ODBC driver, which the covenant cannot count
   on.
 - **Access `.accdb`** — refused: no covenant-compliant route exists.
+
+## The port, before the dependency
+
+For a capability of bounded size whose problem is frozen — a format, an
+algorithm, a calculation — the strongest way to use an external library is
+to take its **contract**, not its code. Port the behavior into plain Tcl
+and keep the original as the oracle:
+
+- **The original's behavior is the contract.** During development, run the
+  reference implementation beside the port and differential-test them:
+  same inputs, same results, same inputs refused. Disagreements are
+  settled by the oracle, never by taste — and the oracle's corrections are
+  the pattern's whole value, because they land before a line ships. The
+  fixtures carry their provenance (oracle name, version, date) into the
+  suite; the oracle itself lives and dies at development time and ships
+  nowhere.
+- **Port the behavior, never translate the source.** A translation
+  inherits the original's license; an independent implementation against
+  the observed contract is Machteld's own. The port therefore carries no
+  notice obligation, no DLL chain, and no upstream decay rate — if the
+  problem does not change, the solution does not have to change either.
+- **State every claim exactly.** Where the port matches the oracle, say so
+  with name and version. Where it deviates, refuse by name or write the
+  deviation down. Equivalence claims come in strengths — byte-identity is
+  not round-trip fidelity — and the suite holds precisely the claim that
+  was made, never a stronger one implied.
+
+The paid-for exemplar is `csv`: Text::CSV_XS, the CPAN reference
+implementation, was installed beside the work and differential-tested
+against `tcl/csv.tcl` — edge fixtures and seeded round-trip fuzz agreeing
+byte for byte — before the contract was written into `test/csv_test.tcl`
+and the command reference. The oracle overruled the author's reading of
+the format several times before any code was committed (a bare CR
+terminates a record; an empty line is one empty field); a port without
+its oracle is a guess with confidence.
+
+The rule of thumb: below a few thousand lines of frozen problem, the port
+beats the dependency. Above that, the covenant governs — and the
+palette-first rule governs both.
 
 ## What this page does not promise
 
