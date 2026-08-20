@@ -100,6 +100,7 @@ try {
     Run-Test 'process' @((Join-Path $RepoRoot 'test\process_test.tcl'), $processFixture)
     Run-Test 'store' @((Join-Path $RepoRoot 'test\store_test.tcl'), $lockFixture)
     Run-Test 'macht' @((Join-Path $RepoRoot 'test\macht_test.tcl'))
+    Run-Test 'csv' @((Join-Path $RepoRoot 'test\csv_test.tcl'))
     Run-Test 'native' @((Join-Path $RepoRoot 'test\native_test.tcl'), $httpFixture, $processFixture)
     Run-Test 'filesystem' @((Join-Path $RepoRoot 'test\filesystem_test.tcl'))
     Run-Test 'runtime services' @((Join-Path $RepoRoot 'test\runtime_test.tcl'))
