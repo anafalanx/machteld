@@ -53,6 +53,34 @@ exactly as Lua itself did.
    remains the Tcl-side organ; this is in-kernel data access, not a
    shadow of it.
 
+## 0.12.0 — the palette gains xml (decided 2026-08-20)
+
+Solid XML handling, validation included, is committed for 0.12.0 as a
+palette organ beside `json` — runtime capability, not an extensions-covenant
+errand. The deciding programs are the rail-family operations formats
+(railML, NeTEx, TAF/TSI, Darwin push data): schema-described XML is the
+data plane of long-lived operations environments, and a runtime that
+promises "just works for years" must read it in the box.
+
+Recorded as constraints, not answers — the route is design work:
+
+- The leading vendor candidate is tDOM 0.9.7 (C, Tcl 9-ready, bundles
+  expat 2.7.3): DOM, XPath, DTD validation, and its own schema engine,
+  statically linkable the way SQLite and Lua entered, pinned through the
+  dependency lock with its license notices verified and carried. A narrower
+  expat-based organ is the fallback if tDOM's surface proves too wide for a
+  palette contract.
+- "Validation" is pinned by name during design: well-formedness always;
+  DTD and tDOM's schema engine are on the table; full W3C XML Schema is
+  deliberately not claimed — that claim costs Xerces-class machinery the
+  covenant refuses. Whatever subset ships is stated exactly, and the rest
+  is refused by name, never approximated.
+- The usual admission bar applies: a narrow Tcl-shaped contract, structured
+  `{MACHTELD XML ...}` failures with depth/size guards the way `json` has
+  them, external-entity and all network resolution refused by default (the
+  classic XML trap), manifest metadata, and tests on real rail-format
+  fixtures plus hostile ones (XXE, entity expansion, depth bombs).
+
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
