@@ -23,7 +23,7 @@ namespace path.
 - Process control: `run`, `child`, `wait`, `scope`, and `detach`.
 - Interactive processes: `pty`.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, and `mtps`.
-- Data and network: `http`, `json`, `hash`, and `store`.
+- Data and network: `http`, `json`, `csv`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
 - Runtime and distribution: `version`, `manifest`, `docs`, `help`, and `wrap`.
 

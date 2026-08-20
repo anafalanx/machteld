@@ -118,7 +118,7 @@ descendants born afterward and PID reuse can race it. Use `child kill` for a
 tree launched and owned by Machteld, where the Job Object provides the stronger
 lifetime boundary.
 
-## HTTP, JSON, hashes, and storage
+## HTTP, JSON, CSV, hashes, and storage
 
 ```tcl
 set r [http get https://example.com -timeout 10s -maxbody 8M]
@@ -127,6 +127,9 @@ http post $url [json encode -dict $doc] -type application/json
 
 set doc [json decode {{"name":"x","n":42}}]
 json encode -dict $doc
+
+set rows [csv decode $text]        ;# records as lists of fields
+csv encode $rows -eol crlf
 
 hash sum sha256 $bytes
 hash file sha256 C:/large.iso

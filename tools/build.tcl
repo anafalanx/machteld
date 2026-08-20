@@ -161,7 +161,8 @@ set staged [file join $OBJDIR prelude.tcl]
 set output [open $staged w]
 fconfigure $output -translation lf
 foreach part [list [Rp tcl machteld.tcl] [Rp tcl docs.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] \
-        [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] [Rp tcl macht.tcl] \
+        [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] [Rp tcl csv.tcl] \
+        [Rp tcl macht.tcl] \
         $generatedManifest] {
     set input [open $part r]
     fconfigure $input -translation lf
