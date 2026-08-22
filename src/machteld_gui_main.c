@@ -48,6 +48,14 @@ _tWinMain(
         }
     }
 
+    /* Engine mode leaves before any Tcl, Tk, or zipfs work; a GUI-subsystem
+     * exe spawned with pipes serves protocol 1 exactly like the console
+     * host, so wrapped GUI tools carry their engine in their own file. */
+    if (argc >= 2 && _tcscmp(argv[1], _T("--machteld-engine")) == 0) {
+        int engineThreads = (argc >= 3) ? (int)_tcstol(argv[2], NULL, 10) : 0;
+        return Machteld_EngineMain(engineThreads);
+    }
+
 #if defined(UNICODE)
     TclZipfs_AppHook(&argc, &argv);
 #endif
