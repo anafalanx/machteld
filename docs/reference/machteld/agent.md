@@ -72,3 +72,27 @@ The upstream Tcl/Tk `application` pages document upstream `tclsh` and `wish`
 hosts. They are language-distribution reference, not Machteld host-option
 promises. For program entry, `--docs`, wrapping, and reserved host routes, use
 the Machteld command and packaging references.
+
+## When the palette is not enough
+
+Machteld's built-ins are deliberately small. When they are not sufficient or
+not appropriate for the job, you are expected to **build beside the
+executable**, not to give up or to fight the runtime: create a folder and
+construct whatever artifact the job needs there. That right is part of the
+product, under two conditions:
+
+- **Contract-compliant.** The artifact plays by Machteld's published rules
+  for its kind. A Tcl extension or script package enters through the
+  extension mechanics and the precedence rule (`machteld/guide/extensions`).
+  A compute engine speaks the engine wire and passes its conformance suite
+  (`machteld/guide/engine`, the 0.12.0 contract). A helper executable is
+  launched, supervised, and killed through `run`, `child`, and `scope` like
+  any process, and speaks structured output you define.
+- **Covenant-compliant.** Every dependency of the shipped program is in the
+  box, in the folder, or not in the program: files beside the exe with their
+  license texts, nothing installed, no registry writes, no downloads at run
+  time. The shipped program must just work.
+
+Order of consideration: the palette first; then ordinary Tcl; then an
+artifact in the folder. Building beside the exe is not a workaround — it is
+the designed extension point.

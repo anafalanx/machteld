@@ -12,6 +12,15 @@ the built-in palette. This page records the mechanics that work today, the
 precedence rule that keeps the palette honest, and the deployment covenant
 that governs what a shipped program may depend on.
 
+The standing doctrine behind all of it: when the built-ins are not
+sufficient or not appropriate for a job, the program author — human or
+agent — is expected to build beside the executable: create a folder and
+construct whatever artifact the job needs there, contract-compliant for its
+kind (this page for Tcl extensions; [the engine](engine.md) for compute
+engines; `run`/`child`/`scope` for helper executables) and covenant-
+compliant in deployment. Building beside the exe is the designed extension
+point, not a workaround.
+
 ## The mechanics
 
 The Machteld host is statically linked, and that is no obstacle: Tcl
