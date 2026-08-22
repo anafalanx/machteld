@@ -69,6 +69,12 @@ closing section so that its absence is a promise, not an oversight.
 
 ## 0.13.0 candidates
 
+Before 0.13.0 is scoped, the cross-industry maintenance-engineering study
+(banked in the z estate as `study-cross-industry.md`, 2026-08-22) is
+revisited by standing instruction. Its first-ranked transposition is engine
+PHM: State-of-Health wear telemetry, condition-based engine rotation,
+freeze-frame error snapshots, and a timeout selectivity study.
+
 - The sharded, schema-specialized loader: byte-range parallel parsing into
   column pools, admitted only by a registered throughput prediction.
 - Engine-side vectorized primitives exposed to kernels as Lua functions,
