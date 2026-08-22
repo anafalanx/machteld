@@ -164,6 +164,13 @@ typedef struct {
 static Pool gPools[ENGINE_MAX_POOLS];
 static int gPoolSeq = 0;
 
+/* View tracking mutates the shared Pool struct, and the FIRST sharded run
+ * over a fresh pool builds every shard's view concurrently - one worker
+ * thread per state, all appending to the same views array. The lua_State
+ * side is per-thread by law; this lock covers only the shared bookkeeping.
+ * (Found by the 0.13.0 plan's adversarial review panel; a 0.12.0 defect.) */
+static CRITICAL_SECTION gViewLock;
+
 typedef struct {
     int used;
     int ref;                         /* registry ref in state 0 */
@@ -323,8 +330,18 @@ PoolByHandle(const char *h, int *numOut)
     return NULL;
 }
 
+static void PoolTrackViewLocked(Pool *p, int state, const char *key);
+
 static void
 PoolTrackView(Pool *p, int state, const char *key)
+{
+    EnterCriticalSection(&gViewLock);
+    PoolTrackViewLocked(p, state, key);
+    LeaveCriticalSection(&gViewLock);
+}
+
+static void
+PoolTrackViewLocked(Pool *p, int state, const char *key)
 {
     if (p->nviews == p->capviews) {
         int cap = (p->capviews == 0) ? 8 : p->capviews * 2;
@@ -1733,6 +1750,7 @@ Machteld_EngineMain(int threads)
 {
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
+    InitializeCriticalSection(&gViewLock);
     gStats.t0 = GetTickCount64();
 
     if (threads < 1 || threads > ENGINE_MAXSTATES) {
