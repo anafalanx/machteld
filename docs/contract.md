@@ -109,7 +109,7 @@ try {
 
 The current domains are `ENTRY`, `RUN`, `CHILD`, `WAIT`, `DETACH`, `PTY`,
 `WATCH`, `MTPS`, `DIRS`, `HTTP`, `HASH`, `JSON`, `STORE`, `CLI`, `LOG`,
-`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
+`WORKER`, `POOL`, `PMAP`, `MACHT`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
 `badvalue`, `notfound`, `nohandle`, `timeout`, `launch`, and `oserror`; each
 manifest entry lists its closed set of Machteld-domain codes.
 
@@ -151,6 +151,28 @@ SQLite busy timeout, allowing independent Machteld processes to wait through
 ordinary writer contention. Engine failures use `STORE sqlite`.
 Every full, console-wrapped, and GUI-wrapped 0.11.0 host includes this same static
 implementation.
+
+## Engines (0.12.0 contract)
+
+From 0.12.0, heavy computation leaves the host process. `macht` becomes the
+verb family that commands **engines**: disposable compute processes - the
+Machteld executable in engine mode, or a sidecar executable in the folder -
+holding Lua 5.5 and typed data pools, spoken to over a language-neutral wire
+and killed through the job machinery. [The engine](engine.md) is the full
+contract; these are its cross-command rules:
+
+- The control plane is Tcl and only Tcl; a kernel is machinery that never
+  holds control flow, events, a window, or supervision.
+- Computation runs where the data lives: bulk enters an engine by path,
+  engine-resident data is addressed by handle, and only bounded values cross
+  the wire. A payload never passes through the control plane.
+- The engine is a cache, never the truth: any engine may be killed at any
+  instant and a program must be able to start another and load again.
+- The machine is proven by Machteld's build gates; kernels are trusted as
+  written, never sampled or verified at run time.
+- The engine is additive: a program that never calls `macht` starts nothing.
+
+The section below describes the 0.11.0 `macht`, which 0.12.0 replaces.
 
 ## Macht
 

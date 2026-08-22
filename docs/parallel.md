@@ -111,6 +111,21 @@ Use a pool when items are expensive enough to amortize JSON framing and process
 scheduling, or when a responsive event loop matters. For tiny operations, an
 ordinary Tcl loop is clearer and often faster.
 
+## Engines (0.12.0)
+
+From 0.12.0 the heavy-data counterpart to pools is the engine, commanded by
+`macht` (see [the engine](engine.md)). The doctrine line between the two
+families is short: **pools carry commands; engines hold data.** A pool item is
+a named operation with a small payload, handled by a Tcl program with the full
+palette - hash a file, probe a host, drive a tool. An engine holds a million
+rows resident and runs Lua kernels over them, returning answers. Data
+parallelism is shard threads *inside* one engine; task parallelism is a
+program starting several engines *across* - threads inside, engines across,
+and Tcl the only spawner. They compose: a pool worker may command an engine.
+
+The section below describes the 0.11.0 in-process `macht -parallel`, which
+0.12.0 replaces with the engine's `-shards`.
+
 ## Kernel-level parallelism (macht)
 
 `worker`, `pool`, and `pmap` parallelize at the PROCESS level: separate

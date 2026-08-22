@@ -242,6 +242,11 @@ becomes `PMAP failed`. See [parallel work](parallel.md).
 
 ## Serious calculation
 
+From 0.12.0, `macht` commands out-of-process engines - data loaded by path,
+kernels written in Lua, answers returned over a wire, the engine killed at
+will - under the contract in [the engine](engine.md). The grammar shown below
+is the 0.11.0 surface that 0.12.0 replaces.
+
 ```tcl
 set h [macht load $rows -schema {naam s pad s status i bytes i}]
 set waste [macht sum {$bytes} where {$status == 404 && [string match "/api/*" $pad]} -data $h]
