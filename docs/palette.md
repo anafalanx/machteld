@@ -242,23 +242,31 @@ becomes `PMAP failed`. See [parallel work](parallel.md).
 
 ## Serious calculation
 
-From 0.12.0, `macht` commands out-of-process engines - data loaded by path,
-kernels written in Lua, answers returned over a wire, the engine killed at
-will - under the contract in [the engine](engine.md). The grammar shown below
-is the 0.11.0 surface that 0.12.0 replaces.
-
 ```tcl
-set h [macht load $rows -schema {naam s pad s status i bytes i}]
-set waste [macht sum {$bytes} where {$status == 404 && [string match "/api/*" $pad]} -data $h]
-set fast [macht sum {($a * $b + $c) % 97} where {$status < 500} -data $h -parallel auto]
+set h [macht load -lines C:/data/access.log]
+macht def hits {function hits(h)
+    local n = 0
+    for i = 1, h.rows do
+        if string.find(h.line[i], "404", 1, true) then n = n + 1 end
+    end
+    return n
+end}
+set total [macht run hits $h -shards 8 -reduce sum_of]
+macht free $h
+macht stop
 ```
 
-`macht` compiles plain Tcl expr conditions into proven-equal bodies and
-routes each run to whichever body the measurements earn — the Tcl arm, the
-metered Lua cell, or an in-process shard pool for every core. Constructs
-whose Tcl and Lua meanings diverge are refused by name; `macht stats` shows
-every routing decision. See [the contract](contract.md) and
-`machteld/command/macht`.
+`macht` commands engines: disposable compute processes - the executable
+itself in engine mode, or a sidecar via `-exe` - holding Lua and data
+pools, spoken to over a language-neutral wire, and killed through the job
+machinery. Data enters by path and is addressed by handles; kernels are
+Lua written by the program author, cached by content hash, trusted as
+written; `-shards` runs a kernel over contiguous pool views in parallel
+threads and `-reduce` folds the partials engine-side; `-budget` is
+enforced by kill, after which the lazy default engine simply restarts.
+The first work subcommand starts an engine on its own; `macht start`
+exists for control and for additional engines. See
+[the engine](engine.md) and `machteld/command/macht`.
 
 ## Packaging and introspection
 

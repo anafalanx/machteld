@@ -123,15 +123,9 @@ parallelism is shard threads *inside* one engine; task parallelism is a
 program starting several engines *across* - threads inside, engines across,
 and Tcl the only spawner. They compose: a pool worker may command an engine.
 
-The section below describes the 0.11.0 in-process `macht -parallel`, which
-0.12.0 replaces with the engine's `-shards`.
-
-## Kernel-level parallelism (macht)
-
-`worker`, `pool`, and `pmap` parallelize at the PROCESS level: separate
-machteld hosts, message passing, tools and IO. `macht -parallel`
-parallelizes at the KERNEL level: one process, N metered Lua states,
-contiguous shards of a loaded table, integer partials reduced in Tcl. Use
-pmap when the unit of work is a tool; use macht when the unit is arithmetic
-over rows. They compose: a pmap worker may itself run macht. See
-[the contract](contract.md) and `machteld/command/macht`.
+Inside one engine, `macht run ... -shards N` is the kernel-level lane:
+N contiguous views of one pool, one thread per view, partials back in
+shard order or folded engine-side by `-reduce`. Use a pool when the unit
+of work is a tool; use an engine when the unit is computation over rows.
+They compose: a pool worker may command an engine. See
+[the engine](engine.md) and `machteld/command/macht`.

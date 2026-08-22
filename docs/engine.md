@@ -7,10 +7,13 @@ tags: [machteld, engine, macht, lua, contract, wire]
 
 # The engine
 
-This page is the contract for the Machteld 0.12.0 engine. The 0.11.0
-executable does not implement it; 0.12.0 is implemented against this page and
-gated by it (see the [roadmap](roadmap.md)). Within 0.12.0 the page, the
-`macht` manifest entry, and the behavior must agree.
+This page is the contract for the Machteld 0.12.0 engine. Implementation
+lands against it across the 0.12.0 phases (see the [roadmap](roadmap.md)) -
+engine mode, the wire, the boundary, the `macht` family, and the `lines`
+loader are present; the `csv` loader and the kernel libraries arrive in
+later phases behind the same `hello` capability negotiation, so a program
+asks the engine what it carries rather than assuming. The page, the `macht`
+manifest entry, and the behavior must agree.
 
 ## What the engine is
 
