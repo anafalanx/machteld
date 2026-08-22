@@ -38,6 +38,7 @@
 #include "lualib.h"
 
 #include "engine_json.h"
+#include "engine_int.h"
 
 #define ENGINE_PROTOCOL     1
 #define ENGINE_MAXSTATES    32
@@ -89,6 +90,56 @@ static int gNStates = 0;
 extern int luaopen_lpeg(lua_State *L);
 extern int luaopen_cjson(lua_State *L);
 
+/* AVX2 gate for the primitive palette: computed once, in this plain
+ * translation unit (col.c is compiled -mavx2 and must not execute before
+ * the check). Without AVX2 the col library simply is not opened and the
+ * capability is never declared - negotiation doing its job. */
+static int gColOk = 0;
+
+/* View identity for col: a weak-keyed per-state registry map from the
+ * view table to its packed identity, written at view creation. Invisible
+ * to kernels, unforgeable, collision-free (panel ruling). */
+#define ENGINE_COLVIEWS "machteld.colviews"
+
+typedef struct {
+    int poolNum;
+    int64_t a, b;
+} EngViewId;
+
+static void
+ColViewsInit(lua_State *S)
+{
+    lua_newtable(S);
+    lua_createtable(S, 0, 1);
+    lua_pushstring(S, "k");
+    lua_setfield(S, -2, "__mode");
+    lua_setmetatable(S, -2);
+    lua_setfield(S, LUA_REGISTRYINDEX, ENGINE_COLVIEWS);
+}
+
+int
+EngineViewIdentity(lua_State *S, int idx, int *poolNumOut,
+                   int64_t *aOut, int64_t *bOut)
+{
+    idx = lua_absindex(S, idx);
+    if (lua_getfield(S, LUA_REGISTRYINDEX, ENGINE_COLVIEWS) != LUA_TTABLE) {
+        lua_pop(S, 1);
+        return 0;
+    }
+    lua_pushvalue(S, idx);
+    lua_rawget(S, -2);
+    if (lua_type(S, -1) != LUA_TUSERDATA) {
+        lua_pop(S, 2);
+        return 0;
+    }
+    EngViewId *id = (EngViewId *)lua_touserdata(S, -1);
+    *poolNumOut = id->poolNum;
+    *aOut = id->a;
+    *bOut = id->b;
+    lua_pop(S, 2);
+    return 1;
+}
+
 static lua_State *
 NewMeteredState(EngAlloc *a)
 {
@@ -109,6 +160,10 @@ NewMeteredState(EngAlloc *a)
     luaL_requiref(S, "lpeg", luaopen_lpeg, 1);
     luaL_requiref(S, "cjson", luaopen_cjson, 1);
     lua_settop(S, 0);
+    ColViewsInit(S);
+    if (gColOk) {
+        MachteldCol_Open(S);
+    }
     return S;
 }
 
@@ -170,6 +225,48 @@ static int gPoolSeq = 0;
  * side is per-thread by law; this lock covers only the shared bookkeeping.
  * (Found by the 0.13.0 plan's adversarial review panel; a 0.12.0 defect.) */
 static CRITICAL_SECTION gViewLock;
+
+int
+EnginePoolLive(int poolNum)
+{
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
+        if (gPools[i].used == poolNum) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int
+EnginePoolColumn(int poolNum, const char *field, char *typeOut,
+                 const void **dataOut, int64_t *rowsOut)
+{
+    Pool *p = NULL;
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
+        if (gPools[i].used == poolNum) {
+            p = &gPools[i];
+            break;
+        }
+    }
+    if (p == NULL) {
+        *typeOut = 0;                          /* the pool is gone */
+        return 0;
+    }
+    for (int c = 0; c < p->ncols; c++) {
+        if (strcmp(p->cols[c].name, field) == 0) {
+            *typeOut = p->cols[c].type;
+            *rowsOut = p->rows;
+            switch (p->cols[c].type) {
+            case 'i': *dataOut = p->cols[c].i; break;
+            case 'f': *dataOut = p->cols[c].f; break;
+            default:  *dataOut = NULL;
+            }
+            return 1;
+        }
+    }
+    *typeOut = '?';                            /* live pool, unknown field */
+    return 0;
+}
 
 typedef struct {
     int used;
@@ -401,6 +498,17 @@ PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
     lua_pushvalue(S, -1);
     lua_setfield(S, LUA_REGISTRYINDEX, key);
     PoolTrackView(p, stateIdx, key);
+    /* Record the view's identity for col, invisibly (weak-keyed). */
+    if (lua_getfield(S, LUA_REGISTRYINDEX, ENGINE_COLVIEWS) == LUA_TTABLE) {
+        lua_pushvalue(S, -2);                  /* the view table as key */
+        EngViewId *id = (EngViewId *)lua_newuserdatauv(S,
+            sizeof(EngViewId), 0);
+        id->poolNum = poolNum;
+        id->a = a;
+        id->b = b;
+        lua_rawset(S, -3);
+    }
+    lua_pop(S, 1);
 }
 
 static void
@@ -1751,6 +1859,7 @@ Machteld_EngineMain(int threads)
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
     InitializeCriticalSection(&gViewLock);
+    gColOk = __builtin_cpu_supports("avx2");
     gStats.t0 = GetTickCount64();
 
     if (threads < 1 || threads > ENGINE_MAXSTATES) {

@@ -135,15 +135,24 @@ foreach src [lsort [glob [file join $CJSON *.c]]] {
 
 set consoleMain [Rp src machteld_main.c]
 set guiMain [Rp src machteld_gui_main.c]
+set colSource [Rp src col.c]
 set objects {}
 foreach source [lsort [glob -directory [Rp src] *.c]] {
-    if {$source eq $consoleMain || $source eq $guiMain} continue
+    if {$source eq $consoleMain || $source eq $guiMain ||
+            $source eq $colSource} continue
     set stem [file rootname [file tail $source]]
     set object [file join $OBJDIR ${stem}.o]
     puts "cc   [file tail $source]"
     run $GCC {*}$common -c $source -o $object
     lappend objects $object
 }
+
+# The primitive palette is the one authored TU with a raised ISA floor:
+# -mavx2, executed only behind the engine's runtime CPUID gate.
+set colObject [file join $OBJDIR col.o]
+puts "cc   col.c (-mavx2)"
+run $GCC {*}$common -mavx2 -fvect-cost-model=dynamic -c $colSource -o $colObject
+lappend objects $colObject
 
 set consoleObj [file join $OBJDIR machteld_main.o]
 puts "cc   machteld_main.c"

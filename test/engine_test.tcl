@@ -184,7 +184,77 @@ scope {
     check "an embedded newline survives quoting" [expr {
         [dict get [reqok run name embedded args \
             [list [dict create handle $cpool]]] value] eq "two\nlines"}]
+
+    # The primitive palette (0.13.0 Phase 0 trio) - callable, undeclared.
+    check "col is not yet a declared capability" [expr {"col" ni $caps}]
+    reqok def name coltrio chunk {function coltrio(h)
+        local sel = col.filter(h, "status", "lt", 500)
+        return col.sum(h, "status") * 1000000
+             + col.sum(h, "status", sel) * 1000
+             + col.count(sel) * 10 + col.count(h)
+    end}
+    set r [reqok run name coltrio args [list [dict create handle $cpool]]]
+    check "the trio computes over native columns (sum, filter, count)" \
+        [expr {[dict get $r value] == 1104604023}]
+    reqok def name colerr chunk {function colerr(h, what)
+        if what == 1 then return col.sum(h, "zzz") end
+        if what == 2 then return col.sum(h, "note") end
+        if what == 3 then return col.sum(h, "ratio") end
+        G_STASH = h
+        return 0
+    end}
+    foreach {what pattern} {
+        1 "*col: unknown field*"
+        2 "*col: field note is not numeric*"
+        3 "*col: field type f arrives*"
+    } {
+        set r [req run name colerr \
+            args [list [dict create handle $cpool] $what]]
+        check "col names its refusal ($pattern)" [expr {
+            ![dict get $r ok] && [errcode $r] eq "lua" &&
+            [string match $pattern [dict get $r error message]]}]
+    }
+    reqok run name colerr args [list [dict create handle $cpool] 4]
+    reqok def name colleak chunk {function colleak(h)
+        return col.filter(h, "status", "eq", 404)
+    end}
+    set r [req run name colleak args [list [dict create handle $cpool]]]
+    check "a selection cannot cross the boundary" \
+        [expr {![dict get $r ok] && [errcode $r] eq "type"}]
+    reqok def name colforeign chunk {function colforeign(h, hb)
+        local sel = col.filter(h, "status", "eq", 404)
+        return col.sum(hb, "status", sel)
+    end}
+    set r [reqok load format csv path $csvfix header 1 \
+        schema [list name s note s status i ratio f]]
+    set cpool2 [dict get $r handle]
+    set r [req run name colforeign args [list \
+        [dict create handle $cpool] [dict create handle $cpool2]]]
+    check "a foreign selection is refused by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*bound to another view*" [dict get $r error message]]}]
+    reqok free handle $cpool2
+    reqok def name colstale chunk {function colstale()
+        return col.count(G_STASH)
+    end}
     reqok free handle $cpool
+    set r [req run name colstale]
+    check "a stashed view outlives its pool by refusal, not by crash" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*view outlives its pool*" [dict get $r error message]]}]
+    set f [open $csvfix wb]
+    puts -nonewline $f "a\n9223372036854775807\n9223372036854775807\n"
+    close $f
+    set r [reqok load format csv path $csvfix header 1 schema [list a i]]
+    set opool [dict get $r handle]
+    reqok def name colover chunk {function colover(h)
+        return col.sum(h, "a")
+    end}
+    set r [req run name colover args [list [dict create handle $opool]]]
+    check "an overflowing integer sum refuses by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*col: integer overflow*" [dict get $r error message]]}]
+    reqok free handle $opool
     set f [open $csvfix wb]
     puts -nonewline $f "1,2\n3,notanint\n"
     close $f
