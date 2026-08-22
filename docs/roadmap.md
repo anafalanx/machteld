@@ -82,8 +82,14 @@ freeze-frame error snapshots, and a timeout selectivity study.
 
 - The sharded, schema-specialized loader: byte-range parallel parsing into
   column pools, admitted only by a registered throughput prediction.
-- Engine-side vectorized primitives exposed to kernels as Lua functions,
-  admitted only after a re-profile shows kernels dominate the pipeline.
+- Engine-side vectorized primitives exposed to kernels as Lua functions.
+  The original admission condition - "only after a re-profile shows
+  kernels dominate the pipeline" - was waived by owner decision on
+  2026-08-22, which made the primitives 0.13.0's headline and moved the
+  evidence obligation into registered predictions; the predictions then
+  held (the `col` library: sums at the memory wall, the fused form 13-17x
+  over the Lua loop, hand intrinsics earning residence nowhere). The
+  waiver is recorded here so the gate's history stays visible.
 - A resident engine daemon over a named pipe, with rendezvous and idle policy.
 - A sidecar conformance kit: the `macht conform` fixtures packaged for engine
   authors in other languages.

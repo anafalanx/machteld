@@ -247,6 +247,60 @@ and returns its value. `N` above the engine's `-threads` is refused
 (`MACHT badvalue`). The engine's thread count is the commander's budget:
 several engines on one machine oversubscribe only when the program says so.
 
+## The col library
+
+Kernels on a capable host carry `col`: precompiled column primitives that
+reach the pool's native memory directly, at memory-bandwidth speed. The
+capability is negotiated - the engine declares `col` in `hello` only when
+its CPU carries AVX2; on any other host the library simply is not opened,
+and kernels fall back to ordinary Lua loops. The primitives are plain
+autovectorized C by measured verdict (hand intrinsics earned residence
+nowhere); they stand on the invariant that **pools are read-only after
+load**, which is what makes concurrent shard reads lawful.
+
+The vocabulary, over a view `h`:
+
+- `col.filter(h, FIELD, OP, X)` with OP in `"lt" "le" "gt" "ge" "eq"
+  "ne"`, over an `i` or `f` column, returns a **selection**. Float
+  comparisons are IEEE: NaN matches nothing except `ne`; a NaN probe
+  matches nothing except `ne`, which then matches every row.
+- `col.sum(h, FIELD ?, SEL?)` - integer sums are exact int64, computed in
+  4096-element chunks proven wraparound-free (a chunk that cannot be
+  proven falls back to per-element checked adds), and an overflow raises
+  `col: integer overflow` deterministically. Float sums follow the
+  normative row-striped eight-lane tree: lane `k mod 8` accumulates row
+  `k`, a masked-out row contributes `+0.0`, lanes fold left to right - so
+  every float sum is deterministic to the bit, and a selected NaN
+  propagates.
+- `col.sumwhere(h, FIELD, BYFIELD, OP, X)` - the fused one-pass form over
+  any pairing of `i`/`f` value and predicate columns; prefer it to
+  filter-plus-sum when the predicate is used once.
+- `col.min(h, FIELD ?, SEL?)`, `col.max(...)` - NaN is skipped; the
+  result seeds at the first surviving element; nothing surviving raises
+  `col: empty selection`. `col.count(h)` and `col.count(SEL)`.
+- `col.band(A, B)`, `col.bor(A, B)`, `col.bnot(A)` - selection algebra
+  for compound predicates worth reusing; bits beyond the view's rows
+  stay zero, always.
+
+Selections are engine furniture: per-state userdata through the metered
+allocator, bound to full view identity (the monotone pool number plus the
+row range), freed by garbage collection. A selection offered to another
+view is refused by name; a selection or view whose pool was freed refuses
+with `col: view outlives its pool` rather than touching a stale pointer;
+a selection can never cross the boundary (the wire refuses userdata as
+`MACHT type`). The library's refusals - `col: unknown field`, `col: field
+... is not numeric`, `col: argument type`, `col: selection is bound to
+another view`, `col: view outlives its pool`, `col: integer overflow`,
+`col: empty selection` - are Lua errors and surface as
+`{MACHTELD MACHT lua}` with the message intact.
+
+Two pieces of measured guidance, not law: a single `col` call outruns
+the twelve-shard Lua path several times over, so arithmetic no longer
+needs `-shards` - shard for kernels that do real per-row Lua work, not
+for primitives; and for anything the vocabulary cannot express, the
+fallback is the ordinary Lua loop over the materialized columns, in the
+same kernel, beside the same data.
+
 ## Limits and kill
 
 `-budget DURATION` on `run` is a wall-clock limit on that run. On breach the
