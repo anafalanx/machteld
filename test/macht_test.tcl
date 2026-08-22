@@ -76,9 +76,26 @@ scope {
     check "non-finite floats arrive tagged" [expr {
         [dict exists $v float] && [dict get $v float] eq "nan"}]
 
-    # Refusals, by name and by capability.
-    check "an undeclared capability is refused" \
-        [string equal [code_of {macht load -csv $fixture}] refused]
+    # The csv road through the verb: typed columns end to end.
+    set csvfix [file join [pwd] macht_test_fixture.csv]
+    set f [open $csvfix wb]
+    puts -nonewline $f "naam,status,bytes\nindex,200,512\napi,404,2048\nlogin,404,1024\n"
+    close $f
+    set ch [macht load -csv $csvfix -header -schema {naam s status i bytes i}]
+    macht def waste {function waste(h)
+        local acc = 0
+        for i = 1, h.rows do
+            if h.status[i] == 404 then acc = acc + h.bytes[i] end
+        end
+        return acc
+    end}
+    check "csv loads typed columns through the verb" \
+        [expr {[macht run waste $ch] == 3072}]
+    check "typed csv shards and reduces" \
+        [expr {[macht run waste $ch -shards 2 -reduce sum_of] == 3072}]
+    macht free $ch
+    file delete -- $csvfix
+
     check "an unknown subcommand is usage" \
         [string equal [code_of {macht nonsense}] usage]
     macht free $h

@@ -137,12 +137,27 @@ typedef struct {
     char key[64];
 } ViewRef;
 
+/* A pool is columns over an arena. String cells reference (off,len) spans
+ * of the arena, which holds unescaped field bytes; integer and double
+ * columns are native arrays. The lines loader is the one-column case. */
+#define ENGINE_MAX_COLS 64
+
+typedef struct {
+    char name[64];
+    char type;                       /* 'i', 'f', or 's' */
+    int64_t *i;                      /* type 'i' */
+    double *f;                       /* type 'f' */
+    int64_t *off;                    /* type 's': span starts in the arena */
+    int64_t *len;                    /* type 's': span lengths */
+} PoolCol;
+
 typedef struct {
     int used;
     int64_t rows;
-    char *bytes;                     /* one allocation holding every line */
-    int64_t *offs;
-    int64_t *lens;
+    int ncols;
+    PoolCol cols[ENGINE_MAX_COLS];
+    char *arena;
+    size_t arenaLen;
     ViewRef *views;
     int nviews, capviews;
 } Pool;
@@ -329,8 +344,9 @@ PoolTrackView(Pool *p, int state, const char *key)
 }
 
 /* Push the pool view [a,b) as the kernel-visible object: h.rows plus one
- * materialized column sequence h.line. Cached per (state, range) in that
- * state's registry, per the contract's materialized-columns promise. */
+ * materialized sequence per column, h.<name>[i]. Cached per (state, range)
+ * in that state's registry, per the contract's materialized-columns
+ * promise. */
 static void
 PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
              int64_t a, int64_t b)
@@ -343,15 +359,28 @@ PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
     }
     lua_pop(S, 1);
     int64_t n = b - a;
-    lua_createtable(S, 0, 2);
+    lua_createtable(S, 0, p->ncols + 1);
     lua_pushinteger(S, (lua_Integer)n);
     lua_setfield(S, -2, "rows");
-    lua_createtable(S, (int)n, 0);
-    for (int64_t i = 0; i < n; i++) {
-        lua_pushlstring(S, p->bytes + p->offs[a + i], (size_t)p->lens[a + i]);
-        lua_rawseti(S, -2, (lua_Integer)(i + 1));
+    for (int c = 0; c < p->ncols; c++) {
+        PoolCol *col = &p->cols[c];
+        lua_createtable(S, (int)n, 0);
+        for (int64_t i = 0; i < n; i++) {
+            switch (col->type) {
+            case 'i':
+                lua_pushinteger(S, (lua_Integer)col->i[a + i]);
+                break;
+            case 'f':
+                lua_pushnumber(S, (lua_Number)col->f[a + i]);
+                break;
+            default:
+                lua_pushlstring(S, p->arena + col->off[a + i],
+                                (size_t)col->len[a + i]);
+            }
+            lua_rawseti(S, -2, (lua_Integer)(i + 1));
+        }
+        lua_setfield(S, -2, col->name);
     }
-    lua_setfield(S, -2, "line");
     lua_pushvalue(S, -1);
     lua_setfield(S, LUA_REGISTRYINDEX, key);
     PoolTrackView(p, stateIdx, key);
@@ -366,9 +395,13 @@ PoolFree(Pool *p)
         lua_setfield(S, LUA_REGISTRYINDEX, p->views[i].key);
     }
     free(p->views);
-    free(p->bytes);
-    free(p->offs);
-    free(p->lens);
+    for (int c = 0; c < p->ncols; c++) {
+        free(p->cols[c].i);
+        free(p->cols[c].f);
+        free(p->cols[c].off);
+        free(p->cols[c].len);
+    }
+    free(p->arena);
     memset(p, 0, sizeof(*p));
 }
 
@@ -668,8 +701,332 @@ OpHello(int64_t id, const Ej *req)
     EjBufText(&b, ",\"engine\":\"machteld\",\"version\":\"");
     EjBufText(&b, MACHTELD_VERSION);
     EjBufText(&b, "\",\"protocol\":1,\"capabilities\":"
-        "[\"lua\",\"load.lines\",\"shards\",\"reduce\",\"stats\"]}");
+        "[\"lua\",\"load.lines\",\"load.csv\",\"shards\",\"reduce\","
+        "\"stats\"]}");
     SendBuf(&b);
+}
+
+/* ---- load plumbing: file reading, growable arena, cell recorder ---- */
+
+typedef struct {
+    char *p;
+    size_t len, cap;
+} Grow;
+
+static int
+GrowBytes(Grow *g, const char *s, size_t n)
+{
+    if (g->len + n > g->cap) {
+        size_t cap = (g->cap == 0) ? 4096 : g->cap;
+        while (cap < g->len + n) {
+            cap *= 2;
+        }
+        char *np = (char *)realloc(g->p, cap);
+        if (np == NULL) {
+            return 0;
+        }
+        g->p = np;
+        g->cap = cap;
+    }
+    memcpy(g->p + g->len, s, n);
+    g->len += n;
+    return 1;
+}
+
+typedef struct {
+    int64_t *v;
+    size_t n, cap;
+} I64Vec;
+
+static int
+I64Push(I64Vec *v, int64_t x)
+{
+    if (v->n == v->cap) {
+        size_t cap = (v->cap == 0) ? 256 : v->cap * 2;
+        int64_t *np = (int64_t *)realloc(v->v, cap * sizeof(int64_t));
+        if (np == NULL) {
+            return 0;
+        }
+        v->v = np;
+        v->cap = cap;
+    }
+    v->v[v->n++] = x;
+    return 1;
+}
+
+/* Row-major parse product: unescaped field bytes in an arena, one (off,len)
+ * pair per cell, the source line of each record for honest type errors. */
+typedef struct {
+    Grow arena;
+    I64Vec off, len, lineOf;
+    int64_t records;
+    int ncols;
+    char err[256];
+} Parsed;
+
+static void
+ParsedFree(Parsed *ps)
+{
+    free(ps->arena.p);
+    free(ps->off.v);
+    free(ps->len.v);
+    free(ps->lineOf.v);
+    memset(ps, 0, sizeof(*ps));
+}
+
+static char *
+ReadWholeFile(const char *pathUtf8, long long *sizeOut, const char **errOut)
+{
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, pathUtf8, -1, NULL, 0);
+    WCHAR *wpath = (WCHAR *)malloc((size_t)(wlen > 0 ? wlen : 1) *
+                                   sizeof(WCHAR));
+    if (wpath == NULL || wlen == 0) {
+        free(wpath);
+        *errOut = "path conversion failed";
+        return NULL;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, pathUtf8, -1, wpath, wlen);
+    FILE *fh = _wfopen(wpath, L"rb");
+    free(wpath);
+    if (fh == NULL) {
+        *errOut = "cannot open the path for reading";
+        return NULL;
+    }
+    _fseeki64(fh, 0, SEEK_END);
+    long long size = _ftelli64(fh);
+    _fseeki64(fh, 0, SEEK_SET);
+    if (size < 0) {
+        fclose(fh);
+        *errOut = "cannot size the file";
+        return NULL;
+    }
+    char *bytes = (char *)malloc((size_t)size + 1);
+    if (bytes == NULL) {
+        fclose(fh);
+        *errOut = "file does not fit in engine memory";
+        return NULL;
+    }
+    if (size > 0 && fread(bytes, 1, (size_t)size, fh) != (size_t)size) {
+        free(bytes);
+        fclose(fh);
+        *errOut = "short read";
+        return NULL;
+    }
+    fclose(fh);
+    bytes[size] = '\0';
+    *sizeOut = size;
+    return bytes;
+}
+
+static int
+CellCommit(Parsed *ps, size_t start)
+{
+    return I64Push(&ps->off, (int64_t)start) &&
+           I64Push(&ps->len, (int64_t)(ps->arena.len - start));
+}
+
+/* The lines parser: one 's' column, CRLF and LF, empty lines are rows, a
+ * final unterminated line is a row. */
+static int
+LinesParse(const char *bytes, long long size, Parsed *ps)
+{
+    ps->ncols = 1;
+    long long start = 0;
+    int64_t line = 1;
+    for (long long i = 0; i <= size; i++) {
+        if (i == size || bytes[i] == '\n') {
+            if (i == size && start == i) {
+                break;
+            }
+            long long end = i;
+            if (end > start && bytes[end - 1] == '\r') {
+                end--;
+            }
+            size_t a = ps->arena.len;
+            if (!GrowBytes(&ps->arena, bytes + start, (size_t)(end - start)) ||
+                    !CellCommit(ps, a) || !I64Push(&ps->lineOf, line)) {
+                snprintf(ps->err, sizeof(ps->err), "out of memory");
+                return 0;
+            }
+            ps->records++;
+            line++;
+            start = i + 1;
+        }
+    }
+    return 1;
+}
+
+/* The csv parser: strict RFC 4180. Quoted fields with doubled quotes and
+ * embedded newlines; CRLF and LF record ends; a quote in an unquoted
+ * field, data after a closing quote, a bare CR, an unterminated quote,
+ * and a ragged record are each refused naming their line. */
+static int
+CsvParse(const char *bytes, long long size, Parsed *ps)
+{
+    long long i = 0;
+    int64_t line = 1, recLine = 1;
+    int fieldsInRec = 0;
+    while (i <= size) {
+        /* One field, starting here. */
+        size_t a = ps->arena.len;
+        if (i < size && bytes[i] == '"') {
+            i++;
+            for (;;) {
+                if (i >= size) {
+                    snprintf(ps->err, sizeof(ps->err),
+                             "line %lld: unterminated quoted field",
+                             (long long)recLine);
+                    return 0;
+                }
+                char c = bytes[i];
+                if (c == '"') {
+                    if (i + 1 < size && bytes[i + 1] == '"') {
+                        if (!GrowBytes(&ps->arena, "\"", 1)) {
+                            goto oom;
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    i++;
+                    break;                          /* closing quote */
+                }
+                if (c == '\n') {
+                    line++;
+                }
+                if (!GrowBytes(&ps->arena, &c, 1)) {
+                    goto oom;
+                }
+                i++;
+            }
+            if (i < size && bytes[i] != ',' && bytes[i] != '\n' &&
+                    !(bytes[i] == '\r' && i + 1 < size &&
+                      bytes[i + 1] == '\n')) {
+                snprintf(ps->err, sizeof(ps->err),
+                         "line %lld: data after closing quote",
+                         (long long)line);
+                return 0;
+            }
+        } else {
+            while (i < size && bytes[i] != ',' && bytes[i] != '\n' &&
+                    bytes[i] != '\r') {
+                if (bytes[i] == '"') {
+                    snprintf(ps->err, sizeof(ps->err),
+                             "line %lld: quote in unquoted field",
+                             (long long)line);
+                    return 0;
+                }
+                if (!GrowBytes(&ps->arena, &bytes[i], 1)) {
+                    goto oom;
+                }
+                i++;
+            }
+            if (i < size && bytes[i] == '\r' &&
+                    !(i + 1 < size && bytes[i + 1] == '\n')) {
+                snprintf(ps->err, sizeof(ps->err),
+                         "line %lld: bare carriage return",
+                         (long long)line);
+                return 0;
+            }
+        }
+        if (!CellCommit(ps, a)) {
+            goto oom;
+        }
+        fieldsInRec++;
+        /* Delimiter, record end, or EOF. */
+        if (i < size && bytes[i] == ',') {
+            i++;
+            continue;
+        }
+        int atEof = (i >= size);
+        if (!atEof) {
+            if (bytes[i] == '\r') {
+                i++;                                /* the LF is next */
+            }
+            i++;                                    /* the LF */
+            line++;
+        }
+        /* Commit the record unless it is the empty tail after a final
+         * newline (one empty field born from EOF). */
+        if (atEof && fieldsInRec == 1 &&
+                ps->len.v[ps->len.n - 1] == 0 &&
+                (ps->records > 0 || size == 0)) {
+            long long lastEnd = size;
+            if (lastEnd == 0 || bytes[lastEnd - 1] == '\n') {
+                ps->off.n--;
+                ps->len.n--;
+                break;
+            }
+        }
+        if (ps->ncols == 0) {
+            if (fieldsInRec > ENGINE_MAX_COLS) {
+                snprintf(ps->err, sizeof(ps->err),
+                         "line %lld: %d fields exceeds the %d-column bound",
+                         (long long)recLine, fieldsInRec, ENGINE_MAX_COLS);
+                return 0;
+            }
+            ps->ncols = fieldsInRec;
+        } else if (fieldsInRec != ps->ncols) {
+            snprintf(ps->err, sizeof(ps->err),
+                     "line %lld: %d fields where the first record has %d",
+                     (long long)recLine, fieldsInRec, ps->ncols);
+            return 0;
+        }
+        if (!I64Push(&ps->lineOf, recLine)) {
+            goto oom;
+        }
+        ps->records++;
+        fieldsInRec = 0;
+        recLine = line;
+        if (atEof) {
+            break;
+        }
+        if (i >= size) {
+            break;                                  /* file ended at newline */
+        }
+    }
+    return 1;
+oom:
+    snprintf(ps->err, sizeof(ps->err), "out of memory");
+    return 0;
+}
+
+/* Parse one cell span under a column type, exactly: the whole span, no
+ * surrounding whitespace, or a refusal naming the record's line. */
+static int
+CellToI64(const char *s, int64_t n, int64_t *out)
+{
+    char buf[32];
+    if (n <= 0 || n >= (int64_t)sizeof(buf)) {
+        return 0;
+    }
+    memcpy(buf, s, (size_t)n);
+    buf[n] = '\0';
+    errno = 0;
+    char *end = NULL;
+    long long v = strtoll(buf, &end, 10);
+    if (errno == ERANGE || end != buf + n) {
+        return 0;
+    }
+    *out = (int64_t)v;
+    return 1;
+}
+
+static int
+CellToF64(const char *s, int64_t n, double *out)
+{
+    char buf[64];
+    if (n <= 0 || n >= (int64_t)sizeof(buf)) {
+        return 0;
+    }
+    memcpy(buf, s, (size_t)n);
+    buf[n] = '\0';
+    char *end = NULL;
+    double v = strtod(buf, &end);
+    if (end != buf + n) {
+        return 0;
+    }
+    *out = v;
+    return 1;
 }
 
 static void
@@ -677,52 +1034,123 @@ OpLoad(int64_t id, const Ej *req)
 {
     Ej *fmt = EjGet(req, "format");
     Ej *path = EjGet(req, "path");
+    Ej *schemaE = EjGet(req, "schema");
+    Ej *headerE = EjGet(req, "header");
     if (fmt == NULL || fmt->kind != EJ_STRING || path == NULL ||
             path->kind != EJ_STRING) {
         SendError(id, "usage", "load expects string format and path");
         return;
     }
-    if (strcmp(fmt->u.s.bytes, "lines") != 0) {
-        SendError(id, "refused", "this engine loads format \"lines\" only "
-                  "(csv arrives with a later capability)");
+    int isCsv = (strcmp(fmt->u.s.bytes, "csv") == 0);
+    if (!isCsv && strcmp(fmt->u.s.bytes, "lines") != 0) {
+        SendError(id, "refused", "this engine loads formats \"lines\" and "
+                  "\"csv\"");
         return;
     }
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, path->u.s.bytes, -1, NULL, 0);
-    WCHAR *wpath = (WCHAR *)malloc((size_t)wlen * sizeof(WCHAR));
-    if (wpath == NULL || wlen == 0) {
-        free(wpath);
-        SendError(id, "badvalue", "path conversion failed");
+    /* Tcl has no booleans, so hosts send 1; JSON-native hosts send true. */
+    int header = (headerE != NULL && (headerE->kind == EJ_TRUE ||
+                  (headerE->kind == EJ_INT && headerE->u.i != 0)));
+    if (schemaE != NULL && (schemaE->kind != EJ_ARRAY ||
+            schemaE->u.a.count % 2 != 0)) {
+        SendError(id, "usage", "schema is pairs of field name and type");
         return;
     }
-    MultiByteToWideChar(CP_UTF8, 0, path->u.s.bytes, -1, wpath, wlen);
-    FILE *fh = _wfopen(wpath, L"rb");
-    free(wpath);
-    if (fh == NULL) {
-        SendError(id, "badvalue", "cannot open the path for reading");
-        return;
-    }
-    _fseeki64(fh, 0, SEEK_END);
-    long long size = _ftelli64(fh);
-    _fseeki64(fh, 0, SEEK_SET);
-    if (size < 0) {
-        fclose(fh);
-        SendError(id, "badvalue", "cannot size the file");
-        return;
-    }
-    char *bytes = (char *)malloc((size_t)size + 1);
-    if (bytes == NULL) {
-        fclose(fh);
-        SendError(id, "memory", "file does not fit in engine memory");
-        return;
-    }
-    if (size > 0 && fread(bytes, 1, (size_t)size, fh) != (size_t)size) {
-        free(bytes);
-        fclose(fh);
-        SendError(id, "badvalue", "short read");
-        return;
-    }
-    fclose(fh);
 
+    const char *ferr = NULL;
+    long long size = 0;
+    char *bytes = ReadWholeFile(path->u.s.bytes, &size, &ferr);
+    if (bytes == NULL) {
+        SendError(id, strcmp(ferr, "file does not fit in engine memory") == 0
+                  ? "memory" : "badvalue", ferr);
+        return;
+    }
+    Parsed ps;
+    memset(&ps, 0, sizeof(ps));
+    int okParse = isCsv ? CsvParse(bytes, size, &ps)
+                        : LinesParse(bytes, size, &ps);
+    free(bytes);
+    if (!okParse) {
+        char msg[320];
+        snprintf(msg, sizeof(msg), "%s: %s", isCsv ? "csv" : "lines", ps.err);
+        const char *code = strcmp(ps.err, "out of memory") == 0 ? "memory"
+                                                                : "badvalue";
+        ParsedFree(&ps);
+        SendError(id, code, msg);
+        return;
+    }
+    if (isCsv && ps.records == 0) {
+        ParsedFree(&ps);
+        SendError(id, "badvalue", "csv: the file holds no records");
+        return;
+    }
+
+    /* Resolve names and types: schema wins; a header names (and is
+     * consumed); otherwise c1..cN, all strings. */
+    int ncols = (ps.ncols > 0) ? ps.ncols : 1;
+    char names[ENGINE_MAX_COLS][64];
+    char types[ENGINE_MAX_COLS];
+    for (int c = 0; c < ncols; c++) {
+        snprintf(names[c], sizeof(names[c]), "c%d", c + 1);
+        types[c] = 's';
+    }
+    if (!isCsv) {
+        snprintf(names[0], sizeof(names[0]), "line");
+    }
+    int64_t firstRow = 0;
+    if (isCsv && header) {
+        if (ps.records < 1) {
+            ParsedFree(&ps);
+            SendError(id, "badvalue", "csv: -header with no header record");
+            return;
+        }
+        for (int c = 0; c < ncols; c++) {
+            int64_t off = ps.off.v[c], len = ps.len.v[c];
+            if (len > 0 && len < 64) {
+                memcpy(names[c], ps.arena.p + off, (size_t)len);
+                names[c][len] = '\0';
+            }
+        }
+        firstRow = 1;
+    }
+    if (isCsv && schemaE != NULL) {
+        if ((int)(schemaE->u.a.count / 2) != ncols) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "schema names %d columns, the file has %d",
+                     (int)(schemaE->u.a.count / 2), ncols);
+            ParsedFree(&ps);
+            SendError(id, "badvalue", msg);
+            return;
+        }
+        for (int c = 0; c < ncols; c++) {
+            Ej *nm = schemaE->u.a.items[c * 2];
+            Ej *ty = schemaE->u.a.items[c * 2 + 1];
+            if (nm->kind != EJ_STRING || ty->kind != EJ_STRING ||
+                    ty->u.s.len != 1 || (ty->u.s.bytes[0] != 'i' &&
+                    ty->u.s.bytes[0] != 'f' && ty->u.s.bytes[0] != 's')) {
+                ParsedFree(&ps);
+                SendError(id, "usage",
+                          "schema types are i, f, or s; names are strings");
+                return;
+            }
+            snprintf(names[c], sizeof(names[c]), "%s", nm->u.s.bytes);
+            types[c] = ty->u.s.bytes[0];
+        }
+    }
+    for (int c = 0; c < ncols; c++) {
+        for (int d = c + 1; d < ncols; d++) {
+            if (strcmp(names[c], names[d]) == 0) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "duplicate column name %.63s",
+                         names[c]);
+                ParsedFree(&ps);
+                SendError(id, "badvalue", msg);
+                return;
+            }
+        }
+    }
+
+    int64_t rows = ps.records - firstRow;
     int slot = -1;
     for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
         if (!gPools[i].used) {
@@ -731,60 +1159,84 @@ OpLoad(int64_t id, const Ej *req)
         }
     }
     if (slot < 0) {
-        free(bytes);
+        ParsedFree(&ps);
         SendError(id, "badvalue", "too many pools (free some)");
         return;
     }
-    int64_t rows = 0;
-    for (long long i = 0; i < size; i++) {
-        if (bytes[i] == '\n') {
-            rows++;
-        }
-    }
-    if (size > 0 && bytes[size - 1] != '\n') {
-        rows++;                                     /* final unterminated line */
-    }
-    int64_t *offs = (int64_t *)malloc((size_t)(rows > 0 ? rows : 1) * 8);
-    int64_t *lens = (int64_t *)malloc((size_t)(rows > 0 ? rows : 1) * 8);
-    if (offs == NULL || lens == NULL) {
-        free(bytes);
-        free(offs);
-        free(lens);
-        SendError(id, "memory", "index does not fit in engine memory");
-        return;
-    }
-    int64_t r = 0;
-    long long start = 0;
-    for (long long i = 0; i <= size; i++) {
-        if (i == size || bytes[i] == '\n') {
-            if (i == size && start == i) {
-                break;                              /* no final empty row */
-            }
-            long long end = i;
-            if (end > start && bytes[end - 1] == '\r') {
-                end--;                              /* CRLF */
-            }
-            offs[r] = start;
-            lens[r] = end - start;
-            r++;
-            start = i + 1;
-        }
-    }
     Pool *p = &gPools[slot];
     memset(p, 0, sizeof(*p));
+    p->rows = rows;
+    p->ncols = ncols;
+    size_t alloc = (size_t)(rows > 0 ? rows : 1);
+    for (int c = 0; c < ncols; c++) {
+        PoolCol *col = &p->cols[c];
+        snprintf(col->name, sizeof(col->name), "%s", names[c]);
+        col->type = types[c];
+        int okAlloc = 1;
+        if (types[c] == 'i') {
+            okAlloc = (col->i = (int64_t *)malloc(alloc * 8)) != NULL;
+        } else if (types[c] == 'f') {
+            okAlloc = (col->f = (double *)malloc(alloc * 8)) != NULL;
+        } else {
+            col->off = (int64_t *)malloc(alloc * 8);
+            col->len = (int64_t *)malloc(alloc * 8);
+            okAlloc = col->off != NULL && col->len != NULL;
+        }
+        if (!okAlloc) {
+            PoolFree(p);
+            ParsedFree(&ps);
+            SendError(id, "memory", "columns do not fit in engine memory");
+            return;
+        }
+    }
+    for (int64_t r = 0; r < rows; r++) {
+        int64_t cell = (firstRow + r) * ncols;
+        for (int c = 0; c < ncols; c++) {
+            PoolCol *col = &p->cols[c];
+            int64_t off = ps.off.v[cell + c], len = ps.len.v[cell + c];
+            int okCell = 1;
+            if (col->type == 'i') {
+                okCell = CellToI64(ps.arena.p + off, len, &col->i[r]);
+            } else if (col->type == 'f') {
+                okCell = CellToF64(ps.arena.p + off, len, &col->f[r]);
+            } else {
+                col->off[r] = off;
+                col->len[r] = len;
+            }
+            if (!okCell) {
+                char msg[224];
+                snprintf(msg, sizeof(msg),
+                         "line %lld: field %s does not parse as %c",
+                         (long long)ps.lineOf.v[firstRow + r], col->name,
+                         col->type);
+                PoolFree(p);
+                ParsedFree(&ps);
+                SendError(id, "badvalue", msg);
+                return;
+            }
+        }
+    }
+    /* The pool adopts the arena; the index vectors die with Parsed. */
+    p->arena = ps.arena.p;
+    p->arenaLen = ps.arena.len;
+    ps.arena.p = NULL;
+    ParsedFree(&ps);
     p->used = ++gPoolSeq;
-    p->rows = r;
-    p->bytes = bytes;
-    p->offs = offs;
-    p->lens = lens;
 
     EjBuf b;
     OkOpen(&b, id);
     EjBufText(&b, ",\"handle\":\"pool#");
     EjBufInt(&b, p->used);
     EjBufText(&b, "\",\"rows\":");
-    EjBufInt(&b, r);
-    EjBufText(&b, ",\"fields\":[\"line\"]}");
+    EjBufInt(&b, rows);
+    EjBufText(&b, ",\"fields\":[");
+    for (int c = 0; c < ncols; c++) {
+        if (c > 0) {
+            EjBufText(&b, ",");
+        }
+        EjBufString(&b, p->cols[c].name, strlen(p->cols[c].name));
+    }
+    EjBufText(&b, "]}");
     SendBuf(&b);
 }
 
