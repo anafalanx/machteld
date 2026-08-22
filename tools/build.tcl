@@ -92,7 +92,6 @@ set defines {
     -DUNICODE -D_UNICODE -DSTATIC_BUILD=1
     -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
-    -DMACHTELD_LUA
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
     -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA]

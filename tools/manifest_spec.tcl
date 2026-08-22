@@ -8,7 +8,7 @@ namespace eval ::machteld::manifest {}
 
 # Internal commands are registered for cooperation with the Tcl prelude, but
 # are intentionally absent from the public manifest.
-set ::machteld::manifest::private {EntryCheck LuaCell PayloadRoot Publish}
+set ::machteld::manifest::private {EntryCheck PayloadRoot Publish}
 
 set ::machteld::manifest::native {
     canon {

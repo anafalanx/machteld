@@ -172,33 +172,23 @@ contract; these are its cross-command rules:
   written, never sampled or verified at run time.
 - The engine is additive: a program that never calls `macht` starts nothing.
 
-The section below describes the 0.11.0 `macht`, which 0.12.0 replaces.
-
 ## Macht
 
-`macht` is compiled calculation, not an embedded language. The condition and
-expression surfaces are Tcl expr syntax over a declared row schema; macht
-parses and type-checks them, runs the user's own text verbatim as the Tcl
-body, and generates a Lua body for the metered cell from the same parse.
-Before any route trusts the Lua body it must equal the Tcl body on a sample,
-and that differential run doubles as the calibration that prices the route.
-Constructs whose Tcl and Lua meanings diverge are refused by name
-(`{MACHTELD MACHT refused}`): `?`/`[]` match patterns, `string length`,
-string ordering. Results are exact 64-bit integers.
-
-Routing is declared or accounted, never guessed: `once` always runs Tcl;
-`{sweep K}` buys the data marshal when the measured saving exceeds it;
-`auto` rents Tcl until the accumulated spend reaches the marshal price, then
-calibrates and promotes only on a measured ratio; `-parallel` shards across
-an in-process pool of metered states and reduces integer partials (sum and
-count are monoids). Every decision is a `macht stats` entry. `sandboxed` is
-the exception that is law rather than economics: the metered cell, an
-instruction `-budget`, a hard memory cap, no io, no os — and it never
-silently downgrades, and does not combine with `-parallel`.
-
-The cell is `::machteld::LuaCell`, a private primitive absent from the
-public manifest; there is no way to submit Lua text. Cell failures raise
-`{MACHTELD MACHT call}` with the budget or memory reason in the message.
+`macht` is the family that commands engines: `start`/`stop`/`status` for
+lifecycle, `load`/`def`/`run`/`free`/`stats` for work, `conform` for
+sidecar verification. Kernels are Lua, written by the program author, sent
+as source, cached by content hash, and trusted as written - there is no
+translation of expressions, no oracle, and no runtime verification; the
+build gates prove the machine. Data enters an engine by path and is
+addressed by engine-scoped handles; only bounded values cross the wire,
+under the `json` command's mapping plus the boundary's edge laws (exact
+64-bit integers, booleans as `1`/`0`, tagged non-finite floats, UTF-8 or
+refused). `-budget` is enforced by killing the engine - the only limit
+that holds against a kernel inside one C call - and the next work
+subcommand starts a fresh default engine. Failures raise
+`{MACHTELD MACHT code}` from the closed set in the manifest. The exact
+family reference is `machteld/command/macht`; the wire and boundary
+contract is [the engine](engine.md).
 
 ## Manifest
 
