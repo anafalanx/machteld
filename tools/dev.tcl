@@ -11,11 +11,15 @@
 # compiled once and reused; authored src/*.c recompile only when they change;
 # the reference corpus is reused unless a doc source is newer or -ref is given.
 #
-# THE RULE: this loop is for iteration. It MAY drift from a clean build (a
-# stale object, a reused corpus). The release gate, tools/test.ps1, stays
-# authoritative and MUST pass before any push or release. Compile flags here
-# are copied verbatim from tools/build.tcl so a dev object is byte-for-byte a
-# release object; only the caching and the work directory differ.
+# THE RULE: this loop is for iteration and it MAY drift from a clean build
+# (a stale object, a reused corpus). The release gate, tools/test.ps1, stays
+# authoritative and hermetic, and runs at RELEASE boundaries: before a
+# version ships, before a version bump, and after changes to the release
+# tooling itself. Ordinary development commits push on this loop's checks;
+# drift is caught at the next release gate, which is the point of having
+# one. Compile flags here are copied verbatim from tools/build.tcl so a dev
+# object is byte-for-byte a release object; only the caching and the work
+# directory differ.
 
 proc script_root {} {
     set s [info script]
