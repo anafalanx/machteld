@@ -10,16 +10,16 @@ The bundled Tcl core is 9.0.4 plus the exact upstream correction for
 preserves executable paths below ACL-restricted directories. The backport,
 source hashes, and upstream check-in identity are locked into the local build.
 
-The 0.11.0 release target is 64-bit Windows 10 version 1809 or newer (including
+The 0.12.0 release target is 64-bit Windows 10 version 1809 or newer (including
 Windows 11 and corresponding Windows Server releases). ConPTY sets that floor;
 the shipped artifact is x64, not a claim to run on every historical Windows box.
 
-Version 0.11.0 deliberately has one entry route: a readable UTF-8 program file.
+Version 0.12.0 deliberately has one entry route: a readable UTF-8 program file.
 The conventional extension is `.tcl`, but the runtime does not require it. The file must
 begin with a literal opt-in command:
 
 ```tcl
-package require machteld 0.11.0
+package require machteld 0.12.0
 
 set result [run -timeout 30s -- git status --short]
 puts [dict get $result out]
@@ -87,7 +87,7 @@ machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically. There is no
 reduced runtime mode: every wrapped console or GUI tool exposes the same
-programmatic Machteld 0.11.0 machine-control API, including the statically linked,
+programmatic Machteld 0.12.0 machine-control API, including the statically linked,
 binary-safe SQLite `store`. Wrapped tools also retain the complete offline
 reference corpus; wrapping basekits are not embedded recursively.
 
