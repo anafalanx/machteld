@@ -67,11 +67,23 @@ path); parallel ingestion (the sharded, schema-specialized loader is its own
 measured project); and any network. Each is named in the engine contract's
 closing section so that its absence is a promise, not an oversight.
 
-## 0.12.0 — the palette gains xml (decided 2026-08-20)
+## 0.13.0 candidates
 
-Solid XML handling, validation included, is committed for 0.12.0 as a
+- The sharded, schema-specialized loader: byte-range parallel parsing into
+  column pools, admitted only by a registered throughput prediction.
+- Engine-side vectorized primitives exposed to kernels as Lua functions,
+  admitted only after a re-profile shows kernels dominate the pipeline.
+- A resident engine daemon over a named pipe, with rendezvous and idle policy.
+- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
+  authors in other languages.
+
+## Deferred: the palette gains xml (decided 2026-08-20, deferred 2026-08-22)
+
+Solid XML handling, validation included, was decided on 2026-08-20 as a
 palette organ beside `json` — runtime capability, not an extensions-covenant
-errand. The deciding programs are the rail-family operations formats
+errand — and deferred on 2026-08-22 to an unspecified later version, so that
+0.12.0 stays about one thing. The decision stands; only its release is
+unassigned. The deciding programs are the rail-family operations formats
 (railML, NeTEx, TAF/TSI, Darwin push data): schema-described XML is the
 data plane of long-lived operations environments, and a runtime that
 promises "just works for years" must read it in the box.
@@ -94,16 +106,6 @@ Recorded as constraints, not answers — the route is design work:
   them, external-entity and all network resolution refused by default (the
   classic XML trap), manifest metadata, and tests on real rail-format
   fixtures plus hostile ones (XXE, entity expansion, depth bombs).
-
-## 0.13.0 candidates
-
-- The sharded, schema-specialized loader: byte-range parallel parsing into
-  column pools, admitted only by a registered throughput prediction.
-- Engine-side vectorized primitives exposed to kernels as Lua functions,
-  admitted only after a re-profile shows kernels dominate the pipeline.
-- A resident engine daemon over a named pipe, with rendezvous and idle policy.
-- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
-  authors in other languages.
 
 ## Candidate additions
 
