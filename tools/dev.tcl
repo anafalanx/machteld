@@ -154,13 +154,22 @@ proc dev_build {{forceRef 0}} {
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
     set guiMain     [Rp src machteld_gui_main.c]
+    set colSource   [Rp src col.c]
     set objects {}
     foreach s [lsort [glob -directory [Rp src] *.c]] {
-        if {$s eq $consoleMain || $s eq $guiMain} continue
+        if {$s eq $consoleMain || $s eq $guiMain || $s eq $colSource} continue
         set o [file join $::OBJ [file rootname [file tail $s]].o]
         incr changed [cc $o $s $::common [file tail $s]]
         lappend objects $o
     }
+    # The palette TU: -mavx2, with the vectorizer's report captured so the
+    # bench lane can verify the scalar-reference loops actually vectorized
+    # (a grading requirement of plan-machteld-013).
+    set colObj [file join $::OBJ col.o]
+    set colVec [file join $::DEV col-vec.txt]
+    incr changed [cc $colObj $colSource \
+        [concat $::common -mavx2 -fvect-cost-model=dynamic -fopt-info-vec-optimized=$colVec] col.c]
+    lappend objects $colObj
     set consoleObj [file join $::OBJ machteld_main.o]
     incr changed [cc $consoleObj $consoleMain [concat $::common -municode] machteld_main.c]
     set guiObj [file join $::OBJ machteld_gui_main.o]
