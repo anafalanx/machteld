@@ -227,6 +227,67 @@ SumUnderI64(const int64_t *restrict v, int64_t n, const uint64_t *bits,
     return 1;
 }
 
+/* The fused predicate-reduction (the P2 miss's lesson): one pass, no
+ * bitmap. Masked accumulation keeps the loop vectorizable - the mask is
+ * arithmetic (0 or all-ones), the accumulate and the safety proof are
+ * AND-gated by it - and the same chunk/wild-fallback structure keeps
+ * overflow detection deterministic. Admitted 2026-08-23 by owner ruling
+ * on the P2 stop-and-decide. */
+#define COL_SUMWHERE_CHUNK(CMP)                                            \
+    for (int64_t k = 0; k < lim; k++) {                                    \
+        uint64_t m = (uint64_t)0 - (uint64_t)(pp[k] CMP x);                 \
+        acc += m & (uint64_t)vv[k];                                         \
+        bad |= m & (((uint64_t)vv[k] + (uint64_t)COL_SAFE_BOUND) >> 51);    \
+    }
+
+static int
+SumWhereI64(const int64_t *restrict v, const int64_t *restrict p,
+            int64_t n, int op, int64_t x, int64_t *totalOut)
+{
+    int64_t total = 0;
+    for (int64_t at = 0; at < n; at += COL_CHUNK) {
+        int64_t lim = (n - at < COL_CHUNK) ? n - at : COL_CHUNK;
+        const int64_t *restrict vv = v + at;
+        const int64_t *restrict pp = p + at;
+        uint64_t acc = 0, bad = 0;
+        switch (op) {
+        case OP_LT: COL_SUMWHERE_CHUNK(<)  break;
+        case OP_LE: COL_SUMWHERE_CHUNK(<=) break;
+        case OP_GT: COL_SUMWHERE_CHUNK(>)  break;
+        case OP_GE: COL_SUMWHERE_CHUNK(>=) break;
+        case OP_EQ: COL_SUMWHERE_CHUNK(==) break;
+        default:    COL_SUMWHERE_CHUNK(!=) break;
+        }
+        if (bad == 0) {
+            if (__builtin_add_overflow(total, (int64_t)acc, &total)) {
+                return 0;
+            }
+        } else {
+            /* The rare wild chunk: exact per-element on selected rows. */
+            int64_t chunk = 0;
+            for (int64_t k = 0; k < lim; k++) {
+                int hit;
+                switch (op) {
+                case OP_LT: hit = pp[k] < x; break;
+                case OP_LE: hit = pp[k] <= x; break;
+                case OP_GT: hit = pp[k] > x; break;
+                case OP_GE: hit = pp[k] >= x; break;
+                case OP_EQ: hit = pp[k] == x; break;
+                default:    hit = pp[k] != x;
+                }
+                if (hit && __builtin_add_overflow(chunk, vv[k], &chunk)) {
+                    return 0;
+                }
+            }
+            if (__builtin_add_overflow(total, chunk, &total)) {
+                return 0;
+            }
+        }
+    }
+    *totalOut = total;
+    return 1;
+}
+
 static int64_t
 CountBits(const uint64_t *bits, int64_t n)
 {
@@ -389,6 +450,29 @@ LSum(lua_State *L)
     return 1;
 }
 
+/* col.sumwhere(h, FIELD, BYFIELD, OP, X): sum FIELD over the rows where
+ * BYFIELD OP X - the one-pass fused form, scalar-only by P3's verdict;
+ * its differential twin is the composed filter+sum, which must agree
+ * exactly (both are exact int64). */
+static int
+LSumWhere(lua_State *L)
+{
+    ColArg vcol, pcol;
+    const char *field = luaL_checkstring(L, 2);
+    const char *byfield = luaL_checkstring(L, 3);
+    int op = luaL_checkoption(L, 4, NULL, kOpNames);
+    int64_t x = (int64_t)luaL_checkinteger(L, 5);
+    ResolveColumn(L, 1, field, &vcol);
+    ResolveColumn(L, 1, byfield, &pcol);
+    int64_t total = 0;
+    if (!SumWhereI64(vcol.i + vcol.a, pcol.i + pcol.a, vcol.b - vcol.a,
+                     op, x, &total)) {
+        return luaL_error(L, "col: integer overflow");
+    }
+    lua_pushinteger(L, (lua_Integer)total);
+    return 1;
+}
+
 static int
 LCount(lua_State *L)
 {
@@ -456,6 +540,8 @@ BindImpl(lua_State *L, const ColImpl *impl)
     lua_pushlightuserdata(L, (void *)(uintptr_t)impl);
     lua_pushcclosure(L, LSum, 1);
     lua_setfield(L, -2, "sum");
+    lua_pushcfunction(L, LSumWhere);
+    lua_setfield(L, -2, "sumwhere");
     lua_pushcfunction(L, LCount);
     lua_setfield(L, -2, "count");
 }

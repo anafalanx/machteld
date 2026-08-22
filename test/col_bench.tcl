@@ -92,6 +92,9 @@ scope {
     req def name col404 chunk {function col404(h)
         return col.sum(h, "bytes", col.filter(h, "status", "eq", 404))
     end}
+    req def name col404w chunk {function col404w(h)
+        return col.sumwhere(h, "bytes", "status", "eq", 404)
+    end}
     req def name s_sum chunk {function s_sum(h) return col._scalar.sum(h, "bytes") end}
     req def name a_sum chunk {function a_sum(h) return col._avx2.sum(h, "bytes") end}
     req def name s_flt chunk {function s_flt(h)
@@ -110,7 +113,7 @@ scope {
     req def name k42 chunk {function k42() return 42 end}
 
     # Warm-ups: view materialization charged here, per the plan's boundary.
-    foreach k {base404 col404 s_sum a_sum s_flt a_flt s_feq a_feq} {
+    foreach k {base404 col404 col404w s_sum a_sum s_flt a_flt s_feq a_feq} {
         runk $k $H
         runk $k $H64
     }
@@ -165,20 +168,33 @@ scope {
                    ($p1 > 4.0 * $bwLimit ? "KILLED" : "MISSED")}]
     puts [format "P1  col.sum 1M i64: %.3f ms vs limit %.2f (<=%.2f held, >%.2f killed)  %s" \
         $p1 $bwLimit [expr {2 * $bwLimit}] [expr {4 * $bwLimit}] $p1v]
-    # P2: col vs the pinned Lua baseline, interleaved.
-    set ratios {}
-    set colv ""
+    # P2: the fused form vs the pinned Lua baseline, interleaved (the
+    # graded form after the 2026-08-23 stop-and-decide); the composed
+    # filter+sum ratio is reported beside it for the record.
+    set rf {}
+    set rc2 {}
     set basev ""
+    set fusedv ""
+    set compv ""
     for {set i 0} {$i < 7} {incr i} {
         set rb [runk base404 $H]
-        set rc [runk col404 $H]
+        set rw [runk col404w $H]
+        set rcc [runk col404 $H]
         set basev [dict get $rb value]
-        set colv [dict get $rc value]
-        lappend ratios [expr {[dict get $rb ms] / [dict get $rc ms]}]
+        set fusedv [dict get $rw value]
+        set compv [dict get $rcc value]
+        lappend rf [expr {[dict get $rb ms] / [dict get $rw ms]}]
+        lappend rc2 [expr {[dict get $rb ms] / [dict get $rcc ms]}]
     }
-    set p2 [median $ratios]
-    puts [format "P2  col404 vs Lua loop: %.1fx (>=10x)  values agree: %s  %s" \
-        $p2 [expr {$colv == $basev}] [expr {$p2 >= 10.0 ? "HELD" : "MISSED"}]]
+    set p2f [median $rf]
+    set p2c [median $rc2]
+    if {!($fusedv == $basev && $compv == $basev)} {
+        puts "P2  VALUES DISAGREE: base $basev fused $fusedv composed $compv"
+    }
+    puts [format "P2  fused sumwhere vs Lua loop: %.1fx (>=10x)  %s" \
+        $p2f [expr {$p2f >= 10.0 ? "HELD" : "MISSED"}]]
+    puts [format "P2r composed filter+sum vs Lua loop: %.1fx (for the record)" $p2c]
+    puts [format "P2r fused vs composed: %.1fx" [expr {$p2f / $p2c}]]
     # P3: hand AVX2 vs autovectorized scalar, per primitive, both sizes.
     foreach {label sk ak} {sum s_sum a_sum filter-lt s_flt a_flt filter-eq s_feq a_feq} {
         foreach {size hh} [list 1M $H 64k $H64] {
