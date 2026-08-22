@@ -67,16 +67,6 @@ path); parallel ingestion (the sharded, schema-specialized loader is its own
 measured project); and any network. Each is named in the engine contract's
 closing section so that its absence is a promise, not an oversight.
 
-## 0.13.0 candidates
-
-- The sharded, schema-specialized loader: byte-range parallel parsing into
-  column pools, admitted only by a registered throughput prediction.
-- Engine-side vectorized primitives exposed to kernels as Lua functions,
-  admitted only after a re-profile shows kernels dominate the pipeline.
-- A resident engine daemon over a named pipe, with rendezvous and idle policy.
-- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
-  authors in other languages.
-
 ## 0.12.0 — the palette gains xml (decided 2026-08-20)
 
 Solid XML handling, validation included, is committed for 0.12.0 as a
@@ -104,6 +94,16 @@ Recorded as constraints, not answers — the route is design work:
   them, external-entity and all network resolution refused by default (the
   classic XML trap), manifest metadata, and tests on real rail-format
   fixtures plus hostile ones (XXE, entity expansion, depth bombs).
+
+## 0.13.0 candidates
+
+- The sharded, schema-specialized loader: byte-range parallel parsing into
+  column pools, admitted only by a registered throughput prediction.
+- Engine-side vectorized primitives exposed to kernels as Lua functions,
+  admitted only after a re-profile shows kernels dominate the pipeline.
+- A resident engine daemon over a named pipe, with rendezvous and idle policy.
+- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
+  authors in other languages.
 
 ## Candidate additions
 
