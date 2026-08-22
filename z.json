@@ -2,6 +2,10 @@
   "commands": {
     "run": ["out/machteld.exe"],
     "docs": ["out/machteld.exe", "--docs"],
-    "wrap": ["out/machteld.exe", "wrap"]
+    "wrap": ["out/machteld.exe", "wrap"],
+    "devdocs": ["tclsh90", "tools/dev.tcl", "docs"],
+    "devbuild": ["tclsh90", "tools/dev.tcl", "build"],
+    "devtest": ["tclsh90", "tools/dev.tcl", "test"],
+    "devclean": ["tclsh90", "tools/dev.tcl", "clean"]
   }
 }
