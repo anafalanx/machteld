@@ -167,7 +167,9 @@ function Get-ArtifactManifestLines {
         (Join-Path $Prefix 'lib\tcl9'),
         (Join-Path $Prefix 'lib\tcl9.0'),
         (Join-Path $Prefix 'lib\tk9.0'),
-        (Join-Path $CacheRoot 'lua')
+        (Join-Path $CacheRoot 'lua'),
+        (Join-Path $CacheRoot 'lpeg'),
+        (Join-Path $CacheRoot 'cjson')
     )
     $files = @(
         (Join-Path $Prefix 'bin\tclsh90s.exe'),
@@ -318,7 +320,9 @@ New-Item -ItemType Directory -Force -Path $CacheRoot, $SourceRoot, $Prefix | Out
 # downloaded archives, whose hashes are rechecked by Get-Archive, and rebuild
 # every derived tree from a known-empty directory.
 foreach ($derived in @($Prefix, $SourceRoot, (Join-Path $CacheRoot 'sqlite'),
-                       (Join-Path $CacheRoot 'lua'))) {
+                       (Join-Path $CacheRoot 'lua'),
+                       (Join-Path $CacheRoot 'lpeg'),
+                       (Join-Path $CacheRoot 'cjson'))) {
     Assert-UnderCache $derived
     if (Test-Path -LiteralPath $derived) {
         Get-ChildItem -LiteralPath $derived -Recurse -Force -ErrorAction SilentlyContinue |
@@ -419,6 +423,70 @@ if (-not (Test-Path -LiteralPath (Join-Path $luaStage 'lua.h'))) {
     } finally {
         if (Test-Path -LiteralPath $luaExtract) {
             [IO.Directory]::Delete($luaExtract, $true)
+        }
+    }
+}
+
+# LPeg and lua-cjson: the engine's kernel libraries, staged exactly the way
+# Lua itself was - in-box tar, C/H sources only, everything else (docs, the
+# pure-Lua re module, test files, alternate fpconv backends) never enters
+# the cache. cjson's default fpconv backend is fpconv.c; dtoa.c/g_fmt.c
+# belong to -DUSE_INTERNAL_FPCONV, which the build does not define.
+$lpegEntry = $Lock.archives | Where-Object id -eq 'lpeg'
+$lpegArchive = Get-Archive $lpegEntry
+$lpegStage = Join-Path $CacheRoot 'lpeg'
+if (-not (Test-Path -LiteralPath (Join-Path $lpegStage 'lptree.c'))) {
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
+        throw 'in-box tar.exe not found; cannot extract the LPeg archive'
+    }
+    $lpegExtract = Join-Path $SourceRoot ('.lpeg-extract-' + [Guid]::NewGuid().ToString('n'))
+    Assert-UnderCache $lpegExtract
+    New-Item -ItemType Directory -Force -Path $lpegExtract | Out-Null
+    try {
+        & $tar -xzf $lpegArchive -C $lpegExtract
+        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
+        $lpegSrc = Join-Path $lpegExtract ('lpeg-' + $lpegEntry.version)
+        if (-not (Test-Path -LiteralPath (Join-Path $lpegSrc 'lptree.c'))) {
+            throw 'LPeg archive contains no lptree.c after extraction'
+        }
+        New-Item -ItemType Directory -Force -Path $lpegStage | Out-Null
+        Get-ChildItem -LiteralPath $lpegSrc -File |
+            Where-Object { $_.Extension -in @('.c', '.h') } |
+            Copy-Item -Destination $lpegStage -Force
+    } finally {
+        if (Test-Path -LiteralPath $lpegExtract) {
+            [IO.Directory]::Delete($lpegExtract, $true)
+        }
+    }
+}
+
+$cjsonEntry = $Lock.archives | Where-Object id -eq 'cjson'
+$cjsonArchive = Get-Archive $cjsonEntry
+$cjsonStage = Join-Path $CacheRoot 'cjson'
+if (-not (Test-Path -LiteralPath (Join-Path $cjsonStage 'lua_cjson.c'))) {
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
+        throw 'in-box tar.exe not found; cannot extract the lua-cjson archive'
+    }
+    $cjsonExtract = Join-Path $SourceRoot ('.cjson-extract-' + [Guid]::NewGuid().ToString('n'))
+    Assert-UnderCache $cjsonExtract
+    New-Item -ItemType Directory -Force -Path $cjsonExtract | Out-Null
+    try {
+        & $tar -xzf $cjsonArchive -C $cjsonExtract
+        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
+        $cjsonSrc = Join-Path $cjsonExtract ('lua-cjson-' + $cjsonEntry.version)
+        if (-not (Test-Path -LiteralPath (Join-Path $cjsonSrc 'lua_cjson.c'))) {
+            throw 'lua-cjson archive contains no lua_cjson.c after extraction'
+        }
+        New-Item -ItemType Directory -Force -Path $cjsonStage | Out-Null
+        Get-ChildItem -LiteralPath $cjsonSrc -File |
+            Where-Object { $_.Name -in @('lua_cjson.c', 'strbuf.c', 'strbuf.h',
+                                         'fpconv.c', 'fpconv.h') } |
+            Copy-Item -Destination $cjsonStage -Force
+    } finally {
+        if (Test-Path -LiteralPath $cjsonExtract) {
+            [IO.Directory]::Delete($cjsonExtract, $true)
         }
     }
 }

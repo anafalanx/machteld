@@ -19,6 +19,8 @@ set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] &&
 set PREFIX [file join $CACHE prefix]
 set SQLITE [file join $CACHE sqlite]
 set LUA [file join $CACHE lua]
+set LPEG [file join $CACHE lpeg]
+set CJSON [file join $CACHE cjson]
 set GCC [expr {[info exists ::env(MACHTELD_GCC)] ? $::env(MACHTELD_GCC) : ""}]
 set STRIP [expr {[info exists ::env(MACHTELD_STRIP)] ? $::env(MACHTELD_STRIP) : ""}]
 if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/build.ps1" }
@@ -40,7 +42,9 @@ set TCLSTUB [first_existing "Tcl stub library" [list \
     [file join $PREFIX lib libtclstub.a] [file join $PREFIX lib libtclstub90.a]]]
 foreach {label path} [list gcc $GCC tcl.h [file join $INCLUDE tcl.h] \
         sqlite3.c [file join $SQLITE sqlite3.c] sqlite3.h [file join $SQLITE sqlite3.h] \
-        lua.h [file join $LUA lua.h] lvm.c [file join $LUA lvm.c]] {
+        lua.h [file join $LUA lua.h] lvm.c [file join $LUA lvm.c] \
+        lptree.c [file join $LPEG lptree.c] \
+        lua_cjson.c [file join $CJSON lua_cjson.c]] {
     if {![file exists $path]} { error "build.tcl: missing $label: $path" }
 }
 
@@ -112,6 +116,21 @@ foreach luaSource [lsort [glob [file join $LUA *.c]]] {
     set luaObj [file join $OBJDIR lua_[file rootname [file tail $luaSource]].o]
     run $GCC -O2 -c $luaSource -o $luaObj
     lappend luaObjs $luaObj
+}
+
+# The engine's kernel libraries: LPeg and lua-cjson, pinned like Lua and
+# outside the warning gate like every vendored source.
+puts "cc   lpeg 1.1.0 (pinned kernel library)"
+foreach src [lsort [glob [file join $LPEG *.c]]] {
+    set obj [file join $OBJDIR lpeg_[file rootname [file tail $src]].o]
+    run $GCC -O2 -I$LUA -c $src -o $obj
+    lappend luaObjs $obj
+}
+puts "cc   lua-cjson 2.1.0.19 (pinned kernel library)"
+foreach src [lsort [glob [file join $CJSON *.c]]] {
+    set obj [file join $OBJDIR cjson_[file rootname [file tail $src]].o]
+    run $GCC -O2 -I$LUA -I$CJSON -c $src -o $obj
+    lappend luaObjs $obj
 }
 
 set consoleMain [Rp src machteld_main.c]

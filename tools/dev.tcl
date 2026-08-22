@@ -62,6 +62,8 @@ set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] && $::env(MACHTELD_DEPS
 set PREFIX  [file join $CACHE prefix]
 set SQLITE  [file join $CACHE sqlite]
 set LUA     [file join $CACHE lua]
+set LPEG    [file join $CACHE lpeg]
+set CJSON   [file join $CACHE cjson]
 set INCLUDE [file join $PREFIX include]
 proc need {label path} {
     if {![file exists $path]} {
@@ -74,6 +76,8 @@ need "static tclsh" [set TCLSH [file join $PREFIX bin tclsh90s.exe]]
 need "tcl.h"     [file join $INCLUDE tcl.h]
 need "sqlite3.c" [file join $SQLITE sqlite3.c]
 need "lua.h"     [file join $LUA lua.h]
+need "lptree.c"  [file join $LPEG lptree.c]
+need "lua_cjson.c" [file join $CJSON lua_cjson.c]
 set TCLLIB   [need "libtcl90.a"   [file join $PREFIX lib libtcl90.a]]
 set TKLIB    [need "libtcl9tk90.a" [file join $PREFIX lib libtcl9tk90.a]]
 set TCLSTUB  [need "libtclstub.a" [file join $PREFIX lib libtclstub.a]]
@@ -133,6 +137,17 @@ proc dev_build {{forceRef 0}} {
     foreach s [lsort [glob [file join $::LUA *.c]]] {
         set o [file join $::OBJ lua_[file rootname [file tail $s]].o]
         incr changed [cc $o $s {-O2} "lua/[file tail $s]"]
+        lappend luaObjs $o
+    }
+    foreach s [lsort [glob [file join $::LPEG *.c]]] {
+        set o [file join $::OBJ lpeg_[file rootname [file tail $s]].o]
+        incr changed [cc $o $s [list -O2 -I$::LUA] "lpeg/[file tail $s]"]
+        lappend luaObjs $o
+    }
+    foreach s [lsort [glob [file join $::CJSON *.c]]] {
+        set o [file join $::OBJ cjson_[file rootname [file tail $s]].o]
+        incr changed [cc $o $s [list -O2 -I$::LUA -I$::CJSON] \
+            "cjson/[file tail $s]"]
         lappend luaObjs $o
     }
 

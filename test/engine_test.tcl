@@ -119,6 +119,26 @@ scope {
     check "an unknown kernel is refused by name" \
         [expr {![dict get $r ok] && [errcode $r] eq "lua"}]
 
+    # The kernel libraries: utf8, lpeg, cjson.
+    reqok def name clen chunk {function clen(s) return utf8.len(s) end}
+    check "utf8.len counts characters, not bytes" \
+        [expr {[dict get [reqok run name clen args [list "héllo"]] value] == 5}]
+    reqok def name fields chunk {function fields(s)
+        local sep = lpeg.P(",")
+        local field = lpeg.C((1 - sep)^0)
+        local line = lpeg.Ct(field * (sep * field)^0)
+        return line:match(s)
+    end}
+    set r [reqok run name fields args [list "a,b,c"]]
+    check "lpeg parses in the cell" [expr {[dict get $r value] eq "a b c"}]
+    reqok def name jround chunk {function jround(s)
+        local doc = cjson.decode(s)
+        return cjson.encode(doc.n)
+    end}
+    set r [reqok run name jround args [list {{"n":9007199254740993}}]]
+    check "cjson round-trips int64 exactly in the cell" \
+        [expr {[dict get $r value] eq "9007199254740993"}]
+
     # Road 3: the lines loader (CRLF mix, empty line, unterminated tail).
     set fixture [file join [pwd] engine_test_fixture.txt]
     set f [open $fixture wb]

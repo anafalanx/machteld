@@ -44,6 +44,20 @@
       "file": "lua-5.5.0.tar.gz",
       "url": "https://www.lua.org/ftp/lua-5.5.0.tar.gz",
       "sha256": "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d"
+    },
+    {
+      "id": "lpeg",
+      "version": "1.1.0",
+      "file": "lpeg-1.1.0.tar.gz",
+      "url": "https://www.inf.puc-rio.br/~roberto/lpeg/lpeg-1.1.0.tar.gz",
+      "sha256": "4b155d67d2246c1ffa7ad7bc466c1ea899bbc40fef0257cc9c03cecbaed4352a"
+    },
+    {
+      "id": "cjson",
+      "version": "2.1.0.19",
+      "file": "lua-cjson-2.1.0.19.tar.gz",
+      "url": "https://github.com/openresty/lua-cjson/archive/refs/tags/2.1.0.19.tar.gz",
+      "sha256": "d1aded44b4cfe5ec6b395e178902aba3eed1dbe7999a753c0662222de2890ec0"
     }
   ],
   "patches": [
