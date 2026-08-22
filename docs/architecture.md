@@ -39,6 +39,14 @@ SQLite, so a wrapped entry sees the same programmatic Machteld 0.11.0 API. The
 complete versioned reference corpus is copied into wrapped tools; nested
 wrapping basekits remain distribution-only and are not copied recursively.
 
+From 0.12.0 the executable has a third face: **engine mode**, entered by a
+host-only flag, which initializes neither Tcl nor Tk and runs a frame loop
+over binary standard I/O holding Lua 5.5, LPeg, lua-cjson, and typed data
+pools. Both basekits carry it, so a wrapped tool can start its own engine from
+its own file. The host commands it through `macht` as an ordinary supervised
+child in the root and a per-engine Job Object; the contract is
+[the engine](engine.md).
+
 Tcl 9.0.4 predates the upstream fix for ACL-restricted Windows path
 normalization. Dependency bootstrap applies Tcl core check-in `0ac314cb96`
 verbatim to `win/tclWinFile.c`, after verifying the archive input, patch, and

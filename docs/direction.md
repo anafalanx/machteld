@@ -35,6 +35,23 @@ Current decisions:
   Launching still supports Machteld's deterministic `PATH`-only lookup for a
   bare command.
 
+Decided for 0.12.0 (contract: [the engine](engine.md)):
+
+- Heavy computation is out of process. The control plane is Tcl and only
+  Tcl; foreign code enters as machinery - Lua kernels run by an engine the
+  program starts, feeds, questions, and kills. No Lua runs in the host.
+- The engine is the executable itself in engine mode, so every host and every
+  wrapped tool carries its engine and nothing is installed; the wire is
+  language-neutral so that a sidecar executable in the folder may be an
+  engine under the deployment covenant.
+- Computation runs where the data lives; a payload never passes through the
+  control plane. The engine is a cache, never the truth.
+- The machine is proven by build gates; kernels are trusted as written. There
+  is no translation of expressions into Lua, no runtime oracle, and no
+  sampling: a computation runs in Tcl or in Lua, never both.
+- The engine is additive. Nothing leaves the Tcl side; a program that never
+  calls `macht` starts nothing.
+
 Admission questions, in order:
 
 1. Is this a Windows machine-control primitive or a composition needed by many

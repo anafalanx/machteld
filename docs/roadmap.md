@@ -32,26 +32,50 @@ tags: [machteld, roadmap, windows]
    all produced executables; test the documented distribution-only exceptions.
 5. Measure startup, idle memory, and packaging size after the product cut.
 
-## 0.12.0 — the cell grows capabilities
+## 0.12.0 — the engine
 
-Three additions are committed, not candidates. Each enters as an emitter
-capability under the oracle — never as user-facing Lua; the seam stays
-closed — and the two vendored libraries enter through the dependency lock
-exactly as Lua itself did.
+The release moves all Lua out of the host process and replaces the 0.11.0
+`macht` grammar with an engine: the executable in engine mode, commanded by
+the `macht` verb family over a language-neutral wire, under the contract in
+[the engine](engine.md). Committed, in build order; each phase ends with every
+test lane green and the tree never holds a gap between a removal and its
+replacement:
 
-1. **Open the built-in `utf8` library in the cell** and implement
-   character semantics in the emitter: `utf8.len` agrees with Tcl's
-   `string length` on characters, converting today's `string length`
-   refusal into a proven construct. Zero vendoring; the admission test is
-   an é-heavy oracle fixture agreeing across all arms.
-2. **LPeg** (MIT, pinned lock entry): parsing inside kernels at C speed —
-   the ingestion direction's substrate, starting with in-cell field
-   splitting. Admitted with byte-honest semantics specified against their
-   Tcl counterparts, oracle-proven or refused by name.
-3. **lua-cjson** (MIT, pinned lock entry): JSON decoded inside the cell so
-   kernels run over JSON-lines data directly. The palette's `json` verb
-   remains the Tcl-side organ; this is in-kernel data access, not a
-   shadow of it.
+1. **Contract first.** The engine page, and the engine sections of the
+   contract, direction, creed, architecture, palette, and parallel guides
+   (this phase).
+2. **Engine mode in the executable.** A host-only entry that initializes no
+   Tcl, runs the frame loop, and hosts the metered-state pool with shard
+   threads - the machinery proven in the reken B- and E-spikes, transplanted.
+3. **The `macht` family in the host**, built on `child -channels`, `scope`,
+   and the job machinery: lifecycle, load/def/run/free/stats, a lazy default
+   engine, `-engine` addressing, `-threads`, kernels cached by source hash.
+   The private `LuaCell` leaves the host.
+4. **The removal.** Grammar, emitter, Tcl arm, router, and oracle deleted from
+   the prelude; the test lane rewritten engine-shaped, including the kill of a
+   kernel inside one C call; the `macht` reference page rewritten.
+5. **Libraries in the engine.** LPeg and lua-cjson as pinned lock entries, the
+   built-in `utf8` opened; kernels parse real data from day one.
+6. **The loader.** `macht load -csv|-lines`: a correct single-thread C parser
+   into typed pools, hostile-fixture-tested at build time.
+7. **Version, gates, ship.** The 0.12.0 sweep, a live demo of residency and
+   the kill, and the conformance suite run against the built-in engine.
+
+Deliberately not in 0.12.0: a resident engine daemon shared across runs;
+bulk transfer of large Tcl-born data (road 1's ceiling applies; files enter by
+path); parallel ingestion (the sharded, schema-specialized loader is its own
+measured project); and any network. Each is named in the engine contract's
+closing section so that its absence is a promise, not an oversight.
+
+## 0.13.0 candidates
+
+- The sharded, schema-specialized loader: byte-range parallel parsing into
+  column pools, admitted only by a registered throughput prediction.
+- Engine-side vectorized primitives exposed to kernels as Lua functions,
+  admitted only after a re-profile shows kernels dominate the pipeline.
+- A resident engine daemon over a named pipe, with rendezvous and idle policy.
+- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
+  authors in other languages.
 
 ## 0.12.0 — the palette gains xml (decided 2026-08-20)
 
