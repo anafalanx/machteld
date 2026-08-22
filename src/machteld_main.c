@@ -35,6 +35,16 @@ _tmain(
         }
     }
 
+    /* Engine mode leaves before any Tcl or zipfs work: this process becomes
+     * the protocol-1 compute child of docs/engine.md. The word is reserved
+     * for the runtime (like --machteld-docs), so wrapped tools carry their
+     * engine in their own file. An optional following integer bounds the
+     * shard threads. */
+    if (argc >= 2 && _tcscmp(argv[1], _T("--machteld-engine")) == 0) {
+        int engineThreads = (argc >= 3) ? (int)_tcstol(argv[2], NULL, 10) : 0;
+        return Machteld_EngineMain(engineThreads);
+    }
+
 #if defined(UNICODE)
     TclZipfs_AppHook(&argc, &argv);
 #endif

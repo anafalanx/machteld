@@ -309,6 +309,7 @@ proc dev_docs {} {
 # store, wrap, entry, embedded-reference generator) stay with the release gate.
 set ::LANES {
     macht      test/macht_test.tcl
+    engine     test/engine_test.tcl
     filesystem test/filesystem_test.tcl
     runtime    test/runtime_test.tcl
     reference  test/reference_test.tcl

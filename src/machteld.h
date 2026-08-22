@@ -24,6 +24,15 @@ int Machteld_EntryError(Tcl_Interp *interp, const char *code,
                         const char *message);
 TCL_NORETURN void Machteld_Fatal(Tcl_Interp *interp);
 
+/*
+ * Engine mode (docs/engine.md): the third face of the executable, entered
+ * via the reserved host word `--machteld-engine` before any Tcl or zipfs
+ * work. Runs the protocol-1 frame loop over binary stdio and never returns
+ * to the Tcl hosts; the process exit code is its result. threads <= 0 asks
+ * for the default (logical cores, capped).
+ */
+int Machteld_EngineMain(int threads);
+
 enum {
     MACHTELD_HOST_NORMAL = 0,
     MACHTELD_HOST_HELP,
