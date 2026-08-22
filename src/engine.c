@@ -13,9 +13,10 @@
  * allocation is CRT malloc, metered per state by the counting allocator.
  * The parsed request tree (Ej) is read-only and safely shared by workers.
  *
- * Phase 2 capabilities: lua, load.lines, shards, reduce, stats. The csv
- * loader (Phase 6) and the kernel libraries LPeg/cjson/utf8 (Phase 5)
- * arrive behind the same hello negotiation.
+ * Capabilities: lua, load.lines, shards, reduce, stats; the csv loader
+ * arrives behind the same hello negotiation. The kernel environment is
+ * Lua 5.5 with base/string/math/table/utf8 plus the vendored LPeg and
+ * lua-cjson - pure computation, no ambient authority.
  */
 
 #include "machteld.h"            /* MACHTELD_VERSION + the entry prototype */
@@ -84,6 +85,10 @@ typedef struct {
 static EngSlot gStates[ENGINE_MAXSTATES];
 static int gNStates = 0;
 
+/* The engine's kernel libraries, vendored through the dependency lock. */
+extern int luaopen_lpeg(lua_State *L);
+extern int luaopen_cjson(lua_State *L);
+
 static lua_State *
 NewMeteredState(EngAlloc *a)
 {
@@ -93,10 +98,16 @@ NewMeteredState(EngAlloc *a)
     if (S == NULL) {
         return NULL;
     }
+    /* The cage: pure computation only. base/string/math/table plus the
+     * character library and the two vendored kernel libraries; never io,
+     * os, package, or debug. */
     luaL_requiref(S, LUA_GNAME, luaopen_base, 1);
     luaL_requiref(S, LUA_STRLIBNAME, luaopen_string, 1);
     luaL_requiref(S, LUA_MATHLIBNAME, luaopen_math, 1);
     luaL_requiref(S, LUA_TABLIBNAME, luaopen_table, 1);
+    luaL_requiref(S, LUA_UTF8LIBNAME, luaopen_utf8, 1);
+    luaL_requiref(S, "lpeg", luaopen_lpeg, 1);
+    luaL_requiref(S, "cjson", luaopen_cjson, 1);
     lua_settop(S, 0);
     return S;
 }
