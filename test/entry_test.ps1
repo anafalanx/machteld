@@ -133,18 +133,18 @@ try {
 
         $result = Invoke-Host -Arguments @('--version') -Executable $aclHost
         Check 'standalone zipfs starts below an ACL-denied parent' `
-            ($result.Exit -eq 0 -and $result.Out -match '0.12.0') `
+            ($result.Exit -eq 0 -and $result.Out -match '0.13.0') `
             ($result.Err + $result.Out)
 
         $aclProgram = Join-Path $Work 'acl-entry.tcl'
         Write-Utf8 $aclProgram @'
-package require machteld 0.12.0
+package require machteld 0.13.0
 set normalized [file normalize [info nameofexecutable]]
 puts "ACL-ENTRY:[file exists $normalized]:[version]"
 '@
         $result = Invoke-Host -Arguments @($aclProgram) -Executable $aclHost
         Check 'direct entry runs below an ACL-denied parent without losing a path component' `
-            ($result.Exit -eq 0 -and $result.Out -match 'ACL-ENTRY:1:0.12.0') `
+            ($result.Exit -eq 0 -and $result.Out -match 'ACL-ENTRY:1:0.13.0') `
             ($result.Err + $result.Out)
 
         $aclWrapped = Join-Path $Work 'acl-wrapped.exe'
@@ -463,12 +463,12 @@ puts "TK-LIB:$::tk_library"
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
     Check '--help identifies the complete Machteld, Tcl, and Tk reference' `
         ($help.Out -match '(?i)complete offline reference' -and
-         $help.Out -match 'Machteld 0.12.0' -and
+         $help.Out -match 'Machteld 0.13.0' -and
          $help.Out -match 'Tcl 9\.0\.4' -and $help.Out -match 'Tk 9\.0\.4' -and
          $help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') `
         ($help.Err + $help.Out)
     $version = Invoke-Host @('--version')
-    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0.12.0') $version.Err
+    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0.13.0') $version.Err
 
     $docsStatus = Invoke-Host @('--docs', 'status', '--json')
     $statusObject = $null
@@ -481,7 +481,7 @@ puts "TK-LIB:$::tk_library"
         ($docsStatus.Err + $docsStatus.Out)
     Check 'embedded reference status names exact runtime versions' `
         ($null -ne $statusObject -and $statusObject.ok -eq 1 -and
-         $docsStatus.Out -match '0.12.0' -and
+         $docsStatus.Out -match '0.13.0' -and
          $docsStatus.Out -match '9\.0\.4' -and $docsStatus.Out -match '(?i)sha256') `
         ($docsStatus.Err + $docsStatus.Out)
 

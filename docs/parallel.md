@@ -14,7 +14,7 @@ Code is installed once in a worker; requests carry data.
 ## Worker
 
 ```tcl
-package require machteld 0.12.0
+package require machteld 0.13.0
 
 worker on digest {path {alg sha256}} {
     hash file $alg $path
@@ -111,7 +111,7 @@ Use a pool when items are expensive enough to amortize JSON framing and process
 scheduling, or when a responsive event loop matters. For tiny operations, an
 ordinary Tcl loop is clearer and often faster.
 
-## Engines (0.12.0)
+## Engines
 
 From 0.12.0 the heavy-data counterpart to pools is the engine, commanded by
 `macht` (see [the engine](engine.md)). The doctrine line between the two
