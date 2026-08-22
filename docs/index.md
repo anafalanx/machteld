@@ -1,11 +1,11 @@
 ---
 type: index
 title: machteld documentation
-description: The documentation map for the Machteld 0.11.0 runtime.
+description: The documentation map for the Machteld 0.12.0 runtime.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld 0.11.0
+# machteld 0.12.0
 
 machteld is a compact Windows machine-control runtime. A program is ordinary
 Tcl 9 whose first executable command explicitly requires `machteld`; the runtime

@@ -2,7 +2,7 @@
 # Wrapped console/GUI fixture. Its marker proves startup, argv ownership, and
 # that the same static Machteld package (including SQLite/store) is present in
 # both embedded basekits.
-package require machteld 0.11.0
+package require machteld 0.12.0
 
 set marker [file join [file dirname [info nameofexecutable]] _hello_ran.txt]
 set database [file join [file dirname [info nameofexecutable]] _hello_store.db]

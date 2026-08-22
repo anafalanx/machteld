@@ -90,7 +90,7 @@ set result [run -- $console --help payload]
 check "wrapped console receives its own --help argument" [expr {
     [dict get $result status] eq "ok" && [wait_for_file $marker]}]
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
-check "wrapped console loads package 0.11.0" [string match *version:0.11.0* $text]
+check "wrapped console loads package 0.12.0" [string match *version:0.12.0* $text]
 check "wrapped console owns --help/--version spelling" [string match *argv:--help\ payload* $text]
 check "wrapped console carries native process API" [string match *run:yes* $text]
 check "wrapped console carries static binary store" [string match *store:yes* $text]
@@ -137,7 +137,7 @@ foreach relative {docs/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.
     close $channel
 }
 set channel [open [file join $nested src main.tcl] w]
-puts $channel {package require machteld 0.11.0}
+puts $channel {package require machteld 0.12.0}
 puts $channel {set f [open [file join [file dirname [info script]] sibling.txt] r]}
 puts $channel {puts [read $f]}
 puts $channel {close $f}
@@ -231,7 +231,7 @@ check "wrapped GUI selftest exits cleanly" [expr {
     [dict get $gui_result status] eq "ok" && [dict get $gui_result exit] == 0}]
 child close $gui_child
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
-check "wrapped GUI loads package 0.11.0" [string match *version:0.11.0* $text]
+check "wrapped GUI loads package 0.12.0" [string match *version:0.12.0* $text]
 regexp -line {^argc:(.*)$} $text _ observed_argc
 regexp -line {^argv:(.*)$} $text _ observed_argv
 check "wrapped GUI preserves exact original argc" [expr {

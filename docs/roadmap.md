@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.11.0 contains and how possible additions are ordered.
+description: What Machteld 0.12.0 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -61,6 +61,11 @@ replacement:
 7. **Version, gates, ship.** The 0.12.0 sweep, a live demo of residency and
    the kill, and the conformance suite run against the built-in engine.
 
+All seven phases have landed; 0.12.0 is the current baseline. A program
+written against 0.11.0's entry line still starts: `package require
+machteld 0.11.0` is satisfied by 0.12.0 under Tcl's version rules, though
+the 0.11.0 macht grammar it may have used is gone.
+
 Deliberately not in 0.12.0: a resident engine daemon shared across runs;
 bulk transfer of large Tcl-born data (road 1's ceiling applies; files enter by
 path); parallel ingestion (the sharded, schema-specialized loader is its own
@@ -116,7 +121,7 @@ Recorded as constraints, not answers — the route is design work:
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.11.0. Each needs a
+selected WMI queries remain candidates. None is promised by 0.12.0. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 
