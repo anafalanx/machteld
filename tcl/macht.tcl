@@ -282,10 +282,10 @@ proc ::machteld::macht {sub args} {
                 set req [dict create op load format csv \
                     path [file normalize [dict get $opts -csv]]]
                 if {[dict exists $opts -schema]} {
-                    dict set req schema [dict get $opts -schema]
+                    dict set req schema [lrange [dict get $opts -schema] 0 end]
                 }
                 if {[dict exists $opts -header]} {
-                    dict set req header true
+                    dict set req header 1
                 }
             }
             set r [::machteld::macht::Ask $tok $req]

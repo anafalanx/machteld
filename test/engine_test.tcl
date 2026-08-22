@@ -148,6 +148,65 @@ scope {
     set pool [dict get $r handle]
     check "load lines counts CRLF, empty, and unterminated rows" [expr {
         [dict get $r rows] == 4 && [dict get $r fields] eq "line"}]
+    set r [req load format xml path $fixture]
+    check "an unknown load format is refused by name" \
+        [expr {![dict get $r ok] && [errcode $r] eq "refused"}]
+
+    # Road 3: the csv loader against a hostile fixture - header, quoted
+    # comma, doubled quote, embedded newline, CRLF and LF mixed, typed
+    # columns.
+    set csvfix [file join [pwd] engine_test_fixture.csv]
+    set f [open $csvfix wb]
+    puts -nonewline $f "name,note,status,ratio\r\n"
+    puts -nonewline $f "alpha,\"a, quoted comma\",404,1.5\n"
+    puts -nonewline $f "beta,\"a \"\"quoted\"\" word\",200,0.25\r\n"
+    puts -nonewline $f "gamma,\"two\nlines\",500,2.0"
+    close $f
+    set r [reqok load format csv path $csvfix header 1 \
+        schema [list name s note s status i ratio f]]
+    set cpool [dict get $r handle]
+    check "csv parses the hostile fixture into typed columns" [expr {
+        [dict get $r rows] == 3 &&
+        [dict get $r fields] eq "name note status ratio"}]
+    reqok def name csum chunk {function csum(h)
+        local acc = 0.0
+        for i = 1, h.rows do
+            if h.status[i] >= 400 then acc = acc + h.ratio[i] end
+        end
+        return acc
+    end}
+    set r [reqok run name csum args [list [dict create handle $cpool]]]
+    check "a kernel computes over typed csv columns" \
+        [expr {[dict get $r value] == 3.5}]
+    reqok def name embedded chunk {function embedded(h)
+        return h.note[3]
+    end}
+    check "an embedded newline survives quoting" [expr {
+        [dict get [reqok run name embedded args \
+            [list [dict create handle $cpool]]] value] eq "two\nlines"}]
+    reqok free handle $cpool
+    set f [open $csvfix wb]
+    puts -nonewline $f "1,2\n3,notanint\n"
+    close $f
+    set r [req load format csv path $csvfix schema [list a i b i]]
+    check "a type failure names its line and field" [expr {
+        ![dict get $r ok] && [errcode $r] eq "badvalue" &&
+        [string match "*line 2*b*" [dict get $r error message]]}]
+    set f [open $csvfix wb]
+    puts -nonewline $f "a,b\n1,2,3\n"
+    close $f
+    set r [req load format csv path $csvfix]
+    check "a ragged record names its line" [expr {
+        ![dict get $r ok] && [errcode $r] eq "badvalue" &&
+        [string match "*line 2*" [dict get $r error message]]}]
+    set f [open $csvfix wb]
+    puts -nonewline $f "\"unterminated"
+    close $f
+    set r [req load format csv path $csvfix]
+    check "an unterminated quote is refused" [expr {
+        ![dict get $r ok] && [errcode $r] eq "badvalue" &&
+        [string match "*unterminated*" [dict get $r error message]]}]
+    file delete -- $csvfix
 
     reqok def name nonempty chunk {function nonempty(h)
         local n = 0
