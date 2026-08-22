@@ -3,7 +3,7 @@
 # side: lifecycle, the lazy default, addressing, budget-by-kill with a
 # clean respawn, capability refusal, and conform.
 
-package require machteld 0.12.0
+package require machteld 0.13.0
 
 set fails 0
 proc check {name ok} {

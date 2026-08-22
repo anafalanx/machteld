@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.12.0 contains and how possible additions are ordered.
+description: What Machteld 0.13.0 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -61,7 +61,7 @@ replacement:
 7. **Version, gates, ship.** The 0.12.0 sweep, a live demo of residency and
    the kill, and the conformance suite run against the built-in engine.
 
-All seven phases have landed; 0.12.0 is the current baseline. A program
+All seven phases landed; 0.13.0 now extends that baseline. A program
 written against 0.11.0's entry line still starts: `package require
 machteld 0.11.0` is satisfied by 0.12.0 under Tcl's version rules, though
 the 0.11.0 macht grammar it may have used is gone.
@@ -72,27 +72,47 @@ path); parallel ingestion (the sharded, schema-specialized loader is its own
 measured project); and any network. Each is named in the engine contract's
 closing section so that its absence is a promise, not an oversight.
 
-## 0.13.0 candidates
+## 0.13.0 — the primitive palette
 
-Before 0.13.0 is scoped, the cross-industry maintenance-engineering study
-(banked in the z estate as `study-cross-industry.md`, 2026-08-22) is
-revisited by standing instruction. Its first-ranked transposition is engine
-PHM: State-of-Health wear telemetry, condition-based engine rotation,
-freeze-frame error snapshots, and a timeout selectivity study.
+The `col` library: precompiled column primitives in the cell, reaching
+the pool's native memory at measured memory-bandwidth speed, under the
+contract section "The col library" in [the engine](engine.md). Filters
+over integer and float columns with IEEE law; exact chunked integer sums
+and the normative row-striped float tree; the fused one-pass
+`sumwhere`; NaN-skipping min/max; the selection algebra. Everything is
+plain autovectorized C: hand intrinsics were raced pair-by-pair against
+the compiler and earned residence nowhere. The capability is
+CPUID-gated and negotiated in `hello`.
 
-- The sharded, schema-specialized loader: byte-range parallel parsing into
-  column pools, admitted only by a registered throughput prediction.
-- Engine-side vectorized primitives exposed to kernels as Lua functions.
-  The original admission condition - "only after a re-profile shows
-  kernels dominate the pipeline" - was waived by owner decision on
-  2026-08-22, which made the primitives 0.13.0's headline and moved the
-  evidence obligation into registered predictions; the predictions then
-  held (the `col` library: sums at the memory wall, the fused form 13-17x
-  over the Lua loop, hand intrinsics earning residence nowhere). The
-  waiver is recorded here so the gate's history stays visible.
-- A resident engine daemon over a named pipe, with rendezvous and idle policy.
-- A sidecar conformance kit: the `macht conform` fixtures packaged for engine
-  authors in other languages.
+The admission story, kept visible: the prior roadmap conditioned
+primitives on "a re-profile showing kernels dominate the pipeline"; the
+owner waived that gate on 2026-08-22, making primitives the release
+headline and moving the evidence into registered predictions. The
+predictions were then graded in the open (plan-machteld-013 in the z
+estate): sums at the memory wall; the fused form 13-17x over the pinned
+Lua loop, admitted after an honestly recorded miss of the composed
+form; one `col` thread 3.3x faster than the twelve-shard Lua path, so
+arithmetic no longer shards; the 0.12.0 demo question from 2.9 ms to
+0.083 ms engine-side. One 0.12.0 defect (a first-touch sharded view
+race) was found by the plan's review panel and fixed ahead of the
+benches. A 0.12.0 entry line still starts under Tcl's version rules.
+
+## 0.14.0 candidates
+
+The cross-industry study's transpositions (z estate,
+`study-cross-industry.md`) lead the field: engine PHM — State-of-Health
+wear telemetry, condition-based engine rotation, freeze-frame error
+snapshots — and the timeout selectivity study. Beside them:
+
+- The sharded, schema-specialized loader: byte-range parallel parsing
+  into column pools, admitted only by a registered throughput
+  prediction.
+- A resident engine daemon over a named pipe, with rendezvous and idle
+  policy.
+- A sidecar conformance kit: the `macht conform` fixtures packaged for
+  engine authors in other languages.
+- String primitives for `col`, contingent on dictionary-encoded columns
+  (the loader's lineage).
 
 ## Deferred: the palette gains xml (decided 2026-08-20, deferred 2026-08-22)
 
@@ -127,7 +147,7 @@ Recorded as constraints, not answers — the route is design work:
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.12.0. Each needs a
+selected WMI queries remain candidates. None is promised by 0.13.0. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 

@@ -1,19 +1,20 @@
 ---
 type: contract
 title: The engine
-description: The 0.12.0 engine contract - an out-of-process trusted Lua engine commanded by a Tcl program over a language-neutral wire.
+description: The engine contract - an out-of-process trusted Lua engine commanded by a Tcl program over a language-neutral wire.
 tags: [machteld, engine, macht, lua, contract, wire]
 ---
 
 # The engine
 
-This page is the contract for the Machteld 0.12.0 engine, and the 0.12.0
-executable implements it in full: engine mode, the wire, the boundary, the
-`macht` family, the `lines` and `csv` loaders, and the kernel libraries
-(utf8, LPeg, lua-cjson). Capabilities remain negotiated in `hello` - a
-program asks an engine what it carries rather than assuming, which is also
-how a sidecar with a narrower surface stays honest. The page, the `macht`
-manifest entry, and the behavior must agree.
+This page is the contract for the Machteld engine, implemented in full by
+the current executable: engine mode, the wire, the boundary, the `macht`
+family, the `lines` and `csv` loaders, the kernel libraries (utf8, LPeg,
+lua-cjson), and - since 0.13.0 - the `col` primitive library. The 0.12.0
+release built the engine; 0.13.0 added the primitives. Capabilities are
+negotiated in `hello` - a program asks an engine what it carries rather
+than assuming, which is also how a sidecar with a narrower surface stays
+honest. The page, the `macht` manifest entry, and the behavior must agree.
 
 ## What the engine is
 
@@ -55,7 +56,7 @@ One verb owns an engine's whole life, in the palette's usual shape (`pty`,
 `watch`, `store`): lifecycle, work, and introspection are subcommands.
 
 ```tcl
-package require machteld 0.12.0
+package require machteld 0.13.0
 
 set e [macht start -threads 8 -memory 2G]     ;# explicit engine (optional)
 set h [macht load -csv C:/data/access.csv -schema {name s path s status i bytes i}]
@@ -90,7 +91,7 @@ macht stop $e
 Every work subcommand accepts `-engine TOKEN`. Without it, the first work
 subcommand lazily starts one default engine for the program, with default
 limits; `macht start` exists for control and for additional engines. The exact
-option sets are claimed by the 0.12.0 manifest; this page fixes the vocabulary
+option sets are claimed by the manifest; this page fixes the vocabulary
 and its semantics.
 
 `macht` is not a grammar, not a compiler, and not a translation of anything. The
@@ -115,9 +116,9 @@ engine. It is deliberately boring.
   declared, and refuses with `MACHT refused` when a program asks for one.
 
 ```json
--> {"id":1,"op":"hello","protocol":1,"host":"machteld","version":"0.12.0"}
-<- {"id":1,"ok":true,"engine":"machteld","version":"0.12.0","protocol":1,
-    "capabilities":["lua","load.csv","load.lines","shards","reduce","stats"]}
+-> {"id":1,"op":"hello","protocol":1,"host":"machteld","version":"0.13.0"}
+<- {"id":1,"ok":true,"engine":"machteld","version":"0.13.0","protocol":1,
+    "capabilities":["lua","load.csv","load.lines","shards","reduce","stats","col"]}
 -> {"id":2,"op":"load","format":"csv","path":"C:/data/access.csv",
     "schema":["name","s","path","s","status","i","bytes","i"],"header":true}
 <- {"id":2,"ok":true,"handle":"pool#1","rows":1000000,
@@ -157,7 +158,7 @@ message. A program recovers by starting another engine and loading again.
 Residency is within the program's lifetime: an engine outlives any number of
 runs, holds pools and compiled kernels between them, and answers the second
 question without reloading. An engine that outlives its program - a resident
-daemon shared across runs - is contracted direction, not 0.12.0 behavior (see
+daemon shared across runs - is contracted direction, not present behavior (see
 the last section).
 
 Topology is flat: **threads inside, engines across.** Data parallelism is the
@@ -212,7 +213,7 @@ Edge laws, each one stated once:
 **Road 2 - handles, for everything engine-resident.** Pools and spilled
 results are opaque tokens owned by one engine. A kernel receives a pool as an
 object `h` with `h.rows` and one indexable column per field, `h.<field>[i]`,
-`i` from 1 to `h.rows`; in the 0.12.0 built-in engine the columns of a shard's
+`i` from 1 to `h.rows`; in the built-in engine the columns of a shard's
 view are materialized Lua sequences, so the measured kernel numbers apply
 directly. A handle offered to a different engine, or after its engine died or
 `free`d it, raises `MACHT nohandle`. Handles are never guessed, never
@@ -224,7 +225,7 @@ program's at start. A schema is pairs of field name and type, `i` (64-bit
 integer), `f` (double), or `s` (string); a field that fails to parse under its
 type is a `load` error naming the line. `-csv` reads RFC 4180 records:
 quoted fields, doubled quotes, embedded newlines, CRLF and LF, an optional
-header. `-lines` builds one string column, `line`. The 0.12.0 loader is a
+header. `-lines` builds one string column, `line`. The loader is a
 correct single-thread parser; its throughput is measured, not promised.
 
 **Kernels.** A chunk crosses as source text, compiles in the engine, and is
@@ -348,16 +349,16 @@ Tcl-side cold path it replaces; the engine loads a million rows to resident in
 178 ms; and an engine spinning inside one C call is killed and reaped in 32-38
 ms with a clean respawn. The whole engine, Lua included, is 300 KB.
 
-## What this page does not promise in 0.12.0
+## What this page does not promise in 0.13.0
 
 - A program-independent resident engine - a daemon shared across runs - is
   contracted direction: it will speak this same wire over a named pipe and
   outlive its starter by `detach`, with a rendezvous and an idle policy, and
-  it is not in 0.12.0.
+  it is not in 0.13.0.
 - Bulk transfer of large Tcl-born data into an engine. Road 1's ceiling
   applies to arguments; data larger than that goes to a file and enters by
   road 3.
-- Parallel ingestion. The 0.12.0 loader is one thread; the sharded,
+- Parallel ingestion. The loader is one thread; the sharded,
   schema-specialized loader is its own measured project.
 - Engines on other machines. The wire is local stdio; nothing on this page
   addresses a network.
