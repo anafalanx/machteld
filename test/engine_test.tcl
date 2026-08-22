@@ -196,6 +196,14 @@ scope {
     set r [reqok run name coltrio args [list [dict create handle $cpool]]]
     check "the trio computes over native columns (sum, filter, count)" \
         [expr {[dict get $r value] == 1104604023}]
+    reqok def name colfused chunk {function colfused(h)
+        local composed = col.sum(h, "status", col.filter(h, "status", "lt", 500))
+        local fused = col.sumwhere(h, "status", "status", "lt", 500)
+        return (fused == composed) and fused or -1
+    end}
+    check "the fused sumwhere agrees exactly with filter+sum" [expr {
+        [dict get [reqok run name colfused \
+            args [list [dict create handle $cpool]]] value] == 604}]
     reqok def name colerr chunk {function colerr(h, what)
         if what == 1 then return col.sum(h, "zzz") end
         if what == 2 then return col.sum(h, "note") end
@@ -252,6 +260,13 @@ scope {
     end}
     set r [req run name colover args [list [dict create handle $opool]]]
     check "an overflowing integer sum refuses by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*col: integer overflow*" [dict get $r error message]]}]
+    reqok def name coloverw chunk {function coloverw(h)
+        return col.sumwhere(h, "a", "a", "gt", 0)
+    end}
+    set r [req run name coloverw args [list [dict create handle $opool]]]
+    check "the fused path refuses overflow by name too" [expr {
         ![dict get $r ok] && [errcode $r] eq "lua" &&
         [string match "*col: integer overflow*" [dict get $r error message]]}]
     reqok free handle $opool
