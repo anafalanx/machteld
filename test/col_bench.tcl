@@ -68,7 +68,7 @@ proc median {xs} {
 }
 
 scope {
-    set C [child start -channels -- $exe --machteld-engine 1]
+    set C [child start -channels -- $exe --machteld-engine 12]
     set io [child info $C]
     set W [dict get $io stdin]
     set R [dict get $io stdout]
@@ -212,6 +212,80 @@ scope {
                 $label $size $med3 $lo $bar $verdict]
         }
     }
+    # P4: the honest sharding question. Headline: col single-thread vs the
+    # 12-shard Lua path (needs >=1.5x to clear noise); engineering
+    # comparison: col single vs col 8-shard, reported with guidance.
+    req def name sum_of chunk {function sum_of(ps)
+        local s = 0
+        for i = 1, #ps do s = s + ps[i] end
+        return s
+    end}
+    proc runsh {name h shards} {
+        return [req run name $name args [list [dict create handle $h]] \
+            shards $shards reduce sum_of]
+    }
+    runsh base404 $H 12
+    runsh col404w $H 8
+    set rSingle {}
+    set rLua12 {}
+    set rCol8 {}
+    for {set i 0} {$i < 7} {incr i} {
+        lappend rSingle [dict get [runk col404w $H] ms]
+        lappend rLua12 [dict get [runsh base404 $H 12] ms]
+        lappend rCol8 [dict get [runsh col404w $H 8] ms]
+    }
+    set p4s [median $rSingle]
+    set p4l [median $rLua12]
+    set p4c [median $rCol8]
+    set head [expr {$p4l / $p4s}]
+    puts [format "P4  col single %.2f ms | 12-shard Lua %.2f ms | col 8-shard %.2f ms" \
+        $p4s $p4l $p4c]
+    puts [format "P4  headline col-single vs 12-shard Lua: %.1fx (>=1.5x)  %s" \
+        $head [expr {$head >= 1.5 ? "HELD" : "reported, no verdict"}]]
+    puts [format "P4  guidance: col single vs col 8-shard: %.2fx %s" \
+        [expr {$p4s / $p4c}] \
+        [expr {$p4s <= $p4c ? "(sharding buys nothing here)" : "(sharding still pays)"}]]
+
+    # P6a: the demo question (200k, demo-shaped fixture) via col,
+    # engine-side, warm; P6b wall through the verb reported beside 0d.
+    set demo [file join $devdir col-bench-200k.csv]
+    if {![file exists $demo]} {
+        set f [open $demo wb]
+        puts $f "pad,status,bytes,tijd"
+        set s 4711
+        set paden {/api/users /api/orders /static/app.js /index.html /health}
+        set statuses {200 200 200 404 500}
+        for {set i 0} {$i < 200000} {incr i} {
+            set s [expr {($s * 1103515245 + 12345) % 2147483648}]
+            puts $f "[lindex $paden [expr {$s % 5}]],[lindex $statuses [expr {($s >> 2) % 5}]],[expr {($s >> 3) % 100000}],[expr {$s % 86400}]"
+        }
+        close $f
+    }
+    set HD [dict get [req load format csv path $demo header 1 \
+        schema [list pad s status i bytes i tijd i]] handle]
+    runk col404w $HD
+    set xs {}
+    for {set i 0} {$i < 7} {incr i} {
+        lappend xs [dict get [runk col404w $HD] ms]
+    }
+    set p6a [median $xs]
+    puts [format "P6a demo question via col, engine-side warm: %.3f ms (<0.5 held, >1.5 killed)  %s" \
+        $p6a [expr {$p6a < 0.5 ? "HELD" : ($p6a > 1.5 ? "KILLED" : "MISSED")}]]
+    macht def dem {function dem(h)
+        return col.sumwhere(h, "bytes", "status", "eq", 404)
+    end}
+    set hd2 [macht load -csv $demo -header -schema {pad s status i bytes i tijd i}]
+    macht run dem $hd2
+    set ws {}
+    for {set i 0} {$i < 7} {incr i} {
+        set t0 [clock microseconds]
+        macht run dem $hd2
+        lappend ws [expr {([clock microseconds] - $t0) / 1000.0}]
+    }
+    puts [format "P6b demo question wall through the verb: %.2f ms (reported beside the 0d floor, not graded)" \
+        [median $ws]]
+    macht stop
+
     # P5 spot confirmation (full matrix lives in the gate lane).
     set ok [expr {
         [dict get [runk s_sum $H] value] == [dict get [runk a_sum $H] value] &&

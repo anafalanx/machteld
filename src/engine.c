@@ -827,7 +827,11 @@ OpHello(int64_t id, const Ej *req)
     EjBufText(&b, MACHTELD_VERSION);
     EjBufText(&b, "\",\"protocol\":1,\"capabilities\":"
         "[\"lua\",\"load.lines\",\"load.csv\",\"shards\",\"reduce\","
-        "\"stats\"]}");
+        "\"stats\"");
+    if (gColOk) {
+        EjBufText(&b, ",\"col\"");
+    }
+    EjBufText(&b, "]}");
     SendBuf(&b);
 }
 

@@ -51,6 +51,7 @@ typedef struct {
     int poolNum;
     int64_t a, b;                    /* view range */
     const int64_t *i;                /* 'i' column data (pool-absolute) */
+    const double *f;                 /* 'f' column data (pool-absolute) */
     char type;
 } ColArg;
 
@@ -80,10 +81,8 @@ ResolveColumn(lua_State *L, int idx, const char *field, ColArg *out)
     if (out->type == 's') {
         luaL_error(L, "col: field %s is not numeric", field);
     }
-    if (out->type == 'f') {
-        luaL_error(L, "col: field type f arrives with the full matrix");
-    }
-    out->i = (const int64_t *)data;
+    out->i = (out->type == 'i') ? (const int64_t *)data : NULL;
+    out->f = (out->type == 'f') ? (const double *)data : NULL;
 }
 
 static ColSel *
@@ -288,6 +287,204 @@ SumWhereI64(const int64_t *restrict v, const int64_t *restrict p,
     return 1;
 }
 
+/* ---------------- the float and matrix bodies (Phase 1) ----------------
+ * Normative laws, written here and mirrored in the contract page:
+ * - Float comparisons are IEEE: NaN matches nothing except ne (and a NaN
+ *   probe value matches nothing except ne, which then matches every row).
+ * - Float sums use the row-striped eight-lane tree: lane k&7 accumulates
+ *   row k (a masked-out row contributes +0.0), lanes fold left to right,
+ *   chunk order is row order. Deterministic by construction; NaN rows
+ *   that are selected propagate.
+ * - min/max skip NaN, seed at the first surviving element, compare by
+ *   plain < / >; nothing surviving raises "col: empty selection". */
+
+static void
+FilterF64(const double *restrict v, int64_t n, int op, double x,
+          uint64_t *restrict bits)
+{
+    for (int64_t w = 0; w * 64 < n; w++) {
+        uint64_t word = 0;
+        int64_t base = w * 64;
+        int64_t lim = (n - base < 64) ? n - base : 64;
+        switch (op) {
+        case OP_LT:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] < x) << k;
+            }
+            break;
+        case OP_LE:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] <= x) << k;
+            }
+            break;
+        case OP_GT:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] > x) << k;
+            }
+            break;
+        case OP_GE:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] >= x) << k;
+            }
+            break;
+        case OP_EQ:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] == x) << k;
+            }
+            break;
+        default:
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(v[base + k] != x) << k;
+            }
+        }
+        bits[w] = word;
+    }
+}
+
+static double
+SumF64Masked(const double *restrict v, int64_t n, const uint64_t *bits)
+{
+    double acc[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    for (int64_t k = 0; k < n; k++) {
+        int sel = (bits == NULL) || ((bits[k >> 6] >> (k & 63)) & 1u);
+        acc[k & 7] += sel ? v[k] : 0.0;
+    }
+    return ((acc[0] + acc[1]) + (acc[2] + acc[3])) +
+           ((acc[4] + acc[5]) + (acc[6] + acc[7]));
+}
+
+static int
+MinMaxI64(const int64_t *restrict v, int64_t n, const uint64_t *bits,
+          int isMax, int64_t *out)
+{
+    int found = 0;
+    int64_t best = 0;
+    for (int64_t k = 0; k < n; k++) {
+        if (bits != NULL && !((bits[k >> 6] >> (k & 63)) & 1u)) {
+            continue;
+        }
+        if (!found || (isMax ? v[k] > best : v[k] < best)) {
+            best = v[k];
+            found = 1;
+        }
+    }
+    *out = best;
+    return found;
+}
+
+static int
+MinMaxF64(const double *restrict v, int64_t n, const uint64_t *bits,
+          int isMax, double *out)
+{
+    int found = 0;
+    double best = 0;
+    for (int64_t k = 0; k < n; k++) {
+        if (bits != NULL && !((bits[k >> 6] >> (k & 63)) & 1u)) {
+            continue;
+        }
+        if (v[k] != v[k]) {
+            continue;                              /* NaN is skipped */
+        }
+        if (!found || (isMax ? v[k] > best : v[k] < best)) {
+            best = v[k];
+            found = 1;
+        }
+    }
+    *out = best;
+    return found;
+}
+
+/* The fused matrix: value {i,f} x predicate {i,f}, all six ops. Integer
+ * values keep the exact chunked path; float values use the striped tree
+ * with the predicate as the mask. */
+#define COL_SUMWHERE_FP_CHUNK(PT, CMP)                                     \
+    for (int64_t k = 0; k < lim; k++) {                                    \
+        uint64_t m = (uint64_t)0 - (uint64_t)(((const PT *)pp)[k] CMP x);  \
+        acc += m & (uint64_t)vv[k];                                        \
+        bad |= m & (((uint64_t)vv[k] + (uint64_t)COL_SAFE_BOUND) >> 51);   \
+    }
+
+static int
+SumWhereI64Fp(const int64_t *restrict v, const double *restrict pd,
+              int64_t n, int op, double x, int64_t *totalOut)
+{
+    int64_t total = 0;
+    for (int64_t at = 0; at < n; at += COL_CHUNK) {
+        int64_t lim = (n - at < COL_CHUNK) ? n - at : COL_CHUNK;
+        const int64_t *restrict vv = v + at;
+        const double *restrict pp = pd + at;
+        uint64_t acc = 0, bad = 0;
+        switch (op) {
+        case OP_LT: COL_SUMWHERE_FP_CHUNK(double, <)  break;
+        case OP_LE: COL_SUMWHERE_FP_CHUNK(double, <=) break;
+        case OP_GT: COL_SUMWHERE_FP_CHUNK(double, >)  break;
+        case OP_GE: COL_SUMWHERE_FP_CHUNK(double, >=) break;
+        case OP_EQ: COL_SUMWHERE_FP_CHUNK(double, ==) break;
+        default:    COL_SUMWHERE_FP_CHUNK(double, !=) break;
+        }
+        if (bad == 0) {
+            if (__builtin_add_overflow(total, (int64_t)acc, &total)) {
+                return 0;
+            }
+        } else {
+            int64_t chunk = 0;
+            for (int64_t k = 0; k < lim; k++) {
+                int hit;
+                switch (op) {
+                case OP_LT: hit = pp[k] < x; break;
+                case OP_LE: hit = pp[k] <= x; break;
+                case OP_GT: hit = pp[k] > x; break;
+                case OP_GE: hit = pp[k] >= x; break;
+                case OP_EQ: hit = pp[k] == x; break;
+                default:    hit = pp[k] != x;
+                }
+                if (hit && __builtin_add_overflow(chunk, vv[k], &chunk)) {
+                    return 0;
+                }
+            }
+            if (__builtin_add_overflow(total, chunk, &total)) {
+                return 0;
+            }
+        }
+    }
+    *totalOut = total;
+    return 1;
+}
+
+#define COL_SUMWHERE_F_BODY(PT, CMP)                                       \
+    for (int64_t k = 0; k < n; k++) {                                      \
+        int sel = ((const PT *)p)[k] CMP x;                                \
+        acc[k & 7] += sel ? v[k] : 0.0;                                    \
+    }
+
+#define COL_SUMWHERE_F_ALL(PT, XT)                                         \
+    double acc[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };                            \
+    XT x = xIn;                                                            \
+    switch (op) {                                                          \
+    case OP_LT: COL_SUMWHERE_F_BODY(PT, <)  break;                         \
+    case OP_LE: COL_SUMWHERE_F_BODY(PT, <=) break;                         \
+    case OP_GT: COL_SUMWHERE_F_BODY(PT, >)  break;                         \
+    case OP_GE: COL_SUMWHERE_F_BODY(PT, >=) break;                         \
+    case OP_EQ: COL_SUMWHERE_F_BODY(PT, ==) break;                         \
+    default:    COL_SUMWHERE_F_BODY(PT, !=) break;                         \
+    }                                                                      \
+    return ((acc[0] + acc[1]) + (acc[2] + acc[3])) +                       \
+           ((acc[4] + acc[5]) + (acc[6] + acc[7]))
+
+static double
+SumWhereF64Ip(const double *restrict v, const void *restrict p,
+              int64_t n, int op, int64_t xIn)
+{
+    COL_SUMWHERE_F_ALL(int64_t, int64_t);
+}
+
+static double
+SumWhereF64Fp(const double *restrict v, const void *restrict p,
+              int64_t n, int op, double xIn)
+{
+    COL_SUMWHERE_F_ALL(double, double);
+}
+
 static int64_t
 CountBits(const uint64_t *bits, int64_t n)
 {
@@ -420,10 +617,18 @@ LFilter(lua_State *L)
     ColArg col;
     const char *field = luaL_checkstring(L, 2);
     int op = luaL_checkoption(L, 3, NULL, kOpNames);
-    int64_t x = (int64_t)luaL_checkinteger(L, 4);
     ResolveColumn(L, 1, field, &col);
-    ColSel *s = NewSel(L, col.poolNum, col.a, col.b);
-    impl->filter(col.i + col.a, col.b - col.a, op, x, s->bits);
+    ColSel *s;
+    if (col.type == 'f') {
+        double x = (double)luaL_checknumber(L, 4);
+        s = NewSel(L, col.poolNum, col.a, col.b);
+        FilterF64(col.f + col.a, col.b - col.a, op, x, s->bits);
+    } else {
+        int64_t x = (int64_t)luaL_checkinteger(L, 4);
+        s = NewSel(L, col.poolNum, col.a, col.b);
+        impl->filter(col.i + col.a, col.b - col.a, op, x, s->bits);
+    }
+    (void)s;
     return 1;
 }
 
@@ -435,11 +640,19 @@ LSum(lua_State *L)
     ColArg col;
     const char *field = luaL_checkstring(L, 2);
     ResolveColumn(L, 1, field, &col);
+    const uint64_t *bits = NULL;
+    if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
+        bits = CheckSel(L, 3, &col)->bits;
+    }
+    if (col.type == 'f') {
+        lua_pushnumber(L, (lua_Number)SumF64Masked(col.f + col.a,
+            col.b - col.a, bits));
+        return 1;
+    }
     int64_t total = 0;
     int ok;
-    if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
-        ColSel *s = CheckSel(L, 3, &col);
-        ok = SumUnderI64(col.i + col.a, col.b - col.a, s->bits, &total);
+    if (bits != NULL) {
+        ok = SumUnderI64(col.i + col.a, col.b - col.a, bits, &total);
     } else {
         ok = impl->sum(col.i + col.a, col.b - col.a, &total);
     }
@@ -447,6 +660,68 @@ LSum(lua_State *L)
         return luaL_error(L, "col: integer overflow");
     }
     lua_pushinteger(L, (lua_Integer)total);
+    return 1;
+}
+
+static int
+LMinMax(lua_State *L)
+{
+    int isMax = (int)lua_tointeger(L, lua_upvalueindex(1));
+    ColArg col;
+    const char *field = luaL_checkstring(L, 2);
+    ResolveColumn(L, 1, field, &col);
+    const uint64_t *bits = NULL;
+    if (lua_gettop(L) >= 3 && !lua_isnil(L, 3)) {
+        bits = CheckSel(L, 3, &col)->bits;
+    }
+    if (col.type == 'f') {
+        double out = 0;
+        if (!MinMaxF64(col.f + col.a, col.b - col.a, bits, isMax, &out)) {
+            return luaL_error(L, "col: empty selection");
+        }
+        lua_pushnumber(L, (lua_Number)out);
+        return 1;
+    }
+    int64_t out = 0;
+    if (!MinMaxI64(col.i + col.a, col.b - col.a, bits, isMax, &out)) {
+        return luaL_error(L, "col: empty selection");
+    }
+    lua_pushinteger(L, (lua_Integer)out);
+    return 1;
+}
+
+static int
+LBand(lua_State *L)
+{
+    ColSel *a = (ColSel *)luaL_checkudata(L, 1, COL_SEL_META);
+    ColSel *b = (ColSel *)luaL_checkudata(L, 2, COL_SEL_META);
+    int orMode = (int)lua_tointeger(L, lua_upvalueindex(1));
+    if (a->poolNum != b->poolNum || a->a != b->a || a->b != b->b) {
+        return luaL_error(L, "col: selection is bound to another view");
+    }
+    ColSel *r = NewSel(L, a->poolNum, a->a, a->b);
+    int64_t words = ((a->b - a->a) + 63) / 64;
+    for (int64_t w = 0; w < words; w++) {
+        r->bits[w] = orMode ? (a->bits[w] | b->bits[w])
+                            : (a->bits[w] & b->bits[w]);
+    }
+    return 1;
+}
+
+static int
+LBnot(lua_State *L)
+{
+    ColSel *a = (ColSel *)luaL_checkudata(L, 1, COL_SEL_META);
+    ColSel *r = NewSel(L, a->poolNum, a->a, a->b);
+    int64_t n = a->b - a->a;
+    int64_t words = (n + 63) / 64;
+    for (int64_t w = 0; w < words; w++) {
+        r->bits[w] = ~a->bits[w];
+    }
+    if ((n & 63) != 0) {
+        /* Bits beyond the view's rows stay zero, always. */
+        r->bits[words - 1] &= (((uint64_t)1 << (n & 63)) - 1);
+    }
     return 1;
 }
 
@@ -461,12 +736,31 @@ LSumWhere(lua_State *L)
     const char *field = luaL_checkstring(L, 2);
     const char *byfield = luaL_checkstring(L, 3);
     int op = luaL_checkoption(L, 4, NULL, kOpNames);
-    int64_t x = (int64_t)luaL_checkinteger(L, 5);
     ResolveColumn(L, 1, field, &vcol);
     ResolveColumn(L, 1, byfield, &pcol);
+    int64_t n = vcol.b - vcol.a;
+    if (vcol.type == 'f') {
+        double out;
+        if (pcol.type == 'f') {
+            out = SumWhereF64Fp(vcol.f + vcol.a, pcol.f + pcol.a, n, op,
+                                (double)luaL_checknumber(L, 5));
+        } else {
+            out = SumWhereF64Ip(vcol.f + vcol.a, pcol.i + pcol.a, n, op,
+                                (int64_t)luaL_checkinteger(L, 5));
+        }
+        lua_pushnumber(L, (lua_Number)out);
+        return 1;
+    }
     int64_t total = 0;
-    if (!SumWhereI64(vcol.i + vcol.a, pcol.i + pcol.a, vcol.b - vcol.a,
-                     op, x, &total)) {
+    int ok;
+    if (pcol.type == 'f') {
+        ok = SumWhereI64Fp(vcol.i + vcol.a, pcol.f + pcol.a, n, op,
+                           (double)luaL_checknumber(L, 5), &total);
+    } else {
+        ok = SumWhereI64(vcol.i + vcol.a, pcol.i + pcol.a, n, op,
+                         (int64_t)luaL_checkinteger(L, 5), &total);
+    }
+    if (!ok) {
         return luaL_error(L, "col: integer overflow");
     }
     lua_pushinteger(L, (lua_Integer)total);
@@ -533,17 +827,37 @@ LBandwidth(lua_State *L)
 static void
 BindImpl(lua_State *L, const ColImpl *impl)
 {
-    /* table on top: fill filter/sum/count bound to impl */
+    /* table on top: the impl-paired primitives (P3's A/B subjects) */
     lua_pushlightuserdata(L, (void *)(uintptr_t)impl);
     lua_pushcclosure(L, LFilter, 1);
     lua_setfield(L, -2, "filter");
     lua_pushlightuserdata(L, (void *)(uintptr_t)impl);
     lua_pushcclosure(L, LSum, 1);
     lua_setfield(L, -2, "sum");
+}
+
+static void
+BindCommon(lua_State *L)
+{
+    /* table on top: the scalar-only vocabulary (P3 earned no twins) */
     lua_pushcfunction(L, LSumWhere);
     lua_setfield(L, -2, "sumwhere");
     lua_pushcfunction(L, LCount);
     lua_setfield(L, -2, "count");
+    lua_pushinteger(L, 0);
+    lua_pushcclosure(L, LMinMax, 1);
+    lua_setfield(L, -2, "min");
+    lua_pushinteger(L, 1);
+    lua_pushcclosure(L, LMinMax, 1);
+    lua_setfield(L, -2, "max");
+    lua_pushinteger(L, 0);
+    lua_pushcclosure(L, LBand, 1);
+    lua_setfield(L, -2, "band");
+    lua_pushinteger(L, 1);
+    lua_pushcclosure(L, LBand, 1);
+    lua_setfield(L, -2, "bor");
+    lua_pushcfunction(L, LBnot);
+    lua_setfield(L, -2, "bnot");
 }
 
 void
@@ -551,12 +865,14 @@ MachteldCol_Open(lua_State *S)
 {
     luaL_newmetatable(S, COL_SEL_META);
     lua_pop(S, 1);
-    lua_createtable(S, 0, 6);
+    lua_createtable(S, 0, 12);
     BindImpl(S, &kScalar);                 /* the public dialect: scalar C */
-    lua_createtable(S, 0, 3);
+    BindCommon(S);
+    lua_createtable(S, 0, 10);
     BindImpl(S, &kScalar);
+    BindCommon(S);
     lua_setfield(S, -2, "_scalar");        /* the normative twins, by name */
-    lua_createtable(S, 0, 3);
+    lua_createtable(S, 0, 2);
     BindImpl(S, &kAvx2);
     lua_setfield(S, -2, "_avx2");          /* bench lane only, P3 */
     lua_pushcfunction(S, LBandwidth);
