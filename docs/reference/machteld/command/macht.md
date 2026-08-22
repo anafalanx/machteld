@@ -118,8 +118,10 @@ Kernels are trusted as written: there is no translation, no oracle, and
 no runtime verification - the build gates prove the machine (the engine,
 the wire, the boundary, the loader), and testing a kernel is the program
 author's optional work. The kernel environment is Lua 5.5 with `base`,
-`string`, `table`, `math`, `utf8`, and the vendored `lpeg` and `cjson`;
-no `io`, `os`, `package`, or `debug`.
+`string`, `table`, `math`, `utf8`, the vendored `lpeg` and `cjson`, and
+- as a negotiated capability on AVX2 hosts - the `col` primitive library
+(see the engine contract's "The col library"); no `io`, `os`, `package`,
+or `debug`.
 Handles are engine-scoped and never guessed; a handle offered to another
 engine is `nohandle`. `-shards` above the engine's thread bound is
 refused. A kernel returning a string shaped exactly like a handle is
