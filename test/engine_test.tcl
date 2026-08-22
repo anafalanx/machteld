@@ -185,8 +185,9 @@ scope {
         [dict get [reqok run name embedded args \
             [list [dict create handle $cpool]]] value] eq "two\nlines"}]
 
-    # The primitive palette (0.13.0 Phase 0 trio) - callable, undeclared.
-    check "col is not yet a declared capability" [expr {"col" ni $caps}]
+    # The primitive palette (0.13.0): declared from the full vocabulary.
+    check "col is a declared capability on this AVX2 host" \
+        [expr {"col" in $caps}]
     reqok def name coltrio chunk {function coltrio(h)
         local sel = col.filter(h, "status", "lt", 500)
         return col.sum(h, "status") * 1000000
@@ -207,14 +208,12 @@ scope {
     reqok def name colerr chunk {function colerr(h, what)
         if what == 1 then return col.sum(h, "zzz") end
         if what == 2 then return col.sum(h, "note") end
-        if what == 3 then return col.sum(h, "ratio") end
         G_STASH = h
         return 0
     end}
     foreach {what pattern} {
         1 "*col: unknown field*"
         2 "*col: field note is not numeric*"
-        3 "*col: field type f arrives*"
     } {
         set r [req run name colerr \
             args [list [dict create handle $cpool] $what]]
@@ -222,7 +221,7 @@ scope {
             ![dict get $r ok] && [errcode $r] eq "lua" &&
             [string match $pattern [dict get $r error message]]}]
     }
-    reqok run name colerr args [list [dict create handle $cpool] 4]
+    reqok run name colerr args [list [dict create handle $cpool] 3]
     reqok def name colleak chunk {function colleak(h)
         return col.filter(h, "status", "eq", 404)
     end}
@@ -245,6 +244,65 @@ scope {
     reqok def name colstale chunk {function colstale()
         return col.count(G_STASH)
     end}
+
+    # The float laws and the algebra, on a fixture that spells them out:
+    # x = {1.5, nan, -0.0, 2.5, inf}, y = {10, 20, 30, 40, 50}.
+    set fcsv [file join [pwd] engine_test_fixture_f.csv]
+    set f [open $fcsv wb]
+    puts -nonewline $f "x,y\n1.5,10\nnan,20\n-0.0,30\n2.5,40\ninf,50\n"
+    close $f
+    set r [reqok load format csv path $fcsv header 1 schema [list x f y i]]
+    set fpool [dict get $r handle]
+    reqok def name colfloat chunk {function colfloat(h)
+        local gt1 = col.filter(h, "x", "gt", 1.0)
+        local ne25 = col.filter(h, "x", "ne", 2.5)
+        local r = {}
+        r.gt1 = col.count(gt1)                 -- NaN matches nothing: 3
+        r.ne25 = col.count(ne25)               -- ne matches NaN: 4
+        r.both = col.count(col.band(gt1, ne25))          -- {1.5, inf}: 2
+        r.either = col.count(col.bor(gt1, ne25))         -- all but 2.5? no: 5
+        r.notgt1 = col.count(col.bnot(gt1))              -- {nan, -0.0}: 2
+        r.demorgan = col.count(col.bnot(col.band(gt1, ne25))) ==
+                     col.count(col.bor(col.bnot(gt1), col.bnot(ne25)))
+        r.fmin = col.min(h, "x")               -- NaN skipped: -0.0 -> 0.0
+        r.ysum = col.sumwhere(h, "y", "x", "gt", 1.0)    -- 10+40+50: 100
+        r.fsum = col.sum(h, "x", gt1)          -- 1.5+2.5+inf = inf
+        return r
+    end}
+    set v [dict get [reqok run name colfloat \
+        args [list [dict create handle $fpool]]] value]
+    check "float filters follow IEEE (NaN matches nothing but ne)" [expr {
+        [dict get $v gt1] == 3 && [dict get $v ne25] == 4}]
+    check "the selection algebra composes (band, bor, bnot, De Morgan)" [expr {
+        [dict get $v both] == 2 && [dict get $v either] == 5 &&
+        [dict get $v notgt1] == 2 && [dict get $v demorgan] == 1}]
+    check "min skips NaN and sumwhere crosses types (f pred, i value)" [expr {
+        [dict get $v fmin] == 0.0 && [dict get $v ysum] == 100}]
+    check "a float sum reaching infinity leaves as the tagged float" [expr {
+        [dict exists [dict get $v fsum] float] &&
+        [dict get [dict get $v fsum] float] eq "inf"}]
+    reqok def name colempty chunk {function colempty(h)
+        return col.min(h, "x", col.filter(h, "x", "lt", -100.0))
+    end}
+    set r [req run name colempty args [list [dict create handle $fpool]]]
+    check "min over an empty selection refuses by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*col: empty selection*" [dict get $r error message]]}]
+    reqok def name colnan chunk {function colnan(h)
+        return col.sum(h, "x")
+    end}
+    set v [dict get [reqok run name colnan \
+        args [list [dict create handle $fpool]]] value]
+    check "a selected NaN propagates through the float sum" [expr {
+        [dict exists $v float] && [dict get $v float] eq "nan"}]
+    reqok def name colminmax chunk {function colminmax(h)
+        return col.min(h, "y") * 1000 + col.max(h, "y")
+    end}
+    check "integer min and max work under no selection" [expr {
+        [dict get [reqok run name colminmax \
+            args [list [dict create handle $fpool]]] value] == 10050}]
+    reqok free handle $fpool
+    file delete -- $fcsv
     reqok free handle $cpool
     set r [req run name colstale]
     check "a stashed view outlives its pool by refusal, not by crash" [expr {
