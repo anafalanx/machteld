@@ -219,6 +219,24 @@ scope {
     check "a kernel reads a pool view (rows and columns)" \
         [expr {[dict get $r value] == 3}]
 
+    # First-touch sharded runs over fresh pools: every shard's view is
+    # built concurrently, exercising the shared view-tracking lock (the
+    # PoolTrackView race found by the 0.13.0 review panel). Best-effort
+    # by nature; repeated to give a regression a real chance to bite.
+    set stressOk 1
+    for {set round 0} {$round < 5} {incr round} {
+        set r [reqok load format lines path $fixture]
+        set fp [dict get $r handle]
+        set r [reqok run name nonempty \
+            args [list [dict create handle $fp]] shards 4]
+        if {[tcl::mathop::+ {*}[dict get $r value]] != 3} {
+            set stressOk 0
+        }
+        reqok free handle $fp
+    }
+    check "five first-touch sharded runs over fresh pools stay consistent" \
+        $stressOk
+
     # Sharding: partials, reduce, and the thread bound.
     set r [reqok run name nonempty args [list [dict create handle $pool]] shards 4]
     set parts [dict get $r value]
