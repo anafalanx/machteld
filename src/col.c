@@ -1032,6 +1032,62 @@ typedef struct {
     EngineStrCol sc;
 } RowsCol;
 
+/* Resolve every column of a live pool once, in pool order. Returns the
+ * column count. Shared by col.rows and col.topn. */
+static int
+ResolveRowsCols(int poolNum, RowsCol *cols)
+{
+    const char *names[64];
+    int ncols = 0;
+    char t;
+    while (ncols < 64 && EnginePoolField(poolNum, ncols, &names[ncols], &t)) {
+        RowsCol *rc = &cols[ncols];
+        rc->type = t;
+        rc->i = NULL;
+        rc->f = NULL;
+        if (t == 's') {
+            EnginePoolStrColumn(poolNum, names[ncols], &rc->sc);
+        } else {
+            const void *data = NULL;
+            int64_t rows = 0;
+            char tt;
+            EnginePoolColumn(poolNum, names[ncols], &tt, &data, &rows);
+            rc->i = (t == 'i') ? (const int64_t *)data : NULL;
+            rc->f = (t == 'f') ? (const double *)data : NULL;
+        }
+        ncols++;
+    }
+    return ncols;
+}
+
+/* Push one pool row as a sequence in pool column order. */
+static void
+PushRowSeq(lua_State *L, const RowsCol *cols, int ncols, int64_t row)
+{
+    lua_createtable(L, ncols, 0);
+    for (int c = 0; c < ncols; c++) {
+        const RowsCol *rc = &cols[c];
+        switch (rc->type) {
+        case 'i':
+            lua_pushinteger(L, (lua_Integer)rc->i[row]);
+            break;
+        case 'f':
+            lua_pushnumber(L, (lua_Number)rc->f[row]);
+            break;
+        default:
+            if (rc->sc.dictN > 0) {
+                int32_t dc = rc->sc.code[row];
+                lua_pushlstring(L, rc->sc.arena + rc->sc.dictOff[dc],
+                                (size_t)rc->sc.dictLen[dc]);
+            } else {
+                lua_pushlstring(L, rc->sc.arena + rc->sc.off[row],
+                                (size_t)rc->sc.len[row]);
+            }
+        }
+        lua_rawseti(L, -2, (lua_Integer)(c + 1));
+    }
+}
+
 static int
 LRows(lua_State *L)
 {
@@ -1054,29 +1110,8 @@ LRows(lua_State *L)
     if (count > 4096) {
         return luaL_error(L, "col: rows asks more than 4096");
     }
-    /* Resolve every column once, in pool order. */
     RowsCol cols[64];
-    const char *names[64];
-    int ncols = 0;
-    char t;
-    while (ncols < 64 &&
-           EnginePoolField(poolNum, ncols, &names[ncols], &t)) {
-        RowsCol *rc = &cols[ncols];
-        rc->type = t;
-        rc->i = NULL;
-        rc->f = NULL;
-        if (t == 's') {
-            EnginePoolStrColumn(poolNum, names[ncols], &rc->sc);
-        } else {
-            const void *data = NULL;
-            int64_t rows = 0;
-            char tt;
-            EnginePoolColumn(poolNum, names[ncols], &tt, &data, &rows);
-            rc->i = (t == 'i') ? (const int64_t *)data : NULL;
-            rc->f = (t == 'f') ? (const double *)data : NULL;
-        }
-        ncols++;
-    }
+    int ncols = ResolveRowsCols(poolNum, cols);
     /* Collect the view-relative row indices of the page. */
     int64_t n = b - a;
     int64_t *page = (int64_t *)lua_newuserdatauv(L,
@@ -1112,30 +1147,194 @@ LRows(lua_State *L)
     /* Build the page: a sequence of row sequences. */
     lua_createtable(L, (int)got, 0);
     for (int64_t r = 0; r < got; r++) {
-        int64_t row = a + page[r];
-        lua_createtable(L, ncols, 0);
-        for (int c = 0; c < ncols; c++) {
-            RowsCol *rc = &cols[c];
-            switch (rc->type) {
-            case 'i':
-                lua_pushinteger(L, (lua_Integer)rc->i[row]);
-                break;
-            case 'f':
-                lua_pushnumber(L, (lua_Number)rc->f[row]);
-                break;
-            default:
-                if (rc->sc.dictN > 0) {
-                    int32_t dc = rc->sc.code[row];
-                    lua_pushlstring(L, rc->sc.arena + rc->sc.dictOff[dc],
-                                    (size_t)rc->sc.dictLen[dc]);
-                } else {
-                    lua_pushlstring(L, rc->sc.arena + rc->sc.off[row],
-                                    (size_t)rc->sc.len[row]);
-                }
-            }
-            lua_rawseti(L, -2, (lua_Integer)(c + 1));
-        }
+        PushRowSeq(L, cols, ncols, a + page[r]);
         lua_rawseti(L, -2, (lua_Integer)(r + 1));
+    }
+    return 1;
+}
+
+/* col.groupcount(h, BYFIELD ?, SEL?) and col.groupsum(h, FIELD,
+ * BYFIELD ?, SEL?) - the chart verbs (plan-machteld-014, the
+ * follow-through). BYFIELD is a dictionary-mode s column (the codes ARE
+ * the group indices: one integer sweep, k accumulators) or an i column
+ * (bounded open-addressed hash, first-appearance numbering, past
+ * COL_GROUP_LIMIT groups refuses by name). The panel's pins: the i
+ * group universe is the VIEW's rows with SEL ignored - the key set and
+ * its order never depend on the selection, SEL masks only the counting
+ * (dict partials from shards align by index, i partials by KEY only);
+ * a zero-row s column answers empty, never the dictionary-limit
+ * refusal. Returns {keys, counts} / {keys, counts, sums}, parallel
+ * sequences in first-appearance order, every group included. Integer
+ * sums are per-element checked (groups break the chunk proof); float
+ * sums accumulate sequentially per group - the twin is the Lua loop. */
+#define COL_GROUP_LIMIT 65536
+
+static int
+LGroup(lua_State *L)
+{
+    int wantSum = (int)lua_tointeger(L, lua_upvalueindex(1));
+    int byIdx = wantSum ? 3 : 2;
+    int poolNum;
+    int64_t a, b;
+    ResolveView(L, 1, &poolNum, &a, &b);
+    ColArg vcol;
+    if (wantSum) {
+        ResolveColumn(L, 1, luaL_checkstring(L, 2), &vcol);
+    }
+    const char *byfield = luaL_checkstring(L, byIdx);
+    const uint64_t *bits = NULL;
+    if (!lua_isnoneornil(L, byIdx + 1)) {
+        ColSel *s = (ColSel *)luaL_checkudata(L, byIdx + 1, COL_SEL_META);
+        if (s->poolNum != poolNum || s->a != a || s->b != b) {
+            return luaL_error(L, "col: selection is bound to another view");
+        }
+        bits = s->bits;
+    }
+    int64_t n = b - a;
+    EngineStrCol sc;
+    char bmode = ResolveStrColumn(L, poolNum, byfield, &sc);
+    int64_t k = 0;                   /* the group count */
+    int64_t *ikeys = NULL;           /* the i arm's keys */
+    if (bmode == 'd') {
+        k = sc.dictN;
+    } else if (bmode == 'p') {
+        if (sc.rows != 0) {
+            return luaL_error(L,
+                "col: field %s is past the dictionary limit (span mode)",
+                byfield);
+        }
+        /* zero rows: an empty answer, never a lying refusal */
+    } else {
+        /* Numeric BYFIELD: i groups by value, f refuses. */
+        ColArg bcol;
+        ResolveColumn(L, 1, byfield, &bcol);
+        if (bcol.type != 'i') {
+            return luaL_error(L, "col: cannot group by a float field");
+        }
+        bmode = 'i';
+    }
+    /* The accumulators (metered): dict arm sizes by the dictionary;
+     * the i arm sizes at the group limit up front - its k grows as
+     * keys appear (fused single pass: the first O2 run's separate
+     * gidx round-trip cost 25M x 4 bytes of traffic for nothing). */
+    int64_t acap = (bmode == 'i') ? COL_GROUP_LIMIT : (k > 0 ? k : 1);
+    int64_t *cnt = (int64_t *)lua_newuserdatauv(L,
+        (size_t)acap * sizeof(int64_t), 0);
+    memset(cnt, 0, (size_t)acap * sizeof(int64_t));
+    int64_t *sumi = NULL;
+    double *sumf = NULL;
+    if (wantSum) {
+        if (vcol.type == 'i') {
+            sumi = (int64_t *)lua_newuserdatauv(L,
+                (size_t)acap * sizeof(int64_t), 0);
+            memset(sumi, 0, (size_t)acap * sizeof(int64_t));
+        } else {
+            sumf = (double *)lua_newuserdatauv(L,
+                (size_t)acap * sizeof(double), 0);
+            memset(sumf, 0, (size_t)acap * sizeof(double));
+        }
+    }
+    if (bmode == 'i') {
+        /* The i arm, fused: the group universe is the VIEW's rows with
+         * SEL ignored - every key is inserted, the selection masks
+         * only the counting. One pass, no per-row index buffer. */
+        ColArg bcol;
+        ResolveColumn(L, 1, byfield, &bcol);
+        size_t htSize = 4;
+        while (htSize < (size_t)COL_GROUP_LIMIT * 4) {
+            htSize <<= 1;
+        }
+        int32_t *ht = (int32_t *)lua_newuserdatauv(L,
+            htSize * sizeof(int32_t), 0);
+        memset(ht, 0xFF, htSize * sizeof(int32_t));
+        ikeys = (int64_t *)lua_newuserdatauv(L,
+            (size_t)COL_GROUP_LIMIT * sizeof(int64_t), 0);
+        for (int64_t i = 0; i < n; i++) {
+            int64_t key = bcol.i[a + i];
+            uint64_t h = (uint64_t)key * 11400714819323198485ull;
+            size_t slot = (size_t)(h >> 32) & (htSize - 1);
+            int32_t g;
+            for (;;) {
+                int32_t idx = ht[slot];
+                if (idx < 0) {
+                    if (k == COL_GROUP_LIMIT) {
+                        return luaL_error(L,
+                            "col: more than 65536 groups");
+                    }
+                    ht[slot] = (int32_t)k;
+                    ikeys[k] = key;
+                    g = (int32_t)k;
+                    k++;
+                    break;
+                }
+                if (ikeys[idx] == key) {
+                    g = idx;
+                    break;
+                }
+                slot = (slot + 1) & (htSize - 1);
+            }
+            if (bits != NULL &&
+                    (bits[i >> 6] & ((uint64_t)1 << (i & 63))) == 0) {
+                continue;
+            }
+            cnt[g]++;
+            if (sumi != NULL) {
+                if (__builtin_add_overflow(sumi[g], vcol.i[a + i],
+                                           &sumi[g])) {
+                    return luaL_error(L, "col: integer overflow");
+                }
+            } else if (sumf != NULL) {
+                sumf[g] += vcol.f[a + i];
+            }
+        }
+    } else {
+        for (int64_t i = 0; i < n; i++) {
+            if (bits != NULL &&
+                    (bits[i >> 6] & ((uint64_t)1 << (i & 63))) == 0) {
+                continue;
+            }
+            int32_t g = sc.code[a + i];
+            cnt[g]++;
+            if (sumi != NULL) {
+                if (__builtin_add_overflow(sumi[g], vcol.i[a + i],
+                                           &sumi[g])) {
+                    return luaL_error(L, "col: integer overflow");
+                }
+            } else if (sumf != NULL) {
+                sumf[g] += vcol.f[a + i];
+            }
+        }
+    }
+    /* {keys, counts, sums?} - parallel, first-appearance order. */
+    lua_createtable(L, 0, wantSum ? 3 : 2);
+    lua_createtable(L, (int)k, 0);
+    for (int64_t g = 0; g < k; g++) {
+        if (bmode == 'd') {
+            lua_pushlstring(L, sc.arena + sc.dictOff[g],
+                            (size_t)sc.dictLen[g]);
+        } else {
+            lua_pushinteger(L, (lua_Integer)ikeys[g]);
+        }
+        lua_rawseti(L, -2, (lua_Integer)(g + 1));
+    }
+    lua_setfield(L, -2, "keys");
+    lua_createtable(L, (int)k, 0);
+    for (int64_t g = 0; g < k; g++) {
+        lua_pushinteger(L, (lua_Integer)cnt[g]);
+        lua_rawseti(L, -2, (lua_Integer)(g + 1));
+    }
+    lua_setfield(L, -2, "counts");
+    if (wantSum) {
+        lua_createtable(L, (int)k, 0);
+        for (int64_t g = 0; g < k; g++) {
+            if (sumi != NULL) {
+                lua_pushinteger(L, (lua_Integer)sumi[g]);
+            } else {
+                lua_pushnumber(L, (lua_Number)sumf[g]);
+            }
+            lua_rawseti(L, -2, (lua_Integer)(g + 1));
+        }
+        lua_setfield(L, -2, "sums");
     }
     return 1;
 }
@@ -1158,6 +1357,16 @@ LDistinct(lua_State *L)
     char mode = ResolveStrColumn(L, poolNum, field, &sc);
     if (mode == 'n') {
         return luaL_error(L, "col: field %s is not a string", field);
+    }
+    if (mode == 'p' && sc.rows == 0) {
+        /* A zero-row column has no dictionary by construction; the
+         * limit refusal would be a lying name. Answer empty. */
+        if (!wantValues) {
+            lua_pushinteger(L, 0);
+        } else {
+            lua_createtable(L, 0, 0);
+        }
+        return 1;
     }
     if (mode == 'p') {
         return luaL_error(L,
@@ -1233,6 +1442,142 @@ LBandwidth(lua_State *L)
     return 2;
 }
 
+/* col.topn(h, FIELD, N, SEL_or_nil, DIR) - the order-by verb: the N
+ * rows with the largest ("desc") or smallest ("asc") FIELD under SEL,
+ * AS ROWS in pool column order, like col.rows. One pass, a bounded
+ * heap of (value, row): the kept set is the strongest N, ties broken
+ * by row order (earlier rows win a place; output ties ascend by row).
+ * NaN never enters the heap (the min/max law). N above 4096 refuses
+ * by name; strings refuse through the numeric resolution. */
+typedef struct {
+    int64_t vi;
+    double vf;
+    int64_t row;                     /* view-relative */
+} TopEnt;
+
+/* Is x weaker than y in the kept set? For desc the weakest is the
+ * SMALLEST value (evicted first); ties: the LARGER row index is
+ * weaker, so earlier rows survive. asc mirrors the value sense. */
+static int
+TopWeaker(const TopEnt *x, const TopEnt *y, int isF, int desc)
+{
+    if (isF) {
+        if (x->vf != y->vf) {
+            return desc ? (x->vf < y->vf) : (x->vf > y->vf);
+        }
+    } else {
+        if (x->vi != y->vi) {
+            return desc ? (x->vi < y->vi) : (x->vi > y->vi);
+        }
+    }
+    return x->row > y->row;
+}
+
+static void
+TopSiftDown(TopEnt *heap, int64_t nheap, int64_t at, int isF, int desc)
+{
+    /* The root is the WEAKEST kept entry (a min-heap in strength). */
+    for (;;) {
+        int64_t l = 2 * at + 1;
+        int64_t r = l + 1;
+        int64_t weakest = at;
+        if (l < nheap && TopWeaker(&heap[l], &heap[weakest], isF, desc)) {
+            weakest = l;
+        }
+        if (r < nheap && TopWeaker(&heap[r], &heap[weakest], isF, desc)) {
+            weakest = r;
+        }
+        if (weakest == at) {
+            return;
+        }
+        TopEnt t = heap[at];
+        heap[at] = heap[weakest];
+        heap[weakest] = t;
+        at = weakest;
+    }
+}
+
+static int
+LTopN(lua_State *L)
+{
+    ColArg col;
+    const char *field = luaL_checkstring(L, 2);
+    ResolveColumn(L, 1, field, &col);
+    int64_t nwant = (int64_t)luaL_checkinteger(L, 3);
+    if (nwant < 0) {
+        return luaL_error(L, "col: argument type (N >= 0)");
+    }
+    if (nwant > 4096) {
+        return luaL_error(L, "col: topn asks more than 4096");
+    }
+    const uint64_t *bits = NULL;
+    if (!lua_isnoneornil(L, 4)) {
+        ColSel *s = (ColSel *)luaL_checkudata(L, 4, COL_SEL_META);
+        if (s->poolNum != col.poolNum || s->a != col.a || s->b != col.b) {
+            return luaL_error(L, "col: selection is bound to another view");
+        }
+        bits = s->bits;
+    }
+    static const char *const kDirs[] = { "desc", "asc", NULL };
+    int desc = luaL_checkoption(L, 5, NULL, kDirs) == 0;
+    int isF = (col.type == 'f');
+    int64_t n = col.b - col.a;
+    TopEnt *heap = (TopEnt *)lua_newuserdatauv(L,
+        (size_t)(nwant > 0 ? nwant : 1) * sizeof(TopEnt), 0);
+    int64_t nheap = 0;
+    for (int64_t i = 0; i < n; i++) {
+        if (bits != NULL &&
+                (bits[i >> 6] & ((uint64_t)1 << (i & 63))) == 0) {
+            continue;
+        }
+        TopEnt e;
+        e.row = i;
+        if (isF) {
+            e.vf = col.f[col.a + i];
+            if (e.vf != e.vf) {
+                continue;                          /* NaN never enters */
+            }
+            e.vi = 0;
+        } else {
+            e.vi = col.i[col.a + i];
+            e.vf = 0;
+        }
+        if (nheap < nwant) {
+            /* Grow: sift the new entry up toward the weak root. */
+            int64_t at = nheap++;
+            heap[at] = e;
+            while (at > 0) {
+                int64_t up = (at - 1) / 2;
+                if (!TopWeaker(&heap[at], &heap[up], isF, desc)) {
+                    break;
+                }
+                TopEnt t = heap[at];
+                heap[at] = heap[up];
+                heap[up] = t;
+                at = up;
+            }
+        } else if (nwant > 0 && TopWeaker(&heap[0], &e, isF, desc)) {
+            heap[0] = e;
+            TopSiftDown(heap, nheap, 0, isF, desc);
+        }
+    }
+    /* Strong-to-weak output: repeatedly pop the weak root to the back. */
+    for (int64_t m = nheap; m > 1; m--) {
+        TopEnt t = heap[0];
+        heap[0] = heap[m - 1];
+        heap[m - 1] = t;
+        TopSiftDown(heap, m - 1, 0, isF, desc);
+    }
+    RowsCol cols[64];
+    int ncols = ResolveRowsCols(col.poolNum, cols);
+    lua_createtable(L, (int)nheap, 0);
+    for (int64_t r = 0; r < nheap; r++) {
+        PushRowSeq(L, cols, ncols, col.a + heap[r].row);
+        lua_rawseti(L, -2, (lua_Integer)(r + 1));
+    }
+    return 1;
+}
+
 static void
 BindImpl(lua_State *L, const ColImpl *impl)
 {
@@ -1275,6 +1620,14 @@ BindCommon(lua_State *L)
     lua_setfield(L, -2, "values");
     lua_pushcfunction(L, LRows);
     lua_setfield(L, -2, "rows");
+    lua_pushinteger(L, 0);
+    lua_pushcclosure(L, LGroup, 1);
+    lua_setfield(L, -2, "groupcount");
+    lua_pushinteger(L, 1);
+    lua_pushcclosure(L, LGroup, 1);
+    lua_setfield(L, -2, "groupsum");
+    lua_pushcfunction(L, LTopN);
+    lua_setfield(L, -2, "topn");
 }
 
 void

@@ -227,6 +227,34 @@ typedef struct {
 
 #define ENGINE_DICT_LIMIT 65536
 
+/* The effective dictionary limit: ENGINE_DICT_LIMIT by contract. The
+ * UNCONTRACTED bench escape MACHTELD_DICT_LIMIT (plan-machteld-014's
+ * cliff instrument) is read once: a well-formed value in [1, 1048576]
+ * applies (larger clamps down to 1048576); anything malformed or
+ * below 1 is IGNORED and the default stands - never a silent
+ * clamp-to-1 that would disable dictionaries. Ambient state must be
+ * visible: stats always reports dict_limit. Loads run on the op
+ * thread only, so the once-latch is race-free. */
+static int64_t gDictLimit = 0;
+
+static int64_t
+DictLimit(void)
+{
+    if (gDictLimit == 0) {
+        int64_t v = ENGINE_DICT_LIMIT;
+        const char *e = getenv("MACHTELD_DICT_LIMIT");
+        if (e != NULL && *e != '\0') {
+            char *end = NULL;
+            long long parsed = strtoll(e, &end, 10);
+            if (end != NULL && *end == '\0' && parsed >= 1) {
+                v = (parsed > 1048576) ? 1048576 : (int64_t)parsed;
+            }
+        }
+        gDictLimit = v;
+    }
+    return gDictLimit;
+}
+
 typedef struct {
     int used;
     int64_t rows;
@@ -716,14 +744,15 @@ PoolDictBuild(Pool *p, PoolCol *col)
     if (rows == 0) {
         return;
     }
-    size_t htSize = 1;
-    while (htSize < (size_t)ENGINE_DICT_LIMIT * 4) {
+    int64_t limit = DictLimit();
+    size_t htSize = 4;
+    while (htSize < (size_t)limit * 4) {
         htSize <<= 1;
     }
     int32_t *ht = (int32_t *)malloc(htSize * sizeof(int32_t));
     int32_t *code = (int32_t *)malloc((size_t)rows * sizeof(int32_t));
-    int64_t *dOff = (int64_t *)malloc(ENGINE_DICT_LIMIT * sizeof(int64_t));
-    int64_t *dLen = (int64_t *)malloc(ENGINE_DICT_LIMIT * sizeof(int64_t));
+    int64_t *dOff = (int64_t *)malloc((size_t)limit * sizeof(int64_t));
+    int64_t *dLen = (int64_t *)malloc((size_t)limit * sizeof(int64_t));
     if (ht == NULL || code == NULL || dOff == NULL || dLen == NULL) {
         free(ht);
         free(code);
@@ -745,7 +774,7 @@ PoolDictBuild(Pool *p, PoolCol *col)
         for (;;) {
             int32_t idx = ht[slot];
             if (idx < 0) {
-                if (dictN == ENGINE_DICT_LIMIT) {
+                if (dictN == limit) {
                     free(ht);
                     free(code);
                     free(dOff);
@@ -2136,6 +2165,8 @@ OpStats(int64_t id)
     EjBufInt(&b, (int64_t)gStats.viewEvictions);
     EjBufText(&b, ",\"cap_bytes\":");
     EjBufInt(&b, (int64_t)ENGINE_STATE_CAP_MB * 1024 * 1024);
+    EjBufText(&b, ",\"dict_limit\":");
+    EjBufInt(&b, DictLimit());
     EjBufText(&b, ",\"mem_used\":[");
     for (int i = 0; i < gNStates; i++) {
         if (i > 0) {

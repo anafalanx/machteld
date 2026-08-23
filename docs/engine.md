@@ -85,7 +85,7 @@ macht stop $e
 | `macht def NAME CHUNK` | Send a Lua chunk; it runs once in the kernel environment and must leave a global function `NAME`. Cached by source hash. |
 | `macht run NAME ?ARG ...? ?-json TEXT? ?-shards N? ?-reduce NAME2? ?-budget DURATION?` | Call the kernel with arguments and return its value; see the boundary and sharding sections. |
 | `macht free HANDLE` | Release a pool or result handle. |
-| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes`; per-pool `dict_cols` and `span_cols` (the string columns' encoding mode) - the Plimsoll lines a long-lived program watches. |
+| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes`; the effective `dict_limit`; per-pool `dict_cols` and `span_cols` (the string columns' encoding mode) - the Plimsoll lines a long-lived program watches. |
 | `macht conform EXE` | Run the conformance suite against an executable and report. |
 
 Every work subcommand accepts `-engine TOKEN`. Without it, the first work
@@ -304,7 +304,8 @@ The vocabulary, over a view `h`:
   distinct strings as a sequence in first-appearance order (a filter
   dropdown in one call). The dictionary is pool-wide - a view over a
   subrange still answers for the whole column. On a span-mode column
-  both refuse by name (`col: field ... is past the dictionary limit`).
+  both refuse by name (`col: field ... is past the dictionary limit`);
+  a zero-row column answers empty (0, `{}`), never that refusal.
 - `col.min(h, FIELD ?, SEL?)`, `col.max(...)` - NaN is skipped; the
   result seeds at the first surviving element; nothing surviving raises
   `col: empty selection`. `col.count(h)` and `col.count(SEL)`.
@@ -320,6 +321,28 @@ The vocabulary, over a view `h`:
   name. It reads pool memory directly - dictionary or span alike, no
   column materialization - so a GUI pages a pool of any size: filter,
   count, fetch fifty rows, one kernel, one round trip.
+- `col.groupcount(h, BYFIELD ?, SEL?)` and `col.groupsum(h, FIELD,
+  BYFIELD ?, SEL?)` - the chart verbs: `{keys, counts}` /
+  `{keys, counts, sums}` as parallel sequences in first-appearance
+  order, every group included, empty ones too. BYFIELD is a
+  dictionary-mode `s` column (the group set is the pool-wide
+  dictionary; sharded partials align by index) or an `i` column
+  (bounded at 65,536 groups, refused by name past that; the group set
+  is the VIEW's rows with SEL ignored - the selection masks only the
+  counting - and sharded partials align by KEY, never by index, since
+  each shard numbers its own first appearances). Grouping by a float
+  field refuses. Integer sums are exact per-element checked adds;
+  float sums accumulate sequentially per group. A zero-row column
+  answers empty. One caveat carried by the boundary, not the verb: a
+  column holding non-UTF-8 bytes groups fine in-cell, but returning
+  its keys raw fails the reply at the UTF-8-strict wire - map or drop
+  such keys in the kernel before returning.
+- `col.topn(h, FIELD, N, SEL_or_nil, DIR)` - the order-by verb: the N
+  rows with the largest (`"desc"`) or smallest (`"asc"`) FIELD under
+  SEL, as rows in pool column order like `col.rows`, strongest first.
+  Ties break by row order (earlier rows win a place; equal values
+  ascend by row in the output), deterministically. NaN rows never
+  enter; N above 4096 refuses by name; FIELD is `i` or `f`.
 
 **Dictionary encoding.** At load, every `s` column is dictionary-encoded:
 the distinct values are numbered in first-appearance order and the column
@@ -348,12 +371,15 @@ string field`, `col: op ... needs a numeric field`, `col: field ... is
 not a string`, `col: field ... is past the dictionary limit` - are Lua
 errors and surface as `{MACHTELD MACHT lua}` with the message intact.
 
-Two pieces of measured guidance, not law: a single `col` call outruns
+Three pieces of measured guidance, not law: a single `col` call outruns
 the twelve-shard Lua path several times over, so arithmetic no longer
 needs `-shards` - shard for kernels that do real per-row Lua work, not
-for primitives; and for anything the vocabulary cannot express, the
-fallback is the ordinary Lua loop over the materialized columns, in the
-same kernel, beside the same data.
+for primitives; a span-mode predicate walks every row (~82 ns/row
+measured), so at tens of millions of rows a keystroke-driven filter
+costs seconds - debounce that lane, while dictionary columns stay
+keystroke-fast at any measured scale; and for anything the vocabulary
+cannot express, the fallback is the ordinary Lua loop over the
+materialized columns, in the same kernel, beside the same data.
 
 ## Limits and kill
 
