@@ -490,7 +490,84 @@ scope {
         [dict get $modes $dpool] eq {1 0} &&
         [dict get $modes $spool] eq {0 1} &&
         [dict get $modes $epool] eq {0 1}}]
+
+    # col.rows (0.14, the GUI spike's fetch primitive): the page equals
+    # its Lua twin exactly - row order and under a selection, FIRST past
+    # the population is an empty page, COUNT above 4096 refuses.
+    reqok def name rowstwin chunk {function rowstwin(h, first, count, useSel)
+        local sel = nil
+        if useSel == 1 then
+            sel = col.filter(h, "path", "match", "/api/*")
+        end
+        local got = col.rows(h, sel, first, count)
+        local exp = {}
+        local k = 0
+        for i = 1, h.rows do
+            local inSel = true
+            if sel ~= nil then
+                inSel = string.sub(h.path[i], 1, 5) == "/api/"
+            end
+            if inSel then
+                k = k + 1
+                if k >= first and k < first + count then
+                    exp[#exp + 1] = { h.path[i], h.bytes[i] }
+                end
+            end
+        end
+        if #got ~= #exp then return -1 end
+        for r = 1, #got do
+            if #got[r] ~= 2 then return -2 end
+            if got[r][1] ~= exp[r][1] or got[r][2] ~= exp[r][2] then
+                return -3
+            end
+        end
+        return #got
+    end}
+    foreach {mode mpool} [list dictionary $dpool span $spool] {
+        set h [dict create handle $mpool]
+        check "col.rows equals its twin, row order ($mode)" [expr {
+            [dict get [reqok run name rowstwin args \
+                [list $h 1 50 0]] value] == 8}]
+        check "col.rows pages the 2nd-3rd selected rows ($mode)" [expr {
+            [dict get [reqok run name rowstwin args \
+                [list $h 2 2 1]] value] == 2}]
+        check "col.rows past the population is an empty page ($mode)" [expr {
+            [dict get [reqok run name rowstwin args \
+                [list $h 5 3 1]] value] == 0}]
+    }
+    reqok def name rowsmax chunk {function rowsmax(h)
+        return col.rows(h, nil, 1, 4097)
+    end}
+    set r [req run name rowsmax args [list [dict create handle $dpool]]]
+    check "col.rows refuses a page above 4096 by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*asks more than 4096*" [dict get $r error message]]}]
+
+    # The lazy view's liveness law (0.14): a stashed view whose pool was
+    # freed keeps answering for columns it already materialized, and
+    # refuses BY NAME on the first untouched column - never a stale
+    # read. The epool saw only col primitives, so neither of its
+    # columns is materialized yet.
+    reqok def name lazystash chunk {function lazystash(h)
+        G_LAZY = h
+        return h.path[1]
+    end}
+    check "a column materializes through the lazy view" [expr {
+        [dict get [reqok run name lazystash args \
+            [list [dict create handle $epool]]] value] eq "p1"}]
     reqok free handle $epool
+    reqok def name lazytouched chunk {function lazytouched()
+        return G_LAZY.path[3]
+    end}
+    check "a touched column survives its pool (the narrowed guarantee)" \
+        [expr {[dict get [reqok run name lazytouched] value] eq "p3"}]
+    reqok def name lazyuntouched chunk {function lazyuntouched()
+        return G_LAZY.bytes[1]
+    end}
+    set r [req run name lazyuntouched]
+    check "an untouched column refuses by name after free" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*view outlives its pool*" [dict get $r error message]]}]
     reqok free handle $spool
     reqok free handle $dpool
     file delete -- $scsv
