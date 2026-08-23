@@ -9,3 +9,6 @@
 *.res
 *.a
 *.tmp
+# Session scratch, never tracked.
+/scratch.txt
+/tree-brief.tcl
