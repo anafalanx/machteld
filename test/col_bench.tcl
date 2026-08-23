@@ -469,6 +469,42 @@ scope {
     puts [format "S3r Lua glob loop %.1f ms (the reken-lineage class); span mode %.1fx" \
         [median $bms] [median $rs]]
 
+    # O1 (the follow-through): groupsum vs the pinned Lua group loop on
+    # the 1M dictionary pool - exact agreement, >= 10x.
+    req def name base_grp chunk {function base_grp(h)
+        local pad, by = h.pad, h.bytes
+        local sum = {}
+        for i = 1, h.rows do
+            local p = pad[i]
+            sum[p] = (sum[p] or 0) + by[i]
+        end
+        local acc = 0
+        for _, v in pairs(sum) do acc = acc + v end
+        return acc
+    end}
+    req def name col_grp chunk {function col_grp(h)
+        local g = col.groupsum(h, "bytes", "pad")
+        local acc = 0
+        for d = 1, #g.sums do acc = acc + g.sums[d] end
+        return acc
+    end}
+    runk base_grp $SD
+    runk col_grp $SD
+    set rg {}
+    set bv ""
+    set cv ""
+    for {set i 0} {$i < 7} {incr i} {
+        set rb [runk base_grp $SD]
+        set rc [runk col_grp $SD]
+        set bv [dict get $rb value]
+        set cv [dict get $rc value]
+        lappend rg [expr {[dict get $rb ms] / [dict get $rc ms]}]
+    }
+    if {$bv != $cv} { puts "O1  VALUES DISAGREE: lua $bv col $cv" }
+    set o1 [median $rg]
+    puts [format "O1  groupsum vs the Lua group loop (dictionary, 1M): %.1fx (>=10x)  %s" \
+        $o1 [expr {$o1 >= 10.0 ? "HELD" : "MISSED"}]]
+
     # S4 spot: dict, span, and the Lua twins agree on the 1M (the full
     # hostile differential lives in the gate lane's engine test).
     set ok [expr {

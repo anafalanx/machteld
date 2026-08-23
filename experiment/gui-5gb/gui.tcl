@@ -113,16 +113,38 @@ proc runquery {} {
     set twall [expr {([clock microseconds] - $t0) / 1000.0}]
     lappend META [list $twall $trun [dict get $r n]]
     set busy 0
-    # The newest text may have moved on while we were on the wire.
+    # The newest text may have moved on while we were on the wire. The
+    # recheck re-enters the DEBOUNCED lane (panel: calling runquery
+    # directly here chains back-to-back full-cost span queries the
+    # moment each one finishes - the exact stale work the policy
+    # exists to prevent).
     if {[.top.filter get] ne $text || [.top.veld get] ne $veld} {
+        keyquery
+    }
+}
+
+# The debounce policy (plan-machteld-014, the follow-through):
+# dictionary and numeric columns re-filter per keystroke; span columns
+# 350 ms after the LAST keystroke - a span match answers in seconds,
+# and firing one per keystroke queues seconds of stale work. The span
+# set is known from the mode assertion above.
+set SPANCOLS {query}
+set debounceId ""
+
+proc keyquery {} {
+    global SPANCOLS debounceId
+    if {[.top.veld get] in $SPANCOLS} {
+        after cancel $debounceId
+        set debounceId [after 350 runquery]
+    } else {
         after idle runquery
     }
 }
 
-bind .top.filter <KeyRelease> { after idle runquery }
+bind .top.filter <KeyRelease> { keyquery }
 bind .top.veld <<ComboboxSelected>> {
     set have ""
-    after idle runquery
+    keyquery
 }
 runquery
 
@@ -165,13 +187,54 @@ if {$drive} {
     set g4 [drivecol pad "/api/v1/user"]
     # And a second dictionary lane for the record: agent narrowing.
     drivecol agent "Firefox/128"
-    # G5: the span column, same drive shape, measured not graded.
-    set g5 [drivecol query "s=00"]
     puts [format "G4 dictionary keystroke-to-repaint: median %.1f ms (<=150) worst %.1f ms (<=400)  %s" \
         [lindex $g4 0] [lindex $g4 1] \
         [expr {[lindex $g4 0] <= 150 && [lindex $g4 1] <= 400 ? "HELD" : "MISSED"}]]
-    puts [format "G5 span column, same drive: median %.1f ms worst %.1f ms (measured, no bar)" \
-        [lindex $g5 0] [lindex $g5 1]]
+    # O4: the span column under the debounce policy - typed at human
+    # cadence (~60 ms/key, no pumping of pending queries between keys):
+    # the policy must coalesce to fewer queries than keystrokes, the
+    # answer must equal the serial answer, and the last repaint must
+    # land within 2.6 s of the last keystroke (G5's 2.1 s query plus
+    # the 350 ms pause plus paint).
+    .top.veld set query
+    event generate .top.veld <<ComboboxSelected>>
+    for {set i 0} {$i < 10} {incr i} {
+        update
+        after 20 {set ::_tick 1}
+        vwait ::_tick
+    }
+    .top.filter delete 0 end
+    set have ""
+    set META {}
+    focus -force .top.filter
+    foreach ch [split "s=00" ""] {
+        .top.filter insert end $ch
+        event generate .top.filter <KeyRelease> -keysym a
+        # The clock starts at the LAST keystroke's event (panel: after
+        # the cadence wait it measured ~60 ms short).
+        set tlast [clock microseconds]
+        after 60 {set ::_tick 1}
+        vwait ::_tick
+    }
+    set deadline [expr {$tlast + 5000000}]
+    while {[llength $META] == 0 && [clock microseconds] < $deadline} {
+        update
+        after 20 {set ::_tick 1}
+        vwait ::_tick
+    }
+    set o4q [llength $META]
+    set o4wall [expr {([clock microseconds] - $tlast) / 1000.0}]
+    set o4n [lindex [lindex $META end] 2]
+    .top.filter delete 0 end
+    .top.filter insert end "s=00"
+    set have ""
+    set META {}
+    runquery
+    set o4s [lindex [lindex $META end] 2]
+    puts [format "O4 span drive under debounce: 4 keystrokes -> %d query(ies), last-key-to-repaint %.0f ms (<=2600), %s rows == serial %s  %s" \
+        $o4q $o4wall $o4n $o4s \
+        [expr {$o4q > 0 && $o4q < 4 && $o4wall <= 2600 && $o4n == $o4s \
+            ? "HELD" : "MISSED"}]]
     # The BURST (panel: the serial drive cannot exercise the
     # serialization lane): inject characters WITHOUT pumping the queries
     # between them. Correctness bar: fewer queries than keystrokes

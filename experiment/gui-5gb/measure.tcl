@@ -131,6 +131,45 @@ scope {
     puts [format "G6r the whole keystroke kernel (filter+count+fetch) engine-side: %.1f ms median of 7" \
         [median $mv]]
 
+    # ---- the chart verbs at scale (the follow-through: O1b, O2, O3, O3b) ----
+    reqok def name gc_pad chunk {function gc_pad(h)
+        return #col.groupcount(h, "pad").keys
+    end}
+    reqok def name gs_pad chunk {function gs_pad(h)
+        return #col.groupsum(h, "bytes", "pad").keys
+    end}
+    reqok def name gc_status chunk {function gc_status(h)
+        return #col.groupcount(h, "status").keys
+    end}
+    reqok def name t_sel chunk {function t_sel(h)
+        return #col.topn(h, "bytes", 50, G_SEL, "desc")
+    end}
+    reqok def name t_click chunk {function t_click(h, nn)
+        return #col.topn(h, "tijd", nn, nil, "desc")
+    end}
+    foreach kn {gc_pad gs_pad gc_status t_sel} {
+        reqok run name $kn args [list [dict create handle $H]]
+    }
+    reqok run name t_click args [list [dict create handle $H] 50]
+    reqok run name t_click args [list [dict create handle $H] 4096]
+    foreach {var kn extra} {o1c gc_pad {} o1s gs_pad {} o2 gc_status {}
+                            o3 t_sel {} o3b t_click 50 o3w t_click 4096} {
+        set xs {}
+        for {set i 0} {$i < 7} {incr i} {
+            lappend xs [dict get [reqok run name $kn args \
+                [list [dict create handle $H] {*}$extra]] ms]
+        }
+        set $var [median $xs]
+    }
+    puts [format "O1b groupcount by pad %.1f ms, groupsum bytes by pad %.1f ms over 25M (<=60 each)  %s" \
+        $o1c $o1s [expr {$o1c <= 60 && $o1s <= 60 ? "HELD" : "MISSED"}]]
+    puts [format "O2  groupcount by status (i hash) %.1f ms (<=80)  %s" \
+        $o2 [expr {$o2 <= 80 ? "HELD" : "MISSED"}]]
+    puts [format "O3  topn bytes desc 50 under the selection %.1f ms (<=80)  %s" \
+        $o3 [expr {$o3 <= 80 ? "HELD" : "MISSED"}]]
+    puts [format "O3b the header click, worst case (tijd desc, monotone, no SEL): N=50 %.1f ms (<=800, >2000 kills); N=4096 %.1f ms (reported)  %s" \
+        $o3b $o3w [expr {$o3b <= 800 ? "HELD" : ($o3b > 2000 ? "KILLED" : "MISSED")}]]
+
     reqok quit
 }
 puts "measure complete."

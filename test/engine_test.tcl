@@ -543,6 +543,142 @@ scope {
         ![dict get $r ok] && [errcode $r] eq "lua" &&
         [string match "*asks more than 4096*" [dict get $r error message]]}]
 
+    # The chart verbs (the follow-through): groupcount/groupsum equal
+    # their Lua twins exactly - keys, counts, sums, first-appearance
+    # order, empty groups included, SEL masking only the counting.
+    reqok def name grptwin chunk {function grptwin(h, useSel)
+        local sel = nil
+        if useSel == 1 then
+            sel = col.filter(h, "path", "match", "/api/*")
+        end
+        local g = col.groupsum(h, "bytes", "path", sel)
+        local vals = col.values(h, "path")
+        local idx = {}
+        local cnt = {}
+        local sum = {}
+        for d = 1, #vals do idx[vals[d]] = d cnt[d] = 0 sum[d] = 0 end
+        for i = 1, h.rows do
+            local ok = true
+            if sel ~= nil then
+                ok = string.sub(h.path[i], 1, 5) == "/api/"
+            end
+            if ok then
+                local d = idx[h.path[i]]
+                cnt[d] = cnt[d] + 1
+                sum[d] = sum[d] + h.bytes[i]
+            end
+        end
+        if #g.keys ~= #vals then return -1 end
+        for d = 1, #vals do
+            if g.keys[d] ~= vals[d] or g.counts[d] ~= cnt[d]
+                or g.sums[d] ~= sum[d] then return -2 end
+        end
+        local c = col.groupcount(h, "path", sel)
+        for d = 1, #vals do
+            if c.keys[d] ~= vals[d] or c.counts[d] ~= cnt[d] then
+                return -3
+            end
+        end
+        return #g.keys
+    end}
+    check "groupsum equals its twin (no selection, 6 groups)" [expr {
+        [dict get [reqok run name grptwin args \
+            [list [dict create handle $dpool] 0]] value] == 6}]
+    check "groupsum under SEL: the key set never shrinks" [expr {
+        [dict get [reqok run name grptwin args \
+            [list [dict create handle $dpool] 1]] value] == 6}]
+    set r [req run name grptwin args [list [dict create handle $spool] 0]]
+    check "group verbs refuse a span-mode column by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*past the dictionary limit*" \
+            [dict get $r error message]]}]
+    # The i-BYFIELD arm on the 70k pool: bytes = i%100, first row is 1.
+    reqok def name grpint chunk {function grpint(h)
+        local g = col.groupcount(h, "bytes")
+        local total = 0
+        for d = 1, #g.counts do total = total + g.counts[d] end
+        return { n = #g.keys, k1 = g.keys[1], k100 = g.keys[100],
+                 c1 = g.counts[1], total = total }
+    end}
+    set v [dict get [reqok run name grpint \
+        args [list [dict create handle $epool]]] value]
+    check "i groups number by first appearance (100 groups, key 1 first)" \
+        [expr {[dict get $v n] == 100 && [dict get $v k1] == 1 &&
+               [dict get $v k100] == 0 && [dict get $v c1] == 700 &&
+               [dict get $v total] == 70000}]
+
+    # col.topn: ties break by row order, deterministically; NaN and the
+    # float-group refusal ride a tiny f fixture.
+    reqok def name topntwin chunk {function topntwin(h)
+        local t = col.topn(h, "bytes", 3, nil, "desc")
+        local u = col.topn(h, "bytes", 3, nil, "asc")
+        -- bytes = i%100: desc ties at 99 -> rows 99,199,299 (p99...);
+        -- asc ties at 0 -> rows 100,200,300.
+        if #t ~= 3 or t[1][1] ~= "p99" or t[2][1] ~= "p199"
+            or t[3][1] ~= "p299" then return -1 end
+        if u[1][1] ~= "p100" or u[2][1] ~= "p200"
+            or u[3][1] ~= "p300" then return -2 end
+        return #t
+    end}
+    check "topn orders with ties by row (desc and asc)" [expr {
+        [dict get [reqok run name topntwin \
+            args [list [dict create handle $epool]]] value] == 3}]
+    reqok def name topnmax chunk {function topnmax(h)
+        return col.topn(h, "bytes", 4097, nil, "desc")
+    end}
+    set r [req run name topnmax args [list [dict create handle $epool]]]
+    check "topn refuses above 4096 by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*topn asks more than 4096*" \
+            [dict get $r error message]]}]
+    set f [open $scsv.f wb]
+    puts -nonewline $f "x,tag\n1.5,a\nnan,b\n2.5,a\n"
+    close $f
+    set r [reqok load format csv path $scsv.f header 1 \
+        schema [list x f tag s]]
+    set fpool2 [dict get $r handle]
+    reqok def name topnnan chunk {function topnnan(h)
+        local t = col.topn(h, "x", 3, nil, "desc")
+        if #t ~= 2 or t[1][1] ~= 2.5 or t[2][1] ~= 1.5 then return -1 end
+        return #t
+    end}
+    check "topn skips NaN (2 rows from 3)" [expr {
+        [dict get [reqok run name topnnan \
+            args [list [dict create handle $fpool2]]] value] == 2}]
+    reqok def name grpfloat chunk {function grpfloat(h)
+        return col.groupcount(h, "x")
+    end}
+    set r [req run name grpfloat args [list [dict create handle $fpool2]]]
+    check "grouping by a float field refuses by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*cannot group by a float*" \
+            [dict get $r error message]]}]
+    reqok free handle $fpool2
+    file delete -- $scsv.f
+
+    # Zero-row pools answer empty, never the dictionary-limit refusal.
+    set f [open $scsv.z wb]
+    puts -nonewline $f "path,bytes\n"
+    close $f
+    set r [reqok load format csv path $scsv.z header 1 \
+        schema [list path s bytes i]]
+    set zpool [dict get $r handle]
+    reqok def name zeroans chunk {function zeroans(h)
+        local g = col.groupcount(h, "path")
+        return { d = col.distinct(h, "path"), v = #col.values(h, "path"),
+                 k = #g.keys }
+    end}
+    set v [dict get [reqok run name zeroans \
+        args [list [dict create handle $zpool]]] value]
+    check "a zero-row column answers empty (distinct, values, groups)" \
+        [expr {[dict get $v d] == 0 && [dict get $v v] == 0 &&
+               [dict get $v k] == 0}]
+    reqok free handle $zpool
+    file delete -- $scsv.z
+    set r [reqok stats]
+    check "stats reports the effective dict_limit (65536)" \
+        [expr {[dict get $r dict_limit] == 65536}]
+
     # The lazy view's liveness law (0.14): a stashed view whose pool was
     # freed keeps answering for columns it already materialized, and
     # refuses BY NAME on the first untouched column - never a stale
