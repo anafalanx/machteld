@@ -328,6 +328,172 @@ scope {
         ![dict get $r ok] && [errcode $r] eq "lua" &&
         [string match "*col: integer overflow*" [dict get $r error message]]}]
     reqok free handle $opool
+
+    # The string primitives (0.14): dictionary encoding at load, eq/ne/
+    # match on s columns, distinct/values, string-predicate sumwhere.
+    # One hostile fixture, loaded twice - default (dictionary) and with
+    # the bench escape "dict 0" (span mode); every answer must agree in
+    # both modes, and with the Lua twin loops, exactly.
+    set scsv [file join [pwd] engine_test_fixture_s.csv]
+    set f [open $scsv wb]
+    puts -nonewline $f [encoding convertto utf-8 [join {
+        {path,bytes}
+        {/api/users,10}
+        {café/menu,20}
+        {/api/users,30}
+        {"a,b",40}
+        {,50}
+        {/api/orders,60}
+        {"two[]lines",70}
+        {/api/users,80}
+    } \n]]
+    close $f
+    # The quoted embedded newline, spliced in without brace acrobatics.
+    set f [open $scsv rb]; set raw [read $f]; close $f
+    set f [open $scsv wb]
+    puts -nonewline $f [string map [list {[]} "\n"] $raw]
+    close $f
+    set r [reqok load format csv path $scsv header 1 \
+        schema [list path s bytes i]]
+    set dpool [dict get $r handle]
+    set r [reqok load format csv path $scsv header 1 \
+        schema [list path s bytes i] dict 0]
+    set spool [dict get $r handle]
+    check "the string fixture loads in both modes (8 rows)" \
+        [expr {[dict get $r rows] == 8}]
+    reqok def name sview chunk {function sview(hd, hs)
+        for i = 1, hd.rows do
+            if hd.path[i] ~= hs.path[i] then return i end
+        end
+        return 0
+    end}
+    check "views materialize identical strings in both modes" [expr {
+        [dict get [reqok run name sview args [list \
+            [dict create handle $dpool] [dict create handle $spool]]] \
+            value] == 0}]
+    reqok def name globtwin chunk {function globtwin(s, pat)
+        local lp = pat:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+        lp = lp:gsub("%%%*", ".*")
+        return string.find(s, "^" .. lp .. "$") ~= nil
+    end}
+    reqok def name stwin chunk {function stwin(h, op, x)
+        local sel = col.filter(h, "path", op, x)
+        local csel = col.count(sel)
+        local ssel = col.sumwhere(h, "bytes", "path", op, x)
+        local cloop, sloop = 0, 0
+        for i = 1, h.rows do
+            local s, hit = h.path[i], false
+            if op == "eq" then hit = (s == x)
+            elseif op == "ne" then hit = (s ~= x)
+            else hit = globtwin(s, x) end
+            if hit then cloop = cloop + 1; sloop = sloop + h.bytes[i] end
+        end
+        if csel ~= cloop or ssel ~= sloop then return -1 end
+        return csel * 1000000 + ssel
+    end}
+    reqok def name stwinempty chunk {function stwinempty(h)
+        return stwin(h, "eq", "")
+    end}
+    foreach {mode mpool} [list dictionary $dpool span $spool] {
+        set h [dict create handle $mpool]
+        check "eq matches bytes-exactly and twins agree ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h eq /api/users]] value] == 3000120}]
+        check "eq reaches the é bytes ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h eq café/menu]] value] == 1000020}]
+        check "eq finds the empty field ($mode)" [expr {
+            [dict get [reqok run name stwinempty args \
+                [list $h]] value] == 1000050}]
+        check "ne is eq's exact complement ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h ne /api/users]] value] == 5000240}]
+        check "match sweeps the api prefix ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h match /api/*]] value] == 4000180}]
+        check "match crosses an embedded newline ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h match two*lines]] value] == 1000070}]
+        check "match takes the quoted comma literally ($mode)" [expr {
+            [dict get [reqok run name stwin args \
+                [list $h match a*]] value] == 1000040}]
+    }
+    reqok def name sdistinct chunk {function sdistinct(h)
+        local vals = col.values(h, "path")
+        return { n = col.distinct(h, "path"), first = vals[1],
+                 empty = vals[4], last = vals[#vals] }
+    end}
+    set v [dict get [reqok run name sdistinct \
+        args [list [dict create handle $dpool]]] value]
+    check "distinct counts the dictionary (6)" [expr {[dict get $v n] == 6}]
+    check "values keeps first-appearance order" [expr {
+        [dict get $v first] eq "/api/users" && [dict get $v empty] eq "" &&
+        [dict get $v last] eq "two\nlines"}]
+    set r [req run name sdistinct args [list [dict create handle $spool]]]
+    check "distinct refuses a span-mode column by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*past the dictionary limit*" \
+            [dict get $r error message]]}]
+    reqok def name srefuse chunk {function srefuse(h, what)
+        if what == 1 then return col.filter(h, "path", "lt", "a") end
+        if what == 2 then return col.filter(h, "bytes", "match", "4*") end
+        if what == 3 then return col.filter(h, "path", "match", "a?b") end
+        if what == 4 then return col.filter(h, "path", "match", "[ab]") end
+        return col.distinct(h, "bytes")
+    end}
+    foreach {what pattern} {
+        1 "*needs a numeric field*"
+        2 "*match needs a string field*"
+        3 "*match knows only #*"
+        4 "*match knows only #*"
+        5 "*not a string*"
+    } {
+        set r [req run name srefuse \
+            args [list [dict create handle $dpool] $what]]
+        check "the string laws refuse by name ($what)" [expr {
+            ![dict get $r ok] && [errcode $r] eq "lua" &&
+            [string match [string map {# *} $pattern] \
+                [dict get $r error message]]}]
+    }
+    # The cardinality escape: 70k distinct values pass the 65,536 limit,
+    # the dictionary is discarded, the column stays span mode - correct,
+    # slower, and visible in stats.
+    set f [open $scsv wb]
+    puts -nonewline $f "path,bytes\n"
+    for {set i 1} {$i <= 70000} {incr i} {
+        puts -nonewline $f "p$i,[expr {$i % 100}]\n"
+    }
+    close $f
+    set r [reqok load format csv path $scsv header 1 \
+        schema [list path s bytes i]]
+    set epool [dict get $r handle]
+    check "an all-distinct column loads past the limit" \
+        [expr {[dict get $r rows] == 70000}]
+    reqok def name sescape chunk {function sescape(h)
+        local one = col.count(col.filter(h, "path", "eq", "p123"))
+        local pre = col.count(col.filter(h, "path", "match", "p1234*"))
+        return one * 1000 + pre
+    end}
+    check "eq and match stay correct past the escape (1 and 11)" [expr {
+        [dict get [reqok run name sescape \
+            args [list [dict create handle $epool]]] value] == 1011}]
+    set r [req run name sdistinct args [list [dict create handle $epool]]]
+    check "the escaped column refuses distinct by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua"}]
+    set r [reqok stats]
+    set modes {}
+    foreach p [dict get $r pools] {
+        dict set modes [dict get $p handle] \
+            [list [dict get $p dict_cols] [dict get $p span_cols]]
+    }
+    check "stats shows the mode per pool (dict, forced span, escaped)" [expr {
+        [dict get $modes $dpool] eq {1 0} &&
+        [dict get $modes $spool] eq {0 1} &&
+        [dict get $modes $epool] eq {0 1}}]
+    reqok free handle $epool
+    reqok free handle $spool
+    reqok free handle $dpool
+    file delete -- $scsv
     set f [open $csvfix wb]
     puts -nonewline $f "1,2\n3,notanint\n"
     close $f

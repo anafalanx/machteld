@@ -85,7 +85,7 @@ macht stop $e
 | `macht def NAME CHUNK` | Send a Lua chunk; it runs once in the kernel environment and must leave a global function `NAME`. Cached by source hash. |
 | `macht run NAME ?ARG ...? ?-json TEXT? ?-shards N? ?-reduce NAME2? ?-budget DURATION?` | Call the kernel with arguments and return its value; see the boundary and sharding sections. |
 | `macht free HANDLE` | Release a pool or result handle. |
-| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes` - the Plimsoll lines a long-lived program watches. |
+| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes`; per-pool `dict_cols` and `span_cols` (the string columns' encoding mode) - the Plimsoll lines a long-lived program watches. |
 | `macht conform EXE` | Run the conformance suite against an executable and report. |
 
 Every work subcommand accepts `-engine TOKEN`. Without it, the first work
@@ -271,7 +271,13 @@ The vocabulary, over a view `h`:
 - `col.filter(h, FIELD, OP, X)` with OP in `"lt" "le" "gt" "ge" "eq"
   "ne"`, over an `i` or `f` column, returns a **selection**. Float
   comparisons are IEEE: NaN matches nothing except `ne`; a NaN probe
-  matches nothing except `ne`, which then matches every row.
+  matches nothing except `ne`, which then matches every row. Over an
+  `s` column, OP is `"eq"`, `"ne"`, or `"match"` and X is a string;
+  comparisons are **byte-exact** (UTF-8 bytes, no collation, no case
+  folding). `match` is the glob dialect with `*` only - `?` and `[`
+  are refused by name (`col: match knows only *`) - and a `*` crosses
+  any byte, an embedded newline included. `match` on a numeric column
+  and the ordering ops on a string column refuse by name.
 - `col.sum(h, FIELD ?, SEL?)` - integer sums are exact int64, computed in
   4096-element chunks proven wraparound-free (a chunk that cannot be
   proven falls back to per-element checked adds), and an overflow raises
@@ -282,13 +288,34 @@ The vocabulary, over a view `h`:
   propagates.
 - `col.sumwhere(h, FIELD, BYFIELD, OP, X)` - the fused one-pass form over
   any pairing of `i`/`f` value and predicate columns; prefer it to
-  filter-plus-sum when the predicate is used once.
+  filter-plus-sum when the predicate is used once. BYFIELD may also be
+  an `s` column with the string ops - "sum bytes where the path matches
+  the api prefix" is one pass.
+- `col.distinct(h, FIELD)` and `col.values(h, FIELD)` over a
+  dictionary-mode `s` column: the number of distinct values, and the
+  distinct strings as a sequence in first-appearance order (a filter
+  dropdown in one call). The dictionary is pool-wide - a view over a
+  subrange still answers for the whole column. On a span-mode column
+  both refuse by name (`col: field ... is past the dictionary limit`).
 - `col.min(h, FIELD ?, SEL?)`, `col.max(...)` - NaN is skipped; the
   result seeds at the first surviving element; nothing surviving raises
   `col: empty selection`. `col.count(h)` and `col.count(SEL)`.
 - `col.band(A, B)`, `col.bor(A, B)`, `col.bnot(A)` - selection algebra
   for compound predicates worth reusing; bits beyond the view's rows
   stay zero, always.
+
+**Dictionary encoding.** At load, every `s` column is dictionary-encoded:
+the distinct values are numbered in first-appearance order and the column
+stores one small code per row (4 bytes where the span form costs 16). The
+string primitives then run their predicate once per **distinct** value and
+sweep integer codes - which is why `match` over a million rows costs about
+a millisecond, not a Lua loop's ninety. The cardinality escape is
+explicit: past 65,536 distinct values the dictionary is discarded and the
+column stays in span mode - every operation stays byte-for-byte correct,
+only slower, and `distinct`/`values` refuse. The mode is visible: `stats`
+reports `dict_cols` and `span_cols` on every pool. Kernels see nothing of
+any of this - a materialized view holds the same Lua strings in either
+mode.
 
 Selections are engine furniture: per-state userdata through the metered
 allocator, bound to full view identity (the monotone pool number plus the
@@ -299,8 +326,10 @@ a selection can never cross the boundary (the wire refuses userdata as
 `MACHT type`). The library's refusals - `col: unknown field`, `col: field
 ... is not numeric`, `col: argument type`, `col: selection is bound to
 another view`, `col: view outlives its pool`, `col: integer overflow`,
-`col: empty selection` - are Lua errors and surface as
-`{MACHTELD MACHT lua}` with the message intact.
+`col: empty selection`, `col: match knows only *`, `col: match needs a
+string field`, `col: op ... needs a numeric field`, `col: field ... is
+not a string`, `col: field ... is past the dictionary limit` - are Lua
+errors and surface as `{MACHTELD MACHT lua}` with the message intact.
 
 Two pieces of measured guidance, not law: a single `col` call outruns
 the twelve-shard Lua path several times over, so arithmetic no longer
