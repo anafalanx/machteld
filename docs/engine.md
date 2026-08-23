@@ -10,8 +10,10 @@ tags: [machteld, engine, macht, lua, contract, wire]
 This page is the contract for the Machteld engine, implemented in full by
 the current executable: engine mode, the wire, the boundary, the `macht`
 family, the `lines` and `csv` loaders, the kernel libraries (utf8, LPeg,
-lua-cjson), and - since 0.13.0 - the `col` primitive library. The 0.12.0
-release built the engine; 0.13.0 added the primitives. Capabilities are
+lua-cjson), and the `col` primitive library. The 0.12.0
+release built the engine; 0.13.0 added the primitives; 0.14.0 added
+dictionary-encoded strings, lazy views, and the GUI verbs (rows, group,
+topn). Capabilities are
 negotiated in `hello` - a program asks an engine what it carries rather
 than assuming, which is also how a sidecar with a narrower surface stays
 honest. The page, the `macht` manifest entry, and the behavior must agree.
@@ -56,7 +58,7 @@ One verb owns an engine's whole life, in the palette's usual shape (`pty`,
 `watch`, `store`): lifecycle, work, and introspection are subcommands.
 
 ```tcl
-package require machteld 0.13.0
+package require machteld 0.14.0
 
 set e [macht start -threads 8 -memory 2G]     ;# explicit engine (optional)
 set h [macht load -csv C:/data/access.csv -schema {name s path s status i bytes i}]
@@ -116,8 +118,8 @@ engine. It is deliberately boring.
   declared, and refuses with `MACHT refused` when a program asks for one.
 
 ```json
--> {"id":1,"op":"hello","protocol":1,"host":"machteld","version":"0.13.0"}
-<- {"id":1,"ok":true,"engine":"machteld","version":"0.13.0","protocol":1,
+-> {"id":1,"op":"hello","protocol":1,"host":"machteld","version":"0.14.0"}
+<- {"id":1,"ok":true,"engine":"machteld","version":"0.14.0","protocol":1,
     "capabilities":["lua","load.csv","load.lines","shards","reduce","stats","col"]}
 -> {"id":2,"op":"load","format":"csv","path":"C:/data/access.csv",
     "schema":["name","s","path","s","status","i","bytes","i"],"header":true}
@@ -437,12 +439,12 @@ Tcl-side cold path it replaces; the engine loads a million rows to resident in
 178 ms; and an engine spinning inside one C call is killed and reaped in 32-38
 ms with a clean respawn. The whole engine, Lua included, is 300 KB.
 
-## What this page does not promise in 0.13.0
+## What this page does not promise in 0.14.0
 
 - A program-independent resident engine - a daemon shared across runs - is
   contracted direction: it will speak this same wire over a named pipe and
   outlive its starter by `detach`, with a rendezvous and an idle policy, and
-  it is not in 0.13.0.
+  it is not in 0.14.0.
 - Bulk transfer of large Tcl-born data into an engine. Road 1's ceiling
   applies to arguments; data larger than that goes to a file and enters by
   road 3.

@@ -1,11 +1,11 @@
 ---
 type: index
 title: machteld documentation
-description: The documentation map for the Machteld 0.13.0 runtime.
+description: The documentation map for the Machteld 0.14.0 runtime.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld 0.13.0
+# machteld 0.14.0
 
 machteld is a compact Windows machine-control runtime. A program is ordinary
 Tcl 9 whose first executable command explicitly requires `machteld`; the runtime
@@ -24,7 +24,7 @@ own exact command reference.
 - [Parallel work](parallel.md) - `worker`, `pool`, and `pmap`.
 - [Packaging](packaging.md) - direct entries and standalone tools.
 - [External libraries](extensions.md) - Tcl extensions, precedence, and the deployment covenant.
-- [The engine](engine.md) - the 0.13.0 engine contract: `macht`, the wire, the boundary, sidecar engines.
+- [The engine](engine.md) - the 0.14.0 engine contract: `macht`, the wire, the boundary, sidecar engines.
 - [Architecture](architecture.md) - hosts, prelude, native core, and metadata.
 - [Creed](creed.md) - the design tests.
 - [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.

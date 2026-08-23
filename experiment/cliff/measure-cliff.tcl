@@ -9,7 +9,7 @@
 #
 # usage: machteld measure-cliff.tcl
 
-package require machteld 0.13.0
+package require machteld 0.14.0
 
 set exe [info nameofexecutable]
 set devdir [file join [file dirname [file dirname [file dirname \

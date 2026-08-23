@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public Machteld 0.13.0 commands and their intended composition.
+description: The public Machteld 0.14.0 commands and their intended composition.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -284,7 +284,7 @@ wrap app.tcl -o app.exe --console
 wrap appdir -o app.exe --entry src/main.tcl --gui
 ```
 
-`version` and `package require machteld` return `0.13.0`. `manifest` describes the
+`version` and `package require machteld` return `0.14.0`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
 `replycodes` are fixed protocol failures carried as data. `docs` provides exact,
 bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9

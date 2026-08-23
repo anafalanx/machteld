@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.13.0 contains and how possible additions are ordered.
+description: What Machteld 0.14.0 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -61,7 +61,7 @@ replacement:
 7. **Version, gates, ship.** The 0.12.0 sweep, a live demo of residency and
    the kill, and the conformance suite run against the built-in engine.
 
-All seven phases landed; 0.13.0 now extends that baseline. A program
+All seven phases landed; 0.13.0 and 0.14.0 extend that baseline. A program
 written against 0.11.0's entry line still starts: `package require
 machteld 0.11.0` is satisfied by 0.12.0 under Tcl's version rules, though
 the 0.11.0 macht grammar it may have used is gone.
@@ -97,13 +97,53 @@ arithmetic no longer shards; the 0.12.0 demo question from 2.9 ms to
 race) was found by the plan's review panel and fixed ahead of the
 benches. A 0.12.0 entry line still starts under Tcl's version rules.
 
-## 0.14.0 candidates
+## 0.14.0 — the dictionary and the GUI verbs
 
-The cross-industry study's transpositions (z estate,
-`study-cross-industry.md`) lead the field: engine PHM — State-of-Health
-wear telemetry, condition-based engine rotation, freeze-frame error
-snapshots — and the timeout selectivity study. Beside them:
+The release that made big files interactive, proven by a spike GUI that
+filters a 5 GB, 25-million-row csv at typing speed (keystroke-to-repaint
+median under 100 ms). Its parts, each under "The col library" and road 2
+of [the engine](engine.md):
 
+- **Dictionary-encoded string columns.** Every `s` column dictionaries
+  at load; string `filter` (`eq`/`ne`/`match`, byte-exact, `*`-only
+  glob), a string predicate arm for `sumwhere`, and `distinct`/`values`
+  answer from the dictionary. The cardinality escape is rows-relative -
+  `min(1,048,576, max(65,536, rows/8))` - ruled from a measured sweep
+  (n/k = 8 to 250: the dictionary won everywhere the rule admits it),
+  and the mode is visible per pool in `stats`.
+- **Lazy views.** A column materializes on first touch, under a
+  liveness law that refuses a freed pool by name - so col-only kernels
+  run over pools far larger than the state cap, which is what makes the
+  5 GB pool usable at all.
+- **The GUI verbs.** `col.rows` (the bounded page), `col.groupcount` /
+  `col.groupsum` (the chart verbs), `col.topn` (order-by, ties
+  deterministic). Filter, count, group, order, page - one kernel, one
+  round trip.
+- **The walls, closed.** From the endurance spike before the strings
+  work: kernel-table LRU eviction, the bounded view cache, and the
+  stats occupancy gauges - a long-lived engine no longer has a cliff to
+  fall off, and the gauges show the water line.
+
+The admission story, kept visible (plan-machteld-014 in the z estate):
+every number was a registered prediction graded in the open; three
+adversarial review panels folded fourteen findings before code was
+written (among them a liveness law, a fixture whose bar sat above an
+arithmetic ceiling, and a debounce bypass); the honestly recorded
+misses stand unre-banded - the worst-case sorted header click (~1 s,
+banked as evidence for a smarter selection pass), one wall bar by 4%,
+one absolute eq cost at the extreme cardinality. Two implementation
+defects were found by their own benches and fixed inside the registered
+designs (a branchy dictionary sweep; a needless per-row group buffer).
+A 0.13.0 entry line still starts under Tcl's version rules.
+
+## 0.15.0 candidates
+
+- The timeout selectivity study (cross-industry lineage,
+  `study-cross-industry.md` in the z estate).
+- A smarter `topn` selection pass: the banked worst-case evidence
+  (~1 s for a descending click on a monotone column) is its driving
+  workload; admitted only by a registered prediction against that
+  number.
 - The sharded, schema-specialized loader: byte-range parallel parsing
   into column pools, admitted only by a registered throughput
   prediction.
@@ -111,8 +151,6 @@ snapshots — and the timeout selectivity study. Beside them:
   policy.
 - A sidecar conformance kit: the `macht conform` fixtures packaged for
   engine authors in other languages.
-- String primitives for `col`, contingent on dictionary-encoded columns
-  (the loader's lineage).
 
 ## Deferred: the palette gains xml (decided 2026-08-20, deferred 2026-08-22)
 
@@ -147,7 +185,7 @@ Recorded as constraints, not answers — the route is design work:
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.13.0. Each needs a
+selected WMI queries remain candidates. None is promised by 0.14.0. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 

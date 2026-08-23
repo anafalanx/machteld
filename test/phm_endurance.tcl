@@ -3,7 +3,7 @@
 # Predictions E1-E7 were registered before this ran. Usage:
 #   machteld.exe test/phm_endurance.tcl ?cycles?     (default 500)
 
-package require machteld 0.13.0
+package require machteld 0.14.0
 
 set exe [info nameofexecutable]
 set CYCLES [expr {[llength $argv] ? [lindex $argv 0] : 500}]

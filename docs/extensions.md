@@ -29,7 +29,7 @@ any other interp. Extension DLLs load **from disk**; script-only packages
 and `.tm` modules resolve through their own two mechanisms:
 
 ```tcl
-package require machteld 0.13.0
+package require machteld 0.14.0
 lappend auto_path {C:/path/to/tcl9/lib}              ;# pkgIndex packages (DLLs)
 ::tcl::tm::path add {C:/path/to/tcl9/lib/tcl9/9.0}   ;# .tm modules
 package require tdbc::odbc

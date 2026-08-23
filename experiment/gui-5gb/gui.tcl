@@ -16,7 +16,7 @@
 #           (12 keystrokes on the dictionary column, then the span
 #           column), prints the per-keystroke numbers, and exits.
 
-package require machteld 0.13.0
+package require machteld 0.14.0
 package require Tk
 
 set csv [lindex $argv 0]
