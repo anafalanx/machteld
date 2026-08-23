@@ -17,7 +17,7 @@ set devdir [file join [file dirname [file dirname [file dirname \
 file mkdir $devdir
 
 # ------------- fixtures: 25M rows, exactly k distinct keys -------------
-proc genfix {path k} {
+proc genfix {path k rows} {
     if {[file exists $path]} { return }
     set f [open $path wb]
     chan configure $f -buffersize 4194304
@@ -25,7 +25,7 @@ proc genfix {path k} {
     set buf ""
     set buflen 0
     set S 20260823
-    for {set i 0} {$i < 25000000} {incr i} {
+    for {set i 0} {$i < $rows} {incr i} {
         set S [expr {($S * 1103515245 + 12345) % 2147483648}]
         set line "[format w%07d [expr {$i % $k}]],[expr {$S % 100000}]\n"
         append buf $line
@@ -92,9 +92,15 @@ set env(MACHTELD_DICT_LIMIT) 1048576
 set SCHEMA [list key s bytes i]
 
 scope {
-    foreach k {100000 250000 1000000} {
-        set fix [file join $devdir "cliff25-k$k.csv"]
-        genfix $fix $k
+    # Default sweep: 25M rows. "-pair ROWS K" measures one extra point
+    # (the n/k=8 boundary runs as -pair 8000000 1000000).
+    set PAIRS {25000000 100000 25000000 250000 25000000 1000000}
+    if {[lindex $argv 0] eq "-pair"} {
+        set PAIRS [lrange $argv 1 2]
+    }
+    foreach {rows k} $PAIRS {
+        set fix [file join $devdir "cliff[expr {$rows / 1000000}]-k$k.csv"]
+        genfix $fix $k $rows
         puts [format "k=%-8d fixture %d bytes  sha256 %s..." $k \
             [file size $fix] [string range [hash file sha256 $fix] 0 15]]
 
@@ -164,7 +170,7 @@ scope {
         engstop
 
         if {$vd != $vs} { puts "  VALUES DISAGREE: dict $vd span $vs" }
-        puts [format "  mode check: dict_cols=%d, dict_limit=%d (1 and 1048576 = the instrument held)" $dcols [dict get $s dict_limit]]
+        puts [format "  mode check: dict_cols=%d, dict_limit_override=%d (1 and 1048576 = the instrument held)" $dcols [dict get $s dict_limit_override]]
         puts [format "  toll dict/span:  %.2fx   (dict %d ms, span %d ms)" \
             $toll [median $td] [median $ts]]
         puts [format "  eq    dict %7.2f ms | span %7.2f ms | %5.1fx" \
@@ -181,6 +187,22 @@ scope {
     }
 
     # ---------------- the grades ----------------
+    if {[llength $PAIRS] == 2} {
+        # A single -pair point: the C4 boundary grades (n/k = 8).
+        foreach {rows k} $PAIRS {}
+        set matchx [lindex $G($k) 3]
+        set eqx [lindex $G($k) 4]
+        set toll [lindex $G($k) 0]
+        set memok [expr {[lindex $G($k) 5] < [lindex $G($k) 6]}]
+        puts [format "\nC4a match dict/span at n/k=%d: %.1fx (>=2x)  %s" \
+            [expr {$rows / $k}] $matchx \
+            [expr {$matchx >= 2.0 ? "HELD" : "MISSED"}]]
+        puts [format "C4b dict pool smaller: %s  %s   (eq ratio %.1fx beside it)" \
+            [expr {$memok ? "yes" : "NO"}] \
+            [expr {$memok ? "HELD" : "MISSED"}] $eqx]
+        puts [format "C4c toll: %.2fx (<=1.5)  %s" $toll \
+            [expr {$toll <= 1.5 ? "HELD" : "MISSED"}]]
+    } else {
     set t1m [lindex $G(1000000) 0]
     set c1 [expr {$t1m <= 1.5 ? "HELD" : ($t1m > 2.0 ? "KILLED" : "MISSED")}]
     puts [format "\nC1 toll at k=1M: %.2fx (<=1.5 held, >2.0 killed)  %s" $t1m $c1]
@@ -199,6 +221,7 @@ scope {
     }
     puts [format "C3 dict pool smaller at every k: %s  %s" \
         [expr {$ok3 ? "yes" : "NO"}] [expr {$ok3 ? "HELD" : "MISSED"}]]
+    }
 }
 unset env(MACHTELD_DICT_LIMIT)
 puts "\ncliff measured."

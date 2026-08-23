@@ -85,7 +85,7 @@ macht stop $e
 | `macht def NAME CHUNK` | Send a Lua chunk; it runs once in the kernel environment and must leave a global function `NAME`. Cached by source hash. |
 | `macht run NAME ?ARG ...? ?-json TEXT? ?-shards N? ?-reduce NAME2? ?-budget DURATION?` | Call the kernel with arguments and return its value; see the boundary and sharding sections. |
 | `macht free HANDLE` | Release a pool or result handle. |
-| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes`; the effective `dict_limit`; per-pool `dict_cols` and `span_cols` (the string columns' encoding mode) - the Plimsoll lines a long-lived program watches. |
+| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes`; `dict_limit_override` (0 unless the uncontracted bench instrument is set); per-pool `dict_cols`, `span_cols`, and the governing `dict_limit` - the Plimsoll lines a long-lived program watches. |
 | `macht conform EXE` | Run the conformance suite against an executable and report. |
 
 Every work subcommand accepts `-engine TOKEN`. Without it, the first work
@@ -350,12 +350,21 @@ stores one small code per row (4 bytes where the span form costs 16). The
 string primitives then run their predicate once per **distinct** value and
 sweep integer codes - which is why `match` over a million rows costs about
 a millisecond, not a Lua loop's ninety. The cardinality escape is
-explicit: past 65,536 distinct values the dictionary is discarded and the
-column stays in span mode - every operation stays byte-for-byte correct,
-only slower, and `distinct`/`values` refuse. The mode is visible: `stats`
-reports `dict_cols` and `span_cols` on every pool. Kernels see nothing of
-any of this - a materialized view holds the same Lua strings in either
-mode.
+explicit and **rows-relative**: past
+`min(1,048,576, max(65,536, rows / 8))` distinct values the dictionary is
+discarded and the column stays in span mode - every operation stays
+byte-for-byte correct, only slower, and `distinct`/`values` refuse. The
+rule is the measured economics: every dictionary it admits has at least
+eight rows per distinct value, which guarantees the memory win and a
+measured >= 4x speed margin even at the boundary. One consequence, stated
+plainly: the mode is a property of the LOADED POOL, never of the file's
+schema - between loads of different sizes the same column can flip in
+either direction (a bigger load usually gains dictionaries; a column
+whose full-file cardinality is past the 1,048,576 cap can dictionary on a
+sample and escape at scale). Every span-mode refusal stays named. The
+mode is visible: `stats` reports `dict_cols`, `span_cols`, and the
+governing `dict_limit` on every pool. Kernels see nothing of any of
+this - a materialized view holds the same Lua strings in either mode.
 
 Selections are engine furniture: per-state userdata through the metered
 allocator, bound to full view identity (the monotone pool number plus the

@@ -675,9 +675,65 @@ scope {
                [dict get $v k] == 0}]
     reqok free handle $zpool
     file delete -- $scsv.z
+    # The rows-relative gauges (panel-amended from the flat dict_limit
+    # check this replaced): no override in the gate lane, and every
+    # small pool's governing limit is the 65,536 floor.
     set r [reqok stats]
-    check "stats reports the effective dict_limit (65536)" \
-        [expr {[dict get $r dict_limit] == 65536}]
+    check "stats reports no dict override and the floor per pool" [expr {
+        [dict get $r dict_limit_override] == 0 &&
+        [dict get [lindex [dict get $r pools] 0] dict_limit] == 65536}]
+
+    # R2 (rows-relative, both sides of the new boundary in one pool):
+    # 600,000 rows -> limit 75,000; a 70,000-distinct column BUILDS its
+    # dictionary (the old flat contract escaped it), an 80,000-distinct
+    # column beside it stays span. Cost registered in the plan: ~0.9 s
+    # generation + ~0.2 s load, accepted.
+    set rcsv [file join [pwd] engine_test_fixture_r.csv]
+    set f [open $rcsv wb]
+    chan configure $f -buffersize 2097152
+    puts $f "laag,hoog"
+    set buf ""
+    set buflen 0
+    for {set i 0} {$i < 600000} {incr i} {
+        set line "a[expr {$i % 70000}],b[expr {$i % 80000}]\n"
+        append buf $line
+        incr buflen [string length $line]
+        if {$buflen >= 1048576} {
+            puts -nonewline $f $buf
+            set buf ""
+            set buflen 0
+        }
+    }
+    puts -nonewline $f $buf
+    close $f
+    set r [reqok load format csv path $rcsv header 1 \
+        schema [list laag s hoog s]]
+    set rpool [dict get $r handle]
+    set s [reqok stats]
+    set rentry ""
+    foreach p [dict get $s pools] {
+        if {[dict get $p handle] eq $rpool} { set rentry $p }
+    }
+    check "600k rows: limit 75,000; 70k dictionaries, 80k stays span" [expr {
+        [dict get $rentry dict_limit] == 75000 &&
+        [dict get $rentry dict_cols] == 1 &&
+        [dict get $rentry span_cols] == 1}]
+    reqok def name rgrow chunk {function rgrow(h)
+        return col.distinct(h, "laag")
+    end}
+    check "the grown dictionary answers distinct (70,000)" [expr {
+        [dict get [reqok run name rgrow args \
+            [list [dict create handle $rpool]]] value] == 70000}]
+    reqok def name rspan chunk {function rspan(h)
+        return col.distinct(h, "hoog")
+    end}
+    set r [req run name rspan args [list [dict create handle $rpool]]]
+    check "past the pool's limit still refuses by name" [expr {
+        ![dict get $r ok] && [errcode $r] eq "lua" &&
+        [string match "*past the dictionary limit*" \
+            [dict get $r error message]]}]
+    reqok free handle $rpool
+    file delete -- $rcsv
 
     # The lazy view's liveness law (0.14): a stashed view whose pool was
     # freed keeps answering for columns it already materialized, and
