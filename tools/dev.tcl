@@ -376,6 +376,7 @@ switch -- $task {
     build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
     test    { dev_test $rest }
     bench   { dev_build; run [Rp out machteld.exe] [Rp test col_bench.tcl] }
+    endure  { dev_build; run [Rp out machteld.exe] [Rp test phm_endurance.tcl] {*}$rest }
     clean   { dev_clean }
     default { puts "unknown task '$task' (docs build test clean)"; exit 2 }
 }
