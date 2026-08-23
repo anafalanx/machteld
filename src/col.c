@@ -118,11 +118,167 @@ NewSel(lua_State *L, int poolNum, int64_t a, int64_t b)
  * reach them by name. restrict'd plain loops: the compiler's
  * autovectorization (under this TU's -mavx2) is the default dialect. */
 
-enum { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE };
+enum { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_MATCH };
 
 static const char *const kOpNames[] = {
-    "lt", "le", "gt", "ge", "eq", "ne", NULL
+    "lt", "le", "gt", "ge", "eq", "ne", "match", NULL
 };
+
+/* The estate's glob dialect: `*` only (`?` and `[]` stay refused by the
+ * old macht law). Anchored first segment, anchored last, middles found
+ * left to right. Byte-exact, like every string comparison here. */
+static int64_t
+GlobFind(const char *hay, int64_t hn, const char *needle, int64_t nn)
+{
+    if (nn == 0) {
+        return 0;
+    }
+    for (int64_t i = 0; i + nn <= hn; i++) {
+        if (memcmp(hay + i, needle, (size_t)nn) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int
+GlobMatch(const char *pat, int64_t pn, const char *s, int64_t sn)
+{
+    int64_t firstStar = -1;
+    for (int64_t i = 0; i < pn; i++) {
+        if (pat[i] == '*') {
+            firstStar = i;
+            break;
+        }
+    }
+    if (firstStar < 0) {
+        return sn == pn && memcmp(pat, s, (size_t)pn) == 0;
+    }
+    /* Anchored head. */
+    if (sn < firstStar || memcmp(pat, s, (size_t)firstStar) != 0) {
+        return 0;
+    }
+    const char *p = pat + firstStar;
+    int64_t pLeft = pn - firstStar;
+    const char *h = s + firstStar;
+    int64_t hLeft = sn - firstStar;
+    /* Middles, then the anchored tail. */
+    for (;;) {
+        while (pLeft > 0 && *p == '*') {
+            p++;
+            pLeft--;
+        }
+        if (pLeft == 0) {
+            return 1;                              /* pattern ends in '*' */
+        }
+        int64_t seg = 0;
+        while (seg < pLeft && p[seg] != '*') {
+            seg++;
+        }
+        if (seg == pLeft) {
+            /* The last segment: anchored at the end. */
+            return hLeft >= seg &&
+                   memcmp(h + hLeft - seg, p, (size_t)seg) == 0;
+        }
+        int64_t at = GlobFind(h, hLeft, p, seg);
+        if (at < 0) {
+            return 0;
+        }
+        h += at + seg;
+        hLeft -= at + seg;
+        p += seg;
+        pLeft -= seg;
+    }
+}
+
+/* One string predicate, evaluated per span. */
+static int
+StrPred(int op, const char *s, int64_t n, const char *x, int64_t xn)
+{
+    switch (op) {
+    case OP_EQ:    return n == xn && memcmp(s, x, (size_t)n) == 0;
+    case OP_NE:    return !(n == xn && memcmp(s, x, (size_t)n) == 0);
+    default:       return GlobMatch(x, xn, s, n);  /* OP_MATCH */
+    }
+}
+
+/* Resolve FIELD when it may be a string column. Returns 'd' (dictionary)
+ * or 'p' (span mode) with *sc filled, or 'n' for a numeric field - the
+ * caller then takes its numeric path. Dead pools and unknown fields
+ * refuse here, under the same names the numeric path uses. */
+static char
+ResolveStrColumn(lua_State *L, int poolNum, const char *field,
+                 EngineStrCol *sc)
+{
+    char mode = EnginePoolStrColumn(poolNum, field, sc);
+    if (mode == 0) {
+        luaL_error(L, "col: view outlives its pool");
+    }
+    if (mode == '?') {
+        luaL_error(L, "col: unknown field %s", field);
+    }
+    return mode;
+}
+
+/* The dictionary sweep: one selection bit per row from the matched
+ * table, in 64-row word batches, branchless (the branchy per-row form
+ * costs ~5 ns/row in mispredictions at mixed selectivity). The
+ * single-matched-code case - every eq, and any match that hits one
+ * distinct value - collapses to an integer compare over the int32
+ * codes, which autovectorizes. matched[] entries are exactly 0 or 1. */
+static void
+DictSweep(const int32_t *restrict code, int64_t n,
+          const uint8_t *restrict matched, int64_t dictN,
+          uint64_t *restrict bits)
+{
+    int64_t hits = 0;
+    int32_t only = -1;
+    for (int64_t d = 0; d < dictN; d++) {
+        if (matched[d]) {
+            hits++;
+            only = (int32_t)d;
+        }
+    }
+    if (hits == 0) {
+        return;                          /* the bits are already zero */
+    }
+    if (hits == 1) {
+        for (int64_t w = 0; w * 64 < n; w++) {
+            uint64_t word = 0;
+            int64_t base = w * 64;
+            int64_t lim = (n - base < 64) ? n - base : 64;
+            for (int64_t k = 0; k < lim; k++) {
+                word |= (uint64_t)(code[base + k] == only) << k;
+            }
+            bits[w] = word;
+        }
+        return;
+    }
+    for (int64_t w = 0; w * 64 < n; w++) {
+        uint64_t word = 0;
+        int64_t base = w * 64;
+        int64_t lim = (n - base < 64) ? n - base : 64;
+        for (int64_t k = 0; k < lim; k++) {
+            word |= (uint64_t)matched[code[base + k]] << k;
+        }
+        bits[w] = word;
+    }
+}
+
+/* The string ops' argument X. For match, the pattern is the estate's
+ * `*`-only glob dialect; `?` and `[` are refused by name, as the old
+ * macht law had it. */
+static const char *
+CheckStrArg(lua_State *L, int idx, int op, size_t *xnOut)
+{
+    const char *x = luaL_checklstring(L, idx, xnOut);
+    if (op == OP_MATCH &&
+            (memchr(x, '?', *xnOut) != NULL ||
+             memchr(x, '[', *xnOut) != NULL)) {
+        luaL_error(L, "col: match knows only * (? and [ are refused)");
+    }
+    return x;
+}
 
 static void
 FilterI64(const int64_t *restrict v, int64_t n, int op, int64_t x,
@@ -617,6 +773,47 @@ LFilter(lua_State *L)
     ColArg col;
     const char *field = luaL_checkstring(L, 2);
     int op = luaL_checkoption(L, 3, NULL, kOpNames);
+    int poolNum;
+    int64_t a, b;
+    ResolveView(L, 1, &poolNum, &a, &b);
+    EngineStrCol sc;
+    char mode = ResolveStrColumn(L, poolNum, field, &sc);
+    if (mode != 'n') {
+        /* String column: eq/ne/match only, byte-exact. */
+        if (op != OP_EQ && op != OP_NE && op != OP_MATCH) {
+            return luaL_error(L, "col: op %s needs a numeric field",
+                              kOpNames[op]);
+        }
+        size_t xn;
+        const char *x = CheckStrArg(L, 4, op, &xn);
+        if (mode == 'd') {
+            /* The dictionary win: the predicate runs once per DISTINCT
+             * value; the rows are an integer sweep. The matched table is
+             * metered userdata so an error path leaks nothing. */
+            uint8_t *matched = (uint8_t *)lua_newuserdatauv(L,
+                (size_t)sc.dictN, 0);
+            for (int64_t d = 0; d < sc.dictN; d++) {
+                matched[d] = (uint8_t)StrPred(op,
+                    sc.arena + sc.dictOff[d], sc.dictLen[d],
+                    x, (int64_t)xn);
+            }
+            ColSel *sel = NewSel(L, poolNum, a, b);
+            DictSweep(sc.code + a, b - a, matched, sc.dictN, sel->bits);
+        } else {
+            /* Span mode, past the cardinality escape: per row. */
+            ColSel *sel = NewSel(L, poolNum, a, b);
+            for (int64_t i = 0; i < b - a; i++) {
+                if (StrPred(op, sc.arena + sc.off[a + i], sc.len[a + i],
+                            x, (int64_t)xn)) {
+                    sel->bits[i >> 6] |= (uint64_t)1 << (i & 63);
+                }
+            }
+        }
+        return 1;                    /* the selection is on top */
+    }
+    if (op == OP_MATCH) {
+        return luaL_error(L, "col: match needs a string field");
+    }
     ResolveColumn(L, 1, field, &col);
     ColSel *s;
     if (col.type == 'f') {
@@ -737,6 +934,59 @@ LSumWhere(lua_State *L)
     const char *byfield = luaL_checkstring(L, 3);
     int op = luaL_checkoption(L, 4, NULL, kOpNames);
     ResolveColumn(L, 1, field, &vcol);
+    EngineStrCol sc;
+    char pmode = ResolveStrColumn(L, vcol.poolNum, byfield, &sc);
+    if (pmode != 'n') {
+        /* String predicate arm: "sum bytes where the path matches the
+         * api prefix" in one pass. eq/ne/match only; sequential
+         * accumulation order - the differential twin is the plain Lua
+         * loop. */
+        if (op != OP_EQ && op != OP_NE && op != OP_MATCH) {
+            return luaL_error(L, "col: op %s needs a numeric field",
+                              kOpNames[op]);
+        }
+        size_t xn;
+        const char *x = CheckStrArg(L, 5, op, &xn);
+        int64_t sn = vcol.b - vcol.a;
+        uint8_t *matched = NULL;
+        if (pmode == 'd') {
+            matched = (uint8_t *)lua_newuserdatauv(L, (size_t)sc.dictN, 0);
+            for (int64_t d = 0; d < sc.dictN; d++) {
+                matched[d] = (uint8_t)StrPred(op,
+                    sc.arena + sc.dictOff[d], sc.dictLen[d],
+                    x, (int64_t)xn);
+            }
+        }
+        if (vcol.type == 'f') {
+            double t = 0;
+            for (int64_t i = 0; i < sn; i++) {
+                int hit = (matched != NULL)
+                    ? matched[sc.code[vcol.a + i]]
+                    : StrPred(op, sc.arena + sc.off[vcol.a + i],
+                              sc.len[vcol.a + i], x, (int64_t)xn);
+                if (hit) {
+                    t += vcol.f[vcol.a + i];
+                }
+            }
+            lua_pushnumber(L, (lua_Number)t);
+            return 1;
+        }
+        int64_t t = 0;
+        for (int64_t i = 0; i < sn; i++) {
+            int hit = (matched != NULL)
+                ? matched[sc.code[vcol.a + i]]
+                : StrPred(op, sc.arena + sc.off[vcol.a + i],
+                          sc.len[vcol.a + i], x, (int64_t)xn);
+            if (hit && __builtin_add_overflow(t, vcol.i[vcol.a + i], &t)) {
+                return luaL_error(L, "col: integer overflow");
+            }
+        }
+        lua_pushinteger(L, (lua_Integer)t);
+        return 1;
+    }
+    if (op == OP_MATCH) {
+        return luaL_error(L, "col: match needs a string field");
+    }
     ResolveColumn(L, 1, byfield, &pcol);
     int64_t n = vcol.b - vcol.a;
     if (vcol.type == 'f') {
@@ -764,6 +1014,42 @@ LSumWhere(lua_State *L)
         return luaL_error(L, "col: integer overflow");
     }
     lua_pushinteger(L, (lua_Integer)total);
+    return 1;
+}
+
+/* col.distinct(h, FIELD) - the dictionary's size; col.values(h, FIELD) -
+ * the distinct strings as a 1-based sequence, in first-appearance order
+ * (a GUI's filter dropdown). The dictionary is POOL-wide: a view over a
+ * subrange still answers for the whole pool's column. Both refuse by
+ * name on a span-mode column - past the cardinality escape there is no
+ * dictionary to answer from. */
+static int
+LDistinct(lua_State *L)
+{
+    int wantValues = (int)lua_tointeger(L, lua_upvalueindex(1));
+    const char *field = luaL_checkstring(L, 2);
+    int poolNum;
+    int64_t a, b;
+    ResolveView(L, 1, &poolNum, &a, &b);
+    EngineStrCol sc;
+    char mode = ResolveStrColumn(L, poolNum, field, &sc);
+    if (mode == 'n') {
+        return luaL_error(L, "col: field %s is not a string", field);
+    }
+    if (mode == 'p') {
+        return luaL_error(L,
+            "col: field %s is past the dictionary limit (span mode)",
+            field);
+    }
+    if (!wantValues) {
+        lua_pushinteger(L, (lua_Integer)sc.dictN);
+        return 1;
+    }
+    lua_createtable(L, (int)sc.dictN, 0);
+    for (int64_t d = 0; d < sc.dictN; d++) {
+        lua_pushlstring(L, sc.arena + sc.dictOff[d], (size_t)sc.dictLen[d]);
+        lua_rawseti(L, -2, (lua_Integer)(d + 1));
+    }
     return 1;
 }
 
@@ -858,6 +1144,12 @@ BindCommon(lua_State *L)
     lua_setfield(L, -2, "bor");
     lua_pushcfunction(L, LBnot);
     lua_setfield(L, -2, "bnot");
+    lua_pushinteger(L, 0);
+    lua_pushcclosure(L, LDistinct, 1);
+    lua_setfield(L, -2, "distinct");
+    lua_pushinteger(L, 1);
+    lua_pushcclosure(L, LDistinct, 1);
+    lua_setfield(L, -2, "values");
 }
 
 void

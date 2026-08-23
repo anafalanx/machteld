@@ -211,9 +211,21 @@ typedef struct {
     char type;                       /* 'i', 'f', or 's' */
     int64_t *i;                      /* type 'i' */
     double *f;                       /* type 'f' */
-    int64_t *off;                    /* type 's': span starts in the arena */
-    int64_t *len;                    /* type 's': span lengths */
+    int64_t *off;                    /* type 's', span mode: starts */
+    int64_t *len;                    /* type 's', span mode: lengths */
+    /* Dictionary mode (0.14): the column is one int32 code per row plus
+     * the distinct spans, numbered in first-appearance order; the span
+     * arrays above are freed. Codes cost 4 bytes/row where spans cost
+     * 16. Past ENGINE_DICT_LIMIT distinct values the dictionary is
+     * discarded and the column stays in span mode - the cardinality
+     * escape, explicit and visible in stats. */
+    int32_t *code;
+    int64_t *dictOff;
+    int64_t *dictLen;
+    int64_t dictN;                   /* > 0 means dictionary mode */
 } PoolCol;
+
+#define ENGINE_DICT_LIMIT 65536
 
 typedef struct {
     int used;
@@ -244,6 +256,39 @@ EnginePoolLive(int poolNum)
         }
     }
     return 0;
+}
+
+char
+EnginePoolStrColumn(int poolNum, const char *field, EngineStrCol *out)
+{
+    Pool *p = NULL;
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
+        if (gPools[i].used == poolNum) {
+            p = &gPools[i];
+            break;
+        }
+    }
+    if (p == NULL) {
+        return 0;
+    }
+    for (int c = 0; c < p->ncols; c++) {
+        if (strcmp(p->cols[c].name, field) == 0) {
+            PoolCol *col = &p->cols[c];
+            if (col->type != 's') {
+                return 'n';
+            }
+            out->arena = p->arena;
+            out->rows = p->rows;
+            out->code = col->code;
+            out->dictOff = col->dictOff;
+            out->dictLen = col->dictLen;
+            out->dictN = col->dictN;
+            out->off = col->off;
+            out->len = col->len;
+            return (col->dictN > 0) ? 'd' : 'p';
+        }
+    }
+    return '?';
 }
 
 int
@@ -526,8 +571,14 @@ PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
                 lua_pushnumber(S, (lua_Number)col->f[a + i]);
                 break;
             default:
-                lua_pushlstring(S, p->arena + col->off[a + i],
-                                (size_t)col->len[a + i]);
+                if (col->dictN > 0) {
+                    int32_t dc = col->code[a + i];
+                    lua_pushlstring(S, p->arena + col->dictOff[dc],
+                                    (size_t)col->dictLen[dc]);
+                } else {
+                    lua_pushlstring(S, p->arena + col->off[a + i],
+                                    (size_t)col->len[a + i]);
+                }
             }
             lua_rawseti(S, -2, (lua_Integer)(i + 1));
         }
@@ -563,9 +614,95 @@ PoolFree(Pool *p)
         free(p->cols[c].f);
         free(p->cols[c].off);
         free(p->cols[c].len);
+        free(p->cols[c].code);
+        free(p->cols[c].dictOff);
+        free(p->cols[c].dictLen);
     }
     free(p->arena);
     memset(p, 0, sizeof(*p));
+}
+
+/* Build the dictionary for one span-mode s column: open-addressed hash
+ * over the arena spans, first-appearance numbering. On success the span
+ * arrays are freed and the column flips to dictionary mode; past the
+ * limit everything is discarded and the column stays as it was. */
+static void
+PoolDictBuild(Pool *p, PoolCol *col)
+{
+    int64_t rows = p->rows;
+    if (rows == 0) {
+        return;
+    }
+    size_t htSize = 1;
+    while (htSize < (size_t)ENGINE_DICT_LIMIT * 4) {
+        htSize <<= 1;
+    }
+    int32_t *ht = (int32_t *)malloc(htSize * sizeof(int32_t));
+    int32_t *code = (int32_t *)malloc((size_t)rows * sizeof(int32_t));
+    int64_t *dOff = (int64_t *)malloc(ENGINE_DICT_LIMIT * sizeof(int64_t));
+    int64_t *dLen = (int64_t *)malloc(ENGINE_DICT_LIMIT * sizeof(int64_t));
+    if (ht == NULL || code == NULL || dOff == NULL || dLen == NULL) {
+        free(ht);
+        free(code);
+        free(dOff);
+        free(dLen);
+        return;                                    /* stay in span mode */
+    }
+    memset(ht, 0xFF, htSize * sizeof(int32_t));    /* -1 = empty */
+    int64_t dictN = 0;
+    for (int64_t r = 0; r < rows; r++) {
+        const char *s = p->arena + col->off[r];
+        int64_t n = col->len[r];
+        uint64_t h = 1469598103934665603ull;
+        for (int64_t k = 0; k < n; k++) {
+            h ^= (unsigned char)s[k];
+            h *= 1099511628211ull;
+        }
+        size_t slot = (size_t)h & (htSize - 1);
+        for (;;) {
+            int32_t idx = ht[slot];
+            if (idx < 0) {
+                if (dictN == ENGINE_DICT_LIMIT) {
+                    free(ht);
+                    free(code);
+                    free(dOff);
+                    free(dLen);
+                    return;                        /* the escape: span mode */
+                }
+                ht[slot] = (int32_t)dictN;
+                dOff[dictN] = col->off[r];
+                dLen[dictN] = n;
+                code[r] = (int32_t)dictN;
+                dictN++;
+                break;
+            }
+            if (dLen[idx] == n &&
+                    memcmp(p->arena + dOff[idx], s, (size_t)n) == 0) {
+                code[r] = idx;
+                break;
+            }
+            slot = (slot + 1) & (htSize - 1);
+        }
+    }
+    free(ht);
+    /* Shrink the dictionary arrays from the limit to what they hold;
+     * on a refused shrink the full-size originals stay valid. */
+    int64_t *t = (int64_t *)realloc(dOff, (size_t)dictN * sizeof(int64_t));
+    if (t != NULL) {
+        dOff = t;
+    }
+    t = (int64_t *)realloc(dLen, (size_t)dictN * sizeof(int64_t));
+    if (t != NULL) {
+        dLen = t;
+    }
+    free(col->off);
+    free(col->len);
+    col->off = NULL;
+    col->len = NULL;
+    col->code = code;
+    col->dictOff = dOff;
+    col->dictLen = dLen;
+    col->dictN = dictN;
 }
 
 /* ---------------- Ej -> Lua and Lua -> JSON conversion ---------------- */
@@ -1388,6 +1525,17 @@ OpLoad(int64_t id, const Ej *req)
     p->arenaLen = ps.arena.len;
     ps.arena.p = NULL;
     ParsedFree(&ps);
+    /* Dictionary-encode the string columns (0.14). "dict":0 in the
+     * request skips it - a bench-lane escape for measuring the toll,
+     * not a contracted option. */
+    Ej *dictE = EjGet(req, "dict");
+    if (!(dictE != NULL && dictE->kind == EJ_INT && dictE->u.i == 0)) {
+        for (int c = 0; c < ncols; c++) {
+            if (p->cols[c].type == 's') {
+                PoolDictBuild(p, &p->cols[c]);
+            }
+        }
+    }
     p->used = ++gPoolSeq;
 
     EjBuf b;
@@ -1920,10 +2068,24 @@ OpStats(int64_t id)
                 EjBufText(&b, ",");
             }
             first = 0;
+            int dcols = 0, scols = 0;
+            for (int c = 0; c < gPools[i].ncols; c++) {
+                if (gPools[i].cols[c].type == 's') {
+                    if (gPools[i].cols[c].dictN > 0) {
+                        dcols++;
+                    } else {
+                        scols++;
+                    }
+                }
+            }
             EjBufText(&b, "{\"handle\":\"pool#");
             EjBufInt(&b, gPools[i].used);
             EjBufText(&b, "\",\"rows\":");
             EjBufInt(&b, gPools[i].rows);
+            EjBufText(&b, ",\"dict_cols\":");
+            EjBufInt(&b, dcols);
+            EjBufText(&b, ",\"span_cols\":");
+            EjBufInt(&b, scols);
             EjBufText(&b, "}");
         }
     }

@@ -293,6 +293,197 @@ scope {
         [dict get [runk s_feq $H] value] == [dict get [runk a_feq $H] value]}]
     puts "P5  scalar/avx2 agree on 1M (sum, filter-lt, filter-eq): $ok"
 
+    # ---------- the string grades (plan-machteld-014, S1-S4) ----------
+    puts "\n== the string grades (0.14) =="
+    set sbig [file join $devdir col-bench-1m-s.csv]
+    if {![file exists $sbig]} {
+        set f [open $sbig wb]
+        puts $f "pad,status,bytes"
+        set s 20260823
+        set paden {/api/users /api/orders /static/app.js /index.html /health}
+        set statuses {200 200 200 404 500}
+        for {set i 0} {$i < 1000000} {incr i} {
+            set s [expr {($s * 1103515245 + 12345) % 2147483648}]
+            puts $f "[lindex $paden [expr {$s % 5}]],[lindex $statuses [expr {($s >> 2) % 5}]],[expr {($s >> 3) % 100000}]"
+        }
+        close $f
+    }
+    puts "fixture 1M-s: [file size $sbig] bytes  sha256 [string range [hash file sha256 $sbig] 0 15]..."
+    set sschema [list pad s status i bytes i]
+
+    # S1 toll: interleaved dictionary/span loads, wall ms, 7 pairs.
+    set tolls {}
+    set tds {}
+    set tss {}
+    for {set i 0} {$i < 7} {incr i} {
+        set t0 [clock microseconds]
+        set r [req load format csv path $sbig header 1 schema $sschema]
+        set d [expr {([clock microseconds] - $t0) / 1000.0}]
+        req free handle [dict get $r handle]
+        set t0 [clock microseconds]
+        set r [req load format csv path $sbig header 1 schema $sschema dict 0]
+        set sp [expr {([clock microseconds] - $t0) / 1000.0}]
+        req free handle [dict get $r handle]
+        lappend tds $d
+        lappend tss $sp
+        lappend tolls [expr {$d / $sp}]
+    }
+    set s1 [median $tolls]
+    set s1v [expr {$s1 <= 1.25 ? "HELD" : ($s1 > 1.5 ? "KILLED" : "MISSED")}]
+    puts [format "S1  dictionary toll on the 1M load: %.2fx (dict %.0f ms, span %.0f ms; <=1.25x held, >1.5x killed)  %s" \
+        $s1 [median $tds] [median $tss] $s1v]
+
+    # S1m memory: a FRESH engine per mode (no heap history), three 1M
+    # pools held, commit delta per pool. Codes cost 4 B/row where spans
+    # cost 16; the dictionary pool must be smaller.
+    proc commitkb {pid} {
+        return [expr {[exec powershell.exe -NoProfile -Command \
+            "(Get-Process -Id $pid).PrivateMemorySize64"] / 1024}]
+    }
+    proc memload {exe sbig sschema extra} {
+        global W R
+        set saveW $W
+        set saveR $R
+        set c [child start -channels -- $exe --machteld-engine 4]
+        set io [child info $c]
+        set W [dict get $io stdin]
+        set R [dict get $io stdout]
+        chan configure $W -translation binary -buffering none
+        chan configure $R -translation binary -blocking 1
+        req hello protocol 1 host machteld version [version]
+        set pid [dict get $io pid]
+        set c0 [commitkb $pid]
+        for {set i 0} {$i < 3} {incr i} {
+            req load format csv path $sbig header 1 schema $sschema {*}$extra
+        }
+        set c1 [commitkb $pid]
+        req quit
+        child wait $c
+        child close $c
+        set W $saveW
+        set R $saveR
+        return [expr {($c1 - $c0) / 3.0}]
+    }
+    set s1md [memload $exe $sbig $sschema {}]
+    set s1ms [memload $exe $sbig $sschema {dict 0}]
+    puts [format "S1m per-pool commit: dictionary %.1f MB vs span %.1f MB (smaller holds)  %s" \
+        [expr {$s1md / 1024.0}] [expr {$s1ms / 1024.0}] \
+        [expr {$s1md < $s1ms ? "HELD" : "MISSED"}]]
+
+    # S2/S3: eq and match via col vs the pinned Lua loops, dictionary
+    # pool graded, span pool reported for the record, interleaved.
+    set SD [dict get [req load format csv path $sbig header 1 schema $sschema] handle]
+    set SS [dict get [req load format csv path $sbig header 1 schema $sschema dict 0] handle]
+    req def name base_seq chunk {function base_seq(h, x)
+        local acc = 0
+        local pad = h.pad
+        for i = 1, h.rows do
+            if pad[i] == x then acc = acc + 1 end
+        end
+        return acc
+    end}
+    req def name col_seq chunk {function col_seq(h, x)
+        return col.count(col.filter(h, "pad", "eq", x))
+    end}
+    req def name base_match chunk {function base_match(h, pat)
+        local lp = pat:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+        lp = "^" .. lp:gsub("%%%*", ".*") .. "$"
+        local acc = 0
+        local pad = h.pad
+        local find = string.find
+        for i = 1, h.rows do
+            if find(pad[i], lp) then acc = acc + 1 end
+        end
+        return acc
+    end}
+    req def name col_match chunk {function col_match(h, pat)
+        return col.count(col.filter(h, "pad", "match", pat))
+    end}
+    req def name base_sw chunk {function base_sw(h, pat)
+        local lp = pat:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+        lp = "^" .. lp:gsub("%%%*", ".*") .. "$"
+        local acc = 0
+        local pad, by = h.pad, h.bytes
+        local find = string.find
+        for i = 1, h.rows do
+            if find(pad[i], lp) then acc = acc + by[i] end
+        end
+        return acc
+    end}
+    req def name col_sw chunk {function col_sw(h, pat)
+        return col.sumwhere(h, "bytes", "pad", "match", pat)
+    end}
+    proc runk2 {name h x} {
+        return [req run name $name args [list [dict create handle $h] $x]]
+    }
+    foreach k {base_seq col_seq base_match col_match base_sw col_sw} {
+        runk2 $k $SD /api/users
+        runk2 $k $SS /api/users
+    }
+    set rd {}
+    set rs {}
+    set bv ""
+    set cv ""
+    set bmsq {}
+    set cmsq {}
+    for {set i 0} {$i < 7} {incr i} {
+        set rb [runk2 base_seq $SD /api/users]
+        set rc [runk2 col_seq $SD /api/users]
+        set bv [dict get $rb value]
+        set cv [dict get $rc value]
+        lappend bmsq [dict get $rb ms]
+        lappend cmsq [dict get $rc ms]
+        lappend rd [expr {[dict get $rb ms] / [dict get $rc ms]}]
+        set rb [runk2 base_seq $SS /api/users]
+        set rc [runk2 col_seq $SS /api/users]
+        lappend rs [expr {[dict get $rb ms] / [dict get $rc ms]}]
+    }
+    if {$bv != $cv} { puts "S2  VALUES DISAGREE: lua $bv col $cv" }
+    set s2 [median $rd]
+    puts [format "S2  eq via col vs the Lua loop (dictionary): %.1fx (lua %.1f ms, col %.3f ms; >=20x)  %s" \
+        $s2 [median $bmsq] [median $cmsq] \
+        [expr {$s2 >= 20.0 ? "HELD" : "MISSED"}]]
+    puts [format "S2r span mode for the record: %.1fx" [median $rs]]
+    set rd {}
+    set rs {}
+    set cms {}
+    set bms {}
+    for {set i 0} {$i < 7} {incr i} {
+        set rb [runk2 base_match $SD /api/*]
+        set rc [runk2 col_match $SD /api/*]
+        set bv [dict get $rb value]
+        set cv [dict get $rc value]
+        lappend bms [dict get $rb ms]
+        lappend cms [dict get $rc ms]
+        lappend rd [expr {[dict get $rb ms] / [dict get $rc ms]}]
+        set rb [runk2 base_match $SS /api/*]
+        set rc [runk2 col_match $SS /api/*]
+        lappend rs [expr {[dict get $rb ms] / [dict get $rc ms]}]
+    }
+    if {$bv != $cv} { puts "S3  VALUES DISAGREE: lua $bv col $cv" }
+    set s3ms [median $cms]
+    set s3x [median $rd]
+    set s3v [expr {$s3ms <= 5.0 && $s3x >= 20.0 ? "HELD" : "MISSED"}]
+    puts [format "S3  match via col (dictionary): %.3f ms engine-side (<=5) and %.1fx vs the Lua glob loop (>=20x)  %s" \
+        $s3ms $s3x $s3v]
+    puts [format "S3r Lua glob loop %.1f ms (the reken-lineage class); span mode %.1fx" \
+        [median $bms] [median $rs]]
+
+    # S4 spot: dict, span, and the Lua twins agree on the 1M (the full
+    # hostile differential lives in the gate lane's engine test).
+    set ok [expr {
+        [dict get [runk2 col_seq $SD /api/users] value] ==
+            [dict get [runk2 col_seq $SS /api/users] value] &&
+        [dict get [runk2 col_match $SD /api/*] value] ==
+            [dict get [runk2 col_match $SS /api/*] value] &&
+        [dict get [runk2 base_seq $SD /api/users] value] ==
+            [dict get [runk2 col_seq $SD /api/users] value] &&
+        [dict get [runk2 base_sw $SD /api/*] value] ==
+            [dict get [runk2 col_sw $SD /api/*] value] &&
+        [dict get [runk2 col_sw $SD /api/*] value] ==
+            [dict get [runk2 col_sw $SS /api/*] value]}]
+    puts "S4  dict/span/Lua agree on the 1M (eq, match, sumwhere): $ok"
+
     req quit
 }
 puts "\ncol bench complete."

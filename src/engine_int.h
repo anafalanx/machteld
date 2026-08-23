@@ -31,6 +31,22 @@ int EngineViewIdentity(lua_State *S, int idx, int *poolNumOut,
  * stale reference is a named refusal, never a stale pointer. */
 int EnginePoolLive(int poolNum);
 
+/* Resolve one STRING column. Returns 'd' (dictionary mode: codes plus
+ * dictionary spans), 'p' (span mode: per-row spans), 0 (pool dead),
+ * '?' (unknown field), or 'n' (not a string column). All spans index
+ * into *arena. */
+typedef struct {
+    const char *arena;
+    const int32_t *code;             /* 'd': one code per row */
+    const int64_t *dictOff;          /* 'd': dictN spans */
+    const int64_t *dictLen;
+    int64_t dictN;
+    const int64_t *off;              /* 'p': rows spans */
+    const int64_t *len;
+    int64_t rows;
+} EngineStrCol;
+char EnginePoolStrColumn(int poolNum, const char *field, EngineStrCol *out);
+
 /* col.c entry point, called by the engine core - and only after the
  * core's own (plain-ISA) CPUID check passed: col.c is compiled -mavx2
  * and must not execute a single instruction before that gate. */
