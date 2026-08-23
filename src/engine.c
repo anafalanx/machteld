@@ -180,12 +180,21 @@ MsgHandler(lua_State *S)
 
 /* ---------------- registries: kernels, pools, results ---------------- */
 
+/* Kernels: a bounded table with least-recently-used eviction. The PHM
+ * endurance spike (2026-08-23) found that a full table refused every
+ * further definition - a wall the whole engine fell off at once. Now the
+ * 257th distinct name evicts the least recently run kernel: its global is
+ * cleared in every state, and its next run refuses as "no kernel" until
+ * it is defined again. */
 typedef struct {
     char name[64];
     uint64_t hash;
     int used;
+    uint64_t lastUse;
 } Kernel;
 static Kernel gKernels[ENGINE_MAX_KERNELS];
+static uint64_t gKernelClock = 0;
+static uint64_t gKernelEvictions = 0;
 
 typedef struct {
     int state;
@@ -278,7 +287,7 @@ static int gResultSeq = 0;
 /* ---------------- stats ---------------- */
 
 static struct {
-    uint64_t frames, bytesIn, bytesOut, runs, spills;
+    uint64_t frames, bytesIn, bytesOut, runs, spills, viewEvictions;
     ULONGLONG t0;
 } gStats;
 
@@ -429,11 +438,40 @@ PoolByHandle(const char *h, int *numOut)
 
 static void PoolTrackViewLocked(Pool *p, int state, const char *key);
 
+/* The view cache is bounded: at most ENGINE_VIEWS_PER_STATE cached row
+ * ranges per state per pool. The endurance spike found the unbounded
+ * cache retaining every range a hot pool was ever sharded by (3x memory
+ * at twelve variants). Eviction is oldest-first within THIS state - the
+ * registry write is on the calling thread's own state, the shared list
+ * under the lock - and only the cache reference goes: a kernel still
+ * holding an evicted view keeps a valid, live table. */
+#define ENGINE_VIEWS_PER_STATE 2
+
 static void
-PoolTrackView(Pool *p, int state, const char *key)
+PoolTrackView(lua_State *S, Pool *p, int state, const char *key)
 {
     EnterCriticalSection(&gViewLock);
     PoolTrackViewLocked(p, state, key);
+    int mine = 0;
+    for (int i = 0; i < p->nviews; i++) {
+        if (p->views[i].state == state) {
+            mine++;
+        }
+    }
+    while (mine > ENGINE_VIEWS_PER_STATE) {
+        for (int i = 0; i < p->nviews; i++) {
+            if (p->views[i].state == state) {
+                lua_pushnil(S);
+                lua_setfield(S, LUA_REGISTRYINDEX, p->views[i].key);
+                memmove(&p->views[i], &p->views[i + 1],
+                        (size_t)(p->nviews - i - 1) * sizeof(ViewRef));
+                p->nviews--;
+                gStats.viewEvictions++;
+                break;
+            }
+        }
+        mine--;
+    }
     LeaveCriticalSection(&gViewLock);
 }
 
@@ -497,7 +535,7 @@ PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
     }
     lua_pushvalue(S, -1);
     lua_setfield(S, LUA_REGISTRYINDEX, key);
-    PoolTrackView(p, stateIdx, key);
+    PoolTrackView(S, p, stateIdx, key);
     /* Record the view's identity for col, invisibly (weak-keyed). */
     if (lua_getfield(S, LUA_REGISTRYINDEX, ENGINE_COLVIEWS) == LUA_TTABLE) {
         lua_pushvalue(S, -2);                  /* the view table as key */
@@ -1387,6 +1425,7 @@ OpDef(int64_t id, const Ej *req)
     uint64_t hash = Fnv1a(chunk->u.s.bytes, chunk->u.s.len);
     Kernel *k = KernelFind(name->u.s.bytes);
     if (k != NULL && k->hash == hash) {
+        k->lastUse = ++gKernelClock;
         EjBuf b;
         OkOpen(&b, id);
         EjBufText(&b, ",\"name\":");
@@ -1429,13 +1468,26 @@ OpDef(int64_t id, const Ej *req)
             }
         }
         if (k == NULL) {
-            SendError(id, "badvalue", "kernel table is full");
-            return;
+            /* Evict the least recently used kernel: clear its global in
+             * every state so a later run of that name refuses cleanly. */
+            Kernel *victim = &gKernels[0];
+            for (int i = 1; i < ENGINE_MAX_KERNELS; i++) {
+                if (gKernels[i].lastUse < victim->lastUse) {
+                    victim = &gKernels[i];
+                }
+            }
+            for (int i = 0; i < gNStates; i++) {
+                lua_pushnil(gStates[i].L);
+                lua_setglobal(gStates[i].L, victim->name);
+            }
+            gKernelEvictions++;
+            k = victim;
         }
         k->used = 1;
         snprintf(k->name, sizeof(k->name), "%s", name->u.s.bytes);
     }
     k->hash = hash;
+    k->lastUse = ++gKernelClock;
     EjBuf b;
     OkOpen(&b, id);
     EjBufText(&b, ",\"name\":");
@@ -1607,13 +1659,15 @@ OpRun(int64_t id, const Ej *req)
         SendError(id, "usage", "run expects string name and array args");
         return;
     }
-    if (KernelFind(name->u.s.bytes) == NULL) {
+    Kernel *kr = KernelFind(name->u.s.bytes);
+    if (kr == NULL) {
         char msg[128];
         snprintf(msg, sizeof(msg), "no kernel %s (def it first)",
                  name->u.s.bytes);
         SendError(id, "lua", msg);
         return;
     }
+    kr->lastUse = ++gKernelClock;
     int shards = 0;
     if (shardsE != NULL) {
         if (shardsE->kind != EJ_INT || shardsE->u.i < 1 ||
@@ -1829,6 +1883,28 @@ OpStats(int64_t id)
     EjBufInt(&b, (int64_t)gStats.runs);
     EjBufText(&b, ",\"spills\":");
     EjBufInt(&b, (int64_t)gStats.spills);
+    /* Occupancy gauges (the PHM spike's Plimsoll lines): how close each
+     * bounded table and each state's cap is to its edge. */
+    int kernels = 0, results = 0, views = 0;
+    for (int i = 0; i < ENGINE_MAX_KERNELS; i++) { kernels += gKernels[i].used ? 1 : 0; }
+    for (int i = 0; i < ENGINE_MAX_RESULTS; i++) { results += gResults[i].used ? 1 : 0; }
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) { views += gPools[i].used ? gPools[i].nviews : 0; }
+    EjBufText(&b, ",\"kernels\":");
+    EjBufInt(&b, kernels);
+    EjBufText(&b, ",\"kernel_slots\":");
+    EjBufInt(&b, ENGINE_MAX_KERNELS);
+    EjBufText(&b, ",\"kernel_evictions\":");
+    EjBufInt(&b, (int64_t)gKernelEvictions);
+    EjBufText(&b, ",\"results\":");
+    EjBufInt(&b, results);
+    EjBufText(&b, ",\"result_slots\":");
+    EjBufInt(&b, ENGINE_MAX_RESULTS);
+    EjBufText(&b, ",\"views\":");
+    EjBufInt(&b, views);
+    EjBufText(&b, ",\"view_evictions\":");
+    EjBufInt(&b, (int64_t)gStats.viewEvictions);
+    EjBufText(&b, ",\"cap_bytes\":");
+    EjBufInt(&b, (int64_t)ENGINE_STATE_CAP_MB * 1024 * 1024);
     EjBufText(&b, ",\"mem_used\":[");
     for (int i = 0; i < gNStates; i++) {
         if (i > 0) {

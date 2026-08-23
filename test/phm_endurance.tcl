@@ -98,19 +98,25 @@ scope {
     set A [eng_start 2]
     # E1: 257th distinct kernel name; redefinition consumes nothing.
     set failAt 0
+    set e1msg "(none)"
     for {set i 1} {$i <= 300} {incr i} {
         set r [ask A def name "k$i" chunk "function k${i}() return $i end"]
         if {![ok? $r]} { set failAt $i; set e1msg [errmsg $r]; break }
     }
+    # Closed 2026-08-23: the 257th name evicts the least recently used
+    # kernel instead of refusing; k1 (never run) is the first to go.
+    set evicted [expr {![ok? [ask A run name k1]]}]
+    set newest [expr {[ok? [ask A run name k300]]}]
     set redefOk 1
     for {set i 1} {$i <= 50} {incr i} {
         if {![ok? [ask A def name k1 chunk "function k1() return [expr {$i * 2}] end"]]} {
             set redefOk 0
         }
     }
-    grade E1 "fails at distinct #$failAt; redefine ok=$redefOk" "257, redefine free" \
-        [expr {$failAt == 257 && $redefOk && [string match "*kernel table is full*" $e1msg]}]
-    puts "E1  distinct kernel names fail at #$failAt ($e1msg); 50 redefinitions ok=$redefOk"
+    grade E1 "300 distinct defs, failure at #$failAt; k1 evicted=$evicted, k300 live=$newest" \
+        "wall CLOSED: never refuses, LRU evicts" \
+        [expr {$failAt == 0 && $evicted && $newest && $redefOk}]
+    puts "E1  300 distinct kernel names: failure at #$failAt ($e1msg); k1 evicted=$evicted, k300 live=$newest, redefinitions ok=$redefOk"
     ask A quit
     child close [dict get $A child]
     # E6: spilled results without free - on its OWN fresh engine (the
@@ -249,8 +255,8 @@ scope {
     set v12 [mem0 E]
     puts [format "  state-0 mem after shards 1: %d; after shards up to %d: %d (%.1fx) %s" \
         $v1 $reached $v12 [expr {double($v12) / $v1}] $e5msg]
-    grade E5 [format "%.1fx (reached shards %d) %s" [expr {double($v12) / $v1}] $reached $e5msg] ">= 6x" \
-        [expr {double($v12) / $v1 >= 6.0}]
+    grade E5 [format "%.1fx (reached shards %d) %s" [expr {double($v12) / $v1}] $reached $e5msg] \
+        "wall CLOSED: bounded cache, < 2x" [expr {double($v12) / $v1 < 2.0}]
     ask E free handle $H
     ask E quit
     child close [dict get $E child]

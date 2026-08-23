@@ -418,6 +418,44 @@ scope {
     check "a freed pool is nohandle" \
         [expr {![dict get $r ok] && [errcode $r] eq "nohandle"}]
 
+    # The three walls (PHM endurance spike, 2026-08-23), closed.
+    # 1. Kernel table: the 257th distinct name evicts the least recently
+    #    used kernel instead of refusing; the evicted name refuses cleanly
+    #    on run and can be defined again.
+    reqok def name oldest chunk {function oldest() return 1 end}
+    for {set i 1} {$i <= 300} {incr i} {
+        reqok def name "w$i" chunk "function w${i}() return $i end"
+    }
+    set r [req run name oldest]
+    check "past 256 kernels the least recently used is evicted, not the engine" [expr {
+        ![dict get $r ok] && [string match "*no kernel oldest*" [dict get $r error message]]}]
+    check "the newest kernels survive eviction" \
+        [expr {[dict get [reqok run name w300] value] == 300}]
+    reqok def name oldest chunk {function oldest() return 2 end}
+    check "an evicted kernel can be defined again" \
+        [expr {[dict get [reqok run name oldest] value] == 2}]
+    set st [reqok stats]
+    check "stats gauges kernel occupancy and evictions" [expr {
+        [dict get $st kernels] == [dict get $st kernel_slots] &&
+        [dict get $st kernel_evictions] > 0}]
+    # 2. View cache: at most two cached ranges per state per pool. Four
+    #    shard variants on a 4-state engine would cache 10 views unbounded;
+    #    bounded it is 2+2+2+1 = 7.
+    set r [reqok load format lines path $fixture]
+    set vpool [dict get $r handle]
+    reqok def name vcount chunk {function vcount(h) return h.rows end}
+    foreach n {1 2 3 4} {
+        reqok run name vcount args [list [dict create handle $vpool]] shards $n
+    }
+    set st [reqok stats]
+    check "the view cache is bounded per state (7 views, not 10)" [expr {
+        [dict get $st views] == 7 && [dict get $st view_evictions] >= 2}]
+    reqok free handle $vpool
+    # 3. The cap stays the cap, but it is visible before it bites.
+    check "stats exposes the state cap beside per-state use" [expr {
+        [dict get $st cap_bytes] == 268435456 &&
+        [llength [dict get $st mem_used]] == 4}]
+
     # Stats and protocol hygiene.
     set r [reqok stats]
     check "stats counts threads, runs, and spills" [expr {
