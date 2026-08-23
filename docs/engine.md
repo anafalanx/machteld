@@ -213,15 +213,23 @@ Edge laws, each one stated once:
 **Road 2 - handles, for everything engine-resident.** Pools and spilled
 results are opaque tokens owned by one engine. A kernel receives a pool as an
 object `h` with `h.rows` and one indexable column per field, `h.<field>[i]`,
-`i` from 1 to `h.rows`; in the built-in engine the columns of a shard's
-view are materialized Lua sequences, so the measured kernel numbers apply
-directly; the cache keeps at most two ranges per state per pool, evicting
-the oldest (a kernel still holding an evicted view keeps a valid table -
-only the cache reference goes), so a hot pool sharded many ways stays
-bounded
-directly. A handle offered to a different engine, or after its engine died or
-`free`d it, raises `MACHT nohandle`. Handles are never guessed, never
-re-used, never serialized.
+`i` from 1 to `h.rows`. In the built-in engine a column materializes as a
+plain Lua sequence on its FIRST touch and stays in the table from then on
+(one metamethod hit per column; loops run at the measured kernel numbers) -
+so a kernel that computes only through `col` never materializes anything,
+which is what lets `col` work over pools far larger than the state cap. A
+column too large for the cap refuses at the touch with the allocator's
+"not enough memory" as `MACHT lua`; the engine survives. The view cache
+keeps at most two ranges per state per pool, evicting the oldest; a kernel
+still holding an evicted view keeps a valid table while the pool lives. A
+stashed view whose pool was `free`d keeps answering for columns it already
+materialized and refuses `col: view outlives its pool` on the first
+untouched one - never a stale read. `pairs(h)` sees only `rows` and the
+touched columns; the contract is `h.rows` and `h.<field>`, never
+enumeration (and a column literally named `rows` shadows the row count -
+name columns accordingly). A handle offered to a different engine, or
+after its engine died or `free`d it, raises `MACHT nohandle`. Handles are
+never guessed, never re-used, never serialized.
 
 **Road 3 - paths, for bulk.** `load` sends a path; the engine reads the file.
 The host normalizes the path and the engine's working directory is the
@@ -303,6 +311,15 @@ The vocabulary, over a view `h`:
 - `col.band(A, B)`, `col.bor(A, B)`, `col.bnot(A)` - selection algebra
   for compound predicates worth reusing; bits beyond the view's rows
   stay zero, always.
+- `col.rows(h, SEL_or_nil, FIRST, COUNT)` - the bounded page: rows of
+  the view in row order, or the FIRST-th..(FIRST+COUNT-1)-th
+  **selected** rows under SEL, as a sequence of row sequences in pool
+  column order. FIRST is 1-based like everything on the boundary;
+  FIRST past the population yields an empty sequence (a scrolled-past
+  page is an empty page, not an error); COUNT above 4096 refuses by
+  name. It reads pool memory directly - dictionary or span alike, no
+  column materialization - so a GUI pages a pool of any size: filter,
+  count, fetch fifty rows, one kernel, one round trip.
 
 **Dictionary encoding.** At load, every `s` column is dictionary-encoded:
 the distinct values are numbered in first-appearance order and the column

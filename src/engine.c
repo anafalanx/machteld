@@ -292,6 +292,24 @@ EnginePoolStrColumn(int poolNum, const char *field, EngineStrCol *out)
 }
 
 int
+EnginePoolField(int poolNum, int idx, const char **nameOut, char *typeOut)
+{
+    Pool *p = NULL;
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
+        if (gPools[i].used == poolNum) {
+            p = &gPools[i];
+            break;
+        }
+    }
+    if (p == NULL || idx < 0 || idx >= p->ncols) {
+        return 0;
+    }
+    *nameOut = p->cols[idx].name;
+    *typeOut = p->cols[idx].type;
+    return 1;
+}
+
+int
 EnginePoolColumn(int poolNum, const char *field, char *typeOut,
                  const void **dataOut, int64_t *rowsOut)
 {
@@ -540,10 +558,89 @@ PoolTrackViewLocked(Pool *p, int state, const char *key)
     p->nviews++;
 }
 
-/* Push the pool view [a,b) as the kernel-visible object: h.rows plus one
- * materialized sequence per column, h.<name>[i]. Cached per (state, range)
- * in that state's registry, per the contract's materialized-columns
- * promise. */
+/* Build one column of the view [a,b) as a Lua sequence - the same bytes
+ * whether the column is dictionary- or span-mode. Leaves it on top. */
+static void
+PushColumnTable(lua_State *S, Pool *p, PoolCol *col, int64_t a, int64_t b)
+{
+    int64_t n = b - a;
+    lua_createtable(S, (int)n, 0);
+    for (int64_t i = 0; i < n; i++) {
+        switch (col->type) {
+        case 'i':
+            lua_pushinteger(S, (lua_Integer)col->i[a + i]);
+            break;
+        case 'f':
+            lua_pushnumber(S, (lua_Number)col->f[a + i]);
+            break;
+        default:
+            if (col->dictN > 0) {
+                int32_t dc = col->code[a + i];
+                lua_pushlstring(S, p->arena + col->dictOff[dc],
+                                (size_t)col->dictLen[dc]);
+            } else {
+                lua_pushlstring(S, p->arena + col->off[a + i],
+                                (size_t)col->len[a + i]);
+            }
+        }
+        lua_rawseti(S, -2, (lua_Integer)(i + 1));
+    }
+}
+
+/* The lazy view's __index (0.14): materialize the touched column and
+ * rawset it, so the metamethod never fires again for that name and the
+ * kernel's loop runs on a plain table. THE LIVENESS LAW (panel blocker,
+ * plan-machteld-014): resolve the pool by its MONOTONE NUMBER at every
+ * touch, cache no Pool/arena/column pointer anywhere; a stashed view
+ * whose pool was freed refuses by name on its first untouched column
+ * instead of reading freed memory. Already-materialized columns keep
+ * working - the eager guarantee, narrowed honestly. Concurrency: this
+ * mutates only the calling state's own table and reads only the
+ * read-only-after-load pool; the shared view bookkeeping ran once at
+ * view creation - no shared state is touched here. */
+#define ENGINE_LAZYMETA "machteld.lazyview"
+
+static int
+ViewIndex(lua_State *S)
+{
+    if (lua_type(S, 2) != LUA_TSTRING) {
+        lua_pushnil(S);
+        return 1;
+    }
+    int poolNum;
+    int64_t a, b;
+    if (!EngineViewIdentity(S, 1, &poolNum, &a, &b)) {
+        lua_pushnil(S);                /* not a tracked view: plain miss */
+        return 1;
+    }
+    Pool *p = NULL;
+    for (int i = 0; i < ENGINE_MAX_POOLS; i++) {
+        if (gPools[i].used == poolNum) {
+            p = &gPools[i];
+            break;
+        }
+    }
+    if (p == NULL) {
+        return luaL_error(S, "col: view outlives its pool");
+    }
+    const char *name = lua_tostring(S, 2);
+    for (int c = 0; c < p->ncols; c++) {
+        if (strcmp(p->cols[c].name, name) == 0) {
+            PushColumnTable(S, p, &p->cols[c], a, b);
+            lua_pushvalue(S, 2);
+            lua_pushvalue(S, -2);
+            lua_rawset(S, 1);          /* h[name] = the column, once */
+            return 1;
+        }
+    }
+    lua_pushnil(S);
+    return 1;
+}
+
+/* Push the pool view [a,b) as the kernel-visible object: h.rows eagerly,
+ * every column lazily through ViewIndex (a col-only kernel over a pool
+ * of any size touches no column and allocates almost nothing). Cached
+ * per (state, range) in that state's registry. */
 static void
 PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
              int64_t a, int64_t b)
@@ -559,31 +656,17 @@ PushPoolView(lua_State *S, int stateIdx, Pool *p, int poolNum,
     lua_createtable(S, 0, p->ncols + 1);
     lua_pushinteger(S, (lua_Integer)n);
     lua_setfield(S, -2, "rows");
-    for (int c = 0; c < p->ncols; c++) {
-        PoolCol *col = &p->cols[c];
-        lua_createtable(S, (int)n, 0);
-        for (int64_t i = 0; i < n; i++) {
-            switch (col->type) {
-            case 'i':
-                lua_pushinteger(S, (lua_Integer)col->i[a + i]);
-                break;
-            case 'f':
-                lua_pushnumber(S, (lua_Number)col->f[a + i]);
-                break;
-            default:
-                if (col->dictN > 0) {
-                    int32_t dc = col->code[a + i];
-                    lua_pushlstring(S, p->arena + col->dictOff[dc],
-                                    (size_t)col->dictLen[dc]);
-                } else {
-                    lua_pushlstring(S, p->arena + col->off[a + i],
-                                    (size_t)col->len[a + i]);
-                }
-            }
-            lua_rawseti(S, -2, (lua_Integer)(i + 1));
-        }
-        lua_setfield(S, -2, col->name);
+    if (lua_getfield(S, LUA_REGISTRYINDEX, ENGINE_LAZYMETA) != LUA_TTABLE) {
+        lua_pop(S, 1);
+        lua_createtable(S, 0, 2);
+        lua_pushcfunction(S, ViewIndex);
+        lua_setfield(S, -2, "__index");
+        lua_pushliteral(S, "machteld view");
+        lua_setfield(S, -2, "__metatable");
+        lua_pushvalue(S, -1);
+        lua_setfield(S, LUA_REGISTRYINDEX, ENGINE_LAZYMETA);
     }
+    lua_setmetatable(S, -2);
     lua_pushvalue(S, -1);
     lua_setfield(S, LUA_REGISTRYINDEX, key);
     PoolTrackView(S, p, stateIdx, key);

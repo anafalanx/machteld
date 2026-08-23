@@ -1017,6 +1017,129 @@ LSumWhere(lua_State *L)
     return 1;
 }
 
+/* col.rows(h, SEL_or_nil, FIRST, COUNT) - the bounded row-slice fetch
+ * (plan-machteld-014, the GUI spike): rows of the view in row order, or
+ * the FIRST-th..(FIRST+COUNT-1)-th SELECTED rows under SEL, as a
+ * sequence of row sequences in pool column order. FIRST is 1-based;
+ * FIRST past the population yields an empty sequence (a scrolled-past
+ * page is an empty page, not an error); COUNT above 4096 refuses by
+ * name. Reads pool memory directly - dictionary or span alike - so it
+ * works where materializing h.FIELD cannot. */
+typedef struct {
+    char type;                       /* 'i', 'f', or 's' */
+    const int64_t *i;
+    const double *f;
+    EngineStrCol sc;
+} RowsCol;
+
+static int
+LRows(lua_State *L)
+{
+    int poolNum;
+    int64_t a, b;
+    ResolveView(L, 1, &poolNum, &a, &b);
+    ColSel *sel = NULL;
+    if (!lua_isnoneornil(L, 2)) {
+        ColSel *s = (ColSel *)luaL_checkudata(L, 2, COL_SEL_META);
+        if (s->poolNum != poolNum || s->a != a || s->b != b) {
+            return luaL_error(L, "col: selection is bound to another view");
+        }
+        sel = s;
+    }
+    int64_t first = (int64_t)luaL_checkinteger(L, 3);
+    int64_t count = (int64_t)luaL_checkinteger(L, 4);
+    if (first < 1 || count < 0) {
+        return luaL_error(L, "col: argument type (FIRST >= 1, COUNT >= 0)");
+    }
+    if (count > 4096) {
+        return luaL_error(L, "col: rows asks more than 4096");
+    }
+    /* Resolve every column once, in pool order. */
+    RowsCol cols[64];
+    const char *names[64];
+    int ncols = 0;
+    char t;
+    while (ncols < 64 &&
+           EnginePoolField(poolNum, ncols, &names[ncols], &t)) {
+        RowsCol *rc = &cols[ncols];
+        rc->type = t;
+        rc->i = NULL;
+        rc->f = NULL;
+        if (t == 's') {
+            EnginePoolStrColumn(poolNum, names[ncols], &rc->sc);
+        } else {
+            const void *data = NULL;
+            int64_t rows = 0;
+            char tt;
+            EnginePoolColumn(poolNum, names[ncols], &tt, &data, &rows);
+            rc->i = (t == 'i') ? (const int64_t *)data : NULL;
+            rc->f = (t == 'f') ? (const double *)data : NULL;
+        }
+        ncols++;
+    }
+    /* Collect the view-relative row indices of the page. */
+    int64_t n = b - a;
+    int64_t *page = (int64_t *)lua_newuserdatauv(L,
+        (size_t)(count > 0 ? count : 1) * sizeof(int64_t), 0);
+    int64_t got = 0;
+    if (sel == NULL) {
+        for (int64_t i = first - 1; i < n && got < count; i++) {
+            page[got++] = i;
+        }
+    } else {
+        int64_t words = (n + 63) / 64;
+        int64_t seen = 0;
+        for (int64_t wi = 0; wi < words && got < count; wi++) {
+            uint64_t w = sel->bits[wi];
+            if (w == 0) {
+                continue;
+            }
+            int pc = __builtin_popcountll(w);
+            if (seen + pc < first) {
+                seen += pc;               /* the whole word is before us */
+                continue;
+            }
+            while (w != 0 && got < count) {
+                int tz = __builtin_ctzll(w);
+                w &= w - 1;
+                seen++;
+                if (seen >= first) {
+                    page[got++] = wi * 64 + tz;
+                }
+            }
+        }
+    }
+    /* Build the page: a sequence of row sequences. */
+    lua_createtable(L, (int)got, 0);
+    for (int64_t r = 0; r < got; r++) {
+        int64_t row = a + page[r];
+        lua_createtable(L, ncols, 0);
+        for (int c = 0; c < ncols; c++) {
+            RowsCol *rc = &cols[c];
+            switch (rc->type) {
+            case 'i':
+                lua_pushinteger(L, (lua_Integer)rc->i[row]);
+                break;
+            case 'f':
+                lua_pushnumber(L, (lua_Number)rc->f[row]);
+                break;
+            default:
+                if (rc->sc.dictN > 0) {
+                    int32_t dc = rc->sc.code[row];
+                    lua_pushlstring(L, rc->sc.arena + rc->sc.dictOff[dc],
+                                    (size_t)rc->sc.dictLen[dc]);
+                } else {
+                    lua_pushlstring(L, rc->sc.arena + rc->sc.off[row],
+                                    (size_t)rc->sc.len[row]);
+                }
+            }
+            lua_rawseti(L, -2, (lua_Integer)(c + 1));
+        }
+        lua_rawseti(L, -2, (lua_Integer)(r + 1));
+    }
+    return 1;
+}
+
 /* col.distinct(h, FIELD) - the dictionary's size; col.values(h, FIELD) -
  * the distinct strings as a 1-based sequence, in first-appearance order
  * (a GUI's filter dropdown). The dictionary is POOL-wide: a view over a
@@ -1150,6 +1273,8 @@ BindCommon(lua_State *L)
     lua_pushinteger(L, 1);
     lua_pushcclosure(L, LDistinct, 1);
     lua_setfield(L, -2, "values");
+    lua_pushcfunction(L, LRows);
+    lua_setfield(L, -2, "rows");
 }
 
 void

@@ -47,6 +47,13 @@ typedef struct {
 } EngineStrCol;
 char EnginePoolStrColumn(int poolNum, const char *field, EngineStrCol *out);
 
+/* Column name and type by position, for col.rows' pool-column-order
+ * walk. Returns 1 while idx is in range; 0 past the end or when the
+ * pool is dead. *nameOut points into the pool - use it within the
+ * call, never hold it. */
+int EnginePoolField(int poolNum, int idx, const char **nameOut,
+                    char *typeOut);
+
 /* col.c entry point, called by the engine core - and only after the
  * core's own (plain-ISA) CPUID check passed: col.c is compiled -mavx2
  * and must not execute a single instruction before that gate. */
