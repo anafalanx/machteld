@@ -22,7 +22,7 @@
 # usage:  machteld generate.tcl OUT.csv ?-mb N?      (pilot: -mb 50)
 #         default is the full 5 GB (5120 MB)
 
-package require machteld 0.13.0
+package require machteld 0.14.0
 
 set out [lindex $argv 0]
 set mb 5120

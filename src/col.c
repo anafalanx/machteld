@@ -1,5 +1,5 @@
 /* col.c -- the primitive palette: vectorized column operations for kernels
- * (machteld 0.13.0, docs/engine.md "The col library").
+ * (machteld 0.14.0, docs/engine.md "The col library").
  *
  * Design (plan-machteld-013, panel-reviewed):
  * - This translation unit is compiled with -mavx2; the engine opens `col`

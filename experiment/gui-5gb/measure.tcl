@@ -2,7 +2,7 @@
 # Speaks the wire directly for engine-side ms; the GUI drive (G4/G5) is
 # gui.tcl -drive. usage: machteld measure.tcl CSVPATH
 
-package require machteld 0.13.0
+package require machteld 0.14.0
 
 set exe [info nameofexecutable]
 set csv [lindex $argv 0]
