@@ -85,7 +85,7 @@ macht stop $e
 | `macht def NAME CHUNK` | Send a Lua chunk; it runs once in the kernel environment and must leave a global function `NAME`. Cached by source hash. |
 | `macht run NAME ?ARG ...? ?-json TEXT? ?-shards N? ?-reduce NAME2? ?-budget DURATION?` | Call the kernel with arguments and return its value; see the boundary and sharding sections. |
 | `macht free HANDLE` | Release a pool or result handle. |
-| `macht stats ?TOKEN?` | Counters for the engine: frames, bytes, runs, spills, last run time, cached kernels. |
+| `macht stats ?TOKEN?` | Counters and occupancy gauges for the engine: frames, bytes, runs, spills; kernels held against `kernel_slots` with `kernel_evictions`; spilled `results` against `result_slots`; cached `views` with `view_evictions`; per-state `mem_used` against `cap_bytes` - the Plimsoll lines a long-lived program watches. |
 | `macht conform EXE` | Run the conformance suite against an executable and report. |
 
 Every work subcommand accepts `-engine TOKEN`. Without it, the first work
@@ -215,6 +215,10 @@ results are opaque tokens owned by one engine. A kernel receives a pool as an
 object `h` with `h.rows` and one indexable column per field, `h.<field>[i]`,
 `i` from 1 to `h.rows`; in the built-in engine the columns of a shard's
 view are materialized Lua sequences, so the measured kernel numbers apply
+directly; the cache keeps at most two ranges per state per pool, evicting
+the oldest (a kernel still holding an evicted view keeps a valid table -
+only the cache reference goes), so a hot pool sharded many ways stays
+bounded
 directly. A handle offered to a different engine, or after its engine died or
 `free`d it, raises `MACHT nohandle`. Handles are never guessed, never
 re-used, never serialized.
@@ -229,7 +233,10 @@ header. `-lines` builds one string column, `line`. The loader is a
 correct single-thread parser; its throughput is measured, not promised.
 
 **Kernels.** A chunk crosses as source text, compiles in the engine, and is
-cached by source hash: defining the same text twice costs nothing. The kernel
+cached by source hash: defining the same text twice costs nothing. The
+kernel table holds 256 names; a 257th distinct name evicts the least
+recently run kernel, whose next `run` refuses as `no kernel` until it is
+defined again - an engine never refuses a definition. The kernel
 environment is Lua 5.5 with `base`, `string`, `table`, `math`, `utf8`, `lpeg`,
 and `cjson`; there is no `io`, no `os`, no `package`, no `debug`. A kernel's
 error - compile or runtime - raises `{MACHTELD MACHT lua}` with the Lua
