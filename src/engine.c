@@ -227,21 +227,30 @@ typedef struct {
 
 #define ENGINE_DICT_LIMIT 65536
 
-/* The effective dictionary limit: ENGINE_DICT_LIMIT by contract. The
- * UNCONTRACTED bench escape MACHTELD_DICT_LIMIT (plan-machteld-014's
- * cliff instrument) is read once: a well-formed value in [1, 1048576]
- * applies (larger clamps down to 1048576); anything malformed or
- * below 1 is IGNORED and the default stands - never a silent
- * clamp-to-1 that would disable dictionaries. Ambient state must be
- * visible: stats always reports dict_limit. Loads run on the op
- * thread only, so the once-latch is race-free. */
-static int64_t gDictLimit = 0;
+/* The dictionary limit is rows-relative (owner ruling 2026-08-23,
+ * plan-machteld-014: measured from n/k=8 to n/k=250, the dictionary
+ * wins everywhere the formula admits it):
+ *
+ *     limit = min(1048576, max(ENGINE_DICT_LIMIT, rows / 8))
+ *
+ * per pool, from that pool's row count - the floor keeps every mode
+ * assignment the old flat contract made; the rows/8 slope guarantees
+ * every newly admitted dictionary n/k >= 8 (codes 4n + dict 16(n/8)
+ * = 6n bytes < 16n spans, and a measured >= 4x speed margin). The
+ * UNCONTRACTED bench escape MACHTELD_DICT_LIMIT overrides the WHOLE
+ * formula with a flat value, read once: well-formed and >= 1 applies
+ * (above 1048576 clamps down); malformed or below 1 is IGNORED -
+ * never a silent clamp-to-1 that would disable dictionaries. Ambient
+ * state is visible: stats reports dict_limit_override (0 = the
+ * formula governs) and each pool's governing dict_limit. Loads run
+ * on the op thread only, so the once-latch is race-free. */
+static int64_t gDictOverride = -1;   /* -1 unresolved, 0 none, else flat */
 
 static int64_t
-DictLimit(void)
+DictLimitOverride(void)
 {
-    if (gDictLimit == 0) {
-        int64_t v = ENGINE_DICT_LIMIT;
+    if (gDictOverride < 0) {
+        int64_t v = 0;
         const char *e = getenv("MACHTELD_DICT_LIMIT");
         if (e != NULL && *e != '\0') {
             char *end = NULL;
@@ -250,9 +259,26 @@ DictLimit(void)
                 v = (parsed > 1048576) ? 1048576 : (int64_t)parsed;
             }
         }
-        gDictLimit = v;
+        gDictOverride = v;
     }
-    return gDictLimit;
+    return gDictOverride;
+}
+
+static int64_t
+EffectiveDictLimit(int64_t rows)
+{
+    int64_t o = DictLimitOverride();
+    if (o > 0) {
+        return o;
+    }
+    int64_t v = rows / 8;
+    if (v < ENGINE_DICT_LIMIT) {
+        v = ENGINE_DICT_LIMIT;
+    }
+    if (v > 1048576) {
+        v = 1048576;
+    }
+    return v;
 }
 
 typedef struct {
@@ -744,7 +770,7 @@ PoolDictBuild(Pool *p, PoolCol *col)
     if (rows == 0) {
         return;
     }
-    int64_t limit = DictLimit();
+    int64_t limit = EffectiveDictLimit(rows);
     size_t htSize = 4;
     while (htSize < (size_t)limit * 4) {
         htSize <<= 1;
@@ -2165,8 +2191,8 @@ OpStats(int64_t id)
     EjBufInt(&b, (int64_t)gStats.viewEvictions);
     EjBufText(&b, ",\"cap_bytes\":");
     EjBufInt(&b, (int64_t)ENGINE_STATE_CAP_MB * 1024 * 1024);
-    EjBufText(&b, ",\"dict_limit\":");
-    EjBufInt(&b, DictLimit());
+    EjBufText(&b, ",\"dict_limit_override\":");
+    EjBufInt(&b, DictLimitOverride());
     EjBufText(&b, ",\"mem_used\":[");
     for (int i = 0; i < gNStates; i++) {
         if (i > 0) {
@@ -2200,6 +2226,8 @@ OpStats(int64_t id)
             EjBufInt(&b, dcols);
             EjBufText(&b, ",\"span_cols\":");
             EjBufInt(&b, scols);
+            EjBufText(&b, ",\"dict_limit\":");
+            EjBufInt(&b, EffectiveDictLimit(gPools[i].rows));
             EjBufText(&b, "}");
         }
     }
