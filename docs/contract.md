@@ -207,6 +207,29 @@ commands. Tcl commands call an explicit metadata registry. Duplicate facts fail
 the build/runtime merge unless they are the intentional Tcl extension of `pty`.
 Implementation-body scanning is not part of the contract.
 
+## The bounded-delivery covenant
+
+Doctrine for every future network organ and for every incubated network
+package at its admission gate (recorded from real WebSocket/CDP field work;
+the originating handoff lives at the repository root):
+
+- OS, native, and channel callbacks ENQUEUE; they never evaluate application
+  Tcl. Public timer and event scripts carry only opaque handles or delivery
+  ids.
+- Payload queues are bounded in count and bytes, per handle and in aggregate
+  per interpreter; a terminal event has reserved capacity, so saturation can
+  always be disclosed generically.
+- Cancellation and close purge payloads and decrement every counter exactly;
+  stale notifications become no-ops.
+- Callback and notifier failure is caught, cleanup runs, and only fixed
+  error tokens escape. Nothing reaches `bgerror` or Tk's modal error path.
+- Wire payload, URL query, headers, negotiated protocol names, close
+  reasons, and peer-controlled text never appear in errors, traces, info
+  results, logs, manifests, or scheduled scripts; payload-bearing values are
+  exposed only through an explicit receive result.
+- Prefer pull: a readiness callback receives only the opaque handle, and the
+  application explicitly asks for data.
+
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
