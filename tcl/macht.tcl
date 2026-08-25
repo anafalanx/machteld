@@ -324,7 +324,13 @@ proc ::machteld::macht {sub args} {
                     ::machteld::macht::Fail badvalue \
                         "a typed json value cannot cross the engine boundary; unwrap it first"
                 }
-                if {[regexp {^(pool|res)#\d+$} $a]} {
+                # The handle probe runs on a COPY: regexp shimmers its
+                # subject to the String type, which strips the list/dict
+                # rep off a structured arg and would send it as one plain
+                # string - the plan-015 corruption class, in our own wire
+                # (found live by a porting exercise, 2026-08-26).
+                set probe "x[set a]"
+                if {[regexp {^x(pool|res)#\d+$} $probe]} {
                     lappend wireArgs [dict create handle $a]
                 } else {
                     lappend wireArgs $a
