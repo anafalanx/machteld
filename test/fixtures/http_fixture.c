@@ -66,6 +66,10 @@ static int header_equals(const char *headers, const char *name, const char *valu
     return 0;
 }
 
+/* The absolute redirect target for /redir/NNN/abs, from argv (empty = the
+ * endpoint answers 404). Set once in wmain before any client is served. */
+static char g_abs_location[512];
+
 static int serve_one(SOCKET client) {
     enum { CAPACITY = 1024 * 1024 };
     char *request = (char *)calloc(CAPACITY + 1, 1);
@@ -132,12 +136,38 @@ static int serve_one(SOCKET client) {
         status = 200;
     }
 
-    char headers[512];
+    /* 3xx endpoints for the redirect canary (plan-machteld-015 H1/H2):
+     * /redir/NNN/rel answers NNN with a relative Location (/ok);
+     * /redir/NNN/abs answers NNN with the absolute target from argv. */
+    char location[600] = "";
+    if (strncmp(path, "/redir/", 7) == 0 && strlen(path) == 14 &&
+        (strcmp(path + 10, "/rel") == 0 || strcmp(path + 10, "/abs") == 0)) {
+        int code = atoi(path + 7);
+        if (code == 301 || code == 302 || code == 303 ||
+            code == 307 || code == 308) {
+            if (path[11] == 'r') {
+                snprintf(location, sizeof(location), "Location: /ok\r\n");
+                status = code;
+            } else if (g_abs_location[0] != '\0') {
+                snprintf(location, sizeof(location), "Location: %s\r\n",
+                         g_abs_location);
+                status = code;
+            }
+            if (status == code) {
+                response_body = "REDIRECTED";
+                response_length = 10;
+            }
+        }
+    }
+
+    char headers[1200];
     int header_length = snprintf(headers, sizeof(headers),
         "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n"
-        "Content-Type: application/octet-stream\r\n"
+        "Content-Type: application/octet-stream\r\n%s"
         "X-Machteld-Fixture: local\r\nConnection: close\r\n\r\n",
-        status, status == 200 ? "OK" : "Not Found", response_length);
+        status, status == 200 ? "OK" :
+                (status >= 300 && status < 400 ? "Redirect" : "Not Found"),
+        response_length, location);
     int ok = header_length > 0 && send_all(client, headers, header_length) &&
              send_all(client, response_body, response_length);
     if (strcmp(path, "/slow") == 0) ok = 1;
@@ -147,14 +177,39 @@ static int serve_one(SOCKET client) {
 }
 
 int wmain(int argc, wchar_t **argv) {
-    if (argc != 3) {
-        fprintf(stderr, "usage: http_fixture PORT-FILE REQUEST-COUNT\n");
+    /* Two modes (plan-machteld-015 H1):
+     *   http_fixture PORT-FILE REQUEST-COUNT ?ABS-LOCATION?
+     *     - the classic exact-count server; ABS-LOCATION arms the
+     *       /redir/NNN/abs endpoints.
+     *   http_fixture PORT-FILE -canary HIT-FILE SECONDS
+     *     - the zero-request target: listens for SECONDS; ANY accepted
+     *       connection writes HIT-FILE (and is answered 200). Exit 0
+     *       either way - the TEST asserts the hit file's absence, which
+     *       is how a negative becomes provable. */
+    int canary = (argc == 5 && wcscmp(argv[2], L"-canary") == 0);
+    if (!canary && argc != 3 && argc != 4) {
+        fprintf(stderr, "usage: http_fixture PORT-FILE REQUEST-COUNT ?ABS-LOCATION?\n"
+                        "       http_fixture PORT-FILE -canary HIT-FILE SECONDS\n");
         return 64;
     }
-    wchar_t *end = NULL;
-    unsigned long request_count = wcstoul(argv[2], &end, 10);
-    if (end == argv[2] || *end != L'\0' || request_count == 0 || request_count > 100) {
-        return 64;
+    unsigned long request_count = 0;
+    unsigned long canary_seconds = 0;
+    if (canary) {
+        wchar_t *end = NULL;
+        canary_seconds = wcstoul(argv[4], &end, 10);
+        if (end == argv[4] || *end != L'\0' ||
+            canary_seconds == 0 || canary_seconds > 60) {
+            return 64;
+        }
+    } else {
+        wchar_t *end = NULL;
+        request_count = wcstoul(argv[2], &end, 10);
+        if (end == argv[2] || *end != L'\0' || request_count == 0 || request_count > 100) {
+            return 64;
+        }
+        if (argc == 4) {
+            snprintf(g_abs_location, sizeof(g_abs_location), "%ls", argv[3]);
+        }
     }
 
     WSADATA winsock;
@@ -181,6 +236,38 @@ int wmain(int argc, wchar_t **argv) {
         closesocket(listener);
         WSACleanup();
         return 68;
+    }
+
+    if (canary) {
+        ULONGLONG deadline = GetTickCount64() + canary_seconds * 1000ull;
+        for (;;) {
+            ULONGLONG now = GetTickCount64();
+            if (now >= deadline) break;
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(listener, &readable);
+            struct timeval tv;
+            ULONGLONG left = deadline - now;
+            tv.tv_sec = (long)(left / 1000);
+            tv.tv_usec = (long)((left % 1000) * 1000);
+            int ready = select(0, &readable, NULL, NULL, &tv);
+            if (ready <= 0) break;
+            SOCKET client = accept(listener, NULL, NULL);
+            if (client == INVALID_SOCKET) break;
+            HANDLE hit = CreateFileW(argv[3], GENERIC_WRITE, 0, NULL,
+                                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (hit != INVALID_HANDLE_VALUE) {
+                DWORD written = 0;
+                WriteFile(hit, "HIT", 3, &written, NULL);
+                CloseHandle(hit);
+            }
+            serve_one(client);
+            shutdown(client, SD_BOTH);
+            closesocket(client);
+        }
+        closesocket(listener);
+        WSACleanup();
+        return 0;
     }
 
     int ok = 1;

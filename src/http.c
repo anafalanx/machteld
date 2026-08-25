@@ -139,6 +139,7 @@ typedef struct {
     Tcl_Obj    *headers;        /* dict, caller's -- borrowed, never freed here */
     const char *type;           /* -type: Content-Type for a body */
     int         has_content_type;
+    int         redirect_none;  /* -redirect none: return the first 3xx */
 } HttpOpts;
 
 static int http_text_safe(Tcl_Obj *obj, int header_name) {
@@ -230,12 +231,25 @@ static int http_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int fi
     o->headers = NULL;
     o->type    = NULL;
     o->has_content_type = 0;
+    o->redirect_none = 0;
     for (int i = first; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
         if (i + 1 >= objc) return http_error(interp, "usage", "option needs a value");
         Tcl_Obj *v = objv[++i];
         if (strcmp(a, "-timeout") == 0) {
             if (http_duration(interp, v, &o->timeout) != TCL_OK) return TCL_ERROR;
+            continue;
+        }
+        if (strcmp(a, "-redirect") == 0) {
+            /* Exactly `none` (plan-machteld-015 H1): the first 3xx returns
+             * normally, Location included, and NO second request is ever
+             * issued - so no caller header or body is forwarded anywhere,
+             * with nothing to guess about which headers are "sensitive".
+             * Other policies need their own consumer and review. */
+            if (strcmp(Tcl_GetString(v), "none") != 0) {
+                return http_error(interp, "badvalue", "-redirect takes exactly \"none\"");
+            }
+            o->redirect_none = 1;
             continue;
         }
         if (strcmp(a, "-maxbody") == 0) {
@@ -385,7 +399,12 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
      * response headers. The per-request options below make both inherited
      * receive clocks explicit; either phase then reports ERROR_WINHTTP_TIMEOUT
      * through http_request_error below. */
-    DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+    /* Omitted-option behavior is untouched: follow, but never HTTPS->HTTP.
+     * Under -redirect none WinHTTP is told to follow NOTHING, so the first
+     * 3xx response is returned to the caller as an ordinary response. */
+    DWORD redirect_policy = o->redirect_none
+        ? WINHTTP_OPTION_REDIRECT_POLICY_NEVER
+        : WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     if (!WinHttpSetOption(r.session, WINHTTP_OPTION_REDIRECT_POLICY,
             &redirect_policy, sizeof redirect_policy)) {
         DWORD e = GetLastError();
