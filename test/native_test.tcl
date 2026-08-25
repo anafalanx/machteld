@@ -85,8 +85,13 @@ check "JSON native round-trip" [expr {
     [dict get $decoded text] eq "héllo" && [dict get $decoded enabled] eq "true"}]
 check "JSON rejects trailing input" [expr {
     [errcode_of {json decode {{}x}}] eq {MACHTELD JSON parse}}]
+# Depth applies to VALID JSON too deep for the contract; an unclosed flood
+# is a parse error (the J1-table ruling, plan-machteld-015).
 check "JSON reports depth separately from syntax" [expr {
-    [errcode_of [list json decode [string repeat \[ 600]]] eq {MACHTELD JSON depth}}]
+    [errcode_of [list json decode \
+        "[string repeat \[ 600][string repeat \] 600]"]] eq {MACHTELD JSON depth}}]
+check "an unclosed flood is parse, not depth" [expr {
+    [errcode_of [list json decode [string repeat \[ 600]]] eq {MACHTELD JSON parse}}]
 check "JSON -- encodes option-looking scalars" [expr {
     [json encode -- -dict] eq {"-dict"} && [json encode -- -list] eq {"-list"}}]
 
@@ -174,6 +179,60 @@ check_equal "HTTP receive timeout retains timeout code" \
 set result [child wait $server -timeout 8s]
 check "local HTTP fixture exits cleanly" [expr {[dict get $result status] eq "ok"}]
 child close $server
+
+# The redirect canary (plan-machteld-015 H1/H2). Server B is the CANARY: it
+# listens for a bounded window and writes a hit file on ANY connection - the
+# provable zero. Server A answers 301/302/303/307/308 with relative and
+# absolute Locations; the absolute ones point at B (a different port: the
+# cross-origin case on loopback). Every `-redirect none` request must stop
+# at the first response, Location intact, with ZERO requests reaching B and
+# the Authorization/Cookie sentinels appearing nowhere in any result.
+set portB_file [file join $WORK http-canary.port]
+set hit_file [file join $WORK http-canary.hit]
+file delete -- $hit_file
+set canary [child start -- $HTTP_FIXTURE $portB_file -canary $hit_file 4]
+check "canary fixture starts" [wait_for_file $portB_file]
+set portB [string trim [slurp $portB_file]]
+set portA_file [file join $WORK http-redir.port]
+set serverA [child start -- $HTTP_FIXTURE $portA_file 12 http://127.0.0.1:$portB/ok]
+check "redirect fixture starts" [wait_for_file $portA_file]
+set portA [string trim [slurp $portA_file]]
+set baseA http://127.0.0.1:$portA
+set sentinelHeaders [dict create Authorization "Bearer SENTINEL123" Cookie "s=SENTINEL456"]
+set redirOk 1
+set locOk 1
+set cleanOk 1
+foreach code {301 302 303 307 308} {
+    foreach form {rel abs} {
+        set r [http get $baseA/redir/$code/$form -redirect none \
+            -headers $sentinelHeaders -timeout 3s]
+        if {[dict get $r status] != $code} { set redirOk 0 }
+        set loc [expr {[dict exists $r headers location]
+                       ? [dict get $r headers location] : ""}]
+        if {$form eq "rel" && $loc ne "/ok"} { set locOk 0 }
+        if {$form eq "abs" && $loc ne "http://127.0.0.1:$portB/ok"} { set locOk 0 }
+        if {[string match *SENTINEL* $r]} { set cleanOk 0 }
+    }
+}
+check "-redirect none stops at every first 3xx (5 codes x rel/abs)" $redirOk
+check "-redirect none returns the Location header intact" $locOk
+check "no sentinel appears in any -redirect none result" $cleanOk
+check "the canary logged ZERO requests" [expr {![file exists $hit_file]}]
+# H2: the omitted-option behavior is untouched - a follow still follows
+# (two requests reach server A: the 302, then /ok).
+set r [http get $baseA/redir/302/rel -timeout 3s]
+check "omitted-option redirect still follows to the target" [expr {
+    [dict get $r status] == 200 && [dict get $r body] eq "LOCAL-OK"}]
+check "-redirect rejects anything but none" [expr {
+    [errcode_of [list http get $baseA/ok -redirect follow]] eq {MACHTELD HTTP badvalue}}]
+set result [child wait $serverA -timeout 8s]
+check "redirect fixture exits cleanly" [expr {[dict get $result status] eq "ok"}]
+child close $serverA
+set result [child wait $canary -timeout 8s]
+check "the canary exits cleanly, hit file still absent" [expr {
+    [dict get $result status] eq "ok" && ![file exists $hit_file]}]
+child close $canary
+
 check "HTTP rejects non-HTTP schemes" [expr {
     [errcode_of {http get ftp://127.0.0.1/file}] eq {MACHTELD HTTP badvalue}}]
 check "HTTP offers no certificate bypass" [expr {
@@ -182,10 +241,10 @@ check "HTTP GET rejects the POST-only -type option" [expr {
     [errcode_of [list http get $base/ok -type text/plain]] eq {MACHTELD HTTP usage}}]
 check "HTTP manifest advertises exact GET options" [expr {
     [dict get $metadata http subcommands get options]
-        eq {-agent -headers -maxbody -timeout}}]
+        eq {-agent -headers -maxbody -redirect -timeout}}]
 check "HTTP manifest advertises exact POST options" [expr {
     [dict get $metadata http subcommands post options]
-        eq {-agent -headers -maxbody -timeout -type}}]
+        eq {-agent -headers -maxbody -redirect -timeout -type}}]
 foreach {label value} {
     "zero timeout" 0ms
     "bare timeout" 1
