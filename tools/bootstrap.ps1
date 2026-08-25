@@ -169,7 +169,8 @@ function Get-ArtifactManifestLines {
         (Join-Path $Prefix 'lib\tk9.0'),
         (Join-Path $CacheRoot 'lua'),
         (Join-Path $CacheRoot 'lpeg'),
-        (Join-Path $CacheRoot 'cjson')
+        (Join-Path $CacheRoot 'cjson'),
+        (Join-Path $CacheRoot 'yyjson')
     )
     $files = @(
         (Join-Path $Prefix 'bin\tclsh90s.exe'),
@@ -322,7 +323,8 @@ New-Item -ItemType Directory -Force -Path $CacheRoot, $SourceRoot, $Prefix | Out
 foreach ($derived in @($Prefix, $SourceRoot, (Join-Path $CacheRoot 'sqlite'),
                        (Join-Path $CacheRoot 'lua'),
                        (Join-Path $CacheRoot 'lpeg'),
-                       (Join-Path $CacheRoot 'cjson'))) {
+                       (Join-Path $CacheRoot 'cjson'),
+                       (Join-Path $CacheRoot 'yyjson'))) {
     Assert-UnderCache $derived
     if (Test-Path -LiteralPath $derived) {
         Get-ChildItem -LiteralPath $derived -Recurse -Force -ErrorAction SilentlyContinue |
@@ -487,6 +489,38 @@ if (-not (Test-Path -LiteralPath (Join-Path $cjsonStage 'lua_cjson.c'))) {
     } finally {
         if (Test-Path -LiteralPath $cjsonExtract) {
             [IO.Directory]::Delete($cjsonExtract, $true)
+        }
+    }
+}
+
+# yyjson: the palette json organ's reader core (plan-machteld-015).
+# Single .c/.h plus the MIT license text, staged like lua-cjson.
+$yyjsonEntry = $Lock.archives | Where-Object id -eq 'yyjson'
+$yyjsonArchive = Get-Archive $yyjsonEntry
+$yyjsonStage = Join-Path $CacheRoot 'yyjson'
+if (-not (Test-Path -LiteralPath (Join-Path $yyjsonStage 'yyjson.c'))) {
+    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
+        throw 'in-box tar.exe not found; cannot extract the yyjson archive'
+    }
+    $yyjsonExtract = Join-Path $SourceRoot ('.yyjson-extract-' + [Guid]::NewGuid().ToString('n'))
+    Assert-UnderCache $yyjsonExtract
+    New-Item -ItemType Directory -Force -Path $yyjsonExtract | Out-Null
+    try {
+        & $tar -xzf $yyjsonArchive -C $yyjsonExtract
+        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
+        $yyjsonSrc = Join-Path $yyjsonExtract ('yyjson-' + $yyjsonEntry.version)
+        if (-not (Test-Path -LiteralPath (Join-Path $yyjsonSrc 'src\yyjson.c'))) {
+            throw 'yyjson archive contains no src/yyjson.c after extraction'
+        }
+        New-Item -ItemType Directory -Force -Path $yyjsonStage | Out-Null
+        Copy-Item -LiteralPath (Join-Path $yyjsonSrc 'src\yyjson.c'),
+                               (Join-Path $yyjsonSrc 'src\yyjson.h'),
+                               (Join-Path $yyjsonSrc 'LICENSE') `
+            -Destination $yyjsonStage -Force
+    } finally {
+        if (Test-Path -LiteralPath $yyjsonExtract) {
+            [IO.Directory]::Delete($yyjsonExtract, $true)
         }
     }
 }

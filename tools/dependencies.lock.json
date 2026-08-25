@@ -58,6 +58,13 @@
       "file": "lua-cjson-2.1.0.19.tar.gz",
       "url": "https://github.com/openresty/lua-cjson/archive/refs/tags/2.1.0.19.tar.gz",
       "sha256": "d1aded44b4cfe5ec6b395e178902aba3eed1dbe7999a753c0662222de2890ec0"
+    },
+    {
+      "id": "yyjson",
+      "version": "0.12.0",
+      "file": "yyjson-0.12.0.tar.gz",
+      "url": "https://github.com/ibireme/yyjson/archive/refs/tags/0.12.0.tar.gz",
+      "sha256": "b16246f617b2a136c78d73e5e2647c6f1de1313e46678062985bdcf1f40bb75d"
     }
   ],
   "patches": [
