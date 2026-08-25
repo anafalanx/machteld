@@ -140,6 +140,18 @@ scope {
     check "the unwrapped value crosses fine" \
         [expr {[macht run j7echo [json unwrap [json value number 21]]] == 21}]
 
+    # A STRUCTURED arg (nested lists) must cross as tables, never as one
+    # stringified scalar. The handle-probe regexp used to shimmer every
+    # arg to the String type and strip its list rep - found live by a
+    # porting exercise (plan-015's corruption class, in our own wire).
+    macht def argshape {function argshape(point, poly)
+        return type(point) .. "/" .. type(poly) .. "/" .. #poly
+    end}
+    check "a nested-list arg crosses as tables with its shape intact" \
+        [expr {[macht run argshape [list 1 2] \
+            [list [list 0 0] [list 1 0] [list 1 1] [list 0 0]]] \
+            eq "table/table/4"}]
+
     macht stop
     file delete -- $fixture
 }
