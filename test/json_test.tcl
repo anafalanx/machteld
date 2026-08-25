@@ -116,6 +116,104 @@ check "a parse failure is coded"     [expr {
     [catch {json decode {nope}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON parse}}]
 
+# ---- typed mode (plan-machteld-015 J2-J5) -----------------------------------
+
+# J2: the six distinctions, exact on the wire; nested empties; spelling.
+check "typed: the six distinctions hold on the wire" [expr {
+    [json encode [json value array [list \
+        [json value null] [json value boolean false] [json value boolean true] \
+        [json value number 0] [json value string 0] [json value string {}]]]] \
+    eq {[null,false,true,0,"0",""]}}]
+check "typed: nested empty object and array stay distinct" [expr {
+    [json encode [json value object [dict create \
+        a [json value object {}] b [json value array {}]]]] \
+    eq {{"a":{},"b":[]}}}]
+check "typed: number spelling survives verbatim" [expr {
+    [json encode [json value array [list \
+        [json value number -0] [json value number 1e10] \
+        [json value number 1234567890123456789012345678901234567890]]]] \
+    eq {[-0,1e10,1234567890123456789012345678901234567890]}}]
+check "typed: a numeric-looking string stays quoted" [expr {
+    [json encode [json value string 12345]] eq {"12345"}}]
+
+# J5: the CDP wire, the handoff's acceptance list verbatim.
+check "typed: CDP request wire text is exact" [expr {
+    [json encode [json value object [dict create \
+        id [json value number 7] \
+        sessionId [json value string 12345] \
+        params [json value object [dict create \
+            flatten [json value boolean true] \
+            returnByValue [json value boolean true] \
+            userGesture [json value boolean true] \
+            awaitPromise [json value boolean false]]]]]] \
+    eq {{"id":7,"sessionId":"12345","params":{"flatten":true,"returnByValue":true,"userGesture":true,"awaitPromise":false}}}}]
+
+# J3, the honest form: the number gate; the constructor gate on plain and
+# shimmered leaves (indistinguishable by design - that is the law's edge);
+# the container guarantee; the named unguarded routes as executable warnings.
+foreach bad {Inf 01234 1_000 .5} {
+    check "typed: number gate refuses $bad" [expr {
+        [catch {json value number $bad} m opts] &&
+        [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+}
+check "typed: number gate refuses an injection string" [expr {
+    [catch {json value number "1\},\"x\":\{"} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+check "typed: a plain scalar leaf refuses at construction" [expr {
+    [catch {json value object [dict create a 1]} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+set b [json value boolean true]
+string length $b   ;# a string op on the HANDLE strips its intrep - route a
+check "typed: a shimmered handle refuses at the next construction" [expr {
+    [catch {json value object [dict create x $b]} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+check "typed: an unshimmered handle copies into a container exactly" [expr {
+    [json encode [json value object [dict create \
+        keep [json value boolean true]]]] eq {{"keep":true}}}]
+check "typed: route b documented - a typed leaf in a PLAIN dict encodes while its intrep survives" [expr {
+    [json encode [dict create wrap [json value boolean true]]] eq {{"wrap":true}}}]
+
+# J4: strict decode.
+check "typed: duplicate keys refuse by name" [expr {
+    [catch {json decode -typed {{"a":1,"a":2}}} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON strict}}]
+check "typed: nested duplicate keys refuse too" [expr {
+    [catch {json decode -typed {{"x":{"id":1,"id":2}}}} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON strict}}]
+check "typed: an unpaired surrogate escape is a parse error" [expr {
+    [catch {json decode -typed "\"\ud800\""} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON parse}}]
+check "typed: -maxbytes refuses over its limit" [expr {
+    [catch {json decode -typed -maxbytes 4 {{"a":1}}} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON limit}}]
+check "typed: -maxbytes above the hard cap refuses" [expr {
+    [catch {json decode -typed -maxbytes 999999999 {1}} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON limit}}]
+check "typed: depth cap holds in typed decode" [expr {
+    [catch {json decode -typed "[string repeat {[} 600][string repeat {]} 600]"} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON depth}}]
+
+# The access surface: type, unwrap, get, exists.
+set TYPEDDOC [json decode -typed {{"id":7,"result":{"ok":true,"n":42},"s":"S1"}}]
+check "typed: type reads the tag" [expr {
+    [json type $TYPEDDOC] eq "object" &&
+    [json type [json get $TYPEDDOC result ok]] eq "boolean" &&
+    [json type [json get $TYPEDDOC id]] eq "number"}]
+check "typed: unwrap exits to plain exactly" [expr {
+    [json unwrap [json get $TYPEDDOC id]] == 7 &&
+    [json unwrap [json get $TYPEDDOC result]] eq {ok 1 n 42}}]
+check "typed: exists answers, get refuses by name" [expr {
+    [json exists $TYPEDDOC result n] == 1 &&
+    [json exists $TYPEDDOC nope] == 0 &&
+    [catch {json get $TYPEDDOC nope} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON absent}}]
+
+# J7's organ half: the wire path refuses typed values by name.
+check "typed: encode -plain refuses a typed value" [expr {
+    [catch {json encode -plain [json value boolean true]} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+check "typed: encode -plain still passes plain values byte-identically" [expr {
+    [json encode -plain -dict {a 1 b x}] eq {{"a":1,"b":"x"}}}]
 # ---- the conformance corpus -------------------------------------------------
 
 if {![file isdirectory $CORPUS]} {
@@ -211,3 +309,4 @@ if {![file isdirectory $CORPUS]} {
 
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails
+

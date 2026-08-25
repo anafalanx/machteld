@@ -111,7 +111,7 @@ proc ::machteld::macht::Ask {tok req {budgetMs -1}} {
     set id [dict get $E($tok) seq]
     dict set E($tok) seq [expr {$id + 1}]
     dict set req id $id
-    SendFrame $tok [json encode -dict $req]
+    SendFrame $tok [json encode -plain -dict $req]
     set deadline [expr {$budgetMs >= 0 ? [clock milliseconds] + $budgetMs : -1}]
     set r [RecvReply $tok $deadline]
     if {![dict exists $r id] || [dict get $r id] != $id} {
@@ -314,6 +314,16 @@ proc ::machteld::macht {sub args} {
             set req [dict create op run name [lindex $rest 0]]
             set wireArgs {}
             foreach a [lrange $rest 1 end] {
+                # J7 (plan-machteld-015): a TYPED json value refuses at the
+                # boundary BEFORE the handle scan below can shimmer it to a
+                # plain string - the engine's own json map (bool -> 1/0) is
+                # contracted law, and silent degradation through it would
+                # recreate the ambiguity typed mode ends. The probe comes
+                # first: regexp stringifies its subject.
+                if {![catch {json type $a}]} {
+                    ::machteld::macht::Fail badvalue \
+                        "a typed json value cannot cross the engine boundary; unwrap it first"
+                }
                 if {[regexp {^(pool|res)#\d+$} $a]} {
                     lappend wireArgs [dict create handle $a]
                 } else {
