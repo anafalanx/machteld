@@ -114,7 +114,7 @@ proc ::machteld::WorkerAnswer {line} {
                                                    : {MACHTELD WORKER failed}}]
         set reply [dict create id -1 ok 0 code $code msg $reply]
     }
-    catch {puts [json encode -dict $reply]}
+    catch {puts [json encode -plain -dict $reply]}
     return
 }
 
@@ -126,7 +126,7 @@ proc ::machteld::WorkerDispatch {line} {
     }
     # The decoder preserves JSON container type. Re-encoding therefore gives a
     # reliable public test without peeking at Tcl's internal object type.
-    if {[catch {json encode $req} encoded] || ![string match \{* $encoded]} {
+    if {[catch {json encode -plain $req} encoded] || ![string match \{* $encoded]} {
         return [dict create id -1 ok 0 code {MACHTELD WORKER parse} \
                             msg "request must be a JSON object"]
     }

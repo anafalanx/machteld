@@ -129,6 +129,17 @@ scope {
     check "conform on a non-engine fails closed" \
         [string equal [code_of {macht conform no-such-engine.exe}] noengine]
 
+    # J7 (plan-machteld-015): a typed json value refuses at the engine
+    # boundary by name, BEFORE the arg scan can shimmer it - the engine's
+    # own json map (bool -> 1/0) is contracted law.
+    macht def j7echo {function j7echo(x) return x end}
+    check "a typed json value refuses at the engine boundary" [expr {
+        [catch {macht run j7echo [json value number 21]} m opts] &&
+        [dict get $opts -errorcode] eq {MACHTELD MACHT badvalue} &&
+        [string match "*typed json value*" $m]}]
+    check "the unwrapped value crosses fine" \
+        [expr {[macht run j7echo [json unwrap [json value number 21]]] == 21}]
+
     macht stop
     file delete -- $fixture
 }

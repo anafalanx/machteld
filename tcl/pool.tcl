@@ -197,7 +197,7 @@ proc ::machteld::PoolFeed {tok c} {
     if {[catch {
         set ci [child info $c]
         set in [dict get $ci stdin]
-        puts $in [json encode $item]
+        puts $in [json encode -plain $item]
         flush $in
     }]} {
         PoolDied $tok $c
@@ -216,7 +216,7 @@ proc ::machteld::PoolReadable {tok c} {
     while {[gets $ch line] >= 0} {
         if {$line eq ""} continue
         if {[catch {json decode $line} rep] ||
-            [catch {json encode $rep} encoded] ||
+            [catch {json encode -plain $rep} encoded] ||
             ![string match \{* $encoded] ||
             ![dict exists $rep id] || ![dict exists $rep ok]} {
             dict set POOL $tok errbuf [string range \
