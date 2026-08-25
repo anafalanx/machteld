@@ -11,9 +11,10 @@ commands: http, http get, http post
 ## Synopsis
 
 ```tcl
-http get url ?-headers dict? ?-timeout duration? ?-agent name? ?-maxbody size?
+http get url ?-headers dict? ?-timeout duration? ?-agent name? \
+    ?-maxbody size? ?-redirect none?
 http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
-    ?-type mediaType? ?-maxbody size?
+    ?-type mediaType? ?-maxbody size? ?-redirect none?
 ```
 
 ## Arguments and options
@@ -26,6 +27,11 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
   WinHTTP network phases rather than to the complete operation.
 - `-agent` defaults to `machteld`.
 - `-maxbody` defaults to 64 MiB and must be a positive binary size.
+- `-redirect` takes exactly `none`: the first 3xx response returns normally
+  with its `location` header, and no second request is issued to anyone - so
+  no caller-supplied header or body is forwarded. Use it on every
+  authenticated request carrying manual Authorization or Cookie headers. Any
+  other value is `HTTP badvalue`. Omitted, redirects follow as documented.
 - `post` treats `body` as bytes. `-type` sets Content-Type; otherwise an explicit
   Content-Type header is retained, or `application/octet-stream` is used.
 
@@ -73,7 +79,7 @@ returned as plausible truncation.
 
 #### Synopsis
 
-`http get url ?-headers dict? ?-timeout d? ?-agent name? ?-maxbody size?`
+`http get url ?-headers dict? ?-timeout d? ?-agent name? ?-maxbody size? ?-redirect none?`
 
 #### Arguments and options
 

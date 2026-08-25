@@ -144,9 +144,19 @@ store close
 `http` uses WinHTTP for HTTPS, system trust, redirects, proxy discovery, and
 transport decoding. `get` and `post` return `status`, cooked lower-case `headers`,
 `rawheaders`, bytearray `body`, and `bytes`. Options include `-headers`,
-`-timeout`, `-agent`, `-type`, and `-maxbody`. The size limit refuses an oversized
-body; it never returns a plausible truncation. A URL fragment is client-side and
-is not sent. HTTPS-to-HTTP redirects are refused. There is no insecure TLS option.
+`-timeout`, `-agent`, `-type`, `-maxbody`, and `-redirect`. The size limit
+refuses an oversized body; it never returns a plausible truncation. A URL
+fragment is client-side and is not sent. HTTPS-to-HTTP redirects are refused.
+There is no insecure TLS option.
+
+`-redirect` takes exactly `none`: the first 3xx response returns normally -
+`status`, `headers` with its `location`, `body` - and **no second request is
+issued to anyone**, so nothing the caller supplied (an Authorization header, a
+Cookie) is forwarded anywhere. There is deliberately no follow-with-header-
+stripping mode: zero requests needs no guessing about which headers are
+sensitive. An authenticated request carrying manual credential headers should
+always say `-redirect none`. Omitting the option keeps the documented follow
+behavior exactly as before.
 
 `-timeout` uses the exact duration grammar and refuses zero. WinHTTP applies the
 value separately to each network phase; it is not a single wall-clock deadline
@@ -155,15 +165,56 @@ binary size grammar. When omitted, `-timeout` defaults to 30 seconds per phase
 and `-maxbody` to 64 MiB. On `post`, a caller-supplied `Content-Type` header is
 kept unless `-type` is explicitly supplied, in which case `-type` wins.
 
-`json decode` builds Tcl dict/list/scalar values and keeps number text exact.
-JSON `null` maps to the empty Tcl string and booleans to integers, so those three
-values do not round-trip as distinct JSON types. Duplicate object keys keep the
-last value. An escaped unpaired UTF-16 surrogate is replaced with U+FFFD.
+`json` has two modes. PLAIN is the compatibility mapping: `decode` builds Tcl
+dict/list/scalar values and keeps number text exact; JSON `null` maps to the
+empty Tcl string and booleans to integers, so those three values do not
+round-trip as distinct JSON types; duplicate object keys keep the last value;
+an escaped unpaired UTF-16 surrogate is a parse error - machteld does not
+manufacture replacement characters from broken input. `encode` follows a Tcl
+object's internal dict/list representation; `-dict` and `-list` force the
+container reading when needed; a scalar string that is exactly a JSON number
+literal encodes as a number. Use `--` when an option-like scalar must be
+data: `json encode -- -dict` encodes the string `"-dict"`. The reader stands
+on the pinned yyjson core; the emitter's byte choices (lowercase `\u00xx`
+control escapes, the seven short escapes, unescaped solidus, raw UTF-8) are
+contract behavior.
 
-`json encode` follows a Tcl object's internal dict/list representation;
-`-dict` and `-list` force the container reading when needed. A scalar string that
-is exactly a JSON number literal encodes as a number. Use `--` when an option-like
-scalar must be data: `json encode -- -dict` encodes the string `"-dict"`.
+TYPED is for programs that need real JSON identity - a wire that requires a
+literal `true`, a session id that must stay a string, a null that is not an
+empty string:
+
+```tcl
+json value string TEXT | number LITERAL | boolean BOOL | null
+json value array LIST | object DICT
+json decode -typed ?-maxbytes N? TEXT
+json type VALUE      ;# string|number|boolean|null|array|object
+json unwrap VALUE    ;# the plain-mode mapping of the subtree
+json get VALUE ?key|index ...?   ;# a typed child; absent refuses by name
+json exists VALUE key|index ...
+```
+
+Typed values are opaque, document-backed handles. The laws: `json value
+number` validates the exact JSON number grammar fail-closed (a leading zero,
+`Inf`, or an injection string refuses - the one position where caller bytes
+reach the wire unquoted is the most guarded); constructors accept typed
+values and nested plain dict/list CONTAINERS, and refuse plain SCALARS by
+name - every leaf is explicit, which is what makes the guarantee decidable;
+`decode -typed` is strict (duplicate object members refuse at every nesting
+level; a documented 16 MiB default and 64 MiB hard byte cap, `-maxbytes` may
+only lower it); number spelling survives verbatim, `-0` and 40-digit
+integers included; `encode` recognizes typed values at every nesting level.
+
+The shimmer caveat, stated plainly: Tcl converts representations on demand,
+and a typed handle that has been through a string operation is a plain
+string again - indistinguishable from one that was never typed. Under a
+typed container nothing can shimmer (the subtree is document-backed); the
+exposed routes are the handle itself and typed leaves parked in plain
+containers. Build wire-bound trees as typed containers end to end, construct
+late, hold the handle, and never stringify it. A leaf that arrives at a
+constructor already stripped refuses by name - loud, not lucky. Typed values
+are for the program's own boundary work: the engine wire refuses them
+(`macht run` says so by name; unwrap first), and stringification, `store`,
+and worker transport do not preserve the type.
 
 `hash` supports `md5`, `sha1`, `sha256`, `sha384`, and `sha512` through Windows
 CNG. `sum`, `file`, and `hmac` return hex unless `-binary` applies. `start`,

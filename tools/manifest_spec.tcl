@@ -69,11 +69,17 @@ set ::machteld::manifest::native {
         returns {body bytes headers rawheaders status}
     }
     json {
-        kind c domain JSON codes {depth parse usage} options {-dict -list}
+        kind c domain JSON codes {absent depth limit parse strict type usage}
+        options {-dict -list -maxbytes -plain -typed}
         doc machteld/command/json
         subcommands {
-            decode {options {} doc machteld/command/json#decode}
-            encode {options {-dict -list} doc machteld/command/json#encode}
+            decode {options {-maxbytes -typed} doc machteld/command/json#decode}
+            encode {options {-dict -list -plain} doc machteld/command/json#encode}
+            value  {options {} doc machteld/command/json#value}
+            type   {options {} doc machteld/command/json#type}
+            unwrap {options {} doc machteld/command/json#unwrap}
+            get    {options {} doc machteld/command/json#get}
+            exists {options {} doc machteld/command/json#exists}
         }
     }
     links {
