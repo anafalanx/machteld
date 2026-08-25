@@ -64,6 +64,7 @@ set SQLITE  [file join $CACHE sqlite]
 set LUA     [file join $CACHE lua]
 set LPEG    [file join $CACHE lpeg]
 set CJSON   [file join $CACHE cjson]
+set YYJSON  [file join $CACHE yyjson]
 set INCLUDE [file join $PREFIX include]
 proc need {label path} {
     if {![file exists $path]} {
@@ -78,6 +79,7 @@ need "sqlite3.c" [file join $SQLITE sqlite3.c]
 need "lua.h"     [file join $LUA lua.h]
 need "lptree.c"  [file join $LPEG lptree.c]
 need "lua_cjson.c" [file join $CJSON lua_cjson.c]
+need "yyjson.c" [file join $YYJSON yyjson.c]
 set TCLLIB   [need "libtcl90.a"   [file join $PREFIX lib libtcl90.a]]
 set TKLIB    [need "libtcl9tk90.a" [file join $PREFIX lib libtcl9tk90.a]]
 set TCLSTUB  [need "libtclstub.a" [file join $PREFIX lib libtclstub.a]]
@@ -98,7 +100,7 @@ set defines {
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA]
+    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA -I$YYJSON]
 set syslibs {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
@@ -130,9 +132,13 @@ proc dev_build {{forceRef 0}} {
     set changed 0
     puts "build: incremental (cache [file nativename $::DEV])"
 
-    # Pinned third-party sources: SQLite and Lua, cached across builds.
+    # Pinned third-party sources: SQLite, yyjson, and Lua, cached across
+    # builds. Vendor TUs compile with their own minimal flags, never the
+    # authored -Werror set (the sqlite3.c precedent).
     incr changed [cc [file join $::OBJ sqlite3.o] [file join $::SQLITE sqlite3.c] \
         {-O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION} sqlite3.c]
+    incr changed [cc [file join $::OBJ yyjson.o] [file join $::YYJSON yyjson.c] \
+        {-O2 -ffunction-sections -fdata-sections} yyjson.c]
     set luaObjs {}
     foreach s [lsort [glob [file join $::LUA *.c]]] {
         set o [file join $::OBJ lua_[file rootname [file tail $s]].o]
@@ -181,12 +187,12 @@ proc dev_build {{forceRef 0}} {
     if {$changed || ![file exists $bare] || ![file exists $bareGui]} {
         puts "  ld  machteld-bare.exe"
         run $::GCC -municode -static-libgcc -Wl,--gc-sections \
-            $consoleObj {*}$objects [file join $::OBJ sqlite3.o] {*}$luaObjs \
+            $consoleObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] {*}$luaObjs \
             $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bare
         run $::STRIP $bare
         puts "  ld  machteld-bare-gui.exe"
         run $::GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-            $guiObj {*}$objects [file join $::OBJ sqlite3.o] {*}$luaObjs \
+            $guiObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] {*}$luaObjs \
             $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bareGui
         run $::STRIP $bareGui
     } else {

@@ -21,6 +21,7 @@ set SQLITE [file join $CACHE sqlite]
 set LUA [file join $CACHE lua]
 set LPEG [file join $CACHE lpeg]
 set CJSON [file join $CACHE cjson]
+set YYJSON [file join $CACHE yyjson]
 set GCC [expr {[info exists ::env(MACHTELD_GCC)] ? $::env(MACHTELD_GCC) : ""}]
 set STRIP [expr {[info exists ::env(MACHTELD_STRIP)] ? $::env(MACHTELD_STRIP) : ""}]
 if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/build.ps1" }
@@ -44,7 +45,8 @@ foreach {label path} [list gcc $GCC tcl.h [file join $INCLUDE tcl.h] \
         sqlite3.c [file join $SQLITE sqlite3.c] sqlite3.h [file join $SQLITE sqlite3.h] \
         lua.h [file join $LUA lua.h] lvm.c [file join $LUA lvm.c] \
         lptree.c [file join $LPEG lptree.c] \
-        lua_cjson.c [file join $CJSON lua_cjson.c]] {
+        lua_cjson.c [file join $CJSON lua_cjson.c] \
+        yyjson.c [file join $YYJSON yyjson.c]] {
     if {![file exists $path]} { error "build.tcl: missing $label: $path" }
 }
 
@@ -98,7 +100,7 @@ set defines {
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA]
+    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA -I$YYJSON]
 
 # SQLite is third-party generated source. It is pinned and compiled separately;
 # the warning gate applies to every authored C translation unit under src/.
@@ -106,6 +108,12 @@ set sqliteObj [file join $OBJDIR sqlite3.o]
 puts "cc   sqlite3.c (pinned amalgamation)"
 run $GCC -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION \
     -c [file join $SQLITE sqlite3.c] -o $sqliteObj
+
+# yyjson is third-party pinned source: the palette json organ's reader
+# core (plan-machteld-015). Same separation from the warning gate.
+set yyjsonObj [file join $OBJDIR yyjson.o]
+puts "cc   yyjson.c (pinned 0.12.0)"
+run $GCC -O2 -ffunction-sections -fdata-sections -c [file join $YYJSON yyjson.c] -o $yyjsonObj
 
 # Lua is third-party pinned source, compiled AS C: its error model is longjmp,
 # and compiling it as C++ would turn errors into exceptions. Same separation
@@ -170,14 +178,14 @@ set syslibs {
 set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 run $GCC -municode -static-libgcc -Wl,--gc-sections \
-    $consoleObj {*}$objects $sqliteObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
+    $consoleObj {*}$objects $sqliteObj $yyjsonObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bare
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bare }
 
 set bareGui [file join $BUILDROOT machteld-bare-gui.exe]
 puts "ld   [file tail $bareGui]"
 run $GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    $guiObj {*}$objects $sqliteObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
+    $guiObj {*}$objects $sqliteObj $yyjsonObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bareGui
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bareGui }
 

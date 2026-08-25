@@ -90,9 +90,28 @@ foreach doc {
         [json encode $once] eq [json encode $twice]}]
 }
 
+# The emitter's byte choices are contract behavior (plan-machteld-015: the
+# reader moved to yyjson, the emitter deliberately did not - these fixtures
+# pin what "byte-identical plain encode" means).
+check "control characters escape as lowercase \\u00xx" [expr {
+    [json encode [format %c 1]] eq {"\u0001"} &&
+    [json encode [format %c 31]] eq {"\u001f"}}]
+check "the seven short escapes are the short forms" [expr {
+    [json encode "\"\\\b\f\n\r\t"] eq {"\"\\\b\f\n\r\t"}}]
+check "solidus is not escaped" [expr {[json encode "a/b"] eq {"a/b"}}]
+check "non-ASCII passes through as raw UTF-8" [expr {
+    [json encode "héllo"] eq "\"héllo\""}]
+
+# The depth law applies to VALID JSON that is too deep for the contract; an
+# unclosed bracket flood is invalid JSON and fails as parse (a J1-table
+# ruling, plan-machteld-015: the old hand parser tripped its depth counter
+# before discovering the missing closers - implementation order, not law).
 check "depth is capped, not crashed" [expr {
-    [catch {json decode [string repeat {[} 5000]} m opts] &&
+    [catch {json decode "[string repeat {[} 5000][string repeat {]} 5000]"} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON depth}}]
+check "an unclosed bracket flood is a parse error" [expr {
+    [catch {json decode [string repeat {[} 5000]} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON parse}}]
 check "a parse failure is coded"     [expr {
     [catch {json decode {nope}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON parse}}]
@@ -127,6 +146,67 @@ if {![file isdirectory $CORPUS]} {
     set acc 0
     foreach p $idefined { if {[lindex $p 1] eq "accept"} { incr acc } }
     puts "note i_ (implementation-defined): $acc accepted, [expr {$ni - $acc}] rejected, of $ni"
+
+    # The ASSERTED i_ table (plan-machteld-015 J1: a gate, not an
+    # observation). Every implementation-defined case is pinned by name;
+    # a behavior change here is a failing check demanding a new ruling,
+    # never a silent drift. The 2026-08-24 ruling flipped the ten
+    # unpaired-surrogate-escape cases from accept (as U+FFFD) to reject:
+    # machteld does not manufacture replacement characters from broken
+    # input. The raw-invalid-UTF-8 accepts are the corpus harness's
+    # bytearray path (bytes launder to code points before the parser and
+    # always have); real invalid bytes on the wire stay refused by the
+    # boundary's own laws.
+    set ITABLE {
+        i_number_double_huge_neg_exp.json                accept
+        i_number_huge_exp.json                           accept
+        i_number_neg_int_huge_exp.json                   accept
+        i_number_pos_double_huge_exp.json                accept
+        i_number_real_neg_overflow.json                  accept
+        i_number_real_pos_overflow.json                  accept
+        i_number_real_underflow.json                     accept
+        i_number_too_big_neg_int.json                    accept
+        i_number_too_big_pos_int.json                    accept
+        i_number_very_big_negative_int.json              accept
+        i_object_key_lone_2nd_surrogate.json             reject
+        i_string_1st_surrogate_but_2nd_missing.json      reject
+        i_string_1st_valid_surrogate_2nd_invalid.json    reject
+        i_string_UTF-16LE_with_BOM.json                  reject
+        i_string_UTF-8_invalid_sequence.json             accept
+        i_string_UTF8_surrogate_U+D800.json              accept
+        i_string_incomplete_surrogate_and_escape_valid.json reject
+        i_string_incomplete_surrogate_pair.json          reject
+        i_string_incomplete_surrogates_escape_valid.json reject
+        i_string_invalid_lonely_surrogate.json           reject
+        i_string_invalid_surrogate.json                  reject
+        i_string_invalid_utf-8.json                      accept
+        i_string_inverted_surrogates_U+1D11E.json        reject
+        i_string_iso_latin_1.json                        accept
+        i_string_lone_second_surrogate.json              reject
+        i_string_lone_utf8_continuation_byte.json        accept
+        i_string_not_in_unicode_range.json               accept
+        i_string_overlong_sequence_2_bytes.json          accept
+        i_string_overlong_sequence_6_bytes.json          accept
+        i_string_overlong_sequence_6_bytes_null.json     accept
+        i_string_truncated-utf-8.json                    accept
+        i_string_utf16BE_no_BOM.json                     reject
+        i_string_utf16LE_no_BOM.json                     reject
+        i_structure_500_nested_arrays.json               accept
+        i_structure_UTF-8_BOM_empty_object.json          reject
+    }
+    set idict [dict create]
+    foreach p $idefined { dict set idict [lindex $p 0] [lindex $p 1] }
+    set itableBad {}
+    foreach {name expected} $ITABLE {
+        if {![dict exists $idict $name]} {
+            lappend itableBad "$name missing from corpus"
+        } elseif {[dict get $idict $name] ne $expected} {
+            lappend itableBad "$name: [dict get $idict $name], table says $expected"
+        }
+    }
+    check "the i_ table holds, case by case ([expr {[llength $ITABLE] / 2}] pinned)" \
+        [expr {$itableBad eq "" && [dict size $idict] == [llength $ITABLE] / 2}]
+    if {$itableBad ne ""} { puts "     [join [lrange $itableBad 0 6] {; }]" }
 }
 
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
