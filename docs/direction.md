@@ -52,6 +52,27 @@ Decided for 0.12.0 (contract: [the engine](engine.md)):
 - The engine is additive. Nothing leaves the Tcl side; a program that never
   calls `macht` starts nothing.
 
+Decided 2026-08-26 (the narrowed vision; plans 015/016 in the z estate):
+
+- User capabilities are written in Tcl and Lua, and only those. When
+  machteld itself requires more, the author provisions it in the box -
+  vendored, pinned, gated - the way SQLite, Lua, and yyjson entered.
+- External software is not extended into; it is COMMANDED: `run`,
+  `child`, and `scope` keep any program on a supervised, job-caged,
+  budget-killed leash. That is the answer to "other technologies", and
+  it always was.
+- The external-runtime lanes (Deno, Bun, Node, Go sidekicks, embedded
+  Python) and the machinery superstructure around them were examined in
+  full discourse and retired; the engine wire stays language-neutral as
+  dormant contract, blessing no one.
+- Engine confinement becomes GRADED (0.16.0): explicit start-time
+  rights - read, write, env, open - deny-by-default, immutable per
+  engine, visible in stats, conform-proven. The cage is
+  accident-prevention for a trusted author's own components, never an
+  adversarial sandbox, and the contract says exactly that.
+- `spawn` and `net` as engine rights are refused pending their own
+  rulings.
+
 Admission questions, in order:
 
 1. Is this a Windows machine-control primitive or a composition needed by many

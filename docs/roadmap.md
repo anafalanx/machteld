@@ -136,7 +136,47 @@ defects were found by their own benches and fixed inside the registered
 designs (a branchy dictionary sweep; a needless per-row group buffer).
 A 0.13.0 entry line still starts under Tcl's version rules.
 
-## 0.15.0 candidates
+## Landed since 0.14.0, on main, awaiting the 0.15.0 cut
+
+**First-class JSON** (plan-machteld-015 in the z estate; driven by
+MACHTELD-WEBSOCKET-CDP-HANDOFF.md at the repository root, real field
+work): the palette's json reader stands on a vendored yyjson 0.12.0
+core with the plain mode byte-faithful and its emitter deliberately
+unchanged; a TYPED mode gives real JSON identity - document-backed
+opaque values, an all-leaves-explicit constructor law, a fail-closed
+number grammar gate, strict decode, `json value/type/unwrap/get/
+exists` - so machteld can finally say `true`; `http -redirect none`
+stops authenticated requests at the first 3xx, proven by a two-server
+canary; the bounded-delivery covenant is contract doctrine; and a
+porting exercise found and fixed a three-release-old wire bug
+(structured `macht run` args arrived stringified). The release cut -
+version sweep, hermetic gate, ship - happens at the owner's call.
+
+## 0.16.0 - the graded cage (planned; panel-hardened)
+
+The confinement redesign ruled 2026-08-26 (plan-machteld-016 in the z
+estate, two-lens panel folded): the engine's cage becomes GRADED by
+explicit start-time rights - `read ROOTS`, `write ROOTS`, `env NAMES`,
+and `open` (stock Lua, whole, still job-caged and budget-killed) -
+deny-by-default, immutable per engine, visible in stats, proven by a
+conform cage lane. The cage is accident-prevention for a trusted
+author's own components, stated honestly, never an adversarial
+sandbox. The panel also found two defects in the SHIPPED engine, both
+scheduled as the release's first work: `print` in a kernel writes onto
+the protocol wire (the frames share the process stdio), and base
+`dofile`/`loadfile` are ambient file-read in every cell despite the
+"no io" law. Known, named, first in line.
+
+## Ruled, awaiting scheduling
+
+- **Binary Tcl extension loading is disallowed** (ruled 2026-08-24):
+  `load` with a filename leaves the hosts; script-only packages and
+  .tm modules stay; binary capability enters only as vendored palette
+  organs. Consistent with the narrowed vision below; its
+  implementation phase was orphaned when the machinery contract
+  retired and needs a release assignment.
+
+## Candidates
 
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
@@ -149,8 +189,41 @@ A 0.13.0 entry line still starts under Tcl's version rules.
   prediction.
 - A resident engine daemon over a named pipe, with rendezvous and idle
   policy.
-- A sidecar conformance kit: the `macht conform` fixtures packaged for
-  engine authors in other languages.
+
+## Roads examined and not taken (2026-08, the runtime tour)
+
+A deliberate discourse arc examined every serious route to a vast
+library ecosystem, and the owner ruled for the narrow product: **user
+capabilities are written in Tcl and Lua only; the author provisions
+native needs in the box; external software runs on the leash**
+(`run`/`child`/`scope` - always machteld's core competence). Recorded
+so these are reopened by argument, not by forgetting:
+
+- **External engine runtimes** - Deno, Bun, Node, Go sidecars, an
+  embeddable-Python engine, QuickJS - examined in depth and RETIRED
+  with the machinery superstructure. The language-neutral wire stays
+  in the engine contract as dormant capability: any executable
+  speaking it is an engine, but none is blessed, kitted, or promised.
+- **The permission-envelope idea survived by repatriation**: Deno's
+  one great lesson became the graded cage, where additive-from-a-
+  curated-base beats subtractive sandboxing.
+- **The wasm kernel hatch** (build-time-compiled sandboxed kernels in
+  the box) is SHELVED with a named trigger: a machteld user who is
+  not the author needs fast low-level code.
+- **`spawn` and `net` as scoped engine rights**: refused pending their
+  own rulings - the "engines address no network" law does not fall as
+  a side effect.
+- **TinyCC** (compile-on-target): refused - codegen quality, AV
+  posture, and gate-blindness; noted that a sidecar's private
+  interior may legally embed it under the dormant wire.
+- **llama.cpp and DuckDB as machinery**: examined, unruled; the
+  assessments (local models as organs-not-brains with
+  grammar-constrained JSON; DuckDB as the analytics gap-filler) live
+  in the estate ledger for whenever a driving program appears.
+- A porting benchmark (Perl's Math::Polygon to Tcl and Lua,
+  oracle-exact in ~40 seconds each) priced the doctrine: algorithmic
+  needs are ported on demand; only semantic mass ever argued for an
+  ecosystem, and no current program needs one.
 
 ## Deferred: the palette gains xml (decided 2026-08-20, deferred 2026-08-22)
 
