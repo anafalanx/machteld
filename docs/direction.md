@@ -85,3 +85,28 @@ Admission questions, in order:
 
 A "no" does not mean the idea is bad; it means the idea belongs in a program or
 another project rather than in the runtime.
+
+## Placement: host or engine
+
+Where a new capability lives is decided by these questions, in order -
+the first hit decides:
+
+1. **Machine interaction or control** (processes, UI, network,
+   lifecycle)? The host, always: the control plane is Tcl and only
+   Tcl; the engine never owns control flow.
+2. **Operates on engine-resident data** (pools, handles, columns)?
+   The engine, always: computation runs where the data lives; a
+   payload never passes through the control plane.
+3. **Can it run away** (CPU-bound, unbounded, stuck inside one C
+   call)? The engine: only the engine is budget-killable mid-flight,
+   and only engine death is cheap - it is a cache, never the truth.
+4. **Should its use be confinable** (grantable or deniable by an
+   author)? The engine, under the graded rights: the host acts with
+   the program's full authority by design.
+5. **A pure helper both planes need?** Check whether Tcl already
+   covers the host side (it often does); mirror into the cell only on
+   demonstrated kernel need, with independent contracts and no
+   fidelity promise between the twins - the json/cjson precedent.
+6. **Tiebreaker - the wire toll**: small values with host-side data
+   stay in the host; data already engine-side keeps its work
+   engine-side.
