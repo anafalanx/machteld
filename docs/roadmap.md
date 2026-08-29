@@ -152,29 +152,43 @@ porting exercise found and fixed a three-release-old wire bug
 (structured `macht run` args arrived stringified). The release cut -
 version sweep, hermetic gate, ship - happens at the owner's call.
 
-## 0.16.0 - the graded cage (planned; panel-hardened)
+## Next - machteld and X merge (planned; plan-machteld-016)
 
-The confinement redesign ruled 2026-08-26 (plan-machteld-016 in the z
-estate, two-lens panel folded): the engine's cage becomes GRADED by
-explicit start-time rights - `read ROOTS`, `write ROOTS`, `env NAMES`,
-and `open` (stock Lua, whole, still job-caged and budget-killed) -
-deny-by-default, immutable per engine, visible in stats, proven by a
-conform cage lane. The cage is accident-prevention for a trusted
-author's own components, stated honestly, never an adversarial
-sandbox. The panel also found two defects in the SHIPPED engine, both
-scheduled as the release's first work: `print` in a kernel writes onto
-the protocol wire (the frames share the process stdio), and base
-`dofile`/`loadfile` are ambient file-read in every cell despite the
-"no io" law. Known, named, first in line.
+Ruled 2026-08-29, after a long discourse arc: **machteld and the X
+language become one product**, under this repository, named machteld.
+X is a statically typed language that compiles to Tcl; machteld's
+palette becomes its standard library, and `wrap` - four releases old
+and gated - is its deployment stage, so an X program becomes one
+signed executable. A machteld user may still write **ordinary Tcl**
+instead; both are first-class program forms.
 
-## Ruled, awaiting scheduling
+With it, **the engine and Lua retire**. Pools, the csv/lines loaders,
+dictionary-encoded strings, lazy views and all of `col` come
+**in-process** as a palette organ; the wire, protocol-1, the `macht`
+family, the sidecar door and the Lua/LPeg/lua-cjson vendoring are
+deleted. The executable shrinks, and "one consistent JSON" completes
+by subtraction - the engine held the only other two implementations.
 
-- **Binary Tcl extension loading is disallowed** (ruled 2026-08-24):
-  `load` with a filename leaves the hosts; script-only packages and
-  .tm modules stay; binary capability enters only as vendored palette
-  organs. Consistent with the narrowed vision below; its
-  implementation phase was orphaned when the machinery contract
-  retired and needs a release assignment.
+Parallelism is restated in two proven layers: **threads inside C
+palette verbs** (pools are read-only, `col` is pure, no thread ever
+touches an interpreter) for data work, and **child processes** under
+job objects for tasks, with `pmap` as the single language-level
+surface. Hard kill becomes a property of where the author puts the
+work rather than of a special subsystem, and a stated law covers the
+middle: *no palette verb performs unbounded work without a
+cancellation point.*
+
+Capabilities enter machteld as fast C in the palette or as Tcl in the
+prelude - there is no inline C in user programs. Users may add their
+own Tcl packages and DLLs in a **side-folder** beside a built tool,
+loaded by ordinary Tcl mechanics; machteld does not package them, and
+such a tool is deliberately no longer a single file.
+
+**Retracted with this ruling:** the 2026-08-24 decision to disallow
+binary Tcl extensions and remove `load` from the hosts. It
+contradicted the side-folder ruling directly, and the thesis behind it
+belonged to the engine-and-cage architecture now dissolved. `load` and
+ordinary package mechanics stay.
 
 ## Candidates
 
@@ -194,10 +208,12 @@ the protocol wire (the frames share the process stdio), and base
 
 A deliberate discourse arc examined every serious route to a vast
 library ecosystem, and the owner ruled for the narrow product: **user
-capabilities are written in Tcl and Lua only; the author provisions
-native needs in the box; external software runs on the leash**
-(`run`/`child`/`scope` - always machteld's core competence). Recorded
-so these are reopened by argument, not by forgetting:
+capabilities are written in X or Tcl; the author provisions native
+needs in the box (fast C in the palette, or the Tcl prelude); external
+software runs on the leash** (`run`/`child`/`scope` - always
+machteld's core competence). Users may bring their own Tcl packages
+and DLLs in a side-folder beside a built tool. Recorded so these are
+reopened by argument, not by forgetting:
 
 - **External engine runtimes** - Deno, Bun, Node, Go sidecars, an
   embeddable-Python engine, QuickJS - examined in depth and RETIRED
