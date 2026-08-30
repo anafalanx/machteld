@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Machteld,
     [Parameter(Mandatory)][string]$ProcessFixture,
@@ -12,6 +12,17 @@ $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Work = Join-Path ([IO.Path]::GetTempPath()) "machteld-entry-test-$PID"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $Failures = 0
+
+# The expected version is DERIVED from the canonical source, never written here:
+# the 0.15.0 sweep found five hardcoded 0.14.0 expectations in this file, which
+# is the exact failure mode the estate's derive-don't-maintain rule names. The
+# regex matches generate-reference.ps1's canonical check.
+$headerText = Get-Content (Join-Path $Root 'src/machteld.h') -Raw
+if ($headerText -notmatch '(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*$') {
+    throw 'src/machteld.h has no canonical MACHTELD_VERSION'
+}
+$MachteldVersion = $Matches[1]
+$MachteldVersionRe = [regex]::Escape($MachteldVersion)
 
 function Check([string]$Name, [bool]$Condition, [string]$Detail = '') {
     if ($Condition) { Write-Host "ok   $Name"; return }
@@ -133,18 +144,18 @@ try {
 
         $result = Invoke-Host -Arguments @('--version') -Executable $aclHost
         Check 'standalone zipfs starts below an ACL-denied parent' `
-            ($result.Exit -eq 0 -and $result.Out -match '0.14.0') `
+            ($result.Exit -eq 0 -and $result.Out -match $MachteldVersionRe) `
             ($result.Err + $result.Out)
 
         $aclProgram = Join-Path $Work 'acl-entry.tcl'
         Write-Utf8 $aclProgram @'
-package require machteld 0.14.0
+package require machteld
 set normalized [file normalize [info nameofexecutable]]
 puts "ACL-ENTRY:[file exists $normalized]:[version]"
 '@
         $result = Invoke-Host -Arguments @($aclProgram) -Executable $aclHost
         Check 'direct entry runs below an ACL-denied parent without losing a path component' `
-            ($result.Exit -eq 0 -and $result.Out -match 'ACL-ENTRY:1:0.14.0') `
+            ($result.Exit -eq 0 -and $result.Out -match ("ACL-ENTRY:1:" + $MachteldVersionRe)) `
             ($result.Err + $result.Out)
 
         $aclWrapped = Join-Path $Work 'acl-wrapped.exe'
@@ -463,12 +474,12 @@ puts "TK-LIB:$::tk_library"
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
     Check '--help identifies the complete Machteld, Tcl, and Tk reference' `
         ($help.Out -match '(?i)complete offline reference' -and
-         $help.Out -match 'Machteld 0.14.0' -and
+         $help.Out -match ("Machteld " + $MachteldVersionRe) -and
          $help.Out -match 'Tcl 9\.0\.4' -and $help.Out -match 'Tk 9\.0\.4' -and
          $help.Out -match '(?i)--docs' -and $help.Out -match '(?i)search') `
         ($help.Err + $help.Out)
     $version = Invoke-Host @('--version')
-    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match '0.14.0') $version.Err
+    Check '--version is a host mode' ($version.Exit -eq 0 -and $version.Out -match $MachteldVersionRe) $version.Err
 
     $docsStatus = Invoke-Host @('--docs', 'status', '--json')
     $statusObject = $null
@@ -481,7 +492,7 @@ puts "TK-LIB:$::tk_library"
         ($docsStatus.Err + $docsStatus.Out)
     Check 'embedded reference status names exact runtime versions' `
         ($null -ne $statusObject -and $statusObject.ok -eq 1 -and
-         $docsStatus.Out -match '0.14.0' -and
+         $docsStatus.Out -match $MachteldVersionRe -and
          $docsStatus.Out -match '9\.0\.4' -and $docsStatus.Out -match '(?i)sha256') `
         ($docsStatus.Err + $docsStatus.Out)
 
