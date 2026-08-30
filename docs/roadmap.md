@@ -136,7 +136,7 @@ defects were found by their own benches and fixed inside the registered
 designs (a branchy dictionary sweep; a needless per-row group buffer).
 A 0.13.0 entry line still starts under Tcl's version rules.
 
-## Landed since 0.14.0, on main, awaiting the 0.15.0 cut
+## 0.15.0 — first-class JSON (cut 2026-08-30)
 
 **First-class JSON** (plan-machteld-015 in the z estate; driven by
 MACHTELD-WEBSOCKET-CDP-HANDOFF.md at the repository root, real field
@@ -149,8 +149,16 @@ exists` - so machteld can finally say `true`; `http -redirect none`
 stops authenticated requests at the first 3xx, proven by a two-server
 canary; the bounded-delivery covenant is contract doctrine; and a
 porting exercise found and fixed a three-release-old wire bug
-(structured `macht run` args arrived stringified). The release cut -
-version sweep, hermetic gate, ship - happens at the owner's call.
+(structured `macht run` args arrived stringified).
+
+Also in 0.15.0: **the pty redirected-parent fix** - a pty child's
+stdio now binds to the ConPTY even when the parent's own stdio is a
+pipe or file (found by the platform-plan review panel probing this
+roadmap's own claims; gated headless by a canary fixture, proven red
+then green); and the generated wrap launcher now derives its
+`package require machteld` pin from the running runtime's version
+instead of a hardcoded literal. This is the last pre-merge release -
+deliberately cut as the clean state before plan-machteld-016 lands.
 
 ## Next - machteld and X merge (planned; plan-machteld-016)
 
