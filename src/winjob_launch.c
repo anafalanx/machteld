@@ -322,6 +322,17 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
     STARTUPINFOEXW six;
     ZeroMemory(&six, sizeof(six));
     six.StartupInfo.cb = sizeof(six);
+    /* STARTF_USESTDHANDLES with NULL handles, per microsoft/terminal guidance:
+     * without it, CreateProcess duplicates a parent's NON-console std handles
+     * into a console child even with bInheritHandles=FALSE, so a parent whose
+     * own stdout is a pipe or file (CI, `run` capture, hidden launches) gets
+     * the child's output on its own stream instead of through the ConPTY. The
+     * explicit null handles suppress that duplication; the pseudoconsole
+     * attribute then binds the child's console I/O to the ConPTY alone. */
+    six.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    six.StartupInfo.hStdInput = NULL;
+    six.StartupInfo.hStdOutput = NULL;
+    six.StartupInfo.hStdError = NULL;
     six.lpAttributeList = al;
 
     PROCESS_INFORMATION pi;

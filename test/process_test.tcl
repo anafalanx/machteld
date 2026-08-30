@@ -291,13 +291,53 @@ if {[catch {
         [file exists $marker] && [string trim [slurp $marker]] eq $daemon_pid}]
 }
 
-# ConPTY I/O needs a real interactive Windows console. The default/headless lane
-# still checks lifecycle; a terminal lane opts in to the send/read assertions.
+# Interactive send/read semantics get their own terminal lane below. The
+# default/headless lane checks lifecycle plus the redirected-parent binding
+# gate, which needs no console at all.
 set pty_token [pty spawn -- $FIXTURE ok pty]
 check "pty spawn returns a token" [string match pty#* $pty_token]
 check "pty token is listed" [expr {$pty_token in [pty list]}]
 pty close $pty_token
 check "pty close releases the token" [expr {$pty_token ni [pty list]}]
+
+# A pty child's stdio must bind to the pseudoconsole even when the PARENT's own
+# stdio is not a console. CreateProcess duplicates a parent's non-console std
+# handles into a console child even with bInheritHandles=FALSE, so a pty launch
+# that leaves the std-handle fields unset sends the child's bytes into the
+# parent's own pipe or file (CI, `run` capture, hidden launches) while
+# `pty read` sees only VT initialization. The inner parent below runs with both
+# stdio streams captured by `run` -- exactly that hostile redirection -- and
+# reports only the COUNT of canary lines `pty read` collected, never the canary
+# itself, so a single canary byte on either captured stream is a leak.
+set pty_leaf [file join $WORK pty-redirect-leaf.tcl]
+set channel [open $pty_leaf w]
+puts $channel {package require machteld}
+puts $channel {for {set i 0} {$i < 300} {incr i} { puts MACHTELD-PTY-CANARY }}
+close $channel
+set pty_parent [file join $WORK pty-redirect-parent.tcl]
+set channel [open $pty_parent w]
+puts $channel {package require machteld}
+puts $channel {
+    set token [pty spawn -- [info nameofexecutable] [lindex $argv 0]]
+    set collected ""
+    set deadline [expr {[clock milliseconds] + 8000}]
+    while {[clock milliseconds] < $deadline} {
+        append collected [pty read $token -timeout 200ms]
+        if {[regexp -all {MACHTELD-PTY-CANARY} [pty strip $collected]] >= 300} break
+    }
+    catch {pty close $token}
+    puts stderr "PTY-REDIRECT-REPORT canary-lines=[regexp -all {MACHTELD-PTY-CANARY} [pty strip $collected]]"
+}
+close $channel
+set result [run -timeout 20s -- $MT $pty_parent $pty_leaf]
+check "pty parent with redirected stdio completes" [expr {
+    [dict get $result status] eq "ok"}]
+check "redirected parent stdout stays byte-clean of the pty child" [expr {
+    [dict get $result out] eq ""}]
+set pty_lines -1
+regexp {PTY-REDIRECT-REPORT canary-lines=(\d+)} [dict get $result err] -> pty_lines
+check "pty read collects the child's output despite parent redirection" [expr {
+    $pty_lines >= 300}]
 
 if {[info exists ::env(MACHTELD_TEST_PTY_IO)] && $::env(MACHTELD_TEST_PTY_IO) eq "1"} {
     set pty_token [pty spawn -- $FIXTURE stdin-line-count]
