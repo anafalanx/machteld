@@ -1,5 +1,5 @@
 # Complete live contract for the embedded agent reference.
-package require machteld 0.14.0
+package require machteld
 
 set fails 0
 proc check {name condition {detail ""}} {
@@ -10,9 +10,16 @@ proc errorcode {script} {
     return [dict get $options -errorcode]
 }
 
+# Derived, not hardcoded: the release gate caught 0.14.0 literals in two test
+# files during the 0.15.0 sweep; the version comes from machteld.h or nowhere.
+set header [open [file join [file dirname [info script]] .. src machteld.h] r]
+set headerText [read $header]
+close $header
+regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion
+
 set status [docs status]
 check {status identifies schema and runtime} [expr {
-    [dict get $status schema] == 1 && [dict get $status machteld] eq "0.14.0" &&
+    [dict get $status schema] == 1 && [dict get $status machteld] eq $expectedVersion &&
     [dict get $status root] eq "self" && [string length [dict get $status corpus_sha256]] == 64}]
 check {status inventories exact Tcl/Tk manuals} [expr {
     [dict get $status products tcl version] eq "9.0.4" &&

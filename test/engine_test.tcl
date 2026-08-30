@@ -3,7 +3,7 @@
 # child over binary frames, using the palette's json organ for the wire --
 # one map, both organs, by contract.
 
-package require machteld 0.14.0
+package require machteld
 
 set exe [info nameofexecutable]
 set fails 0
@@ -58,7 +58,7 @@ scope {
     set r [req stats]
     check "the first request must be hello" \
         [expr {![dict get $r ok] && [errcode $r] eq "protocol"}]
-    set h [reqok hello protocol 1 host machteld version 0.14.0]
+    set h [reqok hello protocol 1 host machteld version [version]]
     check "hello names the engine and protocol" [expr {
         [dict get $h engine] eq "machteld" && [dict get $h protocol] == 1}]
     set caps [dict get $h capabilities]

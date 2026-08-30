@@ -21,8 +21,19 @@ proc result_of {reply} {
     return [expr {[dict exists $reply result] ? [dict get $reply result] : ""}]
 }
 
+# The expected version is DERIVED from src/machteld.h -- the same canonical
+# regex the reference generator enforces. Two release gates in a row caught
+# hardcoded versions in test files (entry_test.ps1, then here); a literal in a
+# test is a list maintained by memory, and those fall behind.
+set header [open [file join [file dirname [info script]] .. src machteld.h] r]
+set headerText [read $header]
+close $header
+if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion]} {
+    error "src/machteld.h has no canonical MACHTELD_VERSION"
+}
+
 set expected {canon child cli detach dirs docs hash help http json links log macht manifest mtps pmap pool pty run scope store version wait watch worker wrap}
-check "package version is 0.14.0" [expr {[package require machteld] eq "0.14.0"}]
+check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
 set metadata [manifest]
@@ -39,7 +50,7 @@ check "pool separates poison reply from raised codes" [expr {
 check "help advertises bounded embedded-reference discovery" [expr {
     [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
     [string match {*docs schema*} [help]]}]
-check "version command agrees with the package" [expr {[version] eq "0.14.0"}]
+check "version command agrees with machteld.h" [expr {[version] eq $expectedVersion}]
 set embedded_module_path [file normalize \
     [file join [file dirname [info library]] tcl9 9.0]]
 check "embedded Tcl modules include msgcat" [expr {

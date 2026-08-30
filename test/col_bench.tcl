@@ -4,7 +4,7 @@
 # warm; step-0 floors are measured before any grade. Prints the grades
 # table the plan's Executed section records.
 
-package require machteld 0.14.0
+package require machteld
 
 set exe [info nameofexecutable]
 
