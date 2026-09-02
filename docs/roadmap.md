@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.14.0 contains and how possible additions are ordered.
+description: What Machteld 0.15.1 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -157,46 +157,45 @@ pipe or file (found by the platform-plan review panel probing this
 roadmap's own claims; gated headless by a canary fixture, proven red
 then green); and the generated wrap launcher now derives its
 `package require machteld` pin from the running runtime's version
-instead of a hardcoded literal. This is the last pre-merge release -
-deliberately cut as the clean state before plan-machteld-016 lands.
+instead of a hardcoded literal. This was cut as a clean state; the merge it
+anticipated was later withdrawn (see below).
 
-## Next - machteld and X merge (planned; plan-machteld-016)
+## 0.15.1 - documentation corrected (cut 2026-09-03)
 
-Ruled 2026-08-29, after a long discourse arc: **machteld and the X
-language become one product**, under this repository, named machteld.
-X is a statically typed language that compiles to Tcl; machteld's
-palette becomes its standard library, and `wrap` - four releases old
-and gated - is its deployment stage, so an X program becomes one
-signed executable. A machteld user may still write **ordinary Tcl**
-instead; both are first-class program forms.
+No runtime change from 0.15.0. The prose corpus had fallen behind the
+product: the README still announced 0.14.0, and fourteen pages plus
+three reference pages still named 0.14.0 as the current version, because
+the release gate enforces the version trio in the header, the prelude
+and the wrap launcher and derives every test expectation from
+`src/machteld.h` - but prose was never in its remit. Every
+current-version claim now reads 0.15.1; genuine version history (engine
+mode arriving in 0.14.0, the per-release sections below) is left as
+written, because renumbering history makes it false.
 
-With it, **the engine and Lua retire**. Pools, the csv/lines loaders,
-dictionary-encoded strings, lazy views and all of `col` come
-**in-process** as a palette organ; the wire, protocol-1, the `macht`
-family, the sidecar door and the Lua/LPeg/lua-cjson vendoring are
-deleted. The executable shrinks, and "one consistent JSON" completes
-by subtraction - the engine held the only other two implementations.
+Also corrected: **the contracted platform floor**. `contract.md` and the
+README claimed x64 Windows 10 1809 or newer; the owner amended the floor
+on 2026-08-30 to **Windows 11 25H2 (build 26200) and Windows Server 2025
+(build 26100)**. Windows 10 and Server 2022/2019 are below it and ARM64
+is not a target. ConPTY still sets the technical floor at 1809, so the
+binary may start below the contract - it is simply not supported there.
+The `pty` page's own 1809 reference is about ConPTY's requirement and
+stands unchanged.
 
-Parallelism is restated in two proven layers: **threads inside C
-palette verbs** (pools are read-only, `col` is pure, no thread ever
-touches an interpreter) for data work, and **child processes** under
-job objects for tasks, with `pmap` as the single language-level
-surface. Hard kill becomes a property of where the author puts the
-work rather than of a special subsystem, and a stated law covers the
-middle: *no palette verb performs unbounded work without a
-cancellation point.*
+## Next - command and control
 
-Capabilities enter machteld as fast C in the palette or as Tcl in the
-prelude - there is no inline C in user programs. Users may add their
-own Tcl packages and DLLs in a **side-folder** beside a built tool,
-loaded by ordinary Tcl mechanics; machteld does not package them, and
-such a tool is deliberately no longer a single file.
+**The X merge is not happening.** The 2026-08-29 ruling that machteld
+and the statically typed X language would become one product is
+withdrawn (2026-09-01): X is no longer developed as machteld's language,
+and **Tcl is the program form**, first-class and alone. X's design
+record lives in its own repository.
 
-**Retracted with this ruling:** the 2026-08-24 decision to disallow
-binary Tcl extensions and remove `load` from the hosts. It
-contradicted the side-folder ruling directly, and the thesis behind it
-belonged to the engine-and-cage architecture now dissolved. `load` and
-ordinary package mechanics stay.
+The direction instead is machteld's viability as a Windows **command and
+control** system - commanding and supervising processes, machines and
+instruments from Windows, which is what the palette is already shaped
+for. The engine and Lua retirement, the in-process `col` organ, the
+process-control and parallelism law, and the side-folder standard remain
+the ruled runtime work; what changes is the lens they are chosen under.
+The detailed phase plan lives in the estate's platform plan, not here.
 
 ## Candidates
 
@@ -282,7 +281,7 @@ Recorded as constraints, not answers — the route is design work:
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.14.0. Each needs a
+selected WMI queries remain candidates. None is promised by 0.15.1. Each needs a
 concrete program, a narrow Tcl-shaped contract, structured failures, manifest
 metadata, and tests on real Windows behavior before admission.
 

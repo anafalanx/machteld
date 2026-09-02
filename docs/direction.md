@@ -1,13 +1,13 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.14.0.
+description: Current product boundary and decision rules for Machteld 0.15.1.
 tags: [machteld, direction, scope]
 ---
 
 # Direction
 
-The 0.14.0 product sentence is the decision filter:
+The 0.15.1 product sentence is the decision filter:
 
 > machteld is a compact Windows machine-control runtime.
 

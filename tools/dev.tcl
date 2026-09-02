@@ -314,7 +314,7 @@ proc dev_docs {} {
             lappend ids "machteld/guide/[file rootname [file tail $f]]"
         }
         set p [open $probe w]; fconfigure $p -translation lf
-        puts $p "package require machteld 0.14.0"
+        puts $p "package require machteld"
         puts $p "set bad 0"
         puts $p "foreach id {$ids} {"
         puts $p {  if {[catch {docs get $id} e]} { puts "  FAIL corpus missing $id"; incr bad }}
