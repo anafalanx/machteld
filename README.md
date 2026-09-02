@@ -5,36 +5,42 @@ structured command palette implemented in C and Tcl. It ships as one executable,
 starts no service, needs no installed Tcl, and keeps Windows process, ConPTY,
 filesystem, HTTP, hashing, JSON, and SQLite machinery behind Tcl-shaped commands.
 
-## 0.14.0 — the dictionary and the GUI verbs
+## 0.15.0 — first-class JSON
 
-**[machteld 0.14.0 is released](https://github.com/anafalanx/machteld/releases/tag/v0.14.0)**
-(2026-08-23; the executable is Authenticode-signed, SHA-256 checksums beside
-it). The engine face — the same exe, warm and out-of-process, commanded from
-Tcl by the `macht` family — now makes big files interactive: string columns
-are dictionary-encoded at load under a rows-relative cardinality law, views
-are lazy under a liveness law, and the `col` library gained the GUI verbs —
-filter, count, group, order, page: one kernel, one round trip. The release
-was proven before it was named, by a spike GUI filtering a 5 GB,
-25-million-row csv at typing speed (keystroke-to-repaint median under
-100 ms); every number on the way was a registered prediction graded in the
-open, and the hermetic gate ran 630 checks green. The engine's contract,
-boundary laws, and measured guidance live in [the engine page](docs/engine.md).
+**[machteld 0.15.0 is released](https://github.com/anafalanx/machteld/releases/tag/v0.15.0)**
+(2026-08-30; the executable is Authenticode-signed, SHA-256 checksums beside
+it). JSON becomes first-class: the palette's reader stands on a vendored
+yyjson 0.12.0 core with the plain mode byte-faithful and its emitter
+deliberately unchanged, and a **typed mode** gives real JSON identity —
+document-backed opaque values, an all-leaves-explicit constructor law, a
+fail-closed number grammar, strict decode, and `json
+value/type/unwrap/get/exists` — so machteld can finally say `true` and mean
+it. `http -redirect none` stops an authenticated request at the first 3xx,
+proven by a two-server canary; the bounded-delivery covenant became contract
+doctrine; and a porting exercise found and fixed a three-release-old wire
+bug, where structured `macht run` arguments arrived stringified. Also here:
+the **pty redirected-parent fix** — a pty child's stdio now binds to the
+ConPTY even when the parent's own stdio is a pipe or file, gated headless by
+a canary fixture proven red then green — and the generated wrap launcher
+derives its `package require machteld` pin from the running runtime instead
+of a hardcoded literal. The palette's commands and their intended
+composition live in [the palette page](docs/palette.md).
 
 The bundled Tcl core is 9.0.4 plus the exact upstream correction for
 [Tcl ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb), which
 preserves executable paths below ACL-restricted directories. The backport,
 source hashes, and upstream check-in identity are locked into the local build.
 
-The 0.14.0 release target is 64-bit Windows 10 version 1809 or newer (including
+The 0.15.0 release target is 64-bit Windows 10 version 1809 or newer (including
 Windows 11 and corresponding Windows Server releases). ConPTY sets that floor;
 the shipped artifact is x64, not a claim to run on every historical Windows box.
 
-Version 0.14.0 deliberately has one entry route: a readable UTF-8 program file.
+Version 0.15.0 deliberately has one entry route: a readable UTF-8 program file.
 The conventional extension is `.tcl`, but the runtime does not require it. The file must
 begin with a literal opt-in command:
 
 ```tcl
-package require machteld 0.14.0
+package require machteld 0.15.0
 
 set result [run -timeout 30s -- git status --short]
 puts [dict get $result out]
@@ -104,7 +110,7 @@ machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically. There is no
 reduced runtime mode: every wrapped console or GUI tool exposes the same
-programmatic Machteld 0.14.0 machine-control API, including the statically linked,
+programmatic Machteld 0.15.0 machine-control API, including the statically linked,
 binary-safe SQLite `store`. Wrapped tools also retain the complete offline
 reference corpus; wrapping basekits are not embedded recursively.
 
