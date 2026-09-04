@@ -504,10 +504,9 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
         return TCL_ERROR;
     }
     /* Typed values are recognized at every nesting level and written by the
-     * typed writer. On the -plain path (the wire: macht, worker, pool) they
-     * refuse by name instead - the engine boundary's own json map (bool ->
-     * 1/0) is contracted law, and letting a typed boolean degrade through it
-     * would recreate the ambiguity typed mode exists to end (J7). */
+     * typed writer. On the -plain path used by worker and pool protocols they
+     * refuse by name instead, preserving the distinction typed mode exists to
+     * provide. */
     if (JsonIsTyped(v)) {
         if (plainOnly) {
             Tcl_SetObjResult(interp, Tcl_NewStringObj(
@@ -606,6 +605,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 
     if (idx == DECODE) {
         int typed = 0;
+        int maxBytesSet = 0;
         Tcl_WideInt maxBytes = JSON_TYPED_DEFAULT_MAXBYTES;
         Tcl_Obj *textObj = NULL;
         for (int i = 2; i < objc; i++) {
@@ -617,6 +617,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                     maxBytes < 1) {
                     return JsonErr(interp, "usage", "-maxbytes needs a positive byte count");
                 }
+                maxBytesSet = 1;
                 i++;
                 continue;
             }
@@ -629,7 +630,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             Tcl_WrongNumArgs(interp, 2, objv, "?-typed? ?-maxbytes N? text");
             return TCL_ERROR;
         }
-        if (!typed && maxBytes != JSON_TYPED_DEFAULT_MAXBYTES) {
+        if (!typed && maxBytesSet) {
             return JsonErr(interp, "usage", "-maxbytes applies to -typed decode");
         }
         Tcl_Size n;

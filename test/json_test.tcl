@@ -1,10 +1,9 @@
 # json_test.tcl -- ::machteld::json against nst/JSONTestSuite plus a mapping suite.
 #   machteld.exe test/json_test.tcl
 #
-# The suite is VENDORED, the parser is not: docs/ecosystem-policy.md prefers
-# owning a snapshot you can read, and for a parser the thing worth borrowing is
-# the conformance corpus rather than someone else's implementation. 318 cases in
-# test/jsontestsuite, named by the suite's own convention:
+# The suite and yyjson reader are vendored independently: the corpus defines
+# conformance cases while the pinned reader supplies the parsing core. 318 cases
+# live in test/jsontestsuite, named by the suite's own convention:
 #
 #   y_*  MUST parse            n_*  MUST be rejected
 #   i_*  implementation-defined -- we record what we do and why, and a CHANGE in
@@ -186,6 +185,11 @@ check "typed: an unpaired surrogate escape is a parse error" [expr {
 check "typed: -maxbytes refuses over its limit" [expr {
     [catch {json decode -typed -maxbytes 4 {{"a":1}}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON limit}}]
+check "typed: -maxbytes without -typed refuses even at the default" [expr {
+    [catch {json decode -maxbytes 16777216 {null}} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON usage}}]
+check "typed: -maxbytes may raise the default below the hard cap" [expr {
+    [json type [json decode -typed -maxbytes 16777217 {null}]] eq "null"}]
 check "typed: -maxbytes above the hard cap refuses" [expr {
     [catch {json decode -typed -maxbytes 999999999 {1}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON limit}}]
@@ -309,4 +313,3 @@ if {![file isdirectory $CORPUS]} {
 
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"
 exit $fails
-

@@ -155,7 +155,11 @@ proc ::machteld::DocsLoad {} {
         if {[dict get $facts manual_pages] > [dict get $facts documents]} {
             DocsFail corrupt "docs: manual-page count exceeds document count for $product"
         }
-        set expectedVersion [expr {$product eq "machteld" ? [::machteld::version] : "9.0.4"}]
+        if {$product eq "machteld"} {
+            set expectedVersion [::machteld::version]
+        } else {
+            set expectedVersion 9.0.4
+        }
         if {[dict get $facts version] ne $expectedVersion} {
             DocsFail corrupt "docs: $product reference version disagrees with the runtime"
         }
@@ -1261,11 +1265,23 @@ proc ::machteld::DocsPublishText {destination text} {
             [list [dict get $target volume] [dict get $target file]]} {
         DocsFail badvalue "docs: --output cannot replace the running executable"
     }
-    if {[catch {file tempfile candidate [file join $parent .machteld-docs-output-]} channel]} {
-        DocsFail oserror "docs: cannot create --output candidate: $channel"
+    set claim ""
+    set claimChannel ""
+    set candidate ""
+    set channel ""
+    if {[catch {file tempfile claim [file join $parent .machteld-docs-output-]} claimChannel]} {
+        DocsFail oserror "docs: cannot claim --output candidate: $claimChannel"
     }
     set candidateIdentity ""
     try {
+        set candidate "${claim}.candidate"
+        if {[catch {open $candidate {WRONLY CREAT EXCL}} channel]} {
+            DocsFail oserror "docs: cannot create --output candidate: $channel"
+        }
+        if {[catch {canon $candidate} candidateIdentity] ||
+                [dict get $candidateIdentity kind] ne "file"} {
+            DocsFail oserror "docs: cannot identify --output candidate"
+        }
         if {[catch {
             fconfigure $channel -translation binary
             puts -nonewline $channel [encoding convertto utf-8 $text]
@@ -1276,9 +1292,6 @@ proc ::machteld::DocsPublishText {destination text} {
             DocsFail oserror "docs: cannot write --output candidate: $message"
         }
         set channel ""
-        if {[catch {canon $candidate} candidateIdentity] || [dict get $candidateIdentity kind] ne "file"} {
-            DocsFail oserror "docs: cannot identify --output candidate"
-        }
         if {[catch {::machteld::Publish $candidate $destination} message options]} {
             set nativeCode [expr {[dict exists $options -errorcode] ? [lindex [dict get $options -errorcode] 2] : ""}]
             set code [expr {$nativeCode in {badvalue notfound} ? "badvalue" : "oserror"}]
@@ -1292,6 +1305,8 @@ proc ::machteld::DocsPublishText {destination text} {
                     [list [dict get $candidateIdentity volume] [dict get $candidateIdentity file]]} {
             catch {file delete -force $candidate}
         }
+        if {$claimChannel ne ""} { catch {close $claimChannel} }
+        if {$claim ne ""} { catch {file delete -force $claim} }
     }
 }
 

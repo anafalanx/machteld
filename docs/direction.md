@@ -1,13 +1,13 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.15.1.
+description: Current product boundary and decision rules for Machteld 0.20.
 tags: [machteld, direction, scope]
 ---
 
 # Direction
 
-The 0.15.1 product sentence is the decision filter:
+The 0.20 product sentence is the decision filter:
 
 > machteld is a compact Windows machine-control runtime.
 
@@ -35,49 +35,29 @@ Current decisions:
   Launching still supports Machteld's deterministic `PATH`-only lookup for a
   bare command.
 
-Decided for 0.12.0 (contract: [the engine](engine.md)):
+Version 0.20 establishes the product boundary by subtraction: the
+compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and the
+engine-bound column library were removed. They leave no compatibility command
+or migration layer. The release adds no replacement capability; its clean
+Tcl/Tk runtime is the baseline for subsequent development.
 
-- Heavy computation is out of process. The control plane is Tcl and only
-  Tcl; foreign code enters as machinery - Lua kernels run by an engine the
-  program starts, feeds, questions, and kills. No Lua runs in the host.
-- The engine is the executable itself in engine mode, so every host and every
-  wrapped tool carries its engine and nothing is installed; the wire is
-  language-neutral so that a sidecar executable in the folder may be an
-  engine under the deployment covenant.
-- Computation runs where the data lives; a payload never passes through the
-  control plane. The engine is a cache, never the truth.
-- The machine is proven by build gates; kernels are trusted as written. There
-  is no translation of expressions into Lua, no runtime oracle, and no
-  sampling: a computation runs in Tcl or in Lua, never both.
-- The engine is additive. Nothing leaves the Tcl side; a program that never
-  calls `macht` starts nothing.
+Standing architectural decisions:
 
-Decided 2026-08-26/29 (the narrowed vision, then the merge; plans
-015/016 in the z estate):
-
-- **A program is written in X or in ordinary Tcl.** X is a statically
-  typed language compiled to Tcl by a compiler written in Tcl; both
-  forms are first-class, and `wrap` turns either into an executable.
-- When machteld itself requires more, **the author provisions it in
-  the box** - fast C in the palette, or Tcl in the prelude - vendored,
-  pinned, gated, the way SQLite and yyjson entered. There is no inline
-  C in user programs.
-- **A user may bring their own Tcl packages and DLLs in a side-folder**
-  beside a built tool, loaded by ordinary Tcl mechanics. machteld does
-  not package them, and such a tool is deliberately no longer a single
-  file. (This retracts the 2026-08-24 decision to remove `load`.)
-- External software is not extended into; it is COMMANDED: `run`,
-  `child`, and `scope` keep any program on a supervised, job-caged,
-  budget-killed leash. That is the answer to "other technologies", and
-  it always was.
-- The external-runtime lanes (Deno, Bun, Node, Go sidekicks, embedded
-  Python) and the machinery superstructure around them were examined in
-  full discourse and retired.
-- **The engine and Lua retire**; the data plane comes in-process as a
-  palette organ. Parallelism is threads inside C palette verbs plus
-  child processes for tasks, with `pmap` the single language surface,
-  and the law that no palette verb performs unbounded work without a
-  cancellation point.
+- **Machteld is Tcl/Tk, with C/C++ underneath.** Tcl is the sole program,
+  composition, and orchestration language; Tk is the graphical toolkit; C and
+  C++ are the only admitted implementation languages for native facilities.
+- When Machteld itself requires more, the implementation belongs in Tcl or in
+  a narrow native palette command, vendored, pinned, bounded, and gated like
+  SQLite and yyjson. A second embedded scripting language is not retained for
+  hypothetical future use.
+- A user may bring their own Tcl packages and DLLs in a folder beside a built
+  tool, loaded by ordinary Tcl mechanics. Machteld does not package them, and
+  such a tool is deliberately no longer a single file.
+- External software is commanded through `run`, `child`, and `scope`. It is an
+  ordinary supervised process, not a privileged extension architecture.
+- Parallel work uses threads inside carefully bounded native commands or Tcl
+  worker processes through `pmap`. New long-running native operations must
+  provide cancellation points or an explicit bounded contract.
 
 Admission questions, in order:
 
@@ -92,27 +72,19 @@ Admission questions, in order:
 A "no" does not mean the idea is bad; it means the idea belongs in a program or
 another project rather than in the runtime.
 
-## Placement: host or engine
+## Placement: Tcl or native
 
-Where a new capability lives is decided by these questions, in order -
-the first hit decides:
+Where a new capability lives is decided by these questions, in order:
 
-1. **Machine interaction or control** (processes, UI, network,
-   lifecycle)? The host, always: the control plane is Tcl and only
-   Tcl; the engine never owns control flow.
-2. **Operates on engine-resident data** (pools, handles, columns)?
-   The engine, always: computation runs where the data lives; a
-   payload never passes through the control plane.
-3. **Can it run away** (CPU-bound, unbounded, stuck inside one C
-   call)? The engine: only the engine is budget-killable mid-flight,
-   and only engine death is cheap - it is a cache, never the truth.
-4. **Should its use be confinable** (grantable or deniable by an
-   author)? The engine, under the graded rights: the host acts with
-   the program's full authority by design.
-5. **A pure helper both planes need?** Check whether Tcl already
-   covers the host side (it often does); mirror into the cell only on
-   demonstrated kernel need, with independent contracts and no
-   fidelity promise between the twins - the json/cjson precedent.
-6. **Tiebreaker - the wire toll**: small values with host-side data
-   stay in the host; data already engine-side keeps its work
-   engine-side.
+1. Can ordinary Tcl express it clearly and within the required bounds? Keep it
+   in Tcl.
+2. Is it graphical application structure or ordinary desktop UI? Use Tk and
+   Tcl.
+3. Does it require a Windows API, a bundled native library, or measured native
+   performance? Expose the smallest useful Tcl-shaped command implemented in C
+   or C++.
+4. Is it an independently useful executable? Launch and supervise it with the
+   existing process commands and define its data protocol in the program.
+5. Can a native operation run indefinitely or block inside foreign code? Give
+   it cancellation points or place the operation in an ordinary supervised
+   process; do not make the host event loop hostage to it.

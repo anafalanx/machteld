@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public Machteld 0.15.1 commands and their intended composition.
+description: The public Machteld 0.20 commands and their intended composition.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -200,8 +200,8 @@ reach the wire unquoted is the most guarded); constructors accept typed
 values and nested plain dict/list CONTAINERS, and refuse plain SCALARS by
 name - every leaf is explicit, which is what makes the guarantee decidable;
 `decode -typed` is strict (duplicate object members refuse at every nesting
-level; a documented 16 MiB default and 64 MiB hard byte cap, `-maxbytes` may
-only lower it); number spelling survives verbatim, `-0` and 40-digit
+level; a documented 16 MiB default and 64 MiB hard byte cap, and `-maxbytes`
+may set any positive limit through that cap); number spelling survives verbatim, `-0` and 40-digit
 integers included; `encode` recognizes typed values at every nesting level.
 
 The shimmer caveat, stated plainly: Tcl converts representations on demand,
@@ -212,9 +212,8 @@ exposed routes are the handle itself and typed leaves parked in plain
 containers. Build wire-bound trees as typed containers end to end, construct
 late, hold the handle, and never stringify it. A leaf that arrives at a
 constructor already stripped refuses by name - loud, not lucky. Typed values
-are for the program's own boundary work: the engine wire refuses them
-(`macht run` says so by name; unwrap first), and stringification, `store`,
-and worker transport do not preserve the type.
+are for the program's own boundary work: stringification, `store`, and worker
+transport do not preserve the type.
 
 `hash` supports `md5`, `sha1`, `sha256`, `sha384`, and `sha512` through Windows
 CNG. `sum`, `file`, and `hmac` return hex unless `-binary` applies. `start`,
@@ -291,34 +290,6 @@ poison` reply rather than looping.
 handler's structured error is re-raised unchanged; an unstructured handler error
 becomes `PMAP failed`. See [parallel work](parallel.md).
 
-## Serious calculation
-
-```tcl
-set h [macht load -lines C:/data/access.log]
-macht def hits {function hits(h)
-    local n = 0
-    for i = 1, h.rows do
-        if string.find(h.line[i], "404", 1, true) then n = n + 1 end
-    end
-    return n
-end}
-set total [macht run hits $h -shards 8 -reduce sum_of]
-macht free $h
-macht stop
-```
-
-`macht` commands engines: disposable compute processes - the executable
-itself in engine mode, or a sidecar via `-exe` - holding Lua and data
-pools, spoken to over a language-neutral wire, and killed through the job
-machinery. Data enters by path and is addressed by handles; kernels are
-Lua written by the program author, cached by content hash, trusted as
-written; `-shards` runs a kernel over contiguous pool views in parallel
-threads and `-reduce` folds the partials engine-side; `-budget` is
-enforced by kill, after which the lazy default engine simply restarts.
-The first work subcommand starts an engine on its own; `macht start`
-exists for control and for additional engines. See
-[the engine](engine.md) and `machteld/command/macht`.
-
 ## Packaging and introspection
 
 ```tcl
@@ -335,7 +306,7 @@ wrap app.tcl -o app.exe --console
 wrap appdir -o app.exe --entry src/main.tcl --gui
 ```
 
-`version` and `package require machteld` return `0.15.1`. `manifest` describes the
+`version` and `package require machteld` return `0.20`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
 `replycodes` are fixed protocol failures carried as data. `docs` provides exact,
 bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9
@@ -352,5 +323,5 @@ not copied recursively, so a wrapped tool cannot perform another wrap. See
 ## Complete verb list
 
 `canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
-`links`, `log`, `macht`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`,
+`links`, `log`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`,
 `scope`, `store`, `version`, `wait`, `watch`, `worker`, and `wrap`.

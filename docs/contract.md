@@ -12,7 +12,7 @@ This file states the cross-command rules. Command-specific vocabulary is in the
 
 ## Platform
 
-The 0.15.1 artifact targets x64 Windows 11 25H2 (build 26200) and Windows
+The 0.20 artifact targets x64 Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor, and ARM64 is not a target. The binary may well start on
 older builds — ConPTY, which sets the technical floor, has been present since
@@ -26,8 +26,8 @@ of these literal forms. `.tcl` is conventional, not required:
 
 ```tcl
 package require machteld
-package require machteld 0.15.1
-package require -exact machteld 0.15.1
+package require machteld 0.20
+package require -exact machteld 0.20
 ```
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
@@ -37,7 +37,7 @@ with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
 `{MACHTELD ENTRY payload}`. These startup failures exit before the program can
 be evaluated. Programs from stdin are not accepted.
 
-Once loaded, `package require machteld` returns `0.15.1`. Palette commands are in
+Once loaded, `package require machteld` returns `0.20`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add
 `namespace path ::machteld` or use qualified names.
 
@@ -112,7 +112,7 @@ try {
 
 The current domains are `ENTRY`, `RUN`, `CHILD`, `WAIT`, `DETACH`, `PTY`,
 `WATCH`, `MTPS`, `DIRS`, `HTTP`, `HASH`, `JSON`, `STORE`, `CLI`, `LOG`,
-`WORKER`, `POOL`, `PMAP`, `MACHT`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
+`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
 `badvalue`, `notfound`, `nohandle`, `timeout`, `launch`, and `oserror`; each
 manifest entry lists its closed set of Machteld-domain codes.
 
@@ -151,47 +151,9 @@ the key did not exist. Operations before `open` raise `STORE notopen`.
 `store open` creates an in-memory database. `store open path` creates the
 key/value table when needed in a durable database. Both configure a five-second
 SQLite busy timeout, allowing independent Machteld processes to wait through
-ordinary writer contention. Engine failures use `STORE sqlite`.
-Every full, console-wrapped, and GUI-wrapped 0.15.1 host includes this same static
+ordinary writer contention. SQLite failures use `STORE sqlite`.
+Every full, console-wrapped, and GUI-wrapped 0.20 host includes this same static
 implementation.
-
-## Engines
-
-From 0.12.0, heavy computation leaves the host process. `macht` becomes the
-verb family that commands **engines**: disposable compute processes - the
-Machteld executable in engine mode, or a sidecar executable in the folder -
-holding Lua 5.5 and typed data pools, spoken to over a language-neutral wire
-and killed through the job machinery. [The engine](engine.md) is the full
-contract; these are its cross-command rules:
-
-- The control plane is Tcl and only Tcl; a kernel is machinery that never
-  holds control flow, events, a window, or supervision.
-- Computation runs where the data lives: bulk enters an engine by path,
-  engine-resident data is addressed by handle, and only bounded values cross
-  the wire. A payload never passes through the control plane.
-- The engine is a cache, never the truth: any engine may be killed at any
-  instant and a program must be able to start another and load again.
-- The machine is proven by Machteld's build gates; kernels are trusted as
-  written, never sampled or verified at run time.
-- The engine is additive: a program that never calls `macht` starts nothing.
-
-## Macht
-
-`macht` is the family that commands engines: `start`/`stop`/`status` for
-lifecycle, `load`/`def`/`run`/`free`/`stats` for work, `conform` for
-sidecar verification. Kernels are Lua, written by the program author, sent
-as source, cached by content hash, and trusted as written - there is no
-translation of expressions, no oracle, and no runtime verification; the
-build gates prove the machine. Data enters an engine by path and is
-addressed by engine-scoped handles; only bounded values cross the wire,
-under the `json` command's mapping plus the boundary's edge laws (exact
-64-bit integers, booleans as `1`/`0`, tagged non-finite floats, UTF-8 or
-refused). `-budget` is enforced by killing the engine - the only limit
-that holds against a kernel inside one C call - and the next work
-subcommand starts a fresh default engine. Failures raise
-`{MACHTELD MACHT code}` from the closed set in the manifest. The exact
-family reference is `machteld/command/macht`; the wire and boundary
-contract is [the engine](engine.md).
 
 ## Manifest
 
@@ -236,7 +198,7 @@ the originating handoff lives at the repository root):
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-0.15.1 and the same machine-control, data, process, and Tcl composition commands,
+0.20 and the same machine-control, data, process, and Tcl composition commands,
 including `package require Tk`, static `store`, and the complete exact-version
 reference corpus. Nested wrapping alone is intentionally nonrecursive: `wrap`
 reports `WRAP unsupported` because tools carry no nested basekits. Deliberately

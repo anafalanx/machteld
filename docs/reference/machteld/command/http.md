@@ -2,7 +2,7 @@
 id: machteld/command/http
 type: command
 title: http
-summary: Perform bounded HTTPS GET and POST requests through Windows WinHTTP.
+summary: Perform bounded HTTP and HTTPS GET and POST requests through Windows WinHTTP.
 commands: http, http get, http post
 ---
 

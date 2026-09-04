@@ -32,13 +32,13 @@ New-Item -ItemType Directory -Force -Path $Work | Out-Null
 try {
     $header = [IO.File]::ReadAllText((Join-Path $RepoRoot 'src\machteld.h'))
     $prelude = [IO.File]::ReadAllText((Join-Path $RepoRoot 'tcl\machteld.tcl'))
-    if ($header -notmatch '(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*$') {
+    if ($header -notmatch '(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$') {
         Fail 'native canonical version is absent'
     }
     $runtimeVersion = $Matches[1]
-    if ($prelude -notmatch '(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$' -or
+    if ($prelude -notmatch '(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$' -or
             $Matches[1] -ne $runtimeVersion -or
-            $prelude -notmatch '(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+\.[0-9]+)\}\s*$' -or
+            $prelude -notmatch '(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\}\s*$' -or
             $Matches[1] -ne $runtimeVersion) {
         Fail 'C, Tcl package, and wrapped-launcher versions disagree'
     }
@@ -76,6 +76,9 @@ try {
         Fail 'catalog product/manual counts do not preserve the 249/177 core-manual contract'
     }
     $documentNames = @($catalog.documents.PSObject.Properties.Name)
+    foreach ($retired in @('machteld/command/macht', 'machteld/guide/engine')) {
+        if ($retired -cin $documentNames) { Fail "retired document remains in catalog: $retired" }
+    }
     foreach ($id in @('tcl/command/dict','tcl/command/http','tcl/c-api/crtobjcmd',
             'tk/command/bind','machteld/agent','machteld/license','tcl/license','tk/license')) {
         if ($id -cnotin $documentNames) { Fail "catalog document is absent: $id" }

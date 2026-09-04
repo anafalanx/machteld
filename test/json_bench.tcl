@@ -2,7 +2,7 @@
 # yyjson reader vs the old hand parser, two legs. NOT a gate: numbers.
 #   machteld.exe test/json_bench.tcl
 # The benchmark document is generated deterministically and pinned by hash;
-# the small frame is a representative engine wire reply.
+# the small frame is a representative protocol reply.
 
 package require machteld
 

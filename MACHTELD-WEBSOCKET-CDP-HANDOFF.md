@@ -1,8 +1,14 @@
 # Machteld improvements for reusable WebSocket and CDP work
 
-Status: implementation handoff  
-Date: 2026-08-25  
-First consumer: FlowNet KFX History
+- Status: historical handoff, partially completed and superseded
+- Date: 2026-08-25
+- First consumer: FlowNet KFX History
+
+This file preserves the implementation record that led to typed JSON and
+`http -redirect none`, both released in Machteld 0.15.0. The proposed WebSocket
+and CDP packages were not added to Machteld; their remaining work is deferred
+and is not a current release commitment. The dated instructions below remain
+for provenance, not as the active Machteld plan.
 
 ## Objective
 
@@ -143,7 +149,7 @@ Required laws:
   64-bit range.
 - Typed values survive ordinary list/dict nesting and copying within one Tcl
   interpreter without losing their JSON identity. Arbitrary stringification,
-  SQLite storage, worker/engine transport, or interpreter boundaries are not
+  SQLite storage, worker transport, or interpreter boundaries are not
   promised to preserve the opaque type.
 - Typed decode rejects duplicate keys and unpaired surrogates by default.
 - Existing plain decode/encode behavior remains available and documented.
@@ -616,7 +622,7 @@ capture.
 - Automatic cookie jars, SSO, or credential refresh in `http` or WebSocket.
 - TLS-certificate validation bypasses.
 - Runtime-global replacement of Tcl/Tk `bgerror`.
-- Python, Node, Playwright, `z`, or another sidecar as a published dependency.
+- Python, Node, Playwright, `z`, or another helper process as a published dependency.
 - Bundling Chromium merely to call the result a single executable.
 - Weakening `child`'s deterministic PATH-only process resolution.
 

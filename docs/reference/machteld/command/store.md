@@ -2,7 +2,7 @@
 id: machteld/command/store
 type: command
 title: store
-summary: Use a binary-safe key/value store backed by the statically linked SQLite engine.
+summary: Use a binary-safe key/value store backed by the statically linked SQLite library.
 commands: store, store open, store put, store get, store keys, store del, store close, store version
 ---
 
@@ -82,7 +82,7 @@ Returns empty after opening and ensuring the key/value table exists.
 
 #### Errors
 
-Invalid path reports `badvalue`; engine/open/schema failures report `sqlite`.
+Invalid path reports `badvalue`; SQLite open/schema failures report `sqlite`.
 
 #### Lifetime and timeouts
 
@@ -289,7 +289,7 @@ No arguments; a store need not be open.
 
 #### Results
 
-Returns `sqlite3_libversion()` text for the statically linked engine.
+Returns `sqlite3_libversion()` text for the statically linked SQLite library.
 
 #### Errors
 
@@ -305,7 +305,7 @@ Pure constant query.
 
 #### Constraints
 
-This identifies the engine, not a database file format revision.
+This identifies the library, not a database file format revision.
 
 #### See also
 

@@ -9,7 +9,7 @@ commands: docs, help
 # Agent documentation bootstrap
 
 This executable contains the complete, exact-version offline references for
-Machteld 0.15.1, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
+Machteld 0.20, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
 API manuals and the Tk application, widget, and C API manuals—not merely a
 short Machteld guide.
 
@@ -84,10 +84,9 @@ product, under two conditions:
 - **Contract-compliant.** The artifact plays by Machteld's published rules
   for its kind. A Tcl extension or script package enters through the
   extension mechanics and the precedence rule (`machteld/guide/extensions`).
-  A compute engine speaks the engine wire and passes its conformance suite
-  (`machteld/guide/engine`, the 0.15.1 contract). A helper executable is
-  launched, supervised, and killed through `run`, `child`, and `scope` like
-  any process, and speaks structured output you define.
+  An external executable is launched, supervised, and killed through `run`,
+  `child`, and `scope` like any process, and speaks structured output you
+  define.
 - **Covenant-compliant.** Every dependency of the shipped program is in the
   box, in the folder, or not in the program: files beside the exe with their
   license texts, nothing installed, no registry writes, no downloads at run

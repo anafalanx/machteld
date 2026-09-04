@@ -42,7 +42,7 @@ proc ::machteld::pmap {args} {
     set subs {}
     set opts {-width -maxtries -timeout -raw}
     if {[llength $args] < 2} {
-        Fail PMAP usage "usage: pmap requests ?-width n? ?-timeout dur? ?-raw? -- command ?arg ...?"
+        Fail PMAP usage "usage: pmap requests ?-width n? ?-maxtries n? ?-timeout dur? ?-raw? -- command ?arg ...?"
     }
     set reqs [lindex $args 0]
     set rest [lrange $args 1 end]

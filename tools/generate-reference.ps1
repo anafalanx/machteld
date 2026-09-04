@@ -38,7 +38,13 @@ function Read-Utf8Strict([string]$Path) {
 }
 
 function Get-Sha256([string]$Path) {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+        finally { $stream.Dispose() }
+    }
+    finally { $sha.Dispose() }
 }
 
 function Get-BytesSha256([byte[]]$Bytes) {
@@ -980,12 +986,12 @@ if (-not $Tclsh) {
 if (-not $Tclsh -or -not [IO.File]::Exists($Tclsh)) { Fail 'static Tcl 9 shell not found; pass -Tclsh' }
 
 $headerText=Read-Utf8Strict (Join-Path $RepoRoot 'src\machteld.h')
-if($headerText-notmatch'(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*$'){Fail 'src/machteld.h has no canonical MACHTELD_VERSION'}
+if($headerText-notmatch'(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$'){Fail 'src/machteld.h has no canonical MACHTELD_VERSION'}
 $MachteldVersion=$Matches[1]
 $preludeText=Read-Utf8Strict (Join-Path $RepoRoot 'tcl\machteld.tcl')
-if($preludeText-notmatch'(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+\.[0-9]+)\s*$'){Fail 'tcl/machteld.tcl has no canonical version variable'}
+if($preludeText-notmatch'(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$'){Fail 'tcl/machteld.tcl has no canonical version variable'}
 if($Matches[1]-ne$MachteldVersion){Fail "C/Tcl runtime version mismatch: $MachteldVersion vs $($Matches[1])"}
-if($preludeText-notmatch'(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+\.[0-9]+)\}\s*$'){
+if($preludeText-notmatch'(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\}\s*$'){
     Fail 'tcl/machteld.tcl launcher has no exact versioned package require literal'
 }
 if($Matches[1]-ne$MachteldVersion){Fail "C/Tcl/launcher version mismatch: $MachteldVersion vs $($Matches[1])"}

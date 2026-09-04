@@ -38,6 +38,7 @@ try {
     $licenseHashes = @{
         'Tcl-9.0.4.txt' = 'C0A69A2BFD757361EC7E6143973B103C90409316B49E9C88DB26AD6388E79F16'
         'Tk-9.0.4.txt'  = '2CDE822B93CA16AE535C954B7DFE658B4AD10DF2A193628D1B358F1765E8B198'
+        'yyjson-0.12.0.txt' = '45E384D3D52C73CBA3A64D6E6C25D47CD738CD8A55C30629E3201046EDA62947'
     }
     foreach ($notice in $licenseHashes.Keys) {
         $path = Join-Path $RepoRoot "licenses\$notice"
@@ -124,6 +125,19 @@ try {
         ($result.Exit -ne 0 -and $result.Text -match 'license notice directory not found' -and
          -not (Test-Path -LiteralPath $out)) $result.Text
 
+    $incompleteLicenses = Join-Path $Work 'incomplete-licenses'
+    New-Item -ItemType Directory -Force -Path $incompleteLicenses | Out-Null
+    Copy-Item -LiteralPath (Join-Path $licenses 'Tcl-9.0.4.txt'), `
+        (Join-Path $licenses 'Tk-9.0.4.txt') -Destination $incompleteLicenses
+    $result = Invoke-Package @(
+        '--prefix', $prefix, '--prelude', $prelude,
+        '--wrapper', $Tclsh, '--licenses', $incompleteLicenses,
+        '--apache-license', $apacheLicense, '--reference', $reference, '--out', $out)
+    Check 'packaging refuses a missing yyjson notice' `
+        ($result.Exit -ne 0 -and
+         $result.Text -match 'required license notice not found: yyjson-0.12.0.txt' -and
+         -not (Test-Path -LiteralPath $out)) $result.Text
+
     $result = Invoke-Package @(
         '--prefix', $prefix, '--prelude', $prelude,
         '--wrapper', $Tclsh, '--licenses', $licenses,
@@ -175,6 +189,9 @@ try {
     Check 'successful packaging publishes only after lmkimg succeeds' `
         ($result.Exit -eq 0 -and (Get-Item -LiteralPath $out).Length -gt 1MB -and
          [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($out), 0, 2) -eq 'MZ') $result.Text
+    Check 'successful package is not marked temporary' `
+        (((Get-Item -LiteralPath $out).Attributes -band
+          [IO.FileAttributes]::Temporary) -eq 0)
     Check 'successful packaging leaves no staging or candidate paths' `
         (-not (Get-ChildItem -LiteralPath $Work -Force | Where-Object Name -Like '.machteld-package-*'))
     $validator = Join-Path $Work 'validate-package.tcl'
@@ -201,6 +218,7 @@ try {
         licenses/Apache-2.0.txt
         licenses/Tcl-9.0.4.txt
         licenses/Tk-9.0.4.txt
+        licenses/yyjson-0.12.0.txt
         reference/catalog.dict
         reference/catalog.json
         reference/search.dict
