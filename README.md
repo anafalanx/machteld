@@ -30,8 +30,8 @@ The bundled Tcl core is 9.0.4 plus the exact upstream correction for
 preserves executable paths below ACL-restricted directories. The backport,
 source hashes, and upstream check-in identity are locked into the local build.
 The executable's Windows properties carry exact `0.20` file/product versions
-and the repository author/copyright identity; local build paths are scrubbed
-from the packaged runtime.
+and identify Vincent Vercauteren as author, publisher, and copyright holder;
+local build paths are scrubbed from the packaged runtime.
 
 Machteld 0.20 supports 64-bit Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below

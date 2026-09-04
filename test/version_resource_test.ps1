@@ -109,14 +109,14 @@ function Check-VersionResource(
          $info.ProductBuildPart -eq $numeric[2] -and
          $info.ProductPrivatePart -eq $numeric[3]) `
         "file=$($info.FileMajorPart),$($info.FileMinorPart),$($info.FileBuildPart),$($info.FilePrivatePart) product=$($info.ProductMajorPart),$($info.ProductMinorPart),$($info.ProductBuildPart),$($info.ProductPrivatePart)"
-    Check "$Label repository identity is present" `
-        ($info.CompanyName -ceq 'anafalanx' -and
-         $info.LegalCopyright -ceq 'Copyright 2026 anafalanx' -and
+    Check "$Label publisher identity is present" `
+        ($info.CompanyName -ceq 'Vincent Vercauteren' -and
+         $info.LegalCopyright -ceq 'Copyright 2026 Vincent Vercauteren' -and
          $info.ProductName -ceq 'Machteld') `
         "company={$($info.CompanyName)} copyright={$($info.LegalCopyright)} product={$($info.ProductName)}"
     $author = [MachteldVersionResource]::QueryString($Path, 'Author')
     Check "$Label custom author identity is present" `
-        ($author -ceq 'anafalanx') "author={$author}"
+        ($author -ceq 'Vincent Vercauteren') "author={$author}"
     Check "$Label host identity is present" `
         ($info.FileDescription -ceq $Description -and
          $info.InternalName -ceq $InternalName -and

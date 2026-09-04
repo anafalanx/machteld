@@ -85,11 +85,12 @@ self-contained. Only basekits are distribution-only: a wrapped tool cannot run
 `wrap` again.
 
 Every host also carries Windows VERSIONINFO derived from the canonical Machteld
-version: product and file version `0.20`, the Machteld product identity, and the
-repository publisher/copyright identity. A wrapped program inherits the
-console or GUI host metadata; `wrap` does not claim application-specific
-authorship or rewrite version resources. Tcl's embedded configuration points to
-the self-mounted payload, and build-machine paths are absent from the artifact.
+version: product and file version `0.20`, the Machteld product identity, and
+Vincent Vercauteren as author, publisher, and copyright holder. A wrapped
+program inherits the console or GUI host metadata; `wrap` does not claim
+application-specific authorship or rewrite version resources. Tcl's embedded
+configuration points to the self-mounted payload, and build-machine paths are
+absent from the artifact.
 
 `--console` is the default and provides standard channels. `--gui` selects the
 Windows GUI subsystem and does not create a console; use `log -file` or a Tk
