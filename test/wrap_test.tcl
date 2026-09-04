@@ -29,7 +29,10 @@ proc carries_runtime_notices {image} {
     set mount "notice-[pid]-[clock clicks]"
     if {[catch {zipfs mount $image $mount}]} { return 0 }
     try {
-        foreach notice {Apache-2.0.txt Tcl-9.0.4.txt Tk-9.0.4.txt yyjson-0.12.0.txt} {
+        foreach notice {
+            Apache-2.0.txt Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt
+            LibTomMath-1.3.0.txt yyjson-0.12.0.txt
+        } {
             set expected [file join //zipfs:/app/licenses $notice]
             set embedded [file join //zipfs:/$mount/licenses $notice]
             if {![file isfile $expected] || ![file isfile $embedded]} { return 0 }

@@ -57,6 +57,15 @@ proc wait_for_dead {process_id {milliseconds 4000}} {
     }
     return 0
 }
+proc own_handle_count {} {
+    set result [run -- $::FIXTURE handle-count [pid]]
+    set value [string trim [dict get $result out]]
+    if {[dict get $result status] ne "ok" ||
+            ![string is integer -strict $value]} {
+        return -1
+    }
+    return $value
+}
 
 # Ordinary results, Unicode argv, full-width exit codes, and callbacks form one
 # compact supervision contract.
@@ -339,20 +348,140 @@ regexp {PTY-REDIRECT-REPORT canary-lines=(\d+)} [dict get $result err] -> pty_li
 check "pty read collects the child's output despite parent redirection" [expr {
     $pty_lines >= 300}]
 
-if {[info exists ::env(MACHTELD_TEST_PTY_IO)] && $::env(MACHTELD_TEST_PTY_IO) eq "1"} {
-    set pty_token [pty spawn -- $FIXTURE stdin-line-count]
-    set payload [string repeat abcdefghijklmnop 8192]
-    pty send $pty_token "$payload\r\n"
-    set observed ""
-    set expected "PTY-BYTES:[string length $payload]"
-    set deadline [expr {[clock milliseconds] + 10000}]
-    while {[clock milliseconds] < $deadline &&
-            ![string match *$expected* $observed]} {
-        append observed [pty read $pty_token -timeout 100ms]
+# Each non-empty send uses a private duplicate of the PTY input handle while its
+# writer is alive. Repeated small writes make failure to close that duplicate a
+# large, deterministic process-handle increase without filling either pipe.
+set pty_handle_probe [pty spawn -- $FIXTURE stdin-line-count]
+set handles_before [own_handle_count]
+for {set index 0} {$index < 128} {incr index} {
+    pty send $pty_handle_probe X
+}
+set handles_after [own_handle_count]
+pty send $pty_handle_probe "\r\n"
+catch {pty close $pty_handle_probe}
+check "repeated PTY sends release their private writer handles" [expr {
+    $handles_before >= 0 && $handles_after >= 0 &&
+    $handles_after <= $handles_before + 8}]
+
+# A synchronous send must service ConPTY's output at the same time: cooked
+# console input is echoed before the final newline reaches the child, and a
+# full output pipe would otherwise stop ConHost from consuming more input. Run
+# the regression under a supervised outer timeout so a future circular wait is
+# a bounded failure rather than a hung test lane. The sentinels prove that bytes
+# drained to break backpressure remain available to `pty read` in order.
+set pty_large [file join $WORK pty-large-send.tcl]
+set channel [open $pty_large w]
+puts $channel {package require machteld}
+puts $channel {
+    set token [pty spawn -- [lindex $argv 0] stdin-line-count]
+    try {
+        set payload "MACHTELD-PTY-BEGIN-"
+        set markers {}
+        for {set index 0} {$index < 128} {incr index} {
+            set marker [format "<M%03d>" $index]
+            lappend markers $marker
+            append payload $marker [string repeat Q 1024]
+        }
+        append payload "-MACHTELD-PTY-END"
+        pty send $token "$payload\r\n"
+        set pending [dict get [pty info $token] pending]
+        set observed ""
+        set expected "PTY-BYTES:[string length $payload]"
+        set deadline [expr {[clock milliseconds] + 10000}]
+        while {[clock milliseconds] < $deadline &&
+                ![string match *$expected* $observed]} {
+            append observed [pty read $token -timeout 100ms]
+        }
+        set visible [pty strip $observed]
+        set begin_index [string first MACHTELD-PTY-BEGIN- $visible]
+        set end_index [string first -MACHTELD-PTY-END $visible]
+        set summary_index [string first $expected $visible]
+        set marker_index $begin_index
+        set milestones [expr {$marker_index >= 0}]
+        foreach marker $markers {
+            set marker_index [string first $marker $visible $marker_index]
+            if {$marker_index < 0} {
+                set milestones 0
+                break
+            }
+            incr marker_index [string length $marker]
+        }
+        puts [dict create pending $pending \
+            complete [string match *$expected* $visible] \
+            milestones $milestones \
+            ordered [expr {$begin_index >= 0 && $end_index > $marker_index &&
+                            $summary_index > $end_index}]]
+    } finally {
+        catch {pty close $token}
     }
-    check "PTY sends a complete large payload" [expr {
-        [string match *$expected* $observed]}]
-    pty close $pty_token
+}
+close $channel
+set result [run -timeout 20s -- $MT $pty_large $FIXTURE]
+set pty_large_report [string trim [dict get $result out]]
+set pty_large_valid [expr {
+    [dict get $result status] eq "ok" &&
+    ![catch {dict size $pty_large_report}]}]
+foreach key {pending complete milestones ordered} {
+    if {$pty_large_valid && ![dict exists $pty_large_report $key]} {
+        set pty_large_valid 0
+    }
+}
+check "large PTY send completes within a supervised bound" $pty_large_valid
+check "large PTY send reports preserved pending output" [expr {
+    $pty_large_valid && [dict get $pty_large_report pending] > 0}]
+check "large PTY send reaches the child without truncation" [expr {
+    $pty_large_valid && [dict get $pty_large_report complete]}]
+check "large PTY send preserves drained output across the payload" [expr {
+    $pty_large_valid && [dict get $pty_large_report milestones] &&
+    [dict get $pty_large_report ordered]}]
+
+if {[info exists ::env(MACHTELD_TEST_PTY_IO)] && $::env(MACHTELD_TEST_PTY_IO) eq "1"} {
+    # Exercise the production retention ceiling honestly rather than through a
+    # test-only knob. Cooked terminal echo means the writer cannot accept this
+    # entire record without more than 8 MiB of output becoming readable.
+    set pty_limit [file join $WORK pty-send-limit.tcl]
+    set channel [open $pty_limit w]
+    puts $channel {package require machteld}
+    puts $channel {
+        set token [pty spawn -- [lindex $argv 0] stdin-line-count]
+        try {
+            set payload [string repeat Z [expr {9 * 1024 * 1024}]]
+            set caught [catch {pty send $token $payload} message options]
+            unset payload
+            set code [expr {$caught && [dict exists $options -errorcode]
+                                ? [dict get $options -errorcode] : {}}]
+            set pending [dict get [pty info $token] pending]
+            set sample_length [string length [pty read $token]]
+            set closed [expr {![catch {pty close $token}]}]
+            if {$closed} { set token "" }
+            puts [dict create caught $caught code $code pending $pending \
+                sampleLength $sample_length closed $closed]
+        } finally {
+            if {$token ne ""} { catch {pty close $token} }
+        }
+    }
+    close $channel
+    set result [run -timeout 120s -- $MT $pty_limit $FIXTURE]
+    set pty_limit_report [string trim [dict get $result out]]
+    set pty_limit_valid [expr {
+        [dict get $result status] eq "ok" &&
+        ![catch {dict size $pty_limit_report}]}]
+    foreach key {caught code pending sampleLength closed} {
+        if {$pty_limit_valid && ![dict exists $pty_limit_report $key]} {
+            set pty_limit_valid 0
+        }
+    }
+    check "PTY send retention limit completes within a supervised bound" \
+        $pty_limit_valid
+    check "PTY send retention limit has its exact semantic error" [expr {
+        $pty_limit_valid && [dict get $pty_limit_report caught] &&
+        [dict get $pty_limit_report code] eq {MACHTELD PTY limit}}]
+    check "PTY send retention limit preserves queued output" [expr {
+        $pty_limit_valid && [dict get $pty_limit_report pending] >= 8 * 1024 * 1024 &&
+        [dict get $pty_limit_report sampleLength] > 0 &&
+        [dict get $pty_limit_report sampleLength] <= 8192}]
+    check "PTY remains closable after its send retention limit" [expr {
+        $pty_limit_valid && [dict get $pty_limit_report closed]}]
 
     # Redirected stdin is refused above by entry_test; a genuine terminal is
     # the one no-startup case that intentionally remains an interactive REPL.

@@ -35,9 +35,11 @@ try {
     Check 'package parser rejects missing option values' `
         ($result.Exit -ne 0 -and $result.Text -match 'needs a value') $result.Text
 
-    $licenseHashes = @{
+    $licenseHashes = [ordered]@{
         'Tcl-9.0.4.txt' = 'C0A69A2BFD757361EC7E6143973B103C90409316B49E9C88DB26AD6388E79F16'
         'Tk-9.0.4.txt'  = '2CDE822B93CA16AE535C954B7DFE658B4AD10DF2A193628D1B358F1765E8B198'
+        'zlib-1.3.2.txt' = 'E32FF4E00D9D94930537635291DA39E7E612703334BF6FDE8C7F1686FE8A45A2'
+        'LibTomMath-1.3.0.txt' = '2FA64B163659F41965C9815882A8296D3D03FF546B76153E11445F9BDECF955A'
         'yyjson-0.12.0.txt' = '45E384D3D52C73CBA3A64D6E6C25D47CD738CD8A55C30629E3201046EDA62947'
     }
     foreach ($notice in $licenseHashes.Keys) {
@@ -125,18 +127,27 @@ try {
         ($result.Exit -ne 0 -and $result.Text -match 'license notice directory not found' -and
          -not (Test-Path -LiteralPath $out)) $result.Text
 
-    $incompleteLicenses = Join-Path $Work 'incomplete-licenses'
-    New-Item -ItemType Directory -Force -Path $incompleteLicenses | Out-Null
-    Copy-Item -LiteralPath (Join-Path $licenses 'Tcl-9.0.4.txt'), `
-        (Join-Path $licenses 'Tk-9.0.4.txt') -Destination $incompleteLicenses
-    $result = Invoke-Package @(
-        '--prefix', $prefix, '--prelude', $prelude,
-        '--wrapper', $Tclsh, '--licenses', $incompleteLicenses,
-        '--apache-license', $apacheLicense, '--reference', $reference, '--out', $out)
-    Check 'packaging refuses a missing yyjson notice' `
-        ($result.Exit -ne 0 -and
-         $result.Text -match 'required license notice not found: yyjson-0.12.0.txt' -and
-         -not (Test-Path -LiteralPath $out)) $result.Text
+    foreach ($missingNotice in $licenseHashes.Keys) {
+        $stem = [IO.Path]::GetFileNameWithoutExtension($missingNotice)
+        $incompleteLicenses = Join-Path $Work "incomplete-licenses-$stem"
+        New-Item -ItemType Directory -Force -Path $incompleteLicenses | Out-Null
+        foreach ($notice in $licenseHashes.Keys) {
+            if ($notice -cne $missingNotice) {
+                Copy-Item -LiteralPath (Join-Path $licenses $notice) `
+                    -Destination $incompleteLicenses
+            }
+        }
+        $missingOut = Join-Path $Work ".machteld-build-$([Guid]::NewGuid().ToString('n')).exe"
+        $result = Invoke-Package @(
+            '--prefix', $prefix, '--prelude', $prelude,
+            '--wrapper', $Tclsh, '--licenses', $incompleteLicenses,
+            '--apache-license', $apacheLicense, '--reference', $reference,
+            '--out', $missingOut)
+        Check "packaging refuses a missing $missingNotice notice" `
+            ($result.Exit -ne 0 -and
+             $result.Text -match ([regex]::Escape("required license notice not found: $missingNotice")) -and
+             -not (Test-Path -LiteralPath $missingOut)) $result.Text
+    }
 
     $result = Invoke-Package @(
         '--prefix', $prefix, '--prelude', $prelude,
@@ -182,9 +193,17 @@ try {
          $result.Text -match 'reference pack is incomplete: catalog.json' -and
          -not (Test-Path -LiteralPath $out)) $result.Text
 
+    $packagingLicenses = Join-Path $Work 'licenses-with-untracked-sentinel'
+    New-Item -ItemType Directory -Force -Path $packagingLicenses | Out-Null
+    foreach ($notice in $licenseHashes.Keys) {
+        Copy-Item -LiteralPath (Join-Path $licenses $notice) `
+            -Destination $packagingLicenses
+    }
+    [IO.File]::WriteAllText((Join-Path $packagingLicenses 'UNTRACKED-SENTINEL.txt'),
+        'must not enter the package', [Text.UTF8Encoding]::new($false))
     $result = Invoke-Package @(
         '--prefix', $prefix, '--prelude', $prelude,
-        '--wrapper', $Tclsh, '--licenses', $licenses,
+        '--wrapper', $Tclsh, '--licenses', $packagingLicenses,
         '--apache-license', $apacheLicense, '--reference', $reference, '--out', $out)
     Check 'successful packaging publishes only after lmkimg succeeds' `
         ($result.Exit -eq 0 -and (Get-Item -LiteralPath $out).Length -gt 1MB -and
@@ -196,7 +215,7 @@ try {
         (-not (Get-ChildItem -LiteralPath $Work -Force | Where-Object Name -Like '.machteld-package-*'))
     $validator = Join-Path $Work 'validate-package.tcl'
     [IO.File]::WriteAllText($validator, @'
-if {[llength $argv] != 3} { error "usage: validate-package.tcl IMAGE APACHE-LICENSE REFERENCE" }
+if {[llength $argv] != 4} { error "usage: validate-package.tcl IMAGE APACHE-LICENSE LICENSES REFERENCE" }
 proc read_binary {path} {
     set channel [open $path rb]
     try { return [read $channel] } finally { close $channel }
@@ -218,6 +237,8 @@ try {
         licenses/Apache-2.0.txt
         licenses/Tcl-9.0.4.txt
         licenses/Tk-9.0.4.txt
+        licenses/zlib-1.3.2.txt
+        licenses/LibTomMath-1.3.0.txt
         licenses/yyjson-0.12.0.txt
         reference/catalog.dict
         reference/catalog.json
@@ -236,12 +257,25 @@ try {
     if {$embeddedApache ne $sourceApache} {
         error "packaged Apache license is not the tracked LICENSE"
     }
+    if {[file exists //zipfs:/$mount/licenses/UNTRACKED-SENTINEL.txt]} {
+        error "packaging copied a notice outside its explicit allowlist"
+    }
+    foreach notice {
+        Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt
+        yyjson-0.12.0.txt
+    } {
+        set embedded [read_binary [file join //zipfs:/$mount/licenses $notice]]
+        set source [read_binary [file join [lindex $argv 2] $notice]]
+        if {$embedded ne $source} {
+            error "packaging changed license bytes: $notice"
+        }
+    }
     foreach relative {
         catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md
         AGENTS.md markdown/machteld/agent.md
     } {
         set embedded [read_binary [file join //zipfs:/$mount/reference {*}[file split $relative]]]
-        set source [read_binary [file join [lindex $argv 2] {*}[file split $relative]]]
+        set source [read_binary [file join [lindex $argv 3] {*}[file split $relative]]]
         if {$embedded ne $source} {
             error "packaging changed reference bytes: $relative"
         }
@@ -250,7 +284,7 @@ try {
     zipfs unmount $mount
 }
 '@, [Text.UTF8Encoding]::new($false))
-    & $Tclsh $validator $out $apacheLicense $reference
+    & $Tclsh $validator $out $apacheLicense $licenses $reference
     $validatorExit = $LASTEXITCODE
     Check 'packaged image carries complete runtime and byte-identical reference payloads' `
         ($validatorExit -eq 0) "validator exit $validatorExit"

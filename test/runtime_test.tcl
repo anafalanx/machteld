@@ -43,6 +43,9 @@ set pty_map [namespace ensemble configure ::machteld::pty -map]
 check "PTY public ensemble agrees with merged manifest" [expr {
     [lsort [dict keys $pty_map]] eq
     [lsort [dict keys [dict get $metadata pty subcommands]]]}]
+check "PTY manifest advertises its closed error-code set" [expr {
+    [dict get $metadata pty codes] eq
+    {badvalue launch limit nohandle notfound oserror timeout usage}}]
 check "worker separates reply-only protocol codes" [expr {
     [dict get $metadata worker codes] eq {badvalue usage} &&
     [dict get $metadata worker replycodes] eq {failed notfound parse usage}}]
@@ -87,6 +90,8 @@ foreach {notice expected} {
     Apache-2.0.txt 03fd93cceb0f40b82b132e58cff1b8d0d6d1f987a530f22aa5c024a84bfb2f69
     Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
     Tk-9.0.4.txt  2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
+    zlib-1.3.2.txt e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2
+    LibTomMath-1.3.0.txt 2fa64b163659f41965c9815882a8296d3d03ff546b76153e11445f9bdecf955a
     yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
 } {
     set path [file join //zipfs:/app/licenses $notice]
@@ -99,7 +104,14 @@ foreach {notice expected} {
     close $channel
     if {[hash sum sha256 $bytes] ne $expected} { set notice_ok 0 }
 }
-check "embedded runtime carries exact Apache, Tcl, Tk, and yyjson licenses" $notice_ok
+check "embedded runtime carries every exact required license notice" $notice_ok
+set zlib_probe [binary format H* 000102037f80feff4d61636874656c64]
+check "embedded Tcl zlib round-trips arbitrary bytes" [expr {
+    [zlib decompress [zlib compress $zlib_probe]] eq $zlib_probe}]
+set bignum_probe [expr {1 << 200}]
+check "embedded Tcl supports LibTomMath bignums" [expr {
+    $bignum_probe > 0 && ($bignum_probe >> 200) == 1 &&
+    ($bignum_probe & ($bignum_probe - 1)) == 0}]
 
 set spec {
     --count {type int default 2 min 1 max 8 help "number of iterations"}

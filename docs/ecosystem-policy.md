@@ -16,6 +16,8 @@ Current choices:
 
 - Tcl/Tk 9.0.4 are part of every full and wrapped host, including their script
   libraries and distribution notices.
+- Tcl's static core incorporates its bundled zlib 1.3.2 and LibTomMath 1.3.0;
+  their exact upstream notices are pinned and shipped in every host.
 - The public-domain SQLite amalgamation is statically linked behind `store`.
 - MIT-licensed yyjson 0.12.0 is statically linked behind the JSON reader and
   its notice is carried in every host.

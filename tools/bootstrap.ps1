@@ -12,13 +12,35 @@ if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
 $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
 $LockPath = Join-Path $PSScriptRoot 'dependencies.lock.json'
 $Lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
+$BundledNotices = @($Lock.bundledNotices)
+if ($BundledNotices.Count -ne 2 -or
+        (($BundledNotices.id | Sort-Object) -join ',') -cne
+            'tcl-libtommath,tcl-zlib') {
+    throw 'dependency lock must declare the exact Tcl bundled notices'
+}
+$BundledNoticePaths = @($BundledNotices | ForEach-Object {
+    if (-not $_.source -or [IO.Path]::IsPathRooted($_.source) -or
+            $_.source -match '(^|[/\\])\.\.([/\\]|$)' -or
+            $_.source -notmatch '^tcl9\.0\.4/') {
+        throw "invalid bundled-notice source path: $($_.source)"
+    }
+    if (-not $_.distribution -or [IO.Path]::IsPathRooted($_.distribution) -or
+            $_.distribution -notmatch '^licenses/[^/\\]+$') {
+        throw "invalid bundled-notice distribution path: $($_.distribution)"
+    }
+    if ($_.sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "invalid bundled-notice SHA-256: $($_.id)"
+    }
+    Join-Path $RepoRoot ($_.distribution.Replace('/', '\'))
+})
 $PatchPaths = @($Lock.patches | ForEach-Object {
     if (-not $_.file -or [IO.Path]::IsPathRooted($_.file) -or $_.file -match '(^|[/\\])\.\.([/\\]|$)') {
         throw "invalid dependency patch path: $($_.file)"
     }
     Join-Path $PSScriptRoot ($_.file.Replace('/', '\'))
 })
-$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh')) + $PatchPaths
+$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh')) +
+    $PatchPaths + $BundledNoticePaths
 $StateMaterial = foreach ($path in $StateInputs) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing bootstrap input: $path" }
     "{0} {1}" -f ([IO.Path]::GetFileName($path)),
@@ -357,6 +379,16 @@ if (-not ((Test-Path -LiteralPath $tclConfigure) -and (Test-Path -LiteralPath $t
             [IO.Directory]::Delete($extractTemp, $true)
         }
     }
+}
+
+# Tcl's static archive incorporates its bundled zlib and LibTomMath objects.
+# Bind the exact notices in that locked source archive to the tracked copies
+# that package.tcl places in every direct and wrapped runtime.
+foreach ($notice in $BundledNotices) {
+    $sourceNotice = Join-Path $extract ($notice.source.Replace('/', '\'))
+    $distributedNotice = Join-Path $RepoRoot ($notice.distribution.Replace('/', '\'))
+    Assert-Hash $sourceNotice $notice.sha256 "$($notice.id) source notice"
+    Assert-Hash $distributedNotice $notice.sha256 "$($notice.id) distributed notice"
 }
 
 $tclPatchEntries = @($Lock.patches | Where-Object id -eq 'tcl-windows-acl-normalize')

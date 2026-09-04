@@ -101,7 +101,7 @@ set ::machteld::manifest::native {
     pty {
         kind c domain PTY
         doc machteld/command/pty
-        codes {badvalue launch nohandle notfound oserror usage}
+        codes {badvalue launch limit nohandle notfound oserror usage}
         options {-arg0 -cpu -dir -env -mem -timeout}
         subcommands {
             spawn {options {-arg0 -cpu -dir -env -mem} doc machteld/command/pty#spawn}

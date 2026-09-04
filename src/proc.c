@@ -198,6 +198,7 @@ typedef struct {
     HANDLE write;
     char  *buf;
     size_t len;
+    volatile LONG stop;
     DWORD  error;
 } writer_t;
 
@@ -205,11 +206,16 @@ static DWORD WINAPI writer_thread(LPVOID arg) {
     writer_t *w = (writer_t *)arg;
     size_t off = 0;
     while (off < w->len) {
+        if (InterlockedCompareExchange(&w->stop, 0, 0) != 0) {
+            w->error = ERROR_OPERATION_ABORTED;
+            break;
+        }
         size_t left = w->len - off;
-        DWORD want = left > (size_t)0x7ffff000u ? 0x7ffff000u : (DWORD)left;
+        DWORD want = left > (size_t)(64 * 1024) ? (64 * 1024) : (DWORD)left;
         DWORD wrote = 0;
-        if (!WriteFile(w->write, w->buf + off, want, &wrote, NULL) || wrote == 0) {
-            w->error = GetLastError();
+        BOOL ok = WriteFile(w->write, w->buf + off, want, &wrote, NULL);
+        if (!ok || wrote == 0) {
+            w->error = ok ? ERROR_WRITE_FAULT : GetLastError();
             break;
         }
         off += wrote;
@@ -1558,6 +1564,24 @@ cleanup:
  * child, so it stays supervised. Output is the raw VT/ANSI byte stream.
  */
 
+enum {
+    PTY_IO_CHUNK = 8192,
+    PTY_SEND_QUEUE_LIMIT = 8 * 1024 * 1024
+};
+
+typedef enum {
+    PTY_OUTPUT_ERROR = -1,
+    PTY_OUTPUT_EMPTY,
+    PTY_OUTPUT_CAPTURED,
+    PTY_OUTPUT_LIMIT
+} pty_output_status_t;
+
+typedef struct pty_output_s {
+    struct pty_output_s *next;
+    DWORD length;
+    char bytes[PTY_IO_CHUNK];
+} pty_output_t;
+
 typedef struct pty_s {
     char    token[24];
     HPCON   hpc;
@@ -1566,6 +1590,9 @@ typedef struct pty_s {
     int     pid;
     HANDLE  inW;  /* parent writes the child's input (keyboard) here */
     HANDLE  outR; /* parent reads the child's output (screen) here */
+    pty_output_t *queued_head; /* output drained while a send was blocked */
+    pty_output_t *queued_tail;
+    size_t queued_bytes;
     struct pty_s *next;
 } pty_t;
 
@@ -1574,6 +1601,86 @@ static pty_t *pty_find(proc_ctx *ctx, const char *token) {
         if (strcmp(p->token, token) == 0) return p;
     }
     return NULL;
+}
+
+static void pty_output_free(pty_t *p) {
+    while (p->queued_head != NULL) {
+        pty_output_t *chunk = p->queued_head;
+        p->queued_head = chunk->next;
+        free(chunk);
+    }
+    p->queued_tail = NULL;
+    p->queued_bytes = 0;
+}
+
+/* Capture one available output chunk without losing stream order. Allocation
+ * happens before ReadFile, so an allocation failure leaves the bytes in the OS
+ * pipe. The Tcl thread is the only reader while a send is in progress. */
+static pty_output_status_t pty_output_capture(pty_t *p, DWORD *error) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &available, NULL)) {
+        DWORD e = GetLastError();
+        if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED ||
+                e == ERROR_NO_DATA) {
+            return PTY_OUTPUT_EMPTY;
+        }
+        *error = e;
+        return PTY_OUTPUT_ERROR;
+    }
+    if (available == 0) return PTY_OUTPUT_EMPTY;
+
+    if (p->queued_bytes >= (size_t)PTY_SEND_QUEUE_LIMIT)
+        return PTY_OUTPUT_LIMIT;
+    size_t room = (size_t)PTY_SEND_QUEUE_LIMIT - p->queued_bytes;
+    DWORD want = available < PTY_IO_CHUNK ? available : PTY_IO_CHUNK;
+    if ((size_t)want > room) want = (DWORD)room;
+    if (p->queued_bytes > SIZE_MAX - (size_t)want) {
+        *error = ERROR_ARITHMETIC_OVERFLOW;
+        return PTY_OUTPUT_ERROR;
+    }
+    pty_output_t *chunk = (pty_output_t *)malloc(sizeof(*chunk));
+    if (chunk == NULL) {
+        *error = ERROR_NOT_ENOUGH_MEMORY;
+        return PTY_OUTPUT_ERROR;
+    }
+    DWORD got = 0;
+    BOOL ok = ReadFile(p->outR, chunk->bytes, want, &got, NULL);
+    if (!ok) {
+        DWORD e = GetLastError();
+        free(chunk);
+        if (e == ERROR_BROKEN_PIPE || e == ERROR_PIPE_NOT_CONNECTED ||
+                e == ERROR_NO_DATA) {
+            return PTY_OUTPUT_EMPTY;
+        }
+        *error = e;
+        return PTY_OUTPUT_ERROR;
+    }
+    if (got == 0) {
+        free(chunk);
+        return PTY_OUTPUT_EMPTY;
+    }
+    chunk->next = NULL;
+    chunk->length = got;
+    if (p->queued_tail != NULL) {
+        p->queued_tail->next = chunk;
+    } else {
+        p->queued_head = chunk;
+    }
+    p->queued_tail = chunk;
+    p->queued_bytes += (size_t)got;
+    return PTY_OUTPUT_CAPTURED;
+}
+
+static int pty_output_result(pty_t *p, Tcl_Interp *interp) {
+    pty_output_t *chunk = p->queued_head;
+    if (chunk == NULL) return 0;
+    p->queued_head = chunk->next;
+    if (p->queued_head == NULL) p->queued_tail = NULL;
+    p->queued_bytes -= (size_t)chunk->length;
+    Tcl_SetObjResult(interp,
+                     Tcl_NewStringObj(chunk->bytes, (Tcl_Size)chunk->length));
+    free(chunk);
+    return 1;
 }
 
 /* Drain a pipe to EOF, discarding -- run on a thread during ClosePseudoConsole. */
@@ -1617,6 +1724,7 @@ static int pty_free(proc_ctx *ctx, pty_t *p) {
     if (p->outR) { CloseHandle(p->outR); p->outR = NULL; }
     if (p->proc) wj_proc_close(p->proc);
     if (p->job) wj_job_free(p->job);
+    pty_output_free(p);
     free(p);
     return failed ? -1 : 0;
 }
@@ -1750,8 +1858,8 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     switch (idx) {
     /* INFO LOOKS WITHOUT TAKING. `pty read` consumes the child's output, so a
      * monitor built on it would eat the very bytes the program is steering by.
-     * PeekNamedPipe reports how much is waiting and leaves it in the pipe, which
-     * is the only honest way to show "this terminal has something to say". */
+     * Count both output retained during a send and bytes still waiting in the
+     * pipe without consuming either source. */
     case INFO: {
         if (objc != 3) return mt_error(interp, "PTY", "usage", "pty info token");
         Tcl_Obj *d = Tcl_NewDictObj();
@@ -1765,7 +1873,13 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
         DWORD avail = 0;
         if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &avail, NULL)) avail = 0;
-        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pending", -1), Tcl_NewWideIntObj((Tcl_WideInt)avail));
+        unsigned long long total = (unsigned long long)p->queued_bytes +
+                                   (unsigned long long)avail;
+        Tcl_WideInt pending = total > (unsigned long long)LLONG_MAX
+                                  ? (Tcl_WideInt)LLONG_MAX
+                                  : (Tcl_WideInt)total;
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pending", -1),
+                       Tcl_NewWideIntObj(pending));
         Tcl_SetObjResult(interp, d);
         return TCL_OK;
     }
@@ -1773,15 +1887,85 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         if (objc != 4) return mt_error(interp, "PTY", "usage", "pty send token bytes");
         Tcl_Size len;
         const char *s = Tcl_GetStringFromObj(objv[3], &len);
-        size_t off = 0;
-        while (off < (size_t)len) {
-            size_t left = (size_t)len - off;
-            DWORD want = left > (size_t)0x7ffff000u ? 0x7ffff000u : (DWORD)left;
-            DWORD written = 0;
-            if (!WriteFile(p->inW, s + off, want, &written, NULL) || written == 0)
-                return mt_error(interp, "PTY", "oserror", "write to pty failed");
-            off += written;
+        if (len == 0) return TCL_OK;
+
+        HANDLE write = NULL;
+        if (!DuplicateHandle(GetCurrentProcess(), p->inW, GetCurrentProcess(),
+                             &write, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+            return mt_error(interp, "PTY", "oserror",
+                            "duplicate pty input handle failed");
         }
+        writer_t state = {0};
+        state.write = write;
+        state.buf = (char *)s;
+        state.len = (size_t)len;
+        HANDLE thread = CreateThread(NULL, 0, writer_thread, &state, 0, NULL);
+        if (thread == NULL) {
+            CloseHandle(write);
+            return mt_error(interp, "PTY", "oserror",
+                            "start pty input writer failed");
+        }
+
+        DWORD send_error = ERROR_SUCCESS;
+        int send_limit = 0;
+        for (;;) {
+            DWORD status = WaitForSingleObject(thread, 0);
+            if (status == WAIT_OBJECT_0) break;
+            if (status == WAIT_FAILED) {
+                send_error = GetLastError();
+                break;
+            }
+            pty_output_status_t captured = pty_output_capture(p, &send_error);
+            if (captured == PTY_OUTPUT_ERROR) break;
+            if (captured == PTY_OUTPUT_LIMIT) {
+                status = WaitForSingleObject(thread, 0);
+                if (status == WAIT_OBJECT_0) break;
+                if (status == WAIT_FAILED) {
+                    send_error = GetLastError();
+                } else {
+                    send_limit = 1;
+                }
+                break;
+            }
+            if (captured == PTY_OUTPUT_EMPTY) {
+                status = WaitForSingleObject(thread, 10);
+                if (status == WAIT_OBJECT_0) break;
+                if (status == WAIT_FAILED) {
+                    send_error = GetLastError();
+                    break;
+                }
+            }
+        }
+        if (send_error != ERROR_SUCCESS || send_limit) {
+            InterlockedExchange(&state.stop, 1);
+            /* Cancellation can land in the narrow gap between the writer's
+             * stop check and its next WriteFile. Retry after bounded waits so
+             * that call is cancelled too, and never return while the thread
+             * can still access this stack frame or Tcl's string bytes. */
+            DWORD status;
+            for (;;) {
+                (void)CancelSynchronousIo(thread);
+                status = WaitForSingleObject(thread, 50);
+                if (status == WAIT_OBJECT_0) break;
+                if (status == WAIT_FAILED) {
+                    DWORD exit_code = STILL_ACTIVE;
+                    if (GetExitCodeThread(thread, &exit_code) &&
+                            exit_code != STILL_ACTIVE) {
+                        break;
+                    }
+                    Sleep(50);
+                }
+            }
+        }
+        CloseHandle(thread);
+        if (send_limit)
+            return mt_error(interp, "PTY", "limit",
+                            "retained pty output reached the 8 MiB send limit");
+        if (send_error != ERROR_SUCCESS)
+            return mt_error(interp, "PTY", "oserror",
+                            "capture output during pty write failed");
+        if (state.error != ERROR_SUCCESS)
+            return mt_error(interp, "PTY", "oserror", "write to pty failed");
         return TCL_OK;
     }
     case READ: {
@@ -1796,6 +1980,7 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
                 return mt_error(interp, "PTY", "badvalue", "bad -timeout value");
             timeout_ms = (DWORD)t;
         }
+        if (pty_output_result(p, interp)) return TCL_OK;
         char buf[8192];
         ULONGLONG deadline = GetTickCount64() + (ULONGLONG)(timeout_ms > 0 ? timeout_ms : 0);
         for (;;) {
