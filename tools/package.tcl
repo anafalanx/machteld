@@ -145,22 +145,32 @@ if {!$copiedTk} { error "tk_library not found under dependency prefix: $TC" }
 # The machteld prelude at the archive root.
 file copy -force $PREL [file join $stage machteld.tcl]
 
-# Tcl, Tk, and yyjson require their notices in every distribution. They are
-# runtime payload, not distribution-only documentation, because standalone
-# tools are distributions too.
+# Machteld carries the exact notices for Tcl, Tk, yyjson, and the zlib/LibTomMath
+# code incorporated into static Tcl in every distribution. They are runtime
+# payload, not distribution-only documentation, because standalone tools are
+# distributions too.
 if {![file isdirectory $opt(--licenses)]} {
     error "license notice directory not found: $opt(--licenses)"
 }
-foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt yyjson-0.12.0.txt} {
+set requiredNotices {
+    Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt
+    yyjson-0.12.0.txt
+}
+foreach notice $requiredNotices {
     if {![file isfile [file join $opt(--licenses) $notice]]} {
         error "required license notice not found: $notice"
     }
 }
-copy_tree $opt(--licenses) [file join $stage licenses]
+set stagedLicenses [file join $stage licenses]
+file mkdir $stagedLicenses
+foreach notice $requiredNotices {
+    file copy -force [file join $opt(--licenses) $notice] \
+        [file join $stagedLicenses $notice]
+}
 if {![file isfile $opt(--apache-license)]} {
     error "Apache 2.0 license not found: $opt(--apache-license)"
 }
-file copy -force $opt(--apache-license) [file join $stage licenses Apache-2.0.txt]
+file copy -force $opt(--apache-license) [file join $stagedLicenses Apache-2.0.txt]
 
 # Reference is a required runtime payload.  The generator publishes it only
 # after validating inventories, indexes and hashes; packaging still checks the

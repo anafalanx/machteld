@@ -44,11 +44,12 @@ Hidden files are included. Empty directories are not represented in the zipfs
 image, and sibling names that differ only by case are refused because the
 portable staging tree is case-insensitive. Because the application has its own
 archive subtree, names such as `docs`, `basekit`, and `tcl_library` remain
-available to application authors. A directory containing a junction, symlink, other
-name-surrogate reparse point, or an unreadable traversal row is refused rather
-than followed outside the input or copied recursively. The source, entry, and
-output containment checks use canonical Windows identity/path facts, not lexical
-normalization alone. Do not mutate an input tree while `wrap` is reading it.
+available to application authors. A directory is refused rather than followed
+outside the input or copied recursively if traversal encounters a junction,
+symlink, any other name-surrogate reparse point, or an unreadable row. The
+source, entry, and output containment checks use canonical Windows identity/path
+facts, not lexical normalization alone. Do not mutate an input tree while
+`wrap` is reading it.
 
 The staged entry is checked with the exact parser used by direct startup, so the
 bytes selected for the executable—not merely an earlier source pathname—must opt
@@ -68,12 +69,12 @@ A wrapped executable contains:
 - the selected console or GUI basekit;
 - the full Machteld 0.20 prelude and public palette;
 - the Tcl and Tk script libraries;
-- Machteld's Apache 2.0 license and the required Tcl, Tk, and yyjson
-  distribution notices under `licenses/`;
+- Machteld's Apache 2.0 license and the required Tcl, Tk, zlib, LibTomMath, and
+  yyjson distribution notices under `licenses/`;
 - the complete indexed Machteld, Tcl 9, and Tk 9 reference corpus;
 - the application entry and assets in zipfs;
 - the same native Windows core, statically linked public-domain SQLite store,
-  and MIT-licensed yyjson reader.
+  Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
 There is no prelude-free or reduced-capability option. `package require machteld`
 inside a wrapped tool returns 0.20, `manifest` describes the same API, and

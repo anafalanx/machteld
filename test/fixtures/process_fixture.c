@@ -228,6 +228,25 @@ static int daemon_marker(const wchar_t *path, DWORD delay_ms) {
     return write_pid_path(path, GetCurrentProcessId()) ? 0 : EXIT_PIDFILE;
 }
 
+static int process_handle_count(DWORD pid) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process == NULL) {
+        return EXIT_LAUNCH;
+    }
+    DWORD count = 0;
+    BOOL ok = GetProcessHandleCount(process, &count);
+    CloseHandle(process);
+    if (!ok) {
+        return EXIT_OUTPUT;
+    }
+    char text[32];
+    int length = snprintf(text, sizeof(text), "%lu\n", (unsigned long)count);
+    return length > 0 && (size_t)length < sizeof(text) &&
+                   write_all(GetStdHandle(STD_OUTPUT_HANDLE), text, (DWORD)length)
+               ? 0
+               : EXIT_OUTPUT;
+}
+
 /* Environment entries normally split at their first '='. The hidden per-drive
  * current-directory entries use =C:=C:\path, whose name is =C:. */
 static size_t environment_name_length(const wchar_t *entry) {
@@ -372,6 +391,10 @@ int wmain(int argc, wchar_t **argv) {
         DWORD delay = milliseconds(argv[3]);
         return delay == UINT32_MAX ? EXIT_USAGE
                                    : daemon_marker(argv[2], delay);
+    }
+    if (wcscmp(argv[1], L"handle-count") == 0 && argc == 3) {
+        DWORD pid = milliseconds(argv[2]);
+        return pid == UINT32_MAX ? EXIT_USAGE : process_handle_count(pid);
     }
     if (wcscmp(argv[1], L"environment-order") == 0 && argc >= 3) {
         return environment_order(argc - 2, argv + 2);

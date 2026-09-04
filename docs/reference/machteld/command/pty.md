@@ -32,14 +32,14 @@ default and accepts `-timeout`. `expect` defaults to `10s` and accepts
 `spawn` returns a `pty#...` token. `read` returns up to 8192 raw VT/ANSI bytes,
 or empty on timeout/EOF. `expect` returns the selected body's result. `strip`
 returns text with common CSI, OSC, and escape sequences removed. `info` returns
-`token`, `pid`, `running`, and pending-byte count `pending`; `list` returns
-tokens. Mutating operations return empty.
+`token`, `pid`, `running`, and the total pending-byte count `pending`; `list`
+returns tokens. Mutating operations return empty.
 
 ## Errors
 
-Raised codes are `PTY badvalue`, `PTY launch`, `PTY nohandle`, `PTY notfound`,
-`PTY oserror`, `PTY timeout`, and `PTY usage`. A custom `timeout` body can choose
-a different completion for `expect`.
+Raised codes are `PTY badvalue`, `PTY launch`, `PTY limit`, `PTY nohandle`, `PTY
+notfound`, `PTY oserror`, `PTY timeout`, and `PTY usage`. A custom `timeout` body
+can choose a different completion for `expect`.
 
 ## Lifetime and timeouts
 
@@ -120,11 +120,16 @@ Writes the exact Tcl byte/string representation to the terminal input pipe.
 
 #### Results
 
-Returns empty after all bytes have been written.
+Returns empty after all bytes have been written. Terminal output produced while
+the synchronous write is in progress is retained in order for later `read`
+calls; this prevents bidirectional pipe backpressure from deadlocking a large
+send.
 
 #### Errors
 
-Rejects stale tokens and reports pipe-write failures.
+Rejects stale tokens, reports pipe-write failures, and raises `PTY limit` if
+retaining further output would exceed the 8 MiB per-PTY send queue. Already
+retained bytes remain available to `read` after that error.
 
 #### Lifetime and timeouts
 
@@ -136,7 +141,11 @@ The write is synchronous and has no timeout.
 
 #### Constraints
 
-Supply carriage return when the interactive program expects Enter.
+Supply carriage return when the interactive program expects Enter. A failed
+synchronous send may already have written a prefix of the supplied bytes; drain
+or close the PTY rather than blindly retrying the entire payload. The 8 MiB
+per-PTY limit applies to output retained by Machteld while sending, not the small
+amount that may additionally remain in the Windows output pipe.
 
 #### See also
 
@@ -156,7 +165,8 @@ Without `-timeout`, performs an immediate poll. A zero duration is also a poll.
 #### Results
 
 Returns currently available raw terminal bytes, at most 8192 per call; empty
-means no bytes arrived before the bound or the output pipe reached EOF.
+means no bytes arrived before the bound or the output pipe reached EOF. Bytes
+retained during `send` are returned before newer bytes in the output pipe.
 
 #### Errors
 
@@ -266,7 +276,7 @@ Takes one token and no options.
 #### Results
 
 Returns `token`, root `pid`, boolean `running`, and non-consuming `pending`
-bytes.
+bytes, including bytes retained during a concurrent-output `send`.
 
 #### Errors
 
@@ -282,7 +292,7 @@ Does not read or alter the handle.
 
 #### Constraints
 
-`pending` is a pipe-byte count, not terminal character or line count.
+`pending` is a raw byte count, not a terminal character or line count.
 
 #### See also
 
