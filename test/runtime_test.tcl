@@ -87,7 +87,7 @@ foreach {key expected_value} {
 check "embedded Tcl package paths identify the self-mounted runtime" $pkgconfig_ok
 set notice_ok 1
 foreach {notice expected} {
-    Apache-2.0.txt 03fd93cceb0f40b82b132e58cff1b8d0d6d1f987a530f22aa5c024a84bfb2f69
+    Apache-2.0.txt cf76e7aedbbc961da15e0fd7707f3fb902ec5830ef27da6514c870b32e922c07
     Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
     Tk-9.0.4.txt  2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
     zlib-1.3.2.txt e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2

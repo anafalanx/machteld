@@ -76,12 +76,12 @@ try {
     puts $channel {        BLOCK "040904B0"}
     puts $channel {        BEGIN}
     foreach {name value} [list \
-            Author anafalanx \
-            CompanyName anafalanx \
+            Author "Vincent Vercauteren" \
+            CompanyName "Vincent Vercauteren" \
             FileDescription $description \
             FileVersion $version \
             InternalName $internalName \
-            LegalCopyright "Copyright 2026 anafalanx" \
+            LegalCopyright "Copyright 2026 Vincent Vercauteren" \
             OriginalFilename $originalFilename \
             ProductName Machteld \
             ProductVersion $version] {
