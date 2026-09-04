@@ -14,7 +14,7 @@ The product has three layers:
    WinHTTP, BCrypt, JSON, and statically linked SQLite.
 2. **Tcl runtime.** The prelude adds `scope`, `pty expect/strip`, `cli`, `log`,
    `worker`, `pool`, `pmap`, `docs`, `help`, and `wrap`, then provides package
-   `machteld 0.15.1`.
+   `machteld 0.20`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
    `argv` and resolves palette commands through `::machteld` on the global
    namespace path.
@@ -35,17 +35,9 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 0.15.1 API. The
+SQLite, so a wrapped entry sees the same programmatic Machteld 0.20 API. The
 complete versioned reference corpus is copied into wrapped tools; nested
 wrapping basekits remain distribution-only and are not copied recursively.
-
-From 0.14.0 the executable has a third face: **engine mode**, entered by a
-host-only flag, which initializes neither Tcl nor Tk and runs a frame loop
-over binary standard I/O holding Lua 5.5, LPeg, lua-cjson, and typed data
-pools. Both basekits carry it, so a wrapped tool can start its own engine from
-its own file. The host commands it through `macht` as an ordinary supervised
-child in the root and a per-engine Job Object; the contract is
-[the engine](engine.md).
 
 Tcl 9.0.4 predates the upstream fix for ACL-restricted Windows path
 normalization. Dependency bootstrap applies Tcl core check-in `0ac314cb96`
@@ -57,8 +49,9 @@ executable path component when an ancestor can be traversed but not enumerated.
 
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`
-merges the two tables; an incompatible duplicate fails loudly. The sole planned
-extension is `pty`: Tcl adds `expect` and `strip` to the native ensemble.
+merges the two tables; an incompatible duplicate fails loudly. The sole
+intentional cross-layer extension is `pty`: Tcl adds `expect` and `strip` to the
+native ensemble.
 
 No command body, helper name, option-looking comment, or trailing function is
 scanned to infer public behavior. Refactoring implementation text cannot change

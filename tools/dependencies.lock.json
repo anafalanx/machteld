@@ -13,6 +13,7 @@
     "zipPackageVersion": "3.0-4",
     "gccSha256": "f96a3bdb1d3a3967b309d75c7413399391e857b5be4cb17162572ed66f6772a0",
     "stripSha256": "8a3a0baf3e536b4650ea696a6f046961e6dcfd72f3a562aa19a2f5f0e55ccd57",
+    "windresSha256": "f3935fdb281b6491c1d70325e75e7b067888a7d9a9c4e7f9b78684d55a324520",
     "makeSha256": "701b0044dddeb40b02a9eaf20d35f8fca8dc06b0aa8a02a6e9c7ae5e5213a073",
     "zipSha256": "5df599bd0b4628939a26f1208bea4b761be98a4c8261b5fd409998c87834489a"
   },
@@ -37,27 +38,6 @@
       "file": "sqlite-amalgamation-3510000.zip",
       "url": "https://www.sqlite.org/2025/sqlite-amalgamation-3510000.zip",
       "sha256": "1caf7116f2910600d04473ad69d37ec538fa62fa36adccd37b5e0e43647c98be"
-    },
-    {
-      "id": "lua",
-      "version": "5.5.0",
-      "file": "lua-5.5.0.tar.gz",
-      "url": "https://www.lua.org/ftp/lua-5.5.0.tar.gz",
-      "sha256": "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d"
-    },
-    {
-      "id": "lpeg",
-      "version": "1.1.0",
-      "file": "lpeg-1.1.0.tar.gz",
-      "url": "https://www.inf.puc-rio.br/~roberto/lpeg/lpeg-1.1.0.tar.gz",
-      "sha256": "4b155d67d2246c1ffa7ad7bc466c1ea899bbc40fef0257cc9c03cecbaed4352a"
-    },
-    {
-      "id": "cjson",
-      "version": "2.1.0.19",
-      "file": "lua-cjson-2.1.0.19.tar.gz",
-      "url": "https://github.com/openresty/lua-cjson/archive/refs/tags/2.1.0.19.tar.gz",
-      "sha256": "d1aded44b4cfe5ec6b395e178902aba3eed1dbe7999a753c0662222de2890ec0"
     },
     {
       "id": "yyjson",

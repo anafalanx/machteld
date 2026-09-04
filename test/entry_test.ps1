@@ -18,7 +18,7 @@ $Failures = 0
 # is the exact failure mode the estate's derive-don't-maintain rule names. The
 # regex matches generate-reference.ps1's canonical check.
 $headerText = Get-Content (Join-Path $Root 'src/machteld.h') -Raw
-if ($headerText -notmatch '(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+)"\s*$') {
+if ($headerText -notmatch '(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$') {
     throw 'src/machteld.h has no canonical MACHTELD_VERSION'
 }
 $MachteldVersion = $Matches[1]
@@ -192,6 +192,42 @@ puts "ENTRY-LAST:[lindex $argv end]"
     Check 'direct invocation preserves a spaced argument as one item' `
         ($result.Exit -eq 0 -and $result.Out -match 'ENTRY-ARGC:2' -and
          $result.Out -match 'ENTRY-LAST:two words') ($result.Err + $result.Out)
+
+    $exactProgram = Join-Path $Work 'exact-version.tcl'
+    Write-Utf8 $exactProgram "package require -exact machteld $MachteldVersion`nputs `"ENTRY-EXACT:[package require machteld]`"`n"
+    $result = Invoke-Host @($exactProgram)
+    Check 'direct invocation accepts the exact canonical version' `
+        ($result.Exit -eq 0 -and
+         $result.Out -match ('(?m)^ENTRY-EXACT:' + $MachteldVersionRe + '\r?$')) `
+        ($result.Err + $result.Out)
+
+    # The retired engine switch has no direct-host dispatch. With no selected
+    # startup script, the ordinary host path fails closed on redirected stdin;
+    # bound the process so this also fails promptly against the former host.
+    $engineWordInput = Join-Path $Work 'engine-word-stdin.empty'
+    $engineWordStdout = Join-Path $Work 'engine-word-stdout.txt'
+    $engineWordStderr = Join-Path $Work 'engine-word-stderr.txt'
+    Write-Utf8 $engineWordInput ''
+    $engineWordArguments = @('--machteld-engine')
+    $engineWordArgumentLine = (($engineWordArguments | ForEach-Object {
+        ConvertTo-NativeArgument $_
+    }) -join ' ')
+    $engineWordProcess = Start-Process -FilePath $Machteld `
+        -ArgumentList $engineWordArgumentLine -WorkingDirectory $Work -PassThru `
+        -RedirectStandardInput $engineWordInput -RedirectStandardOutput $engineWordStdout `
+        -RedirectStandardError $engineWordStderr -WindowStyle Hidden
+    $engineWordCompleted = $engineWordProcess.WaitForExit(5000)
+    if (-not $engineWordCompleted) {
+        Stop-Process -InputObject $engineWordProcess -Force -ErrorAction SilentlyContinue
+        $engineWordProcess.WaitForExit()
+    }
+    $engineWordOut = Get-Content -LiteralPath $engineWordStdout -Raw -ErrorAction SilentlyContinue
+    $engineWordErr = Get-Content -LiteralPath $engineWordStderr -Raw -ErrorAction SilentlyContinue
+    $engineWordExit = if ($engineWordCompleted) { $engineWordProcess.ExitCode } else { $null }
+    Check '--machteld-engine has no direct-host dispatch' `
+        ($engineWordCompleted -and $engineWordExit -eq 1 -and
+         ($engineWordErr + $engineWordOut) -match 'redirected stdin is not accepted') `
+        ($engineWordErr + $engineWordOut)
 
     $exitProgram = Join-Path $Work 'exit-seven.tcl'
     Write-Utf8 $exitProgram "package require machteld`nexit 7`n"
@@ -516,6 +552,10 @@ puts "TK-LIB:$::tk_library"
         ($docsOutput.Exit -eq 0 -and $null -ne $outputObject -and
          $outputObject.ok -eq 1 -and $null -ne $outputObject.result) `
         ($docsOutput.Err + $docsOutput.Out)
+    Check '--docs output is not marked temporary' `
+        ((Test-Path -LiteralPath $docsStatusFile -PathType Leaf) -and
+         (((Get-Item -LiteralPath $docsStatusFile).Attributes -band
+           [IO.FileAttributes]::Temporary) -eq 0))
 
     $docsGet = Invoke-Host @('docs', 'get', 'tcl/command/dict',
         '--section', 'synopsis', '--limit', '4096', '--json')

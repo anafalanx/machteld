@@ -16,10 +16,9 @@ The standing doctrine behind all of it: when the built-ins are not
 sufficient or not appropriate for a job, the program author — human or
 agent — is expected to build beside the executable: create a folder and
 construct whatever artifact the job needs there, contract-compliant for its
-kind (this page for Tcl extensions; [the engine](engine.md) for compute
-engines; `run`/`child`/`scope` for helper executables) and covenant-
-compliant in deployment. Building beside the exe is the designed extension
-point, not a workaround.
+kind (this page for Tcl extensions; `run`/`child`/`scope` for external
+executables) and covenant-compliant in deployment. Building beside the exe is
+the designed extension point, not a workaround.
 
 ## The mechanics
 
@@ -29,7 +28,7 @@ any other interp. Extension DLLs load **from disk**; script-only packages
 and `.tm` modules resolve through their own two mechanisms:
 
 ```tcl
-package require machteld 0.15.1
+package require machteld 0.20
 lappend auto_path {C:/path/to/tcl9/lib}              ;# pkgIndex packages (DLLs)
 ::tcl::tm::path add {C:/path/to/tcl9/lib/tcl9/9.0}   ;# .tm modules
 package require tdbc::odbc

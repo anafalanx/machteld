@@ -167,9 +167,6 @@ function Get-ArtifactManifestLines {
         (Join-Path $Prefix 'lib\tcl9'),
         (Join-Path $Prefix 'lib\tcl9.0'),
         (Join-Path $Prefix 'lib\tk9.0'),
-        (Join-Path $CacheRoot 'lua'),
-        (Join-Path $CacheRoot 'lpeg'),
-        (Join-Path $CacheRoot 'cjson'),
         (Join-Path $CacheRoot 'yyjson')
     )
     $files = @(
@@ -276,11 +273,13 @@ function Find-One([string[]]$Candidates, [string]$Label) {
 $MsysRoot = Resolve-MsysRoot
 $Gcc = Join-Path $MsysRoot 'ucrt64\bin\gcc.exe'
 $Strip = Join-Path $MsysRoot 'ucrt64\bin\strip.exe'
+$Windres = Join-Path $MsysRoot 'ucrt64\bin\windres.exe'
 $Make = Join-Path $MsysRoot 'ucrt64\bin\mingw32-make.exe'
 $Zip = Join-Path $MsysRoot 'usr\bin\zip.exe'
 $Bash = Join-Path $MsysRoot 'usr\bin\bash.exe'
 Assert-Hash $Gcc $Lock.toolchain.gccSha256 'GCC'
 Assert-Hash $Strip $Lock.toolchain.stripSha256 'strip'
+Assert-Hash $Windres $Lock.toolchain.windresSha256 'windres'
 Assert-Hash $Make $Lock.toolchain.makeSha256 'mingw32-make'
 Assert-Hash $Zip $Lock.toolchain.zipSha256 'zip'
 if (-not (Test-Path -LiteralPath $Bash)) { throw "missing MSYS2 bash: $Bash" }
@@ -317,13 +316,12 @@ if ($stateMatches) {
 
 New-Item -ItemType Directory -Force -Path $CacheRoot, $SourceRoot, $Prefix | Out-Null
 
-# A stale or interrupted cache is never configured in place. Preserve only the
+# A stale or interrupted active cache is never configured in place. Preserve
 # downloaded archives, whose hashes are rechecked by Get-Archive, and rebuild
-# every derived tree from a known-empty directory.
+# every derived tree in the current build graph from a known-empty directory.
+# Unreferenced trees from older locks are inert: neither the artifact manifest
+# nor the current build consumes them.
 foreach ($derived in @($Prefix, $SourceRoot, (Join-Path $CacheRoot 'sqlite'),
-                       (Join-Path $CacheRoot 'lua'),
-                       (Join-Path $CacheRoot 'lpeg'),
-                       (Join-Path $CacheRoot 'cjson'),
                        (Join-Path $CacheRoot 'yyjson'))) {
     Assert-UnderCache $derived
     if (Test-Path -LiteralPath $derived) {
@@ -395,106 +393,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $sqliteExtract 'sqlite3.c'))) {
     Copy-Item -LiteralPath (Join-Path $sqliteDir 'sqlite3.c'), (Join-Path $sqliteDir 'sqlite3.h') -Destination (Join-Path $CacheRoot 'sqlite') -Force
 }
 
-# Lua 5.5 ships as .tar.gz; Windows' in-box bsdtar extracts it (present by
-# contract since Windows 10 1803, and the build floor is far above that).
-$luaEntry = $Lock.archives | Where-Object id -eq 'lua'
-$luaArchive = Get-Archive $luaEntry
-$luaStage = Join-Path $CacheRoot 'lua'
-if (-not (Test-Path -LiteralPath (Join-Path $luaStage 'lua.h'))) {
-    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
-        throw 'in-box tar.exe not found; cannot extract the Lua archive'
-    }
-    $luaExtract = Join-Path $SourceRoot ('.lua-extract-' + [Guid]::NewGuid().ToString('n'))
-    Assert-UnderCache $luaExtract
-    New-Item -ItemType Directory -Force -Path $luaExtract | Out-Null
-    try {
-        & $tar -xzf $luaArchive -C $luaExtract
-        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
-        $luaSrc = Join-Path $luaExtract ('lua-' + $luaEntry.version + '\src')
-        if (-not (Test-Path -LiteralPath (Join-Path $luaSrc 'lua.h'))) {
-            throw 'Lua archive contains no src/lua.h after extraction'
-        }
-        New-Item -ItemType Directory -Force -Path $luaStage | Out-Null
-        # The interpreter sources only: the standalone frontends (lua.c, luac.c)
-        # never enter the build, so they never enter the cache either.
-        Get-ChildItem -LiteralPath $luaSrc -File |
-            Where-Object { $_.Extension -in @('.c', '.h') -and
-                           $_.Name -notin @('lua.c', 'luac.c') } |
-            Copy-Item -Destination $luaStage -Force
-    } finally {
-        if (Test-Path -LiteralPath $luaExtract) {
-            [IO.Directory]::Delete($luaExtract, $true)
-        }
-    }
-}
-
-# LPeg and lua-cjson: the engine's kernel libraries, staged exactly the way
-# Lua itself was - in-box tar, C/H sources only, everything else (docs, the
-# pure-Lua re module, test files, alternate fpconv backends) never enters
-# the cache. cjson's default fpconv backend is fpconv.c; dtoa.c/g_fmt.c
-# belong to -DUSE_INTERNAL_FPCONV, which the build does not define.
-$lpegEntry = $Lock.archives | Where-Object id -eq 'lpeg'
-$lpegArchive = Get-Archive $lpegEntry
-$lpegStage = Join-Path $CacheRoot 'lpeg'
-if (-not (Test-Path -LiteralPath (Join-Path $lpegStage 'lptree.c'))) {
-    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
-        throw 'in-box tar.exe not found; cannot extract the LPeg archive'
-    }
-    $lpegExtract = Join-Path $SourceRoot ('.lpeg-extract-' + [Guid]::NewGuid().ToString('n'))
-    Assert-UnderCache $lpegExtract
-    New-Item -ItemType Directory -Force -Path $lpegExtract | Out-Null
-    try {
-        & $tar -xzf $lpegArchive -C $lpegExtract
-        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
-        $lpegSrc = Join-Path $lpegExtract ('lpeg-' + $lpegEntry.version)
-        if (-not (Test-Path -LiteralPath (Join-Path $lpegSrc 'lptree.c'))) {
-            throw 'LPeg archive contains no lptree.c after extraction'
-        }
-        New-Item -ItemType Directory -Force -Path $lpegStage | Out-Null
-        Get-ChildItem -LiteralPath $lpegSrc -File |
-            Where-Object { $_.Extension -in @('.c', '.h') } |
-            Copy-Item -Destination $lpegStage -Force
-    } finally {
-        if (Test-Path -LiteralPath $lpegExtract) {
-            [IO.Directory]::Delete($lpegExtract, $true)
-        }
-    }
-}
-
-$cjsonEntry = $Lock.archives | Where-Object id -eq 'cjson'
-$cjsonArchive = Get-Archive $cjsonEntry
-$cjsonStage = Join-Path $CacheRoot 'cjson'
-if (-not (Test-Path -LiteralPath (Join-Path $cjsonStage 'lua_cjson.c'))) {
-    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {
-        throw 'in-box tar.exe not found; cannot extract the lua-cjson archive'
-    }
-    $cjsonExtract = Join-Path $SourceRoot ('.cjson-extract-' + [Guid]::NewGuid().ToString('n'))
-    Assert-UnderCache $cjsonExtract
-    New-Item -ItemType Directory -Force -Path $cjsonExtract | Out-Null
-    try {
-        & $tar -xzf $cjsonArchive -C $cjsonExtract
-        if ($LASTEXITCODE) { throw "tar extraction failed with exit code $LASTEXITCODE" }
-        $cjsonSrc = Join-Path $cjsonExtract ('lua-cjson-' + $cjsonEntry.version)
-        if (-not (Test-Path -LiteralPath (Join-Path $cjsonSrc 'lua_cjson.c'))) {
-            throw 'lua-cjson archive contains no lua_cjson.c after extraction'
-        }
-        New-Item -ItemType Directory -Force -Path $cjsonStage | Out-Null
-        Get-ChildItem -LiteralPath $cjsonSrc -File |
-            Where-Object { $_.Name -in @('lua_cjson.c', 'strbuf.c', 'strbuf.h',
-                                         'fpconv.c', 'fpconv.h') } |
-            Copy-Item -Destination $cjsonStage -Force
-    } finally {
-        if (Test-Path -LiteralPath $cjsonExtract) {
-            [IO.Directory]::Delete($cjsonExtract, $true)
-        }
-    }
-}
-
 # yyjson: the palette json organ's reader core (plan-machteld-015).
-# Single .c/.h plus the MIT license text, staged like lua-cjson.
+# Single .c/.h plus the MIT license text.
 $yyjsonEntry = $Lock.archives | Where-Object id -eq 'yyjson'
 $yyjsonArchive = Get-Archive $yyjsonEntry
 $yyjsonStage = Join-Path $CacheRoot 'yyjson'

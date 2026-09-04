@@ -79,21 +79,25 @@ proc zip_entries {root {rel ""}} {
 
 set outputDir [file dirname [file normalize $OUT]]
 file mkdir $outputDir
-# Claim both namespaces exclusively beside the destination. The live marker
-# keeps ownership of the derived staging-directory name; the candidate itself
-# is created with exclusive tempfile semantics. We delete only those exact
-# names and publish only after lmkimg has completed successfully.
+# Claim a unique namespace beside the destination. The live marker keeps
+# ownership of the derived staging-directory and candidate names. The candidate
+# is opened exclusively rather than with `file tempfile`: on Windows, tempfile
+# sets FILE_ATTRIBUTE_TEMPORARY and that attribute survives publication. We
+# delete only these exact names and publish only after lmkimg has completed.
 set stageClaim ""
 set stageMarker ""
 set stage ""
 set outputCandidate ""
+set candidateChannel ""
 try {
     set stageMarker [file tempfile stageClaim [file join $outputDir .machteld-package-stage-]]
     set stage "${stageClaim}.d"
     if {[file exists $stage]} { error "package staging namespace already exists: $stage" }
     file mkdir $stage
-    set candidateMarker [file tempfile outputCandidate [file join $outputDir .machteld-package-candidate-]]
-    close $candidateMarker
+    set outputCandidate "${stageClaim}.candidate"
+    set candidateChannel [open $outputCandidate {WRONLY CREAT EXCL}]
+    close $candidateChannel
+    set candidateChannel ""
 
 # Tcl core script library.
 set tclLib ""
@@ -141,13 +145,13 @@ if {!$copiedTk} { error "tk_library not found under dependency prefix: $TC" }
 # The machteld prelude at the archive root.
 file copy -force $PREL [file join $stage machteld.tcl]
 
-# Tcl and Tk both require their notices to be included verbatim in every
-# distribution. They are runtime payload, not distribution-only documentation,
-# because standalone tools are distributions too.
+# Tcl, Tk, and yyjson require their notices in every distribution. They are
+# runtime payload, not distribution-only documentation, because standalone
+# tools are distributions too.
 if {![file isdirectory $opt(--licenses)]} {
     error "license notice directory not found: $opt(--licenses)"
 }
-foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt} {
+foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt yyjson-0.12.0.txt} {
     if {![file isfile [file join $opt(--licenses) $notice]]} {
         error "required license notice not found: $notice"
     }
@@ -194,6 +198,7 @@ if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
     # non-replacing rename also refuses a path that appears during packaging.
     file rename $outputCandidate $OUT
 } finally {
+    if {$candidateChannel ne ""} { catch {close $candidateChannel} }
     if {$outputCandidate ne ""} { catch {file delete -force $outputCandidate} }
     if {$stage ne ""} { catch {file delete -force $stage} }
     if {$stageMarker ne ""} { catch {close $stageMarker} }

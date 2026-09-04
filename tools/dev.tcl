@@ -7,8 +7,8 @@
 #     z devclean          delete the dev cache
 #
 # Speed comes from a PERSISTENT cache in .cache/dev that the hermetic release
-# build never uses: the 9 MB SQLite amalgamation and the 32 Lua sources are
-# compiled once and reused; authored src/*.c recompile only when they change;
+# build never uses: the 9 MB SQLite amalgamation is compiled once and reused;
+# authored src/*.c recompile only when they change;
 # the reference corpus is reused unless a doc source is newer or -ref is given.
 #
 # THE RULE: this loop is for iteration and it MAY drift from a clean build
@@ -53,6 +53,7 @@ proc discover_msys2 {root} {
 set MSYS2 [discover_msys2 $ROOT]
 set GCC   [file join $MSYS2 ucrt64 bin gcc.exe]
 set STRIP [file join $MSYS2 ucrt64 bin strip.exe]
+set WINDRES [file join $MSYS2 ucrt64 bin windres.exe]
 set ::env(PATH) "[file nativename [file join $MSYS2 ucrt64 bin]];$::env(PATH)"
 
 # ---- machteld's own bootstrapped dependency cache (from a prior release build) ----
@@ -61,9 +62,6 @@ set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] && $::env(MACHTELD_DEPS
                  ? [file normalize $::env(MACHTELD_DEPS_ROOT)] : [Rp .cache deps]}]
 set PREFIX  [file join $CACHE prefix]
 set SQLITE  [file join $CACHE sqlite]
-set LUA     [file join $CACHE lua]
-set LPEG    [file join $CACHE lpeg]
-set CJSON   [file join $CACHE cjson]
 set YYJSON  [file join $CACHE yyjson]
 set INCLUDE [file join $PREFIX include]
 proc need {label path} {
@@ -73,12 +71,10 @@ proc need {label path} {
     return $path
 }
 need "dependency cache" $CACHE
+need "windres" $WINDRES
 need "static tclsh" [set TCLSH [file join $PREFIX bin tclsh90s.exe]]
 need "tcl.h"     [file join $INCLUDE tcl.h]
 need "sqlite3.c" [file join $SQLITE sqlite3.c]
-need "lua.h"     [file join $LUA lua.h]
-need "lptree.c"  [file join $LPEG lptree.c]
-need "lua_cjson.c" [file join $CJSON lua_cjson.c]
 need "yyjson.c" [file join $YYJSON yyjson.c]
 set TCLLIB   [need "libtcl90.a"   [file join $PREFIX lib libtcl90.a]]
 set TKLIB    [need "libtcl9tk90.a" [file join $PREFIX lib libtcl9tk90.a]]
@@ -100,7 +96,7 @@ set defines {
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA -I$YYJSON]
+    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$YYJSON]
 set syslibs {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
@@ -126,60 +122,52 @@ proc cc {obj src flags label} {
     return 1
 }
 
+proc version_resource {kind obj} {
+    set header [Rp src machteld.h]
+    set generator [Rp tools generate-version-resource.tcl]
+    if {[file exists $obj] &&
+            [file mtime $obj] >= [file mtime $header] &&
+            [file mtime $obj] >= [file mtime $generator]} {
+        return 0
+    }
+    set rc [file join $::OBJ "machteld-$kind.rc"]
+    run $::TCLSH $generator $header $kind $rc
+    puts "  rc  machteld-$kind.rc"
+    run $::WINDRES --codepage=65001 -O coff -i $rc -o $obj
+    return 1
+}
+
 # ---- the incremental build ----
 
 proc dev_build {{forceRef 0}} {
     set changed 0
     puts "build: incremental (cache [file nativename $::DEV])"
 
-    # Pinned third-party sources: SQLite, yyjson, and Lua, cached across
-    # builds. Vendor TUs compile with their own minimal flags, never the
+    # Pinned third-party sources: SQLite and yyjson, cached across builds.
+    # Vendor TUs compile with their own minimal flags, never the
     # authored -Werror set (the sqlite3.c precedent).
     incr changed [cc [file join $::OBJ sqlite3.o] [file join $::SQLITE sqlite3.c] \
         {-O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION} sqlite3.c]
     incr changed [cc [file join $::OBJ yyjson.o] [file join $::YYJSON yyjson.c] \
         {-O2 -ffunction-sections -fdata-sections} yyjson.c]
-    set luaObjs {}
-    foreach s [lsort [glob [file join $::LUA *.c]]] {
-        set o [file join $::OBJ lua_[file rootname [file tail $s]].o]
-        incr changed [cc $o $s {-O2} "lua/[file tail $s]"]
-        lappend luaObjs $o
-    }
-    foreach s [lsort [glob [file join $::LPEG *.c]]] {
-        set o [file join $::OBJ lpeg_[file rootname [file tail $s]].o]
-        incr changed [cc $o $s [list -O2 -I$::LUA] "lpeg/[file tail $s]"]
-        lappend luaObjs $o
-    }
-    foreach s [lsort [glob [file join $::CJSON *.c]]] {
-        set o [file join $::OBJ cjson_[file rootname [file tail $s]].o]
-        incr changed [cc $o $s [list -O2 -I$::LUA -I$::CJSON] \
-            "cjson/[file tail $s]"]
-        lappend luaObjs $o
-    }
-
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
     set guiMain     [Rp src machteld_gui_main.c]
-    set colSource   [Rp src col.c]
     set objects {}
     foreach s [lsort [glob -directory [Rp src] *.c]] {
-        if {$s eq $consoleMain || $s eq $guiMain || $s eq $colSource} continue
+        if {$s eq $consoleMain || $s eq $guiMain} continue
         set o [file join $::OBJ [file rootname [file tail $s]].o]
         incr changed [cc $o $s $::common [file tail $s]]
         lappend objects $o
     }
-    # The palette TU: -mavx2, with the vectorizer's report captured so the
-    # bench lane can verify the scalar-reference loops actually vectorized
-    # (a grading requirement of plan-machteld-013).
-    set colObj [file join $::OBJ col.o]
-    set colVec [file join $::DEV col-vec.txt]
-    incr changed [cc $colObj $colSource \
-        [concat $::common -mavx2 -fvect-cost-model=dynamic -fopt-info-vec-optimized=$colVec] col.c]
-    lappend objects $colObj
     set consoleObj [file join $::OBJ machteld_main.o]
     incr changed [cc $consoleObj $consoleMain [concat $::common -municode] machteld_main.c]
     set guiObj [file join $::OBJ machteld_gui_main.o]
     incr changed [cc $guiObj $guiMain [concat $::common -municode] machteld_gui_main.c]
+    set consoleVersionObj [file join $::OBJ machteld-console-resource.o]
+    set guiVersionObj [file join $::OBJ machteld-gui-resource.o]
+    incr changed [version_resource console $consoleVersionObj]
+    incr changed [version_resource gui $guiVersionObj]
 
     # Link the two bare hosts when any object changed or a host is missing.
     set bare    [file join $::DEV machteld-bare.exe]
@@ -187,12 +175,12 @@ proc dev_build {{forceRef 0}} {
     if {$changed || ![file exists $bare] || ![file exists $bareGui]} {
         puts "  ld  machteld-bare.exe"
         run $::GCC -municode -static-libgcc -Wl,--gc-sections \
-            $consoleObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] {*}$luaObjs \
+            $consoleObj $consoleVersionObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] \
             $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bare
         run $::STRIP $bare
         puts "  ld  machteld-bare-gui.exe"
         run $::GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-            $guiObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] {*}$luaObjs \
+            $guiObj $guiVersionObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] \
             $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bareGui
         run $::STRIP $bareGui
     } else {
@@ -210,7 +198,7 @@ proc dev_build {{forceRef 0}} {
     fconfigure $out -translation lf
     foreach part [list [Rp tcl machteld.tcl] [Rp tcl docs.tcl] [Rp tcl cli.tcl] \
             [Rp tcl log.tcl] [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] \
-            [Rp tcl macht.tcl] $manifest] {
+            $manifest] {
         set in [open $part r]; fconfigure $in -translation lf
         puts $out [read $in]; close $in
     }
@@ -272,6 +260,23 @@ proc write_ref_stamp {} {
 proc ref_stale {} {
     if {![file isdirectory $::REF] || ![file exists [ref_stamp]]} { return 1 }
     set stamp [file mtime [ref_stamp]]
+
+    # A timestamp walk cannot notice a deleted source page. Compare the
+    # authored and generated Machteld page sets before considering mtimes so a
+    # removed command or guide cannot survive in the cached corpus.
+    foreach pair [list \
+            [list [Rp docs] [file join $::REF markdown machteld guide]] \
+            [list [Rp docs reference machteld] [file join $::REF markdown machteld]] \
+            [list [Rp docs reference machteld command] [file join $::REF markdown machteld command]]] {
+        lassign $pair sourceDir generatedDir
+        set sourceNames [lsort [lmap f [glob -nocomplain -directory $sourceDir *.md] {
+            file tail $f
+        }]]
+        set generatedNames [lsort [lmap f [glob -nocomplain -directory $generatedDir *.md] {
+            file tail $f
+        }]]
+        if {$sourceNames ne $generatedNames} { return 1 }
+    }
     foreach pat {docs/*.md docs/reference/machteld/*.md docs/reference/machteld/command/*.md} {
         foreach f [glob -nocomplain [Rp {*}[split $pat /]]] {
             if {[file mtime $f] > $stamp} { return 1 }
@@ -337,8 +342,6 @@ proc dev_docs {} {
 # Lanes needing compiled C fixtures or basekit extraction (process, native,
 # store, wrap, entry, embedded-reference generator) stay with the release gate.
 set ::LANES {
-    macht      test/macht_test.tcl
-    engine     test/engine_test.tcl
     filesystem test/filesystem_test.tcl
     runtime    test/runtime_test.tcl
     reference  test/reference_test.tcl
@@ -377,12 +380,10 @@ proc dev_clean {} {
 set task [lindex $argv 0]
 set rest [lrange $argv 1 end]
 switch -- $task {
-    ""      { puts "tasks: docs | build ?-ref? | test LANE ... | bench | clean" }
+    ""      { puts "tasks: docs | build ?-ref? | test LANE ... | clean" }
     docs    { dev_docs }
     build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
     test    { dev_test $rest }
-    bench   { dev_build; run [Rp out machteld.exe] [Rp test col_bench.tcl] }
-    endure  { dev_build; run [Rp out machteld.exe] [Rp test phm_endurance.tcl] {*}$rest }
     clean   { dev_clean }
     default { puts "unknown task '$task' (docs build test clean)"; exit 2 }
 }

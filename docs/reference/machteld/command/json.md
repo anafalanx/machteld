@@ -2,7 +2,7 @@
 id: machteld/command/json
 type: command
 title: json
-summary: Decode and encode bounded JSON values, plainly or with real JSON types.
+summary: Decode and encode JSON values, plainly or with real JSON types.
 commands: json, json decode, json encode, json value, json type, json unwrap, json get, json exists
 ---
 
@@ -25,8 +25,8 @@ json exists VALUE key|index ...
 
 Plain `decode` accepts exactly one complete JSON value. `-typed` returns an
 opaque typed value carrying real JSON identity, with strict decoding.
-`-maxbytes` (typed only) lowers the input byte limit from the 16 MiB
-default; the hard cap is 64 MiB. `encode` uses a Tcl object's internal
+`-maxbytes` (typed only) sets the input byte limit, whose default is 16 MiB
+and hard cap is 64 MiB. `encode` uses a Tcl object's internal
 dict/list representation when available; `-dict` or `-list` forces the outer
 container interpretation and they are mutually exclusive; `-plain` refuses
 typed values by name - it is the wire paths' guard. `--` ends option parsing
@@ -75,9 +75,8 @@ values and nested plain dict/list containers, and refuse plain scalar leaves
 by name; `json value number` validates the exact JSON number grammar
 fail-closed. A typed handle that has been through a string operation is a
 plain string again and refuses at its next construction - build wire-bound
-trees as typed containers, construct late, hold the handle. The engine wire
-refuses typed values (`macht run` names it); stringification, `store`, and
-worker transport do not preserve the type.
+trees as typed containers, construct late, hold the handle. Stringification,
+`store`, and worker/pool/pmap JSON-lines transport do not preserve the type.
 
 ## Subcommands
 
@@ -92,8 +91,8 @@ worker transport do not preserve the type.
 
 The entire string must contain one JSON value plus optional JSON whitespace.
 `-typed` returns an opaque typed value under strict decoding; `-maxbytes`
-(typed only) lowers the byte limit below the 16 MiB default, never above the
-64 MiB hard cap.
+(typed only) sets a positive byte limit. The default is 16 MiB and the hard
+cap is 64 MiB.
 
 #### Results
 
@@ -132,8 +131,8 @@ them at every nesting level.
 
 #### Arguments and options
 
-Force only the outer container. `-plain` refuses typed values by name - the
-engine, worker, and pool wire paths encode with it. `--` is necessary for a
+Force only the outer container. `-plain` refuses typed values by name; worker
+and pool protocol paths encode with it. `--` is necessary for a
 literal such as `-dict` that must be data.
 
 #### Results
@@ -307,8 +306,7 @@ Pure synchronous traversal; the child keeps the whole document alive.
 
 #### Constraints
 
-Array indices are 0-based, matching JSON convention rather than the
-boundary's 1-based lists.
+Array indices are 0-based, matching Tcl list indexing.
 
 #### See also
 

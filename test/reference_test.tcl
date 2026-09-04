@@ -246,6 +246,8 @@ close $channel
 check {host human mode also publishes parser failures} [expr {
     [string match {*unknown subcommand*} $plainErrorText] &&
     [dict get $plainErrorOptions -errorcode] eq {MACHTELD DOCS usage}}]
+check {host output publication leaves no candidate files} [expr {
+    ![llength [glob -nocomplain -directory $work .machteld-docs-output-*]]}]
 check {host rejects repeated JSON and noncanonical option syntax} [expr {
     [errorcode {::machteld::DocsHost --json --json status}] eq {MACHTELD DOCS usage} &&
     [errorcode {docs list --limit 1}] eq {MACHTELD DOCS usage}}]

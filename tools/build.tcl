@@ -18,13 +18,12 @@ set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] &&
                  : [Rp .cache deps]}]
 set PREFIX [file join $CACHE prefix]
 set SQLITE [file join $CACHE sqlite]
-set LUA [file join $CACHE lua]
-set LPEG [file join $CACHE lpeg]
-set CJSON [file join $CACHE cjson]
 set YYJSON [file join $CACHE yyjson]
 set GCC [expr {[info exists ::env(MACHTELD_GCC)] ? $::env(MACHTELD_GCC) : ""}]
 set STRIP [expr {[info exists ::env(MACHTELD_STRIP)] ? $::env(MACHTELD_STRIP) : ""}]
+set WINDRES [expr {[info exists ::env(MACHTELD_WINDRES)] ? $::env(MACHTELD_WINDRES) : ""}]
 if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/build.ps1" }
+if {$WINDRES eq ""} { error "build.tcl: MACHTELD_WINDRES is not set; use tools/build.ps1" }
 
 proc first_existing {label candidates} {
     foreach path $candidates { if {[file exists $path]} { return $path } }
@@ -41,11 +40,8 @@ set TKLIB [first_existing "static Tk library" [list \
     [file join $PREFIX lib libtk9.0.a]]]
 set TCLSTUB [first_existing "Tcl stub library" [list \
     [file join $PREFIX lib libtclstub.a] [file join $PREFIX lib libtclstub90.a]]]
-foreach {label path} [list gcc $GCC tcl.h [file join $INCLUDE tcl.h] \
+foreach {label path} [list gcc $GCC windres $WINDRES tcl.h [file join $INCLUDE tcl.h] \
         sqlite3.c [file join $SQLITE sqlite3.c] sqlite3.h [file join $SQLITE sqlite3.h] \
-        lua.h [file join $LUA lua.h] lvm.c [file join $LUA lvm.c] \
-        lptree.c [file join $LPEG lptree.c] \
-        lua_cjson.c [file join $CJSON lua_cjson.c] \
         yyjson.c [file join $YYJSON yyjson.c]] {
     if {![file exists $path]} { error "build.tcl: missing $label: $path" }
 }
@@ -100,7 +96,7 @@ set defines {
     -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
 }
 set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$LUA -I$YYJSON]
+    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$YYJSON]
 
 # SQLite is third-party generated source. It is pinned and compiled separately;
 # the warning gate applies to every authored C translation unit under src/.
@@ -115,52 +111,17 @@ set yyjsonObj [file join $OBJDIR yyjson.o]
 puts "cc   yyjson.c (pinned 0.12.0)"
 run $GCC -O2 -ffunction-sections -fdata-sections -c [file join $YYJSON yyjson.c] -o $yyjsonObj
 
-# Lua is third-party pinned source, compiled AS C: its error model is longjmp,
-# and compiling it as C++ would turn errors into exceptions. Same separation
-# from the warning gate as SQLite; the frontends never reached the cache.
-set luaObjs {}
-puts "cc   lua 5.5.0 (pinned interpreter sources)"
-foreach luaSource [lsort [glob [file join $LUA *.c]]] {
-    set luaObj [file join $OBJDIR lua_[file rootname [file tail $luaSource]].o]
-    run $GCC -O2 -c $luaSource -o $luaObj
-    lappend luaObjs $luaObj
-}
-
-# The engine's kernel libraries: LPeg and lua-cjson, pinned like Lua and
-# outside the warning gate like every vendored source.
-puts "cc   lpeg 1.1.0 (pinned kernel library)"
-foreach src [lsort [glob [file join $LPEG *.c]]] {
-    set obj [file join $OBJDIR lpeg_[file rootname [file tail $src]].o]
-    run $GCC -O2 -I$LUA -c $src -o $obj
-    lappend luaObjs $obj
-}
-puts "cc   lua-cjson 2.1.0.19 (pinned kernel library)"
-foreach src [lsort [glob [file join $CJSON *.c]]] {
-    set obj [file join $OBJDIR cjson_[file rootname [file tail $src]].o]
-    run $GCC -O2 -I$LUA -I$CJSON -c $src -o $obj
-    lappend luaObjs $obj
-}
-
 set consoleMain [Rp src machteld_main.c]
 set guiMain [Rp src machteld_gui_main.c]
-set colSource [Rp src col.c]
 set objects {}
 foreach source [lsort [glob -directory [Rp src] *.c]] {
-    if {$source eq $consoleMain || $source eq $guiMain ||
-            $source eq $colSource} continue
+    if {$source eq $consoleMain || $source eq $guiMain} continue
     set stem [file rootname [file tail $source]]
     set object [file join $OBJDIR ${stem}.o]
     puts "cc   [file tail $source]"
     run $GCC {*}$common -c $source -o $object
     lappend objects $object
 }
-
-# The primitive palette is the one authored TU with a raised ISA floor:
-# -mavx2, executed only behind the engine's runtime CPUID gate.
-set colObject [file join $OBJDIR col.o]
-puts "cc   col.c (-mavx2)"
-run $GCC {*}$common -mavx2 -fvect-cost-model=dynamic -c $colSource -o $colObject
-lappend objects $colObject
 
 set consoleObj [file join $OBJDIR machteld_main.o]
 puts "cc   machteld_main.c"
@@ -170,6 +131,20 @@ set guiObj [file join $OBJDIR machteld_gui_main.o]
 puts "cc   machteld_gui_main.c"
 run $GCC {*}$common -municode -c $guiMain -o $guiObj
 
+# Windows Explorer and installer tooling read VERSIONINFO without starting the
+# program. Generate both host variants from the one canonical version macro.
+set versionGenerator [Rp tools generate-version-resource.tcl]
+set consoleRc [file join $OBJDIR machteld-console.rc]
+set guiRc [file join $OBJDIR machteld-gui.rc]
+set consoleVersionObj [file join $OBJDIR machteld-console-resource.o]
+set guiVersionObj [file join $OBJDIR machteld-gui-resource.o]
+run $TCLSH $versionGenerator [Rp src machteld.h] console $consoleRc
+run $TCLSH $versionGenerator [Rp src machteld.h] gui $guiRc
+puts "windres machteld-console.rc"
+run $WINDRES --codepage=65001 -O coff -i $consoleRc -o $consoleVersionObj
+puts "windres machteld-gui.rc"
+run $WINDRES --codepage=65001 -O coff -i $guiRc -o $guiVersionObj
+
 set syslibs {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
@@ -178,14 +153,14 @@ set syslibs {
 set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 run $GCC -municode -static-libgcc -Wl,--gc-sections \
-    $consoleObj {*}$objects $sqliteObj $yyjsonObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
+    $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bare
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bare }
 
 set bareGui [file join $BUILDROOT machteld-bare-gui.exe]
 puts "ld   [file tail $bareGui]"
 run $GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-    $guiObj {*}$objects $sqliteObj $yyjsonObj {*}$luaObjs $TKLIB $TCLLIB $TCLSTUB \
+    $guiObj $guiVersionObj {*}$objects $sqliteObj $yyjsonObj $TKLIB $TCLLIB $TCLSTUB \
     {*}$syslibs -o $bareGui
 if {$STRIP ne "" && [file exists $STRIP]} { run $STRIP $bareGui }
 
@@ -196,8 +171,7 @@ set staged [file join $OBJDIR prelude.tcl]
 set output [open $staged w]
 fconfigure $output -translation lf
 foreach part [list [Rp tcl machteld.tcl] [Rp tcl docs.tcl] [Rp tcl cli.tcl] [Rp tcl log.tcl] \
-        [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] [Rp tcl macht.tcl] \
-        $generatedManifest] {
+        [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] $generatedManifest] {
     set input [open $part r]
     fconfigure $input -translation lf
     puts $output [read $input]

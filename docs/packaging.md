@@ -66,21 +66,29 @@ into a misleading failure.
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 0.15.1 prelude and public palette;
+- the full Machteld 0.20 prelude and public palette;
 - the Tcl and Tk script libraries;
-- Machteld's Apache 2.0 license and the required Tcl/Tk distribution notices
-  under `licenses/`;
+- Machteld's Apache 2.0 license and the required Tcl, Tk, and yyjson
+  distribution notices under `licenses/`;
 - the complete indexed Machteld, Tcl 9, and Tk 9 reference corpus;
 - the application entry and assets in zipfs;
-- the same native Windows core and statically linked SQLite store.
+- the same native Windows core, statically linked public-domain SQLite store,
+  and MIT-licensed yyjson reader.
 
 There is no prelude-free or reduced-capability option. `package require machteld`
-inside a wrapped tool returns 0.15.1, `manifest` describes the same API, and
+inside a wrapped tool returns 0.20, `manifest` describes the same API, and
 binary-safe `store` has the same behavior and five-second busy timeout. Wrapping
 does not change the programmatic machine-control API. The reference corpus is
 copied so `docs`, `help`, and the reserved `--machteld-docs` host route remain
 self-contained. Only basekits are distribution-only: a wrapped tool cannot run
 `wrap` again.
+
+Every host also carries Windows VERSIONINFO derived from the canonical Machteld
+version: product and file version `0.20`, the Machteld product identity, and the
+repository publisher/copyright identity. A wrapped program inherits the
+console or GUI host metadata; `wrap` does not claim application-specific
+authorship or rewrite version resources. Tcl's embedded configuration points to
+the self-mounted payload, and build-machine paths are absent from the artifact.
 
 `--console` is the default and provides standard channels. `--gui` selects the
 Windows GUI subsystem and does not create a console; use `log -file` or a Tk
@@ -89,7 +97,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 0.15.1
+package require machteld 0.20
 package require Tk
 ```
 

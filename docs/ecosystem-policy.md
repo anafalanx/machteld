@@ -14,7 +14,11 @@ supports a public capability that cannot be supplied more clearly in-house.
 
 Current choices:
 
-- Tcl/Tk and SQLite are part of every full and wrapped host.
+- Tcl/Tk 9.0.4 are part of every full and wrapped host, including their script
+  libraries and distribution notices.
+- The public-domain SQLite amalgamation is statically linked behind `store`.
+- MIT-licensed yyjson 0.12.0 is statically linked behind the JSON reader and
+  its notice is carried in every host.
 - Windows process, ConPTY, directory, watch, HTTP, and crypto integration is
   implemented against the operating-system APIs behind the Machteld palette.
 - The JSON implementation is gated against JSONTestSuite; the corpus is a test

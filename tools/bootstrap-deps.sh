@@ -25,6 +25,27 @@ export RC=windres
 
 mkdir -p "$prefix"
 
+# The static runtime has no physical installation after packaging. Tcl's public
+# ::tcl::pkgconfig values therefore describe the paths that really exist in
+# every full and wrapped zipfs, rather than leaking this machine's dependency
+# cache. The source-prefix map likewise keeps __FILE__ strings reproducible.
+runtime_root='//zipfs:/app'
+source_root_native=$(cygpath -m "$source_root")
+source_root_escaped=${source_root_native// /\\ }
+source_prefix_map="-ffile-prefix-map=${source_root_escaped}=tcltk-9.0.4"
+tcl_pkgconfig=(
+    "LIB_INSTALL_DIR_NATIVE=$runtime_root"
+    "BIN_INSTALL_DIR_NATIVE=$runtime_root"
+    "SCRIPT_INSTALL_DIR_NATIVE=$runtime_root/tcl_library"
+    "INCLUDE_INSTALL_DIR_NATIVE=$runtime_root"
+    "MAN_INSTALL_DIR_NATIVE=$runtime_root/reference"
+    "libdir_native=$runtime_root"
+    "bindir_native=$runtime_root"
+    "TCL_LIBRARY_NATIVE=$runtime_root/tcl_library"
+    "includedir_native=$runtime_root"
+    "mandir_native=$runtime_root/reference"
+)
+
 pushd "$tcl_source/win" >/dev/null
 if [[ ! -f Makefile ]]; then
     ./configure --enable-64bit --disable-shared --enable-threads \
@@ -33,7 +54,11 @@ fi
 # Only the core static runtime, headers, stubs, and script libraries are build
 # inputs. Upstream's aggregate `all`/`install` targets also compile bundled
 # extension packages and install manuals; neither is linked or packaged here.
-mingw32-make -j "$jobs" binaries
+mingw32-make -j "$jobs" binaries \
+    "CFLAGS_OPTIMIZE=-O2 -fomit-frame-pointer $source_prefix_map" \
+    "${tcl_pkgconfig[@]}"
+# Do not pass the virtual runtime paths to installation: these targets stage
+# the already-built files into the real dependency cache.
 mingw32-make install-binaries
 mingw32-make install-libraries
 mingw32-make install-headers
@@ -44,7 +69,8 @@ if [[ ! -f Makefile ]]; then
     ./configure --enable-64bit --disable-shared --enable-threads \
         --with-tcl="$tcl_source/win" --prefix="$prefix"
 fi
-mingw32-make -j "$jobs" binaries
+mingw32-make -j "$jobs" binaries \
+    "CFLAGS_OPTIMIZE=-O2 -fomit-frame-pointer $source_prefix_map"
 mingw32-make install-binaries
 mingw32-make install-libraries
 popd >/dev/null

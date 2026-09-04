@@ -4,7 +4,7 @@
 
 #include "tcl.h"
 
-#define MACHTELD_VERSION "0.15.1"
+#define MACHTELD_VERSION "0.20"
 
 /* Locate and pin the script libraries in the executable's own zipfs mount.
  * Called by each host before Tcl_Init (and therefore before Tk_Init). */
@@ -23,15 +23,6 @@ int Machteld_EntryGate(Tcl_Interp *interp);
 int Machteld_EntryError(Tcl_Interp *interp, const char *code,
                         const char *message);
 TCL_NORETURN void Machteld_Fatal(Tcl_Interp *interp);
-
-/*
- * Engine mode (docs/engine.md): the third face of the executable, entered
- * via the reserved host word `--machteld-engine` before any Tcl or zipfs
- * work. Runs the protocol-1 frame loop over binary stdio and never returns
- * to the Tcl hosts; the process exit code is its result. threads <= 0 asks
- * for the default (logical cores, capped).
- */
-int Machteld_EngineMain(int threads);
 
 enum {
     MACHTELD_HOST_NORMAL = 0,

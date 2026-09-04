@@ -89,6 +89,9 @@ try {
 }
 & (Join-Path $RepoRoot 'test\package_test.ps1') -Tclsh $tclsh
 if ($LASTEXITCODE) { throw "package parser tests failed with exit code $LASTEXITCODE" }
+& (Join-Path $RepoRoot 'test\version_resource_test.ps1') `
+    -Machteld $Machteld -CacheRoot $CacheRoot
+if ($LASTEXITCODE) { throw "VERSIONINFO tests failed with exit code $LASTEXITCODE" }
 & (Join-Path $RepoRoot 'test\reference_generator_test.ps1') -CacheRoot $CacheRoot -Tclsh $tclsh
 if ($LASTEXITCODE) { throw "reference generator tests failed with exit code $LASTEXITCODE" }
 & $tclsh (Join-Path $RepoRoot 'tools\check_reference.tcl')
@@ -99,8 +102,6 @@ if ($InteractivePty) { $env:MACHTELD_TEST_PTY_IO = '1' }
 try {
     Run-Test 'process' @((Join-Path $RepoRoot 'test\process_test.tcl'), $processFixture)
     Run-Test 'store' @((Join-Path $RepoRoot 'test\store_test.tcl'), $lockFixture)
-    Run-Test 'macht' @((Join-Path $RepoRoot 'test\macht_test.tcl'))
-    Run-Test 'engine' @((Join-Path $RepoRoot 'test\engine_test.tcl'))
     Run-Test 'native' @((Join-Path $RepoRoot 'test\native_test.tcl'), $httpFixture, $processFixture)
     Run-Test 'filesystem' @((Join-Path $RepoRoot 'test\filesystem_test.tcl'))
     Run-Test 'runtime services' @((Join-Path $RepoRoot 'test\runtime_test.tcl'))

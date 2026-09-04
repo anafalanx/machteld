@@ -30,6 +30,7 @@ if (-not $tclsh) { throw "dependency prefix has no static tclsh: $prefix" }
 $env:MACHTELD_DEPS_ROOT = [IO.Path]::GetFullPath($CacheRoot)
 $env:MACHTELD_GCC = Join-Path $MsysRoot 'ucrt64\bin\gcc.exe'
 $env:MACHTELD_STRIP = Join-Path $MsysRoot 'ucrt64\bin\strip.exe'
+$env:MACHTELD_WINDRES = Join-Path $MsysRoot 'ucrt64\bin\windres.exe'
 $outputFull = [IO.Path]::GetFullPath($Output)
 $outputParent = [IO.Path]::GetDirectoryName($outputFull)
 if (-not $outputParent) { throw "output has no parent directory: $outputFull" }

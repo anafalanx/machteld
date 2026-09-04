@@ -29,7 +29,7 @@ proc carries_runtime_notices {image} {
     set mount "notice-[pid]-[clock clicks]"
     if {[catch {zipfs mount $image $mount}]} { return 0 }
     try {
-        foreach notice {Apache-2.0.txt Tcl-9.0.4.txt Tk-9.0.4.txt} {
+        foreach notice {Apache-2.0.txt Tcl-9.0.4.txt Tk-9.0.4.txt yyjson-0.12.0.txt} {
             set expected [file join //zipfs:/app/licenses $notice]
             set embedded [file join //zipfs:/$mount/licenses $notice]
             if {![file isfile $expected] || ![file isfile $embedded]} { return 0 }
@@ -79,7 +79,7 @@ proc carries_reference_pack {image} {
 set console [file join $WORK wrapped-console.exe]
 wrap $TOOL -o $console --console
 check "wrap produces a console executable" [file executable $console]
-check "wrapped console needs no sidecar DLL" [expr {
+check "wrapped console needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped console carries exact runtime license notices" \
     [carries_runtime_notices $console]
@@ -105,6 +105,12 @@ set result [run -- $console --docs application-owned]
 check "wrapped console leaves ordinary --docs to its application" [expr {
     [dict get $result status] eq "ok" && [wait_for_file $marker] &&
     [string match *argv:--docs\ application-owned* [slurp $marker]]}]
+file delete -force $marker [file join $WORK _hello_store.db]
+set result [run -timeout 5s -- $console --machteld-engine application-owned]
+set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
+check "wrapped console leaves retired --machteld-engine to its application" [expr {
+    [dict get $result status] eq "ok" && [dict get $result exit] == 0 &&
+    [string match *argv:--machteld-engine\ application-owned* $text]}]
 file delete -force $marker
 set result [run -- $console --machteld-docs status --json]
 check "wrapped console exposes the namespaced documentation escape" [expr {
@@ -197,7 +203,7 @@ check "wrap revalidates an entry before packaging" [expr {
 set gui [file join $WORK wrapped-gui.exe]
 wrap $TOOL -o $gui --gui
 check "wrap produces a GUI executable" [file executable $gui]
-check "wrapped GUI needs no sidecar DLL" [expr {
+check "wrapped GUI needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped GUI carries exact runtime license notices" \
     [carries_runtime_notices $gui]
@@ -261,6 +267,17 @@ check "wrapped GUI leaves ordinary --docs to its application" [expr {
     [dict get $gui_owned_result status] eq "ok" &&
     [dict get $gui_owned_result exit] == 0 &&
     [string match *argv:--docs\ application-owned* $gui_owned_text]}]
+
+file delete -force $marker [file join $WORK _hello_store.db]
+set gui_engine_word_child [child start -env [list MACHTELD_WRAP_GUI_SELFTEST 1] -- \
+    $gui --machteld-engine application-owned]
+set gui_engine_word_result [child wait $gui_engine_word_child -timeout 5s]
+child close $gui_engine_word_child
+set gui_engine_word_text [expr {[file exists $marker] ? [slurp $marker] : ""}]
+check "wrapped GUI leaves retired --machteld-engine to its application" [expr {
+    [dict get $gui_engine_word_result status] eq "ok" &&
+    [dict get $gui_engine_word_result exit] == 0 &&
+    [string match *argv:--machteld-engine\ application-owned* $gui_engine_word_text]}]
 
 # A GUI documentation query is headless and writes explicitly because the GUI
 # subsystem has no standard output channel.  Omitting the required output is a

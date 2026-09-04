@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.15.1 contains and how possible additions are ordered.
+description: What Machteld 0.20 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -20,7 +20,7 @@ tags: [machteld, roadmap, windows]
   and Tk 9 reference with agent-oriented query, verification, and extraction.
 - Atomic console/GUI `wrap` with hidden assets and the complete runtime.
 
-## Stabilization before breadth
+## Continuing stabilization before breadth
 
 1. Gate the opt-in parser, direct host, both wrapped hosts, and `EntryCheck`
    against the same entry corpus.
@@ -32,12 +32,16 @@ tags: [machteld, roadmap, windows]
    all produced executables; test the documented distribution-only exceptions.
 5. Measure startup, idle memory, and packaging size after the product cut.
 
+The next three sections record the former 0.12.0-0.14.0 compute subsystem for
+release history. The complete subsystem was removed in 0.20 and is not part of
+the current runtime or reference.
+
 ## 0.12.0 — the engine
 
 The release moves all Lua out of the host process and replaces the 0.11.0
 `macht` grammar with an engine: the executable in engine mode, commanded by
-the `macht` verb family over a language-neutral wire, under the contract in
-[the engine](engine.md). Committed, in build order; each phase ends with every
+the `macht` verb family over a language-neutral wire, under the then-current
+engine contract. Committed, in build order; each phase ends with every
 test lane green and the tree never holds a gap between a removal and its
 replacement:
 
@@ -76,7 +80,7 @@ closing section so that its absence is a promise, not an oversight.
 
 The `col` library: precompiled column primitives in the cell, reaching
 the pool's native memory at measured memory-bandwidth speed, under the
-contract section "The col library" in [the engine](engine.md). Filters
+then-current engine contract. Filters
 over integer and float columns with IEEE law; exact chunked integer sums
 and the normative row-striped float tree; the fused one-pass
 `sumwhere`; NaN-skipping min/max; the selection algebra. Everything is
@@ -102,7 +106,7 @@ benches. A 0.12.0 entry line still starts under Tcl's version rules.
 The release that made big files interactive, proven by a spike GUI that
 filters a 5 GB, 25-million-row csv at typing speed (keystroke-to-repaint
 median under 100 ms). Its parts, each under "The col library" and road 2
-of [the engine](engine.md):
+of the then-current engine contract:
 
 - **Dictionary-encoded string columns.** Every `s` column dictionaries
   at load; string `filter` (`eq`/`ne`/`match`, byte-exact, `*`-only
@@ -160,7 +164,7 @@ then green); and the generated wrap launcher now derives its
 instead of a hardcoded literal. This was cut as a clean state; the merge it
 anticipated was later withdrawn (see below).
 
-## 0.15.1 - documentation corrected (cut 2026-09-03)
+## 0.15.1 — unreleased documentation checkpoint (2026-09-03)
 
 No runtime change from 0.15.0. The prose corpus had fallen behind the
 product: the README still announced 0.14.0, and fourteen pages plus
@@ -168,8 +172,8 @@ three reference pages still named 0.14.0 as the current version, because
 the release gate enforces the version trio in the header, the prelude
 and the wrap launcher and derives every test expectation from
 `src/machteld.h` - but prose was never in its remit. Every
-current-version claim now reads 0.15.1; genuine version history (engine
-mode arriving in 0.14.0, the per-release sections below) is left as
+current-version claim was advanced to 0.15.1; genuine version history (engine
+mode arriving in 0.12.0, the per-release sections above) is left as
 written, because renumbering history makes it false.
 
 Also corrected: **the contracted platform floor**. `contract.md` and the
@@ -179,9 +183,10 @@ on 2026-08-30 to **Windows 11 25H2 (build 26200) and Windows Server 2025
 is not a target. ConPTY still sets the technical floor at 1809, so the
 binary may start below the contract - it is simply not supported there.
 The `pty` page's own 1809 reference is about ConPTY's requirement and
-stands unchanged.
+stands unchanged. This checkpoint did not become a 0.15.1 build, public tag,
+or release artifact; those steps were skipped when 0.20 became the next target.
 
-## Next - command and control
+## 0.20 — clean Tcl/Tk foundation (released 2026-09-04)
 
 **The X merge is not happening.** The 2026-08-29 ruling that machteld
 and the statically typed X language would become one product is
@@ -189,56 +194,35 @@ withdrawn (2026-09-01): X is no longer developed as machteld's language,
 and **Tcl is the program form**, first-class and alone. X's design
 record lives in its own repository.
 
-The direction instead is machteld's viability as a Windows **command and
-control** system - commanding and supervising processes, machines and
-instruments from Windows, which is what the palette is already shaped
-for. The engine and Lua retirement, the in-process `col` organ, the
-process-control and parallelism law, and the side-folder standard remain
-the ruled runtime work; what changes is the lens they are chosen under.
-The detailed phase plan lives in the estate's platform plan, not here.
+The direction is Machteld's viability as a Windows **command and control**
+system: commanding and supervising processes, machines, and instruments from
+Windows, which is what the palette is already shaped for. Tcl is the sole
+program language, Tk is the GUI toolkit, and admitted native work is C or C++.
 
-## Candidates
+Version 0.20 is a deliberate subtraction release: engine mode, its wire,
+`macht`, Lua, LPeg, lua-cjson, and the engine-bound `col` implementation were
+removed together, with no migration surface. It adds no replacement capability;
+the clean Tcl/Tk runtime is the baseline for subsequent development.
+
+## Candidate studies
 
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
-- A smarter `topn` selection pass: the banked worst-case evidence
-  (~1 s for a descending click on a monotone column) is its driving
-  workload; admitted only by a registered prediction against that
-  number.
-- The sharded, schema-specialized loader: byte-range parallel parsing
-  into column pools, admitted only by a registered throughput
-  prediction.
-- A resident engine daemon over a named pipe, with rendezvous and idle
-  policy.
 
 ## Roads examined and not taken (2026-08, the runtime tour)
 
-A deliberate discourse arc examined every serious route to a vast
-library ecosystem, and the owner ruled for the narrow product: **user
-capabilities are written in X or Tcl; the author provisions native
-needs in the box (fast C in the palette, or the Tcl prelude); external
-software runs on the leash** (`run`/`child`/`scope` - always
-machteld's core competence). Users may bring their own Tcl packages
-and DLLs in a side-folder beside a built tool. Recorded so these are
-reopened by argument, not by forgetting:
+A deliberate discourse arc examined every serious route to a vast library
+ecosystem, and the owner ruled for the narrow product: **programs are Tcl; the
+author provisions native needs in the box as C/C++ palette commands or Tcl
+prelude code; external software is supervised through `run`, `child`, and
+`scope`**. Users may bring their own Tcl packages and DLLs in a folder beside a
+built tool. Recorded so these are reopened by argument, not by forgetting:
 
-- **External engine runtimes** - Deno, Bun, Node, Go sidecars, an
-  embeddable-Python engine, QuickJS - examined in depth and RETIRED
-  with the machinery superstructure. The language-neutral wire stays
-  in the engine contract as dormant capability: any executable
-  speaking it is an engine, but none is blessed, kitted, or promised.
-- **The permission-envelope idea survived by repatriation**: Deno's
-  one great lesson became the graded cage, where additive-from-a-
-  curated-base beats subtractive sandboxing.
-- **The wasm kernel hatch** (build-time-compiled sandboxed kernels in
-  the box) is SHELVED with a named trigger: a machteld user who is
-  not the author needs fast low-level code.
-- **`spawn` and `net` as scoped engine rights**: refused pending their
-  own rulings - the "engines address no network" law does not fall as
-  a side effect.
-- **TinyCC** (compile-on-target): refused - codegen quality, AV
-  posture, and gate-blindness; noted that a sidecar's private
-  interior may legally embed it under the dormant wire.
+- **External embedded runtimes** - Deno, Bun, Node, Go, Python, QuickJS, wasm,
+  and Lua - were examined and retired with their generic protocol and
+  conformance machinery. That machinery is removed in 0.20, not left dormant.
+- **TinyCC** (compile-on-target) was refused for code-generation quality,
+  antivirus posture, and inability to participate honestly in build gates.
 - **llama.cpp and DuckDB as machinery**: examined, unruled; the
   assessments (local models as organs-not-brains with
   grammar-constrained JSON; DuckDB as the analytics gap-filler) live
@@ -252,9 +236,9 @@ reopened by argument, not by forgetting:
 
 Solid XML handling, validation included, was decided on 2026-08-20 as a
 palette organ beside `json` — runtime capability, not an extensions-covenant
-errand — and deferred on 2026-08-22 to an unspecified later version, so that
-0.12.0 stays about one thing. The decision stands; only its release is
-unassigned. The deciding programs are the rail-family operations formats
+errand — and deferred on 2026-08-22 so the historical 0.12.0 release could stay
+focused. The capability remains decided, but no release is assigned. The
+deciding programs are the rail-family operations formats
 (railML, NeTEx, TAF/TSI, Darwin push data): schema-described XML is the
 data plane of long-lived operations environments, and a runtime that
 promises "just works for years" must read it in the box.
@@ -263,7 +247,7 @@ Recorded as constraints, not answers — the route is design work:
 
 - The leading vendor candidate is tDOM 0.9.7 (C, Tcl 9-ready, bundles
   expat 2.7.3): DOM, XPath, DTD validation, and its own schema engine,
-  statically linkable the way SQLite and Lua entered, pinned through the
+  statically linkable the way SQLite entered, pinned through the
   dependency lock with its license notices verified and carried. A narrower
   expat-based organ is the fallback if tDOM's surface proves too wide for a
   palette contract.
@@ -281,13 +265,14 @@ Recorded as constraints, not answers — the route is design work:
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None is promised by 0.15.1. Each needs a
-concrete program, a narrow Tcl-shaped contract, structured failures, manifest
-metadata, and tests on real Windows behavior before admission.
+selected WMI queries remain candidates. None was included in 0.20, and none has
+an assigned release. Each needs a concrete program, a narrow Tcl-shaped contract,
+structured failures, manifest metadata, and tests on real Windows behavior
+before admission.
 
 The extensions covenant (see [External libraries](extensions.md)) names its
 own candidate machinery: a wrap-time dependency resolver that classifies a
-program's requires as in-box, payload, or sidecar; a hashed manifest beside
+program's requires as in-box, payload, or tool-local; a hashed manifest beside
 the output; and a `--deps` mode that verifies it on the target. The policy
 is contracted now; the machinery follows the same admission bar as every
 verb.

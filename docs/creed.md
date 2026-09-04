@@ -23,10 +23,10 @@ tags: [machteld, principles, design]
 6. **Orthogonal and small.** Prefer one composable primitive over a policy stack.
    Version 0.x may still remove mistakes; 1.0 will freeze the surface.
 7. **Vanilla Tcl, extended.** Add commands and packages; do not mutate Tcl syntax.
-8. **One control plane.** Tcl commands; everything else is machinery - started,
-   fed, questioned, and killed by the program, never holding its control flow,
-   its events, its window, or its supervision. Machinery is a cache, never the
-   truth.
+8. **One language boundary.** Tcl owns program control and Tk owns graphical
+   interfaces. Native C/C++ facilities appear only as Tcl-shaped commands;
+   external software is started, questioned, supervised, and stopped as an
+   ordinary process.
 
 The practical thesis is simple: design for the machine as the most exacting
 reader, without putting a machine in the product.

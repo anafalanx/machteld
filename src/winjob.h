@@ -3,7 +3,7 @@
  * child is launched born-in-job (assigned to
  * its jobs by the kernel at CreateProcess time, before its first thread runs --
  * race-free), giving die-with-parent, whole-tree kill, resource limits, and an
- * event stream without a reaper side-car.
+ * event stream without a separate reaper process.
  */
 #ifndef MACHTELD_WINJOB_H
 #define MACHTELD_WINJOB_H

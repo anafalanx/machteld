@@ -32,10 +32,12 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> ex
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
-set expected {canon child cli detach dirs docs hash help http json links log macht manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
 check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
+check "retired macht command is absent" [expr {
+    [info commands ::machteld::macht] eq "" && ![dict exists [manifest] macht]}]
 set metadata [manifest]
 set pty_map [namespace ensemble configure ::machteld::pty -map]
 check "PTY public ensemble agrees with merged manifest" [expr {
@@ -62,11 +64,30 @@ check "embedded clock has catalogs and named timezone data" [expr {
     [string match {*1970} [clock format 0 -locale nl_BE -timezone :Europe/Brussels]]}]
 check "embedded Tcl library carries legacy encodings" [expr {
     [binary encode hex [encoding convertto cp1252 \u20ac]] eq "80"}]
+set pkgconfig_ok 1
+foreach {key expected_value} {
+    bindir,install //zipfs:/app
+    bindir,runtime //zipfs:/app
+    docdir,install //zipfs:/app/reference
+    docdir,runtime //zipfs:/app/reference
+    includedir,install //zipfs:/app
+    includedir,runtime //zipfs:/app
+    libdir,install //zipfs:/app
+    libdir,runtime //zipfs:/app
+    scriptdir,install //zipfs:/app/tcl_library
+    scriptdir,runtime //zipfs:/app/tcl_library
+} {
+    if {[::tcl::pkgconfig get $key] ne $expected_value} {
+        set pkgconfig_ok 0
+    }
+}
+check "embedded Tcl package paths identify the self-mounted runtime" $pkgconfig_ok
 set notice_ok 1
 foreach {notice expected} {
     Apache-2.0.txt 03fd93cceb0f40b82b132e58cff1b8d0d6d1f987a530f22aa5c024a84bfb2f69
     Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
     Tk-9.0.4.txt  2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
+    yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
 } {
     set path [file join //zipfs:/app/licenses $notice]
     if {![file isfile $path]} {
@@ -78,7 +99,7 @@ foreach {notice expected} {
     close $channel
     if {[hash sum sha256 $bytes] ne $expected} { set notice_ok 0 }
 }
-check "embedded runtime carries exact Apache, Tcl, and Tk licenses" $notice_ok
+check "embedded runtime carries exact Apache, Tcl, Tk, and yyjson licenses" $notice_ok
 
 set spec {
     --count {type int default 2 min 1 max 8 help "number of iterations"}
@@ -241,6 +262,11 @@ scope { pool create -width 3 -- $MT $WORKER }
 check "scope reaps every pool worker" [expr {[child list] eq $before}]
 
 # pmap closes its pool on all paths and re-raises a worker's structured failure.
+set pmap_usage_rc [catch {pmap} pmap_usage_message pmap_usage_options]
+check "pmap usage advertises every supported option" [expr {
+    $pmap_usage_rc &&
+    [dict get $pmap_usage_options -errorcode] eq {MACHTELD PMAP usage} &&
+    [string first {?-maxtries n?} $pmap_usage_message] >= 0}]
 set requests [lmap value {a b c d e f} {dict create op echo text $value}]
 check "pmap returns plain ordered results" [expr {
     [pmap $requests -width 3 -timeout 30s -- $MT $WORKER] eq {a b c d e f}}]
