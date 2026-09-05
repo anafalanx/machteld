@@ -132,9 +132,13 @@ proc ::machteld::PoolSpawn {tok} {
     set ci [child info $c]
     set out [dict get $ci stdout]
     set err [dict get $ci stderr]
-    fconfigure [dict get $ci stdin] -blocking 0 -buffering line
-    fconfigure $out -blocking 0 -buffering line
-    fconfigure $err -blocking 0
+    # child start -channels hands over byte-oriented (binary) channels. The
+    # worker protocol is UTF-8 JSON lines and `worker serve` configures its own
+    # ends that way, so the director must say so too or any character above
+    # U+00FF leaves as "?" and arrives as mojibake.
+    fconfigure [dict get $ci stdin] -blocking 0 -buffering line -encoding utf-8 -translation lf
+    fconfigure $out -blocking 0 -buffering line -encoding utf-8 -translation lf
+    fconfigure $err -blocking 0 -encoding utf-8 -translation lf
     chan event $out readable [list ::machteld::PoolReadable $tok $c]
     chan event $err readable [list ::machteld::PoolStderr  $tok $c]
     dict set POOL $tok workers [linsert [dict get $POOL $tok workers] end $c]
@@ -197,7 +201,7 @@ proc ::machteld::PoolFeed {tok c} {
     if {[catch {
         set ci [child info $c]
         set in [dict get $ci stdin]
-        puts $in [json encode -plain $item]
+        puts $in [json encode -plain -dict $item]
         flush $in
     }]} {
         PoolDied $tok $c
@@ -206,6 +210,7 @@ proc ::machteld::PoolFeed {tok c} {
 
 proc ::machteld::PoolReadable {tok c} {
     variable POOL
+    variable POOL_ERRCAP
     if {![dict exists $POOL $tok]} return
     if {[catch {child info $c} ci]} { PoolDied $tok $c ; return }
     if {![dict exists $ci stdout]} { PoolDied $tok $c ; return }
@@ -220,20 +225,23 @@ proc ::machteld::PoolReadable {tok c} {
             ![string match \{* $encoded] ||
             ![dict exists $rep id] || ![dict exists $rep ok]} {
             dict set POOL $tok errbuf [string range \
-                "[dict get $POOL $tok errbuf]protocol error: worker wrote a malformed reply\n" end-65535 end]
+                "[dict get $POOL $tok errbuf]protocol error: worker wrote a malformed reply\n" end-[expr {$POOL_ERRCAP - 1}] end]
             PoolDied $tok $c
             return
         }
         if {![dict exists [dict get $POOL $tok inflight] $c] ||
             [dict get $rep id] ne [dict get $POOL $tok inflight $c id]} {
             dict set POOL $tok errbuf [string range \
-                "[dict get $POOL $tok errbuf]protocol error: worker replied with an unexpected id\n" end-65535 end]
+                "[dict get $POOL $tok errbuf]protocol error: worker replied with an unexpected id\n" end-[expr {$POOL_ERRCAP - 1}] end]
             PoolDied $tok $c
             return
         }
         dict set POOL $tok results [linsert [dict get $POOL $tok results] end $rep]
         dict set POOL $tok inflight [dict remove [dict get $POOL $tok inflight] $c]
         PoolFeed $tok $c
+        # A failed feed has already declared this worker dead and closed its
+        # channels; reading $ch again would raise out of the event callback.
+        if {$c ni [dict get $POOL $tok workers]} return
     }
     if {[eof $ch]} { PoolDied $tok $c ; return }
     PoolCheckDone $tok

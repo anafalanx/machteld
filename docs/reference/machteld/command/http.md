@@ -32,8 +32,10 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
   no caller-supplied header or body is forwarded. Use it on every
   authenticated request carrying manual Authorization or Cookie headers. Any
   other value is `HTTP badvalue`. Omitted, redirects follow as documented.
-- `post` treats `body` as bytes. `-type` sets Content-Type; otherwise an explicit
-  Content-Type header is retained, or `application/octet-stream` is used.
+- `post` sends `body` as bytes: a bytearray byte for byte, any other value as
+  its UTF-8 string representation (so `json encode` output posts as UTF-8
+  JSON text). `-type` sets Content-Type; otherwise an explicit Content-Type
+  header is retained, or `application/octet-stream` is used.
 
 ## Results
 
@@ -44,8 +46,10 @@ are joined with comma-space in the cooked dict.
 ## Errors
 
 Raised codes are `HTTP badvalue`, `HTTP notfound`, `HTTP oserror`,
-`HTTP timeout`, `HTTP tls`, `HTTP toobig`, and `HTTP usage`. HTTP status codes
-are returned normally rather than raised.
+`HTTP timeout`, `HTTP tls`, `HTTP toobig`, and `HTTP usage`. `tls` covers the
+whole certificate and secure-channel failure family, `notfound` an
+unresolvable or unreachable host. HTTP status codes are returned normally
+rather than raised.
 
 ## Lifetime and timeouts
 
@@ -118,7 +122,8 @@ The method is exactly GET and has no request body.
 
 #### Arguments and options
 
-`body` is sent byte-for-byte. Explicit `-type` takes precedence over a
+`body` is sent byte-for-byte when it is a bytearray, and as its UTF-8 string
+representation otherwise. Explicit `-type` takes precedence over a
 Content-Type supplied in `-headers`.
 
 #### Results

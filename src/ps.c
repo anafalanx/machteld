@@ -33,6 +33,7 @@
 #include <psapi.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 static int ps_error(Tcl_Interp *interp, const char *code, const char *msg) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(msg, -1));

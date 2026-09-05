@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.20 contains and how possible additions are ordered.
+description: What Machteld 0.21 contains and how possible additions are ordered.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -203,6 +203,56 @@ Version 0.20 is a deliberate subtraction release: engine mode, its wire,
 `macht`, Lua, LPeg, lua-cjson, and the engine-bound `col` implementation were
 removed together, with no migration surface. It adds no replacement capability;
 the clean Tcl/Tk runtime is the baseline for subsequent development.
+
+## 0.21 — the fine comb (in preparation)
+
+No capability is added or removed; the 0.20 surface is combed for defects and
+each one is fixed in place, with a regression check where the release gate can
+carry one. Fixed:
+
+- **Documentation.** `help` failed with `invalid command name "Page"` on any
+  page longer than the default retrieval limit: the continuation marker was a
+  command substitution. `docs verify` no longer computes totals it discards.
+- **Workers.** The `pool` director never configured UTF-8 on the byte-oriented
+  channels `child start -channels` hands it, so non-ASCII text left as `?` and
+  returned as mojibake; a worker dying between a reply and its next request
+  could raise a background error out of the pool's read callback; the stderr
+  cap is one constant; request encoding names its container.
+- **JSON.** `encode -list` bypassed the typed-value check at the top level
+  (a typed array was re-parsed as Tcl words, and `-plain` could not refuse it);
+  a duplicate key in `decode -typed` was reported after the document was freed;
+  a repeated key leaked its Tcl key object in plain decode; strict duplicate
+  detection was quadratic per object; a NUL inside a string was mis-spelled in
+  both directions; a lone surrogate could make a typed handle render as `null`
+  (it is now refused by name); `json value array|object` given a typed handle
+  destroyed it; a nesting breach in a constructor carried `type` instead of
+  `depth`.
+- **HTTP.** `post` with a plain string body crashed on a character above
+  U+00FF and sent Latin-1 below it; the whole certificate failure family is
+  `tls`; a repeated response header leaked its key; a later `-headers` kept the
+  earlier dict's Content-Type fact; a connection-handle failure is `oserror`,
+  not `notfound`; the usage line matches the manifest.
+- **Processes.** `run -stdin` re-encoded a bytearray through its string
+  representation, and reported a child that exited before reading its input
+  as an I/O failure; `child kill` on a finished child replaced its exit with
+  `killed`; the monitor could spin forever when an exit code could not be
+  read; a deadline could fire on a tree that had already finished; `pty info`
+  leaked its result on a job query failure; the stdin write handle and a
+  callback line object could leak; a directory watch could free its overlapped
+  buffer with a read still outstanding.
+- **Filesystem.** `dirs`/`links` reported a root that exists but may not be
+  opened as `notfound`; out-of-memory was `badvalue`; `canon` asked for data
+  access it does not need, turning an unreadable file into `notfound`.
+- **Entry, store, winjob.** A first command that cannot be parsed is
+  `ENTRY optin`; a read failure while validating an entry carries a code;
+  `store get` leaked its result on a finalize failure; job-object failures no
+  longer dereference a NULL error pointer; the launcher's UTF-8 conversion is
+  strict like every other; the words handed to `Tcl_EvalObjv` are owned.
+- **Program support.** `cli` refuses a positional named `help` and never takes
+  `--` as an option value; `log configure` refuses `-channel` with `-file`.
+- **Build.** `-Werror` is unconditional in the release build (it was behind an
+  environment variable nothing set); the reference checker uses the packaged
+  prelude list; an orphaned serializer smoke script is gone.
 
 ## Candidate studies
 

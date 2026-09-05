@@ -612,8 +612,21 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             o->arg0 = v;
         } else if (strcmp(a, "-stdin") == 0) {
             if (!(allowed & OPT_STDIN)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            o->stdin_text = v;
-            o->stdin_len = vlen;
+            /* A byte array is fed byte for byte; any other value is fed as its
+             * UTF-8 string representation (the runtime's value rule). The type
+             * is matched by name because Tcl 9 registers only one of its two
+             * byte-array representations. */
+            const Tcl_ObjType *stype = objv[i + 1]->typePtr;
+            if (stype != NULL && strcmp(stype->name, "bytearray") == 0) {
+                Tcl_Size blen = 0;
+                const unsigned char *bytes = Tcl_GetByteArrayFromObj(objv[i + 1], &blen);
+                if (bytes == NULL) return mt_error(interp, dom, "badvalue", "-stdin value is not a byte array");
+                o->stdin_text = (const char *)bytes;
+                o->stdin_len = blen;
+            } else {
+                o->stdin_text = v;
+                o->stdin_len = vlen;
+            }
         } else if (strcmp(a, "-env") == 0) {
             if (!(allowed & OPT_ENV)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->env_obj = objv[i + 1];
@@ -674,8 +687,14 @@ static DWORD WINAPI child_monitor_thread(LPVOID arg) {
                     c->exit_code = (long long)(unsigned long long)code;
                     direct_done = 1;
                 } else {
+                    /* The direct process has exited even if its code cannot be
+                     * read; treat it as done or this loop never terminates and
+                     * the child can never be reaped. */
                     InterlockedExchange(&c->monitor_failed, 1);
                     query_failed = 1;
+                    direct_done = 1;
+                    InterlockedExchange(&c->killed, 1);
+                    if (wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
                 }
             } else if (wr == WAIT_FAILED) {
                 InterlockedExchange(&c->monitor_failed, 1);
@@ -701,7 +720,8 @@ static DWORD WINAPI child_monitor_thread(LPVOID arg) {
         }
         if (direct_done && io_done && (query_failed || active == 0)) break;
         ULONGLONG now = GetTickCount64();
-        if (c->deadline != 0 && now >= c->deadline) {
+        int tree_alive = !direct_done || (!query_failed && active != 0);
+        if (c->deadline != 0 && now >= c->deadline && tree_alive) {
             InterlockedExchange(&c->timeout, 1);
             InterlockedExchange(&c->killed, 1);
             if (wj_job_terminate(c->job, 1) != 0) {
@@ -961,7 +981,12 @@ static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
     if (join_failed) io_error = "joining child I/O thread failed";
     else if (c->monitor_failed) io_error = "child monitor failed";
     else if (c->ro.error || c->re.error) io_error = "reading child output failed";
-    else if (c->wi.error && !c->killed) io_error = "writing child input failed";
+    /* A child that exits, or closes its stdin, before consuming the supplied
+     * input is a normal outcome (the pipe reports no reader), not an I/O
+     * failure of the run. */
+    else if (c->wi.error && !c->killed && c->wi.error != ERROR_NO_DATA &&
+             c->wi.error != ERROR_BROKEN_PIPE && c->wi.error != ERROR_PIPE_NOT_CONNECTED)
+        io_error = "writing child input failed";
     if (c->proc) { wj_proc_close(c->proc); c->proc = NULL; }
     if (c->outR) { CloseHandle(c->outR); c->outR = NULL; }
     if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
@@ -1016,6 +1041,7 @@ static void child_free(child_t *c) {
     free(c->ro.buf);
     free(c->re.buf);
     free(c->wi.buf);
+    if (c->inW) { CloseHandle(c->inW); c->inW = NULL; }
     if (c->doneEv) CloseHandle(c->doneEv);
     if (c->job) wj_job_free(c->job);
     free(c);
@@ -1091,7 +1117,10 @@ static int pump_emit(Tcl_Interp *interp, Tcl_Obj *cb, const char *line, size_t l
     }
     Tcl_Obj *cmd = Tcl_DuplicateObj(cb);
     Tcl_IncrRefCount(cmd);
-    int rc = Tcl_ListObjAppendElement(interp, cmd, Tcl_NewStringObj(line, (Tcl_Size)len));
+    Tcl_Obj *text = Tcl_NewStringObj(line, (Tcl_Size)len);
+    Tcl_IncrRefCount(text);
+    int rc = Tcl_ListObjAppendElement(interp, cmd, text);
+    Tcl_DecrRefCount(text); /* the list holds its own reference, or none was taken */
     if (rc == TCL_OK) rc = Tcl_EvalObjEx(interp, cmd, TCL_EVAL_GLOBAL);
     Tcl_DecrRefCount(cmd);
     return rc;
@@ -1371,9 +1400,13 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             code = (unsigned)v;
         }
         if (!c->reaped) {
+            /* A tree that already finished keeps its real outcome: terminating
+             * an empty job succeeds, but calling that "killed" would replace an
+             * exit code the caller has not collected yet. */
+            int finished = WaitForSingleObject(c->doneEv, 0) == WAIT_OBJECT_0;
             if (wj_job_terminate(c->job, code) != 0)
                 return mt_error(interp, "CHILD", "oserror", "cannot terminate child job");
-            InterlockedExchange(&c->killed, 1);
+            if (!finished) InterlockedExchange(&c->killed, 1);
         }
         return TCL_OK;
     }
@@ -1862,13 +1895,13 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
      * pipe without consuming either source. */
     case INFO: {
         if (objc != 3) return mt_error(interp, "PTY", "usage", "pty info token");
-        Tcl_Obj *d = Tcl_NewDictObj();
-        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(p->token, -1));
-        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(p->pid));
         const char *e = NULL;
         unsigned active = 0;
         if (wj_job_active(p->job, &active, &e) != 0)
             return mt_error(interp, "PTY", "oserror", e);
+        Tcl_Obj *d = Tcl_NewDictObj();
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("token", -1), Tcl_NewStringObj(p->token, -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("pid", -1), Tcl_NewIntObj(p->pid));
         int running = active > 0;
         Tcl_DictObjPut(interp, d, Tcl_NewStringObj("running", -1), Tcl_NewIntObj(running));
         DWORD avail = 0;
@@ -2096,12 +2129,14 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
                          FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
                          FILE_NOTIFY_CHANGE_CREATION;
     int first = 1;
+    int pending = 0;   /* an issued read that has not been reaped */
     for (;;) {
         memset(&ov, 0, sizeof ov);
         ov.hEvent = ioEv;
         ResetEvent(ioEv);
         BOOL ok = ReadDirectoryChangesW(w->dir, buf, 64 * 1024, w->recursive,
                                         filter, NULL, &ov, NULL);
+        pending = ok ? 1 : 0;
         if (first) {
             /* `watch start` blocks until this point. Returning as soon as the
              * THREAD exists is not enough: until the first read is actually
@@ -2119,9 +2154,6 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
         if (r == WAIT_OBJECT_0 + 1) {
             /* Stop requested: withdraw the read and reap it before leaving, so
              * the buffer is not written after this thread frees it. */
-            CancelIoEx(w->dir, &ov);
-            DWORD got = 0;
-            GetOverlappedResult(w->dir, &ov, &got, TRUE);
             break;
         }
         if (r != WAIT_OBJECT_0) {
@@ -2130,9 +2162,11 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
         }
         DWORD got = 0;
         if (!GetOverlappedResult(w->dir, &ov, &got, FALSE)) {
+            pending = 0;
             watch_fail(w, GetLastError());
             break;
         }
+        pending = 0;
 
         EnterCriticalSection(&w->lock);
         if (got == 0) {
@@ -2175,6 +2209,13 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
         int failed = w->failed;
         LeaveCriticalSection(&w->lock);
         if (failed) break;
+    }
+    /* Every exit path reaps an outstanding read before the buffer goes away:
+     * a cancelled or failed wait leaves the OS free to complete into it. */
+    if (pending) {
+        CancelIoEx(w->dir, &ov);
+        DWORD got = 0;
+        GetOverlappedResult(w->dir, &ov, &got, TRUE);
     }
     CloseHandle(ioEv);
     free(buf);

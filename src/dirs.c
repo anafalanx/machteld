@@ -270,6 +270,17 @@ static HANDLE dirs_open(const wchar_t *path, int follow) {
                        NULL, OPEN_EXISTING, flags, NULL);
 }
 
+/* A metadata-only open for `canon`: identity and the final path need no
+ * data access, and asking for FILE_READ_DATA turned a file the caller may not
+ * read into a spurious notfound or dangling answer. */
+static HANDLE dirs_open_meta(const wchar_t *path, int follow) {
+    DWORD flags = FILE_FLAG_BACKUP_SEMANTICS;
+    if (!follow) flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    return CreateFileW(path, FILE_READ_ATTRIBUTES,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL, OPEN_EXISTING, flags, NULL);
+}
+
 static Tcl_Obj *dirs_link_row(const char *path, DWORD tag, int surrogate, const char *action) {
     Tcl_Obj *d = Tcl_NewDictObj();
     char hex[16];
@@ -1025,7 +1036,7 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
         DWORD need = GetFullPathNameW(raw, 0, NULL, NULL);
         if (need == 0) { free(raw); return dirs_error(interp, "badvalue", "the root is not a usable path"); }
         full = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
-        if (full == NULL) { free(raw); return dirs_error(interp, "badvalue", "out of memory"); }
+        if (full == NULL) { free(raw); return dirs_error(interp, "oserror", "out of memory"); }
         /* `>= need` AS WELL AS `== 0`. When the buffer is too small this returns
          * the REQUIRED size and writes nothing, so treating every non-zero
          * return as success leaves `full` uninitialised and wcslen below reads
@@ -1073,14 +1084,14 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
          * dropped and UNC\ takes its place, so the prefix is eight characters
          * standing in for two. dirs_strip undoes exactly this. */
         pref = (wchar_t *)malloc((fl + 8) * sizeof(wchar_t));
-        if (pref == NULL) { free(full); return dirs_error(interp, "badvalue", "out of memory"); }
+        if (pref == NULL) { free(full); return dirs_error(interp, "oserror", "out of memory"); }
         wcscpy(pref, L"\\\\?\\UNC");
         wcscat(pref, full + 1);
         free(full);
         *unc = 1;
     } else {
         pref = (wchar_t *)malloc((fl + 5) * sizeof(wchar_t));
-        if (pref == NULL) { free(full); return dirs_error(interp, "badvalue", "out of memory"); }
+        if (pref == NULL) { free(full); return dirs_error(interp, "oserror", "out of memory"); }
         wcscpy(pref, L"\\\\?\\");
         wcscat(pref, full);
         free(full);
@@ -1245,8 +1256,16 @@ static int dirs_core(Tcl_Interp *interp, Tcl_Obj *const objv[], DirsWalk *wp) {
     memset(&rati, 0, sizeof rati);
     HANDLE rh = dirs_open(rootw, 1);
     if (rh == INVALID_HANDLE_VALUE) {
+        /* Denied is not absent: a caller trapping `notfound` must not conclude
+         * that a directory it may not open does not exist (canon draws the
+         * same line). */
+        DWORD e = GetLastError();
         free(rootw);
-        dirs_free(&w); return dirs_error(interp, "notfound", "no such directory");
+        dirs_free(&w);
+        if (e == ERROR_ACCESS_DENIED) {
+            return dirs_error(interp, "oserror", "access to the root is denied");
+        }
+        return dirs_error(interp, "notfound", "no such directory");
     }
     BOOL rok = GetFileInformationByHandleEx(rh, FileAttributeTagInfo, &rati, sizeof rati);
     CloseHandle(rh);
@@ -1381,12 +1400,12 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     /* FOLLOW. This is the whole verb: `dirs` opens with
      * FILE_FLAG_OPEN_REPARSE_POINT so a junction is classified rather than
      * entered, and here the opposite is wanted -- the target is the answer. */
-    HANDLE h = dirs_open(pathw, 1);
+    HANDLE h = dirs_open_meta(pathw, 1);
     if (h == INVALID_HANDLE_VALUE) {
         /* A dangling link is not a missing path. A raw reparse-point open tells
          * us whether the name exists even though the followed open failed. */
         DWORD e = GetLastError();
-        HANDLE raw = dirs_open(pathw, 0);
+        HANDLE raw = dirs_open_meta(pathw, 0);
         if (raw != INVALID_HANDLE_VALUE) {
             CloseHandle(raw);
             free(pathw);

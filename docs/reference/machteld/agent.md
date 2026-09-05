@@ -9,7 +9,7 @@ commands: docs, help
 # Agent documentation bootstrap
 
 This executable contains the complete, exact-version offline references for
-Machteld 0.20, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
+Machteld 0.21, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
 API manuals and the Tk application, widget, and C API manuals—not merely a
 short Machteld guide.
 

@@ -12,7 +12,7 @@ This file states the cross-command rules. Command-specific vocabulary is in the
 
 ## Platform
 
-The 0.20 artifact targets x64 Windows 11 25H2 (build 26200) and Windows
+The 0.21 artifact targets x64 Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor, and ARM64 is not a target. The binary may well start on
 older builds — ConPTY, which sets the technical floor, has been present since
@@ -26,8 +26,8 @@ of these literal forms. `.tcl` is conventional, not required:
 
 ```tcl
 package require machteld
-package require machteld 0.20
-package require -exact machteld 0.20
+package require machteld 0.21
+package require -exact machteld 0.21
 ```
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
@@ -37,7 +37,7 @@ with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
 `{MACHTELD ENTRY payload}`. These startup failures exit before the program can
 be evaluated. Programs from stdin are not accepted.
 
-Once loaded, `package require machteld` returns `0.20`. Palette commands are in
+Once loaded, `package require machteld` returns `0.21`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add
 `namespace path ::machteld` or use qualified names.
 
@@ -152,7 +152,7 @@ the key did not exist. Operations before `open` raise `STORE notopen`.
 key/value table when needed in a durable database. Both configure a five-second
 SQLite busy timeout, allowing independent Machteld processes to wait through
 ordinary writer contention. SQLite failures use `STORE sqlite`.
-Every full, console-wrapped, and GUI-wrapped 0.20 host includes this same static
+Every full, console-wrapped, and GUI-wrapped 0.21 host includes this same static
 implementation.
 
 ## Manifest
@@ -198,7 +198,7 @@ the originating handoff lives at the repository root):
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-0.20 and the same machine-control, data, process, and Tcl composition commands,
+0.21 and the same machine-control, data, process, and Tcl composition commands,
 including `package require Tk`, static `store`, and the complete exact-version
 reference corpus. Nested wrapping alone is intentionally nonrecursive: `wrap`
 reports `WRAP unsupported` because tools carry no nested basekits. Deliberately

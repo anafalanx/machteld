@@ -16,6 +16,7 @@
  * MACHTELD_STATIC_SQLITE.
  */
 
+#undef USE_TCL_STUBS
 #include <stdlib.h>
 #include <string.h>
 #include "machteld.h"
@@ -177,6 +178,7 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             return fail_code(interp, "notfound", "store key not found");
         }
         if (rc != SQLITE_ROW || frc != SQLITE_OK) {
+            if (res != NULL) Tcl_DecrRefCount(res); /* built, never adopted */
             return fail(interp, sqlite3_errmsg(ctx->db));
         }
         Tcl_SetObjResult(interp, res);

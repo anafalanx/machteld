@@ -88,7 +88,7 @@ int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err) {
 
     if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
         LeaveCriticalSection(&j->lock);
-        *err = "SetInformationJobObject(limits) failed";
+        if (err) *err = "SetInformationJobObject(limits) failed";
         return -1;
     }
     LeaveCriticalSection(&j->lock);
@@ -115,7 +115,7 @@ int wj_job_allow_breakaway(wj_job *j, const char **err) {
     info.BasicLimitInformation.LimitFlags = flags;
     if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
         LeaveCriticalSection(&j->lock);
-        *err = "SetInformationJobObject(BREAKAWAY_OK) failed";
+        if (err) *err = "SetInformationJobObject(BREAKAWAY_OK) failed";
         return -1;
     }
     LeaveCriticalSection(&j->lock);
@@ -135,7 +135,7 @@ int wj_job_assign(wj_job *j, void *process_handle, const char **err) {
     }
     if (!AssignProcessToJobObject(j->handle, (HANDLE)process_handle)) {
         LeaveCriticalSection(&j->lock);
-        *err = "AssignProcessToJobObject failed";
+        if (err) *err = "AssignProcessToJobObject failed";
         return -1;
     }
     LeaveCriticalSection(&j->lock);

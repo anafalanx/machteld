@@ -6,9 +6,26 @@ one executable, starts no service, needs no installed Tcl, and keeps Windows
 process, ConPTY, filesystem, HTTP, hashing, JSON, and SQLite machinery behind
 Tcl-shaped commands.
 
+## 0.21 — the fine comb
+
+Machteld 0.21 is 0.20 with its defects rooted out and nothing added: the same
+commands, options, result shapes, and error codes, corrected where the code had
+drifted from its own contract. Among the fixes: `help` no longer fails on a page
+longer than the default retrieval limit; the `pool` director speaks UTF-8 to
+its workers as the protocol always promised; `json encode -list` honours a
+typed value, a NUL inside a JSON string survives both directions, and strict
+typed decoding is no longer quadratic in object size; `http post` sends a
+plain string as UTF-8 and reports the whole certificate failure family as
+`tls`; `run -stdin` feeds a bytearray byte for byte and no longer reports a
+child that ignored its input as a failure; `child kill` on a finished child
+keeps its real exit; `dirs` distinguishes a denied root from an absent one;
+and refcount, handle, and use-after-free errors on error paths are closed. The
+release build now compiles with `-Werror`, as the development loop always did.
+The complete list is in [the roadmap](docs/roadmap.md).
+
 ## 0.20 — clean Tcl/Tk foundation
 
-**[machteld 0.20 is released](https://github.com/anafalanx/machteld/releases/tag/v0.20)**
+**[machteld 0.20 was released](https://github.com/anafalanx/machteld/releases/tag/v0.20)**
 (2026-09-04; the executable is Authenticode-signed, with its SHA-256 checksum
 beside it). Machteld is decisively a Tcl/Tk platform, with C and C++ as its only
 admitted native implementation languages. The compute-engine architecture, the
@@ -29,23 +46,23 @@ The bundled Tcl core is 9.0.4 plus the exact upstream correction for
 [Tcl ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb), which
 preserves executable paths below ACL-restricted directories. The backport,
 source hashes, and upstream check-in identity are locked into the local build.
-The executable's Windows properties carry exact `0.20` file/product versions
+The executable's Windows properties carry exact `0.21` file/product versions
 and identify Vincent Vercauteren as author, publisher, and copyright holder;
 local build paths are scrubbed from the packaged runtime.
 
-Machteld 0.20 supports 64-bit Windows 11 25H2 (build 26200) and Windows
+Machteld 0.21 supports 64-bit Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor; ARM64 is not a target. ConPTY sets the technical floor
 and has existed since Windows 10 1809, so the binary may start below the
 contract — but the shipped artifact is x64 and supported only on the releases
 named here.
 
-Version 0.20 deliberately has one entry route: a readable UTF-8 program file.
+Version 0.21 deliberately has one entry route: a readable UTF-8 program file.
 The conventional extension is `.tcl`, but the runtime does not require it. The
 file must begin with a literal opt-in command:
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 
 set result [run -timeout 30s -- git status --short]
 puts [dict get $result out]
@@ -113,7 +130,7 @@ machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically.
 There is no reduced runtime mode: every wrapped console or GUI tool exposes the
-same programmatic Machteld 0.20 machine-control API, including the statically
+same programmatic Machteld 0.21 machine-control API, including the statically
 linked, binary-safe SQLite `store`. Wrapped tools also retain the complete
 offline reference corpus; wrapping basekits are not embedded recursively.
 

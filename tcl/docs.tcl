@@ -782,7 +782,7 @@ proc ::machteld::DocsVerify {args} {
     if {[llength $args]} { DocsFail usage {docs: wrong # args: should be "docs verify"} }
     set catalog [DocsLoad]
     set packFiles [DocsPackFiles]
-    set files 0; set bytes 0; set corpusInput ""
+    set corpusInput ""
     foreach relative [lsort [dict keys [dict get $catalog inventory]]] {
         set facts [dict get $catalog inventory $relative]
         if {![dict exists $packFiles $relative]} {
@@ -793,7 +793,6 @@ proc ::machteld::DocsVerify {args} {
         if {$actualBytes != [dict get $facts bytes]} { DocsFail corrupt "docs: byte count mismatch for $relative" }
         if {$actualHash ne [dict get $facts sha256]} { DocsFail corrupt "docs: hash mismatch for $relative" }
         append corpusInput $relative \0 $actualHash \0
-        incr files; incr bytes $actualBytes
     }
     # Tcl's internal string representation uses a modified UTF-8 encoding for
     # embedded NULs.  The corpus identity is explicitly defined over external
@@ -802,6 +801,8 @@ proc ::machteld::DocsVerify {args} {
         DocsFail corrupt "docs: cannot recompute the embedded corpus identity"
     }
     if {$actualCorpus ne [dict get $catalog corpus_sha256]} { DocsFail corrupt "docs: corpus identity mismatch" }
+    # files/bytes describe the complete verified pack (control files included);
+    # corpus_sha256 is the identity of the inventory alone, as the schema states.
     set files [dict size $packFiles]
     set bytes 0
     dict for {relative facts} $packFiles { incr bytes [dict get $facts bytes] }
@@ -1501,7 +1502,8 @@ proc ::machteld::help {args} {
     if {![catch {DocsGet $query} result options]} {
         set text [dict get $result text]
         if {[dict get $result truncated]} {
-            append text "\n\n[Page truncated; continue with: docs get [dict get $result id] -offset [dict get $result next]]"
+            # Escaped brackets: the marker is literal text, not a command.
+            append text "\n\n\[Page truncated; continue with: docs get [dict get $result id] -offset [dict get $result next]\]"
         }
         return $text
     }

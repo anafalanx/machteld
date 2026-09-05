@@ -269,6 +269,20 @@ check {help translates docs discovery failures into its own domain} [expr {
     [errorcode {help a}] eq {MACHTELD HELP notfound}}]
 check {help discovery advertises agent query primitives} [expr {
     [string match {*docs get*docs search*docs schema*} [help]]}]
+# A page beyond the default retrieval limit reaches help with a literal
+# continuation marker. In 0.20 the marker was written as a command
+# substitution, so every long page made help fail.
+set longId ""
+foreach candidate {tk/command/canvas tk/command/text tcl/command/http tcl/c-api/filesystem} {
+    if {![catch {docs get $candidate} page] && [dict get $page truncated]} {
+        set longId $candidate
+        break
+    }
+}
+check {the corpus has a page beyond the default retrieval limit} [expr {$longId ne ""}]
+check {help delivers a truncated page with its continuation marker} [expr {
+    $longId ne "" &&
+    [string match "*\\\[Page truncated; continue with: docs get $longId -offset *\\\]" [help $longId]]}]
 
 file delete -force $work
 if {$fails} { puts stderr "$fails reference test(s) failed"; exit 1 }

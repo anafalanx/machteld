@@ -86,10 +86,9 @@ proc run {args} {
     }
 }
 
-set warnings {-Wall -Wextra -Wpedantic -Wformat=2 -Wundef}
-if {[info exists ::env(MACHTELD_WERROR)] && $::env(MACHTELD_WERROR) eq "1"} {
-    lappend warnings -Werror
-}
+# -Werror is unconditional: the release build must be at least as strict as
+# the development loop (tools/dev.tcl), which has always compiled with it.
+set warnings {-Wall -Wextra -Wpedantic -Wformat=2 -Wundef -Werror}
 set defines {
     -DUNICODE -D_UNICODE -DSTATIC_BUILD=1
     -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON

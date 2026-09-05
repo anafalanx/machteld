@@ -67,6 +67,10 @@ proc ::machteld::CliNorm {spec} {
         }
         set key [expr {$kind eq "option" ? [string range $name 2 end] : $name}]
         if {$key eq ""} { Fail CLI badvalue "cli: \"--\" is not an option name" }
+        # The parser owns the `help` result key for both spellings.
+        if {$key eq "help"} {
+            Fail CLI badvalue "cli: \"$name\" collides with the parser's help key"
+        }
         # Still reachable even after the duplicate-key check above: `--dir` and a
         # positional `dir` are distinct dict keys that would land on one result key.
         if {[dict exists $seen $key]} {
@@ -213,9 +217,8 @@ proc ::machteld::CliHelpText {attrs} {
 
 proc ::machteld::cli {args} {
     set subs {parse usage duration}
-    set opts {}
     if {[llength $args] < 1} {
-        Fail CLI usage "usage: cli parse argv spec | cli usage spec ?name?"
+        Fail CLI usage "usage: cli parse argv spec | cli usage spec ?name? | cli duration value"
     }
     set sub [lindex $args 0]
     if {$sub ni $subs} {
@@ -287,7 +290,8 @@ proc ::machteld::CliParse {argv norm} {
         }
         # Refuse a missing value here instead of passing an ambiguous empty one.
         set nxt [lindex $argv [expr {$i + 1}]]
-        if {$i + 1 >= [llength $argv] || ([string match --* $nxt] && $nxt ne "--")} {
+        # `--` is the end-of-options marker everywhere, a value nowhere.
+        if {$i + 1 >= [llength $argv] || [string match --* $nxt]} {
             Fail CLI usage "$n needs a value"
         }
         incr i

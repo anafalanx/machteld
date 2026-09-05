@@ -498,6 +498,23 @@ if {[info exists ::env(MACHTELD_TEST_PTY_IO)] && $::env(MACHTELD_TEST_PTY_IO) eq
     catch {pty close $repl}
 }
 
+# 0.21 regressions: -stdin feeds bytes, an unread -stdin is not a failure, and
+# a kill after exit keeps the real outcome.
+set raw_input [binary decode hex 00ff80c0e29c930a]
+set result [run -stdin $raw_input -- $FIXTURE stdin-echo]
+check "run -stdin feeds a bytearray byte for byte" [expr {
+    [dict get $result out] eq $raw_input}]
+set result [run -stdin [string repeat x 1048576] -- $FIXTURE ok ignored]
+check "run -stdin to a child that never reads it is still ok" [expr {
+    [dict get $result status] eq "ok" && [dict get $result out] eq "ignored"}]
+set token [child start -- $FIXTURE ok done]
+while {[dict get [child info $token] running]} { after 10 }
+child kill $token
+set result [child wait $token]
+check "child kill after exit keeps the real outcome" [expr {
+    [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
+child close $token
+
 file delete -force $WORK
 if {$fails} {
     puts stderr "$fails process test(s) failed"

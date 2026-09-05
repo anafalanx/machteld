@@ -124,10 +124,16 @@ proc ::machteld::log {args} {
                     if {$v ni [chan names]} {
                         Fail LOG badvalue "log: \"$v\" is not an open channel"
                     }
+                    if {$sinkKind eq "file"} {
+                        Fail LOG usage "log: -channel and -file are exclusive"
+                    }
                     set sinkKind channel
                     set sinkValue $v
                 }
                 -file {
+                    if {$sinkKind eq "channel"} {
+                        Fail LOG usage "log: -channel and -file are exclusive"
+                    }
                     set sinkKind file
                     set sinkValue $v
                 }
