@@ -13,6 +13,7 @@ struct wj_job {
     HANDLE handle;
     int    closed;
     int    kill_on_close;
+    int    breakaway;      /* BREAKAWAY_OK granted; re-asserted by every limits write */
     CRITICAL_SECTION lock;
 };
 
@@ -64,6 +65,9 @@ int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err) {
     if (j->kill_on_close) {
         flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     }
+    if (j->breakaway) {
+        flags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    }
     if (l->process_memory_bytes) {
         flags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
         info.ProcessMemoryLimit = (SIZE_T)l->process_memory_bytes;
@@ -106,38 +110,27 @@ int wj_job_allow_breakaway(wj_job *j, const char **err) {
         if (err) *err = "job is closed";
         return -1;
     }
+    /* Start from the job's current limits: a single LimitFlags write is
+     * authoritative, and a zeroed block would silently drop every cap that
+     * wj_job_set_limits had installed. */
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
     ZeroMemory(&info, sizeof(info));
-    DWORD flags = JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-    if (j->kill_on_close) {
-        flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; /* preserve die-with-parent */
+    DWORD got = 0;
+    if (!QueryInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info), &got)) {
+        LeaveCriticalSection(&j->lock);
+        if (err) *err = "QueryInformationJobObject(limits) failed";
+        return -1;
     }
-    info.BasicLimitInformation.LimitFlags = flags;
+    info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+    if (j->kill_on_close) {
+        info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; /* preserve die-with-parent */
+    }
     if (!SetInformationJobObject(j->handle, JobObjectExtendedLimitInformation, &info, sizeof(info))) {
         LeaveCriticalSection(&j->lock);
         if (err) *err = "SetInformationJobObject(BREAKAWAY_OK) failed";
         return -1;
     }
-    LeaveCriticalSection(&j->lock);
-    return 0;
-}
-
-int wj_job_assign(wj_job *j, void *process_handle, const char **err) {
-    if (j == NULL || process_handle == NULL) {
-        *err = "job is closed";
-        return -1;
-    }
-    EnterCriticalSection(&j->lock);
-    if (j->closed) {
-        LeaveCriticalSection(&j->lock);
-        *err = "job is closed";
-        return -1;
-    }
-    if (!AssignProcessToJobObject(j->handle, (HANDLE)process_handle)) {
-        LeaveCriticalSection(&j->lock);
-        if (err) *err = "AssignProcessToJobObject failed";
-        return -1;
-    }
+    j->breakaway = 1;
     LeaveCriticalSection(&j->lock);
     return 0;
 }
@@ -201,10 +194,3 @@ void *wj_job_handle(wj_job *j) {
     return h;
 }
 
-int wj_in_job(void *process_handle, void *job_handle) {
-    BOOL res = FALSE;
-    if (!IsProcessInJob((HANDLE)process_handle, (HANDLE)job_handle, &res)) {
-        return -1;
-    }
-    return res ? 1 : 0;
-}

@@ -108,7 +108,12 @@ static int http_put_header(Tcl_Obj *d, const char *line, size_t len) {
     size_t nlen = (size_t)(colon - line);
     const char *v = colon + 1;
     size_t vlen = len - nlen - 1;
+    /* Optional whitespace around the value and before the colon is syntax,
+     * not content (RFC 9110 5.5 and 5.1). */
     while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
+    while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
+    while (nlen > 0 && (line[nlen - 1] == ' ' || line[nlen - 1] == '\t')) nlen--;
+    if (nlen == 0) return 1;
 
     char *name = (char *)malloc(nlen + 1);
     if (name == NULL) return 0;
@@ -267,7 +272,9 @@ static int http_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int fi
         if (strcmp(a, "-type")  == 0) {
             if (!allow_type) return http_error(interp, "usage", "-type is only valid for http post");
             if (!http_text_safe(v, 0)) return http_error(interp, "badvalue", "-type contains a forbidden newline or NUL");
-            o->type = Tcl_GetString(v); continue;
+            o->type = Tcl_GetString(v);
+            if (o->type[0] == '\0') return http_error(interp, "badvalue", "-type may not be empty");
+            continue;
         }
         if (strcmp(a, "-headers") == 0) {
             Tcl_Size n;
@@ -384,6 +391,12 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         http_cleanup(&r);
         return http_error(interp, "badvalue", "only http and https urls are supported");
     }
+    /* Credentials in a URL would be silently discarded here; refuse them so a
+     * caller cannot believe they were sent. */
+    if (uc.dwUserNameLength != 0 || uc.dwPasswordLength != 0) {
+        http_cleanup(&r);
+        return http_error(interp, "badvalue", "credentials in the url are not supported; send an Authorization header");
+    }
 
     r.whost = (wchar_t *)malloc(((size_t)uc.dwHostNameLength + 1) * sizeof(wchar_t));
     if (r.whost == NULL) { http_cleanup(&r); return http_error(interp, "oserror", "out of memory"); }
@@ -484,7 +497,7 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         if (Tcl_DictObjFirst(interp, o->headers, &s, &k, &v, &done) != TCL_OK) {
             Tcl_DecrRefCount(hdrbuf);
             http_cleanup(&r);
-            return TCL_ERROR;
+            return http_error(interp, "badvalue", "-headers takes a dict");
         }
         for (; !done; Tcl_DictObjNext(&s, &k, &v, &done)) {
             Tcl_AppendObjToObj(hdrbuf, k);
@@ -539,9 +552,14 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     /* Raw headers: asked for its size first, the same discipline as every other
      * sized Win32 query in this codebase. */
     DWORD rawlen = 0;
+    /* A NULL buffer asks for the size; WinHTTP answers with
+     * ERROR_INSUFFICIENT_BUFFER and the byte count. A success here would mean
+     * no header bytes at all, which is treated as exactly that. */
     if (WinHttpQueryHeaders(r.req, WINHTTP_QUERY_RAW_HEADERS_CRLF,
             WINHTTP_HEADER_NAME_BY_INDEX, NULL, &rawlen,
-            WINHTTP_NO_HEADER_INDEX) || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+            WINHTTP_NO_HEADER_INDEX)) {
+        rawlen = 0;
+    } else if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
         DWORD e = GetLastError();
         http_cleanup(&r);
         return http_win_error(interp, "oserror", "cannot size the response headers", e);

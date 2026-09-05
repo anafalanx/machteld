@@ -208,7 +208,9 @@ proc ::machteld::CliHelpText {attrs} {
     } elseif {[dict exists $attrs max]} {
         lappend extra "at most [dict get $attrs max]"
     }
-    if {[dict exists $attrs default] && [dict get $attrs default] ni {"" 0}} {
+    # A flag's default 0 is noise; any other declared default is information.
+    set isFlag [expr {[dict exists $attrs type] && [dict get $attrs type] eq "flag"}]
+    if {[dict exists $attrs default] && [dict get $attrs default] ne "" && !$isFlag} {
         lappend extra "default [dict get $attrs default]"
     }
     if {[llength $extra]} { append t " (" [join $extra {; }] ")" }

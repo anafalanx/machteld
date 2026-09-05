@@ -277,7 +277,9 @@ proc ref_stale {} {
         }]]
         if {$sourceNames ne $generatedNames} { return 1 }
     }
-    foreach pat {docs/*.md docs/reference/machteld/*.md docs/reference/machteld/command/*.md} {
+    # The corpus also embeds the runtime version and the license notices.
+    foreach pat {docs/*.md docs/reference/machteld/*.md docs/reference/machteld/command/*.md
+                 src/machteld.h LICENSE licenses/*.txt} {
         foreach f [glob -nocomplain [Rp {*}[split $pat /]]] {
             if {[file mtime $f] > $stamp} { return 1 }
         }

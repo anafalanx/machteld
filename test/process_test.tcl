@@ -514,6 +514,12 @@ set result [child wait $token]
 check "child kill after exit keeps the real outcome" [expr {
     [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
 child close $token
+set token [child start -- $FIXTURE hang 10000]
+child kill $token 4294967295
+set result [child wait $token]
+check "child kill carries the full exit-code range" [expr {
+    [dict get $result status] eq "killed" && [dict get $result exit] == 4294967295}]
+child close $token
 
 file delete -force $WORK
 if {$fails} {

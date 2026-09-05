@@ -28,7 +28,8 @@ worker serve
 `worker on name arglist body` creates a real proc in the caller's namespace. The
 argument list is the request schema, including Tcl defaults. Operation names use
 letters, digits, `_`, `.`, and `-`, and begin with a letter or underscore.
-`worker ops` returns the registered schemas.
+`worker ops` returns the registered schemas. A trailing `args` parameter is
+optional and receives the request field named `args` as one value.
 
 `worker serve` reads UTF-8 JSON objects, one line at a time, from stdin and writes
 one JSON reply to stdout. Requests have an `id`, `op`, and fields named by the

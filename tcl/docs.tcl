@@ -1496,7 +1496,7 @@ proc ::machteld::DocsHelpError {message options {discovery 0}} {
 
 proc ::machteld::help {args} {
     if {![llength $args]} {
-        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl 9.0.4 — applications, language commands, and C API\n  Tk 9.0.4 — applications, widgets, and C API\n\nHost routes:\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
+        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl [info patchlevel] — applications, language commands, and C API\n  Tk [expr {[llength [package versions Tk]] ? [lindex [package versions Tk] 0] : "?"}] — applications, widgets, and C API\n\nHost routes:\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
     }
     set query [join $args " "]
     if {![catch {DocsGet $query} result options]} {

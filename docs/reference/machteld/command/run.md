@@ -35,7 +35,8 @@ Use `--` when `command` or one of its arguments could be read as an option.
 - `-dir path` selects the working directory; the default is inherited.
 - `-env dict` overlays environment names and values on the inherited
   environment. Names compare case-insensitively on Windows.
-- `-arg0 word` changes only argument zero after executable resolution.
+- `-arg0 word` changes only argument zero after executable resolution. It has
+  no effect on a `.bat`/`.cmd` target, which runs through `cmd.exe`.
 - `-stdin bytes` supplies the child's standard input and then closes it. A
   bytearray is fed byte for byte; any other value is fed as its UTF-8 string
   representation. A child that exits, or closes its input, before consuming
@@ -88,7 +89,13 @@ run -inherit -- git log --oneline
 
 This is a Windows process launch, not shell evaluation: quoting and redirection
 characters are ordinary arguments. Use `cmd.exe /c` explicitly when shell
-syntax is intended. Capture is intentionally bounded; use callbacks or inherited
+syntax is intended. A bare command is searched only in `PATH`; a name with a
+separator resolves against the current directory. The name's own spelling is
+tried when it carries an extension, then `.exe`, `.com`, `.bat`, and `.cmd`
+are appended in turn, so `python3.11` finds `python3.11.exe`. A `.bat`/`.cmd`
+target runs through a defensively quoted `cmd.exe`; an argument containing a
+newline, or a script path containing a quote or ending in a backslash, is
+refused. Capture is intentionally bounded; use callbacks or inherited
 I/O for unbounded streams. Use capture or `child -channels` for arbitrary binary
 output because callback lines require UTF-8.
 

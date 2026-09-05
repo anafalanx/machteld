@@ -81,6 +81,9 @@ proc ::machteld::worker {args} {
             foreach aname [info args $pname] {
                 if {[info default $pname $aname dflt]} {
                     lappend spec [list $aname $dflt]
+                } elseif {$aname eq "args"} {
+                    # A trailing args is optional, as the dispatcher treats it.
+                    lappend spec [list args {}]
                 } else {
                     lappend spec $aname
                 }

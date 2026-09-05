@@ -92,7 +92,7 @@ typedef struct {
  * the reparse points and (on request) the multiply-linked files it passes. One
  * walker serves both, because two walkers is two answers to "what is under
  * here" and this file exists to have one. In DIRS mode every branch below
- * behaves exactly as it did before the mode existed -- the 809 checks are the
+ * behaves exactly as it did before the mode existed -- the filesystem checks are the
  * gate on that, and they run unchanged. */
 #define DIRS_MODE_DIRS  0
 #define DIRS_MODE_LINKS 1
@@ -128,7 +128,6 @@ typedef struct {
     Tcl_Obj     *multi;      /* {path .. links N} per multiply-linked file */
     Tcl_Obj     *entered;    /* non-surrogate reparse dirs successfully enumerated */
     Tcl_WideInt  files;
-    Tcl_WideInt  multilink;
 } DirsWalk;
 
 /* MB_ERR_INVALID_CHARS IS THE MIRROR OF THE FLAG BELOW, and the two have to
@@ -311,19 +310,6 @@ static void dirs_fault(DirsWalk *w, const wchar_t *path, DWORD e) {
     free(why);
 }
 
-/* Read one directory into a freshly allocated, sorted child array.
- *
- * THE RESTART CALL RETURNS THE FIRST BATCH -- it is not a seek. Written as the
- * specification had it,
- *
- *     GetFileInformationByHandleEx(h, FileIdBothDirectoryRestartInfo, buf, n);
- *     while (GetFileInformationByHandleEx(h, FileIdBothDirectoryInfo, buf, n)) { ... }
- *
- * the loop condition overwrites `buf` with the SECOND batch before the body ever
- * sees the first, and at 64 KB almost every directory fits in one batch -- so the
- * body runs zero times, `paths` comes back holding the root alone, `errors` is
- * empty, and the verb reports a clean, plausible, entirely empty answer. Hence
- * the do/while shape: process what you were given, then ask for more. */
 /* --- links mode: naming a reparse point, and reading where it points -------- */
 static const char *links_type(DWORD tag, int isdir) {
     if (tag == IO_REPARSE_TAG_SYMLINK) {
@@ -509,6 +495,19 @@ static void links_record(DirsWalk *w, const wchar_t *full, const char *shown,
     }
 }
 
+/* Read one directory into a freshly allocated, sorted child array.
+ *
+ * THE RESTART CALL RETURNS THE FIRST BATCH -- it is not a seek. Written as the
+ * specification had it,
+ *
+ *     GetFileInformationByHandleEx(h, FileIdBothDirectoryRestartInfo, buf, n);
+ *     while (GetFileInformationByHandleEx(h, FileIdBothDirectoryInfo, buf, n)) { ... }
+ *
+ * the loop condition overwrites `buf` with the SECOND batch before the body ever
+ * sees the first, and at 64 KB almost every directory fits in one batch -- so the
+ * body runs zero times, `paths` comes back holding the root alone, `errors` is
+ * empty, and the verb reports a clean, plausible, entirely empty answer. Hence
+ * the do/while shape: process what you were given, then ask for more. */
 static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                          DirsChild **out, size_t *outn) {
     size_t bufsz = DIRS_BUFSZ;
@@ -627,7 +626,6 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                                 if (nl == 0) {
                                     dirs_fault(w, fp, GetLastError());
                                 } else if (nl > 1) {
-                                    w->multilink++;
                                     Tcl_Obj *m = Tcl_NewDictObj();
                                     Tcl_DictObjPut(NULL, m, Tcl_NewStringObj("path", -1),
                                                    Tcl_NewStringObj(fshown ? fshown : "", -1));
@@ -985,8 +983,8 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
         return dirs_error(interp, "badvalue",
             "a drive-relative root resolves against hidden per-drive state -- write C:/ instead of C:");
     }
-    if ((given[0] == '\\' && given[1] == '\\' && given[2] == '.' && given[3] == '\\')
-        || (given[0] == '/' && given[1] == '/' && given[2] == '.' && given[3] == '/')) {
+    if ((given[0] == '\\' || given[0] == '/') && (given[1] == '\\' || given[1] == '/') &&
+        given[2] == '.' && (given[3] == '\\' || given[3] == '/')) {
         return dirs_error(interp, "badvalue", "a device path is not a directory tree");
     }
 
@@ -1071,7 +1069,10 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
     while (fl > 1 && full[fl - 1] == L'\\') {
         int driveroot = (fl == 3 && full[1] == L':')
                      || (already && fl == 7 && full[5] == L':');
-        if (driveroot) break;
+        /* \\?\Volume{GUID}\ is a root by the same rule: without its
+         * backslash it names the volume device, not its root directory. */
+        int volumeroot = already && fl == 49 && _wcsnicmp(full, L"\\\\?\\Volume{", 11) == 0;
+        if (driveroot || volumeroot) break;
         full[--fl] = L'\0';
     }
 
@@ -1103,8 +1104,8 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
 /* Result lists start at refcount zero and are adopted only by the final result
  * dict. Every earlier return must release them explicitly. */
 /* SEPARATE FROM dirs_free, because the prune copy has to be released on the
- * SUCCESS path too -- where the five result lists must NOT be, three of them
- * having been adopted by the dict. Called from both. */
+ * SUCCESS path too -- where the result lists must NOT be, those adopted by
+ * the dict included. Called from both. */
 static void dirs_freeprune(DirsWalk *w) {
     if (w->pruneobj != NULL) {
         Tcl_DecrRefCount(w->pruneobj);
@@ -1190,6 +1191,9 @@ static int dirs_opt_kv(Tcl_Interp *interp, const char *a, Tcl_Obj *v, DirsWalk *
 static int dirs_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], DirsWalk *w) {
     for (int i = 2; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
+        if (strcmp(a, "-depth") != 0 && strcmp(a, "-prune") != 0) {
+            return dirs_error(interp, "usage", "unknown option: expected -depth or -prune");
+        }
         if (i + 1 >= objc) return dirs_error(interp, "usage", "option needs a value");
         if (dirs_opt_kv(interp, a, objv[++i], w) != TCL_OK) return TCL_ERROR;
     }
@@ -1201,6 +1205,9 @@ static int links_parse(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], Dirs
     for (int i = 2; i < objc; i++) {
         const char *a = Tcl_GetString(objv[i]);
         if (strcmp(a, "-hardlinks") == 0) { w->hardlinks = 1; continue; }
+        if (strcmp(a, "-depth") != 0 && strcmp(a, "-prune") != 0) {
+            return dirs_error(interp, "usage", "unknown option: expected -depth, -prune, or -hardlinks");
+        }
         if (i + 1 >= objc) return dirs_error(interp, "usage", "option needs a value");
         if (dirs_opt_kv(interp, a, objv[++i], w) != TCL_OK) return TCL_ERROR;
     }
@@ -1231,7 +1238,6 @@ static void dirs_init(DirsWalk *w, int mode) {
     w->multi = Tcl_NewListObj(0, NULL);
     w->entered = Tcl_NewListObj(0, NULL);
     w->files = 0;
-    w->multilink = 0;
 }
 
 /* The walk itself, once the options are in. Takes no argv beyond the root, so

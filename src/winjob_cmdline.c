@@ -175,18 +175,17 @@ static int ci_eq(const char *a, const char *b) {
 /* True if the last path component's extension is .bat or .cmd. Matches Go's
  * filepath.Ext (the last '.' in the final path element). */
 int wj_is_batch_target(const char *exe) {
-    const char *dot = NULL;
+    const char *base = exe;
     for (const char *c = exe; *c; c++) {
-        if (*c == '/' || *c == '\\') {
-            dot = NULL; /* a new path element begins */
-        } else if (*c == '.') {
-            dot = c;
-        }
+        if (*c == '/' || *c == '\\') base = c + 1;
     }
-    if (dot == NULL) {
-        return 0;
-    }
-    return ci_eq(dot, ".bat") || ci_eq(dot, ".cmd");
+    /* Win32 drops trailing dots and spaces when it opens a name, so "x.bat."
+     * runs x.bat: classify the name the way it will be opened. */
+    size_t n = strlen(base);
+    while (n > 0 && (base[n - 1] == '.' || base[n - 1] == ' ')) n--;
+    if (n < 4) return 0;
+    const char *ext = base + n - 4;
+    return _strnicmp(ext, ".bat", 4) == 0 || _strnicmp(ext, ".cmd", 4) == 0;
 }
 
 /* ---- batch command line (CVE-2024-24576 mitigation) -------------------- *

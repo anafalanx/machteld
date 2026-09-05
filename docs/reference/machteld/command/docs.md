@@ -84,7 +84,7 @@ All Tcl subcommands return dicts.
 - `verify`: `ok`, verified `documents`, `files`, `bytes`, and `corpus_sha256`.
 - `get`: `id`, `requested_id`, `product`, `version`, `type`, `title`, `summary`,
   `names`, `format`, `section`, `path`, `sha256`, `bytes`, `text`, `total`,
-  `returned`, `truncated`, and `next`.
+  `offset`, `limit`, `returned`, `truncated`, and `next`.
 - `outline`: exact `id`, `title`, and indexed `sections`.
 - `extract`: normalized output `path`, `files`, `bytes`, and `corpus_sha256`.
 

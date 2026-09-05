@@ -76,7 +76,9 @@ static char *comspec_path(const char **err) {
         wchar_t full[MAX_PATH + 16];
         lstrcpynW(full, sys, MAX_PATH);
         lstrcatW(full, L"\\cmd.exe");
-        return u16_to_u8(full);
+        char *u = u16_to_u8(full);
+        if (u == NULL) *err = "out of memory";
+        return u;
     }
     *err = "cannot locate cmd.exe to run a batch file";
     return NULL;
@@ -91,9 +93,16 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         *err = "all three stdio handles must be non-NULL";
         return -1;
     }
-    if (njobs < 0 || (njobs > 0 && job_handles == NULL) ||
-        (njobs == 0 && !want_breakaway) || (want_breakaway && njobs != 0)) {
+    if (njobs < 0 || (njobs > 0 && job_handles == NULL)) {
+        *err = "job list is invalid";
+        return -1;
+    }
+    if (njobs == 0 && !want_breakaway) {
         *err = "a supervised launch requires at least one job";
+        return -1;
+    }
+    if (want_breakaway && njobs != 0) {
+        *err = "a breakaway launch takes no job";
         return -1;
     }
     for (int i = 0; i < njobs; i++) {
@@ -135,6 +144,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     wApp = u8_to_u16(appExe);
     wCmd = u8_to_u16(cmdText); /* CreateProcessW may modify this buffer: it's our own copy */
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
+    if (wcslen(wCmd) > 32767) { *err = "command line exceeds 32767 characters"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
         wDir = u8_to_u16(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }
@@ -206,7 +216,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT; /* a UTF-16 env block was supplied */
     BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, env_block, wDir, &six.StartupInfo, &pi);
     if (!ok) {
-        static char cpErr[128];
+        static _Thread_local char cpErr[128]; /* per thread: *err stays valid for its caller */
         snprintf(cpErr, sizeof(cpErr), "CreateProcess failed (error %lu)", (unsigned long)GetLastError());
         *err = cpErr;
         goto done;
@@ -291,6 +301,7 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
     wApp = u8_to_u16(appExe);
     wCmd = u8_to_u16(cmdText);
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
+    if (wcslen(wCmd) > 32767) { *err = "command line exceeds 32767 characters"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
         wDir = u8_to_u16(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }
@@ -343,7 +354,7 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
     if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT;
     if (!CreateProcessW(wApp, wCmd, NULL, NULL, FALSE, flags, env_block, wDir,
                         &six.StartupInfo, &pi)) {
-        static char cpErr[128];
+        static _Thread_local char cpErr[128]; /* per thread: *err stays valid for its caller */
         snprintf(cpErr, sizeof(cpErr), "CreateProcess failed (error %lu)",
                  (unsigned long)GetLastError());
         *err = cpErr;
@@ -364,17 +375,6 @@ done:
     free(cmdText);
     free(comspec);
     return rc;
-}
-
-int wj_wait_timeout(void *proc, unsigned int ms, long long *code, const char **err) {
-    HANDLE h = (HANDLE)proc;
-    DWORD w = WaitForSingleObject(h, ms);
-    if (w == WAIT_TIMEOUT) return 1;
-    if (w != WAIT_OBJECT_0) { *err = "WaitForSingleObject failed"; return -1; }
-    DWORD c = 0;
-    if (!GetExitCodeProcess(h, &c)) { *err = "GetExitCodeProcess failed"; return -1; }
-    *code = (long long)(unsigned long long)c; /* 32-bit code, untruncated */
-    return 0;
 }
 
 void wj_proc_close(void *proc) {
