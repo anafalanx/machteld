@@ -230,6 +230,12 @@ static yyjson_mut_val *JsonNodeToMut(yyjson_mut_doc *doc, Tcl_Obj *o) {
     return yyjson_mut_val_mut_copy(doc, (yyjson_mut_val *)JNODE(o));
 }
 
+/* Tcl 9 does not register its arithmetic-series (lseq) type, so it can only
+ * be recognized by name, the way the byte-array type is elsewhere. */
+static int json_is_arith(const Tcl_ObjType *t) {
+    return t != NULL && t->name != NULL && strcmp(t->name, "arithseries") == 0;
+}
+
 /* Caller bytes into a document string. Tcl's internal C0 80 spelling of NUL
  * becomes a real NUL (yyjson copies by length), and a lone surrogate is
  * refused by name: no JSON writer can emit it as valid text, and a handle
@@ -270,10 +276,9 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         if (m == NULL) *err = "out of memory";
         return m;
     }
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL, *arithType = NULL;
+    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
     if (dictType == NULL) dictType = Tcl_GetObjType("dict");
     if (listType == NULL) listType = Tcl_GetObjType("list");
-    if (arithType == NULL) arithType = Tcl_GetObjType("arithseries");
     if (v->typePtr != NULL && v->typePtr == dictType) {
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
         Tcl_DictSearch s;
@@ -299,7 +304,7 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         return obj;
     }
     /* An arithmetic series (lseq) is a list by representation too. */
-    if (v->typePtr != NULL && (v->typePtr == listType || (arithType != NULL && v->typePtr == arithType))) {
+    if (v->typePtr != NULL && (v->typePtr == listType || json_is_arith(v->typePtr))) {
         yyjson_mut_val *arr = yyjson_mut_arr(doc);
         Tcl_Size n;
         Tcl_Obj **el;
@@ -631,15 +636,14 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
     }
     if (as_dict) return json_emit_dict(interp, v, out, depth, plainOnly);
 
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL, *arithType = NULL;
+    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
     if (dictType == NULL) dictType = Tcl_GetObjType("dict");
     if (listType == NULL) listType = Tcl_GetObjType("list");
-    if (arithType == NULL) arithType = Tcl_GetObjType("arithseries");
 
     const Tcl_ObjType *t = v->typePtr;
     if (t != NULL && t == dictType) return json_emit_dict(interp, v, out, depth, plainOnly);
     /* An arithmetic series (lseq) is a list by representation too. */
-    if (t != NULL && (t == listType || (arithType != NULL && t == arithType)))
+    if (t != NULL && (t == listType || json_is_arith(t)))
         return json_emit_list(interp, v, out, depth, plainOnly);
 
     Tcl_Size n;

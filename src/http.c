@@ -381,7 +381,8 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     URL_COMPONENTS uc;
     memset(&uc, 0, sizeof uc);
     uc.dwStructSize = sizeof uc;
-    uc.dwSchemeLength = uc.dwHostNameLength = uc.dwUrlPathLength = uc.dwExtraInfoLength = (DWORD)-1;
+    uc.dwSchemeLength = uc.dwHostNameLength = uc.dwUrlPathLength = uc.dwExtraInfoLength =
+        uc.dwUserNameLength = uc.dwPasswordLength = (DWORD)-1; /* -1: report it, do not copy */
     if (!WinHttpCrackUrl(r.wurl, 0, 0, &uc)) {
         DWORD e = GetLastError();
         http_cleanup(&r);

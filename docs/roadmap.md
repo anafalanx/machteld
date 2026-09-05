@@ -270,8 +270,8 @@ carry one. Fixed:
   the launcher refuses a command line over the Windows limit, classifies
   `x.bat.` as a batch file, and keeps its error text per thread; three unused
   job-object entry points are gone; `worker ops` reports a trailing `args` as
-  optional; `pool close` drains a worker's final diagnostic; a flag's default
-  is the only default `cli usage` hides.
+  optional; `pool close` drains a worker's final diagnostic; `cli usage` hides
+  only a flag's default and an empty one.
 
 ## Candidate studies
 

@@ -34,6 +34,9 @@ enum {
     MACHTELD_HOST_ENCODING
 };
 void Machteld_SetHostMode(int mode);
+/* The GUI host has no standard channels; a fatal startup message is shown in
+ * a message box there and nowhere else. */
+void Machteld_SetGuiHost(void);
 int Machteld_GetHostMode(void);
 
 #endif /* MACHTELD_H */
