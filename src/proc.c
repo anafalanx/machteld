@@ -309,6 +309,8 @@ typedef struct {
     const char        *dir;
     const char        *stdin_text; /* NULL => child stdin is the null device */
     Tcl_Size           stdin_len;
+    Tcl_Obj           *stdin_obj;  /* the -stdin value; its bytes are read at copy time */
+    int                stdin_is_bytes; /* -stdin arrived as a byte array */
     Tcl_Obj           *env_obj;    /* the -env {K V ...} list, or NULL to inherit */
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
@@ -553,6 +555,8 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
     o->dir = NULL;
     o->stdin_text = NULL;
     o->stdin_len = 0;
+    o->stdin_obj = NULL;
+    o->stdin_is_bytes = 0;
     o->env_obj = NULL;
     o->env_block = NULL;
     o->onout = NULL;
@@ -615,18 +619,21 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             /* A byte array is fed byte for byte; any other value is fed as its
              * UTF-8 string representation (the runtime's value rule). The type
              * is matched by name because Tcl 9 registers only one of its two
-             * byte-array representations. */
+             * byte-array representations. Only the FACT is recorded here: the
+             * bytes are fetched again at copy time, because a later option
+             * (-env) can shimmer the same object and free this representation. */
             const Tcl_ObjType *stype = objv[i + 1]->typePtr;
-            if (stype != NULL && strcmp(stype->name, "bytearray") == 0) {
+            o->stdin_obj = objv[i + 1];
+            o->stdin_is_bytes = stype != NULL && strcmp(stype->name, "bytearray") == 0;
+            if (o->stdin_is_bytes) {
                 Tcl_Size blen = 0;
-                const unsigned char *bytes = Tcl_GetByteArrayFromObj(objv[i + 1], &blen);
-                if (bytes == NULL) return mt_error(interp, dom, "badvalue", "-stdin value is not a byte array");
-                o->stdin_text = (const char *)bytes;
+                if (Tcl_GetByteArrayFromObj(objv[i + 1], &blen) == NULL)
+                    return mt_error(interp, dom, "badvalue", "-stdin value is not a byte array");
                 o->stdin_len = blen;
             } else {
-                o->stdin_text = v;
                 o->stdin_len = vlen;
             }
+            o->stdin_text = v; /* non-NULL: stdin is supplied */
         } else if (strcmp(a, "-env") == 0) {
             if (!(allowed & OPT_ENV)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             o->env_obj = objv[i + 1];
@@ -846,11 +853,23 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     if (o->channels) {
         c->inW = stdinW; stdinW = NULL;
     } else if (o->stdin_text != NULL) {
-        if (o->stdin_len > 0) {
-            c->wi.buf = (char *)malloc((size_t)o->stdin_len);
+        /* Resolve the bytes now, from the object itself: a pointer taken at
+         * option-parse time could have been freed by an intervening shimmer. */
+        const char *src = o->stdin_text;
+        Tcl_Size n = o->stdin_len;
+        if (o->stdin_obj != NULL) {
+            if (o->stdin_is_bytes) {
+                src = (const char *)Tcl_GetByteArrayFromObj(o->stdin_obj, &n);
+                if (src == NULL) { *err = "-stdin value is not a byte array"; goto fail; }
+            } else {
+                src = Tcl_GetStringFromObj(o->stdin_obj, &n);
+            }
+        }
+        if (n > 0) {
+            c->wi.buf = (char *)malloc((size_t)n);
             if (c->wi.buf == NULL) { *err = "out of memory"; goto fail; }
-            memcpy(c->wi.buf, o->stdin_text, (size_t)o->stdin_len);
-            c->wi.len = (size_t)o->stdin_len;
+            memcpy(c->wi.buf, src, (size_t)n);
+            c->wi.len = (size_t)n;
             c->wi.write = stdinW; stdinW = NULL;
             c->tIn = CreateThread(NULL, 0, writer_thread, &c->wi, 0, NULL);
             if (c->tIn == NULL) { *err = "cannot start stdin writer thread"; goto fail; }
