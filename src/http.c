@@ -119,6 +119,9 @@ static int http_put_header(Tcl_Obj *d, const char *line, size_t len) {
 
     Tcl_Obj *key = Tcl_NewStringObj(name, (Tcl_Size)nlen);
     free(name);
+    /* Tcl retains only the key object it stores; a repeated header would
+     * otherwise leak this one. */
+    Tcl_IncrRefCount(key);
     Tcl_Obj *prev = NULL;
     Tcl_DictObjGet(NULL, d, key, &prev);
     if (prev == NULL) {
@@ -129,6 +132,7 @@ static int http_put_header(Tcl_Obj *d, const char *line, size_t len) {
         Tcl_AppendToObj(joined, v, (Tcl_Size)vlen);
         Tcl_DictObjPut(NULL, d, key, joined);
     }
+    Tcl_DecrRefCount(key);
     return 1;
 }
 
@@ -276,6 +280,9 @@ static int http_opts(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int fi
             if (Tcl_DictObjFirst(interp, v, &search, &key, &value, &done) != TCL_OK) {
                 return http_error(interp, "badvalue", "-headers takes a dict");
             }
+            /* A later -headers replaces the earlier dict, so its Content-Type
+             * fact must not survive into the replacement. */
+            o->has_content_type = 0;
             for (; !done; Tcl_DictObjNext(&search, &key, &value, &done)) {
                 if (!http_text_safe(key, 1) || !http_text_safe(value, 0)) {
                     Tcl_DictObjDone(&search);
@@ -309,8 +316,30 @@ static void http_cleanup(HttpReq *r) {
     free(r->body);
 }
 
+/* Every WinHTTP failure class that is about the certificate or the secure
+ * channel is `tls`, not only the umbrella SECURE_FAILURE code, so a caller
+ * trapping tls sees the whole family. */
+static int http_is_tls_error(DWORD e) {
+    switch (e) {
+        case ERROR_WINHTTP_SECURE_FAILURE:
+        case ERROR_WINHTTP_SECURE_CERT_CN_INVALID:
+        case ERROR_WINHTTP_SECURE_CERT_DATE_INVALID:
+        case ERROR_WINHTTP_SECURE_CERT_REV_FAILED:
+        case ERROR_WINHTTP_SECURE_CERT_REVOKED:
+        case ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE:
+        case ERROR_WINHTTP_SECURE_CHANNEL_ERROR:
+        case ERROR_WINHTTP_SECURE_INVALID_CA:
+        case ERROR_WINHTTP_SECURE_INVALID_CERT:
+        case ERROR_WINHTTP_CLIENT_CERT_NO_PRIVATE_KEY:
+        case ERROR_WINHTTP_CLIENT_CERT_NO_ACCESS_PRIVATE_KEY:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static int http_request_error(Tcl_Interp *interp, DWORD e, const char *what) {
-    if (e == ERROR_WINHTTP_SECURE_FAILURE) {
+    if (http_is_tls_error(e)) {
         return http_win_error(interp, "tls", "the secure connection was refused", e);
     }
     if (e == ERROR_WINHTTP_TIMEOUT) {
@@ -412,11 +441,13 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         return http_win_error(interp, "oserror", "cannot configure redirect policy", e);
     }
 
+    /* WinHttpConnect does not touch the network; a failure here is a bad
+     * handle or parameter, never an unreachable host. */
     r.conn = WinHttpConnect(r.session, r.whost, uc.nPort, 0);
     if (r.conn == NULL) {
         DWORD e = GetLastError();
         http_cleanup(&r);
-        return http_win_error(interp, "notfound", "cannot reach the host", e);
+        return http_win_error(interp, "oserror", "cannot create the connection handle", e);
     }
 
     DWORD flags = (uc.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
@@ -648,9 +679,10 @@ static int HttpCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     enum { H_GET, H_POST };
     int idx;
     if (objc < 3) {
-        Tcl_WrongNumArgs(interp, 1, objv, "get|post url ?body? ?-headers dict? "
-                                          "?-timeout 30s? ?-agent name? ?-type mime? "
-                                          "?-maxbody n?");
+        Tcl_WrongNumArgs(interp, 1, objv, "get url ?options? | post url body "
+                                          "?options? (options: -headers dict "
+                                          "-timeout duration -agent name -maxbody "
+                                          "size -redirect none; post only: -type mime)");
         return TCL_ERROR;
     }
     if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) {
@@ -670,8 +702,21 @@ static int HttpCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         return TCL_ERROR;
     }
     if (http_opts(interp, objc, objv, 4, 1, &o) != TCL_OK) return TCL_ERROR;
+    /* The body follows the runtime's value rule: a byte array sends its bytes,
+     * any other value sends its UTF-8 string representation. Asking Tcl for the
+     * bytes of a plain string returned NULL for a character above U+00FF and
+     * Latin-1 bytes below it, neither of which is the JSON text the reference
+     * example posts. The type is matched by name because Tcl 9 registers only
+     * one of its two byte-array representations. */
     Tcl_Size blen;
-    unsigned char *b = Tcl_GetByteArrayFromObj(objv[3], &blen);
+    const unsigned char *b;
+    const Tcl_ObjType *btype = objv[3]->typePtr;
+    if (btype != NULL && strcmp(btype->name, "bytearray") == 0) {
+        b = Tcl_GetByteArrayFromObj(objv[3], &blen);
+        if (b == NULL) return http_error(interp, "badvalue", "the post body is not a byte array");
+    } else {
+        b = (const unsigned char *)Tcl_GetStringFromObj(objv[3], &blen);
+    }
     if (o.type == NULL && !o.has_content_type) o.type = "application/octet-stream";
     return http_do(interp, "POST", url, b, blen, &o);
 }

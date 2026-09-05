@@ -14,7 +14,7 @@ Code is installed once in a worker; requests carry data.
 ## Worker
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 
 worker on digest {path {alg sha256}} {
     hash file $alg $path
@@ -87,7 +87,8 @@ completion order.
 requeues, completion, a fatal launch message, and a capped stderr tail. Stderr is
 drained continuously because an unread pipe can fill and deadlock a worker.
 
-`pool wait -timeout` controls the batch wait. It is distinct from a child's
+`pool wait -timeout` controls the batch wait and defaults to five minutes
+(`pmap -timeout` shares that default). It is distinct from a child's
 creation-time `-timeout`. On timeout the pool remains owned by the caller; close
 it or inspect it deliberately.
 

@@ -29,6 +29,7 @@
 #include <bcrypt.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <errno.h>
 
 #define HASH_CHUNK (64 * 1024)

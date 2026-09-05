@@ -245,8 +245,11 @@ has_opt_in(Tcl_Interp *interp, Tcl_Obj *script)
         Tcl_Parse parse;
         int status = Tcl_ParseCommand(interp, bytes, length, 0, &parse);
         if (status != TCL_OK) {
+            /* A first command that cannot be parsed is not the opt-in; the
+             * contract's code applies, with Tcl's parse diagnostic retained. */
             Tcl_FreeParse(&parse);
-            return TCL_ERROR;
+            return entry_detail_error(interp, "optin",
+                "not a machteld program: the first command cannot be parsed");
         }
         if (parse.numWords != 0) {
             if (word_is(&parse, 0, "package") && word_is(&parse, 1, "require")) {
@@ -307,10 +310,19 @@ validate_file(Tcl_Interp *interp, Tcl_Obj *path)
     Tcl_Obj *script = Tcl_NewObj();
     Tcl_IncrRefCount(script);
     Tcl_Size count = Tcl_ReadChars(channel, script, -1, 0);
+    int read_error = count < 0 ? Tcl_GetErrno() : 0;
     int close_status = Tcl_Close(interp, channel);
-    if (count < 0 || close_status != TCL_OK) {
+    if (count < 0) {
         Tcl_DecrRefCount(script);
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf("cannot read machteld entry %s: %s",
+            Tcl_GetString(path), Tcl_ErrnoMsg(read_error)));
+        Tcl_SetErrorCode(interp, "MACHTELD", "ENTRY", "oserror", NULL);
         return TCL_ERROR;
+    }
+    if (close_status != TCL_OK) {
+        Tcl_DecrRefCount(script);
+        return entry_detail_error(interp, "oserror",
+            "cannot close the machteld entry");
     }
     int status = has_opt_in(interp, script);
     Tcl_DecrRefCount(script);
@@ -375,10 +387,16 @@ unwind_file_return(Tcl_Interp *interp)
 static int
 eval_captured_startup(Tcl_Interp *interp, Tcl_Obj *path, Tcl_Obj *script)
 {
+    /* Tcl_EvalObjv requires the caller to hold the words. */
     Tcl_Obj *query[2];
     query[0] = Tcl_NewStringObj("::info", -1);
     query[1] = Tcl_NewStringObj("script", -1);
-    if (Tcl_EvalObjv(interp, 2, query, TCL_EVAL_GLOBAL) != TCL_OK) {
+    Tcl_IncrRefCount(query[0]);
+    Tcl_IncrRefCount(query[1]);
+    int query_status = Tcl_EvalObjv(interp, 2, query, TCL_EVAL_GLOBAL);
+    Tcl_DecrRefCount(query[0]);
+    Tcl_DecrRefCount(query[1]);
+    if (query_status != TCL_OK) {
         return TCL_ERROR;
     }
     Tcl_Obj *prior_script = Tcl_DuplicateObj(Tcl_GetObjResult(interp));
@@ -402,7 +420,11 @@ eval_captured_startup(Tcl_Interp *interp, Tcl_Obj *path, Tcl_Obj *script)
     restore[0] = Tcl_NewStringObj("::info", -1);
     restore[1] = Tcl_NewStringObj("script", -1);
     restore[2] = prior_script;
+    Tcl_IncrRefCount(restore[0]);
+    Tcl_IncrRefCount(restore[1]);
     int restore_status = Tcl_EvalObjv(interp, 3, restore, TCL_EVAL_GLOBAL);
+    Tcl_DecrRefCount(restore[0]);
+    Tcl_DecrRefCount(restore[1]);
     Tcl_DecrRefCount(prior_script);
     if (restore_status != TCL_OK) {
         Tcl_DiscardInterpState(state);

@@ -38,12 +38,14 @@ static wchar_t *u8_to_u16(const char *s) {
     return w;
 }
 
+/* Strict on the way out, as everywhere else in the runtime: an unrepresentable
+ * name is refused rather than rewritten with U+FFFD and reported as success. */
 static char *u16_to_u8(const wchar_t *w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, NULL, 0, NULL, NULL);
     if (n <= 0) return NULL;
     char *s = (char *)malloc((size_t)n);
     if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) {
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, s, n, NULL, NULL) <= 0) {
         free(s);
         return NULL;
     }

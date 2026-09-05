@@ -291,6 +291,25 @@ check "pmap relabels uncoded worker errors" [expr {
     [errcode_of [list pmap [list {op plain}] -width 1 -timeout 30s -- $MT $WORKER]]
         eq {MACHTELD PMAP failed}}]
 
+# 0.21 regressions.
+check "CLI refuses a positional that would shadow the help key" [expr {
+    [errcode_of {cli parse {} {help {type string}}}] eq {MACHTELD CLI badvalue}}]
+check "CLI never takes -- as an option value" [expr {
+    [errcode_of {cli parse {--token --} {--token {type string}}}] eq {MACHTELD CLI usage}}]
+check "log refuses -channel and -file in one call" [expr {
+    [errcode_of [list log configure -channel stderr -file [file join $WORK conflict.log]]]
+        eq {MACHTELD LOG usage}}]
+# The worker protocol is UTF-8 JSON lines in both directions. The worker
+# configures its own ends; the director must configure the channels it was
+# handed, which arrive byte-oriented from `child start -channels`.
+set unicode_text "h\u00e9llo w\u00f6rld \u2014 \u00fcn\u00efcode \u2713"
+set pool_token [pool create -width 1 -- $MT $WORKER]
+pool submit $pool_token [list [dict create op echo text $unicode_text]]
+set replies [pool wait $pool_token -timeout 30s]
+check "pool carries non-ASCII text both ways" [expr {
+    [result_of [lindex $replies 0]] eq $unicode_text}]
+pool close $pool_token
+
 file delete -force $WORK
 if {$fails} {
     puts stderr "$fails runtime test(s) failed"

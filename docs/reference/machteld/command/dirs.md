@@ -33,8 +33,10 @@ and reason.
 ## Errors
 
 Raised codes are `DIRS badvalue`, `DIRS notfound`, `DIRS oserror`, and
-`DIRS usage`. Errors encountered below a valid root are normally disclosed in
-the result's `errors` list instead of aborting the whole survey.
+`DIRS usage`. A root that does not exist is `notfound`; a root that exists but
+may not be opened is `oserror`, so denied is never mistaken for absent. Errors
+encountered below a valid root are normally disclosed in the result's `errors`
+list instead of aborting the whole survey.
 
 ## Lifetime and timeouts
 

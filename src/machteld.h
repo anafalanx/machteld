@@ -4,7 +4,7 @@
 
 #include "tcl.h"
 
-#define MACHTELD_VERSION "0.20"
+#define MACHTELD_VERSION "0.21"
 
 /* Locate and pin the script libraries in the executable's own zipfs mount.
  * Called by each host before Tcl_Init (and therefore before Tk_Init). */

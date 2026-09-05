@@ -279,6 +279,25 @@ if {[info exists ::env(MACHTELD_TEST_PUBLIC_TLS)] && $::env(MACHTELD_TEST_PUBLIC
     }
 }
 
+# 0.21 regressions: typed values through `encode -list`, NUL inside strings,
+# strict duplicate detection, and constructors refusing a typed container.
+set typed_array [json value array [list [json value number 1] [json value number 2]]]
+check "json encode -list honours a typed value" [expr {
+    [json encode -list $typed_array] eq {[1,2]}}]
+check "json encode -plain refuses a typed value at the top level" [expr {
+    [errcode_of [list json encode -list -plain $typed_array]] eq {MACHTELD JSON type}}]
+set with_nul "a\u0000b"
+check "json carries a NUL inside a string both ways" [expr {
+    [json encode -- $with_nul] eq {"a\u0000b"} && [json decode {"a\u0000b"}] eq $with_nul}]
+check "json value string carries a NUL to the wire" [expr {
+    [json encode [json value string $with_nul]] eq {"a\u0000b"}}]
+check "json value array refuses a typed handle by name" [expr {
+    [errcode_of [list json value array $typed_array]] eq {MACHTELD JSON type}}]
+check "json decode -typed rejects a duplicate key" [expr {
+    [errcode_of {json decode -typed {{"a":1,"b":2,"a":3}}}] eq {MACHTELD JSON strict}}]
+check "json decode -typed accepts distinct keys" [expr {
+    [json type [json decode -typed {{"a":1,"b":2,"c":3}}]] eq "object"}]
+
 file delete -force $WORK
 if {$fails} {
     puts stderr "$fails native test(s) failed"
