@@ -82,10 +82,6 @@ wj_job *wj_job_new(int kill_on_close, const char **err);
  * never drops die-with-parent). Call once, before the child is launched. */
 int wj_job_set_limits(wj_job *j, const wj_limits *l, const char **err);
 
-/* Add an already-running process to a job. Machteld's supervised paths instead
- * use the born-in-job launcher; the host deliberately never joins its root job. */
-int wj_job_assign(wj_job *j, void *process_handle, const char **err);
-
 /* Kill every process in the job and its nested child jobs -- whole-tree kill. */
 int wj_job_terminate(wj_job *j, unsigned int exit_code);
 
@@ -106,10 +102,6 @@ void *wj_job_handle(wj_job *j);
  * while re-asserting the job's existing kill-on-close flag. Machteld's `detach`
  * path joins neither the root nor a per-command job. */
 int wj_job_allow_breakaway(wj_job *j, const char **err);
-
-/* Is process a member of job? 1 yes, 0 no, -1 on error. A NULL job asks whether
- * the process is in ANY job; useful for diagnosing born-in-job membership. */
-int wj_in_job(void *process_handle, void *job_handle);
 
 /* ---- born-in-job launch (winjob_launch.c) ------------------------------ */
 
@@ -144,11 +136,9 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
                   void *const *job_handles, int njobs, void *pseudoconsole,
                   void *env_block, int *pid, void **proc, const char **err);
 
-/* Wait up to ms for the child (WJ_INFINITE = forever). Returns 0 and sets *code
- * on exit (the 32-bit exit code, untruncated), 1 on timeout (child still runs),
- * -1 on error (sets *err). Does not close the handle. */
+/* The "wait forever" sentinel shared with the supervision layer's own
+ * timeouts; one below it is the largest finite duration. */
 #define WJ_INFINITE 0xFFFFFFFFu
-int wj_wait_timeout(void *proc, unsigned int ms, long long *code, const char **err);
 
 /* Close a process handle returned by wj_launch. */
 void wj_proc_close(void *proc);

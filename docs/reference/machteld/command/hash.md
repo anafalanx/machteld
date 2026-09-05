@@ -145,6 +145,10 @@ during that read, not an atomic snapshot.
 
 `hash hmac algorithm key data ?-binary?`
 
+The `key` follows the same rule as `data`: a bytearray is used byte for byte,
+any other value as its UTF-8 string representation, so a hex-spelled key
+string is not the key `binary decode hex` produces.
+
 #### Arguments and options
 
 `key` and `data` are byte-preserving Tcl values. `-binary` selects output form.

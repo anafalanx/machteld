@@ -270,9 +270,10 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         if (m == NULL) *err = "out of memory";
         return m;
     }
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
+    static const Tcl_ObjType *dictType = NULL, *listType = NULL, *arithType = NULL;
     if (dictType == NULL) dictType = Tcl_GetObjType("dict");
     if (listType == NULL) listType = Tcl_GetObjType("list");
+    if (arithType == NULL) arithType = Tcl_GetObjType("arithseries");
     if (v->typePtr != NULL && v->typePtr == dictType) {
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
         Tcl_DictSearch s;
@@ -297,7 +298,8 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         Tcl_DictObjDone(&s);
         return obj;
     }
-    if (v->typePtr != NULL && v->typePtr == listType) {
+    /* An arithmetic series (lseq) is a list by representation too. */
+    if (v->typePtr != NULL && (v->typePtr == listType || (arithType != NULL && v->typePtr == arithType))) {
         yyjson_mut_val *arr = yyjson_mut_arr(doc);
         Tcl_Size n;
         Tcl_Obj **el;
@@ -629,13 +631,16 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
     }
     if (as_dict) return json_emit_dict(interp, v, out, depth, plainOnly);
 
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
+    static const Tcl_ObjType *dictType = NULL, *listType = NULL, *arithType = NULL;
     if (dictType == NULL) dictType = Tcl_GetObjType("dict");
     if (listType == NULL) listType = Tcl_GetObjType("list");
+    if (arithType == NULL) arithType = Tcl_GetObjType("arithseries");
 
     const Tcl_ObjType *t = v->typePtr;
     if (t != NULL && t == dictType) return json_emit_dict(interp, v, out, depth, plainOnly);
-    if (t != NULL && t == listType) return json_emit_list(interp, v, out, depth, plainOnly);
+    /* An arithmetic series (lseq) is a list by representation too. */
+    if (t != NULL && (t == listType || (arithType != NULL && t == arithType)))
+        return json_emit_list(interp, v, out, depth, plainOnly);
 
     Tcl_Size n;
     const char *s = Tcl_GetStringFromObj(v, &n);
@@ -647,7 +652,7 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
 /* ---- the verb ----------------------------------------------------------- */
 
 /* The typed decode's byte limits: a documented default, a documented hard
- * cap, and -maxbytes may only ask for LESS than the cap (the organ does not
+ * cap, and -maxbytes may ask for at most the cap (the organ does not
  * infer what a caller bounded elsewhere - the handoff's own law). */
 #define JSON_TYPED_DEFAULT_MAXBYTES (16u * 1024u * 1024u)
 #define JSON_TYPED_HARD_MAXBYTES    (64u * 1024u * 1024u)
@@ -930,6 +935,11 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         if (!JsonIsTyped(objv[2])) {
             return JsonErr(interp, "type", "not a typed json value");
         }
+        if (idx == EXISTS && objc == 3) {
+            /* `exists` asks about a member; the value itself is not one. */
+            Tcl_WrongNumArgs(interp, 2, objv, "value key|index ?key|index ...?");
+            return TCL_ERROR;
+        }
         JsonDocWrap *w = JWRAP(objv[2]);
         void *node = JNODE(objv[2]);
         for (int i = 3; i < objc; i++) {
@@ -974,7 +984,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         }
         val = objv[i];
     }
-    if (val == NULL) { Tcl_WrongNumArgs(interp, 2, objv, "?-dict|-list? ?-plain? value"); return TCL_ERROR; }
+    if (val == NULL) { Tcl_WrongNumArgs(interp, 2, objv, "?-dict|-list? ?-plain? ?--? value"); return TCL_ERROR; }
     if (as_dict && as_list) {
         return JsonErr(interp, "usage", "-dict and -list are exclusive");
     }

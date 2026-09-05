@@ -92,6 +92,9 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
         dict_put_str(d, "started", "");
         return d;
     }
+    /* `access` means every detail query answered; a row can be opened and
+     * still have a field the system declined, and that field reads empty. */
+    int complete = 1;
     dict_put_wide(d, "access", 1);
 
     wchar_t *path = (wchar_t *)malloc(32768u * sizeof(wchar_t));
@@ -100,9 +103,11 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
         path[n] = L'\0';
         char *p = u16_to_u8_dup(path);
         dict_put_str(d, "exe", p ? p : "");
+        if (p == NULL) complete = 0;
         free(p);
     } else {
         dict_put_str(d, "exe", "");
+        complete = 0;
     }
     free(path);
 
@@ -115,6 +120,7 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
     } else {
         dict_put_str(d, "mem", "");
         dict_put_str(d, "private", "");
+        complete = 0;
     }
 
     FILETIME ftCreate, ftExit, ftKernel, ftUser;
@@ -128,7 +134,9 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
     } else {
         dict_put_str(d, "cpu", "");
         dict_put_str(d, "started", "");
+        complete = 0;
     }
+    if (!complete) dict_put_wide(d, "access", 0);
     CloseHandle(h);
     return d;
 }

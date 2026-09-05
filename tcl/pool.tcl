@@ -368,6 +368,8 @@ proc ::machteld::PoolClose {tok} {
             foreach k {stdout stderr} {
                 if {[dict exists $ci $k]} { chan event [dict get $ci $k] readable {} }
             }
+            # A last drain keeps a worker's final diagnostic in `pool info`.
+            if {[dict exists $ci stderr]} { catch {PoolStderr $tok $c} }
             # Closing stdin is what gives a well-behaved worker its EOF, so it
             # exits on its own and `child close` has nothing to kill.
             if {[dict exists $ci stdin]} { chan close [dict get $ci stdin] }

@@ -28,7 +28,10 @@ coalesces one read batch deterministically.
 ## Results
 
 `start` returns `watch#...`. `read` returns event dicts containing `path` and
-`action`, optional rename `from`, or an `overflow` row with `count`. `info`
+`action`, optional rename `from`, or an `overflow` row with `count`. A
+coalesced `action` is `added`, `removed`, `renamed`, or `modified`; with
+`-raw` it is the OS vocabulary `added`, `removed`, `modified`, `renamed-old`,
+or `renamed-new`. `info`
 returns `token`, `directory`, `recursive`, `armed`, `pending`, `dropped`,
 `failed`, and `win32`. `list` returns tokens. `close` returns empty.
 

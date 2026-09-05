@@ -28,7 +28,7 @@ proc result_of {reply} {
 set header [open [file join [file dirname [info script]] .. src machteld.h] r]
 set headerText [read $header]
 close $header
-if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion]} {
+if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"} $headerText -> expectedVersion]} {
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
@@ -309,6 +309,12 @@ set replies [pool wait $pool_token -timeout 30s]
 check "pool carries non-ASCII text both ways" [expr {
     [result_of [lindex $replies 0]] eq $unicode_text}]
 pool close $pool_token
+worker on with-args {a args} { llength $args }
+check "worker ops reports a trailing args as optional" [expr {
+    [dict get [worker ops] with-args] eq {a {args {}}}}]
+check "CLI usage shows a non-flag default of 0" [expr {
+    [string match {*default 0*} [cli usage {--retries {type int default 0}} tool]] &&
+    ![string match {*default 0*} [cli usage {--all {type flag}} tool]]}]
 
 file delete -force $WORK
 if {$fails} {

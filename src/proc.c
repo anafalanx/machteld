@@ -109,16 +109,24 @@ static int has_extension(const char *prog) {
     return strchr(base, '.') != NULL;
 }
 
+static int is_regular_file_w(const wchar_t *path) {
+    DWORD attr = GetFileAttributesW(path);
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 static char *resolve_exe(const char *prog) {
     wchar_t *wp = u8_to_u16(prog);
     if (wp == NULL) return NULL;
 
     /* A bare command name (no path separator) resolves from PATH ONLY -- not the
      * current directory -- so a cwd-local "cmd.exe" can't hijack a bare name. A
-     * name containing a separator (absolute, or .\relative) is searched as given.
-     * Extension-less names resolve against the executable extensions
-     * (cmd -> cmd.exe); the bare name itself is never matched (it could hit a
-     * non-executable in the search path). */
+     * name containing a separator (absolute, or .\relative) resolves against
+     * the current directory alone, never the application or system
+     * directories that a NULL SearchPath would consult first. The name's own
+     * spelling is tried only when it carries an extension (a bare name could
+     * hit a non-executable in the search path); the executable extensions are
+     * then appended in order, so a dotted name such as python3.11 still finds
+     * python3.11.exe. */
     int bare = (wcschr(wp, L'\\') == NULL && wcschr(wp, L'/') == NULL);
     wchar_t *pathEnv = NULL;
     if (bare) {
@@ -130,30 +138,36 @@ static char *resolve_exe(const char *prog) {
         }
     }
 
-    wchar_t buf[MAX_PATH * 2];
-    wchar_t *fpart = NULL;
+    const wchar_t *suffixes[5];
+    int ns = 0;
+    if (has_extension(prog)) suffixes[ns++] = L"";
+    suffixes[ns++] = L".exe";
+    suffixes[ns++] = L".com";
+    suffixes[ns++] = L".bat";
+    suffixes[ns++] = L".cmd";
+
+    enum { RESOLVE_MAX = 32768 };
+    size_t plen = wcslen(wp);
+    wchar_t *cand = (wchar_t *)malloc((plen + 8) * sizeof(wchar_t));
+    wchar_t *buf = (wchar_t *)malloc((size_t)RESOLVE_MAX * sizeof(wchar_t));
     char *result = NULL;
-    const wchar_t *exts[4];
-    int ne = 0;
-    if (has_extension(prog)) {
-        exts[ne++] = NULL;
-    } else {
-        exts[ne++] = L".exe";
-        exts[ne++] = L".com";
-        exts[ne++] = L".bat";
-        exts[ne++] = L".cmd";
-    }
-    for (int e = 0; e < ne; e++) {
-        DWORD n = SearchPathW(bare ? pathEnv : NULL, wp, exts[e],
-                              (DWORD)(sizeof(buf) / sizeof(buf[0])), buf, &fpart);
-        if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
-            DWORD attr = GetFileAttributesW(buf);
-            if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                result = u16_to_u8(buf);
-                break;
-            }
+    for (int e = 0; cand != NULL && buf != NULL && e < ns; e++) {
+        wcscpy(cand, wp);
+        wcscat(cand, suffixes[e]);
+        DWORD n;
+        if (bare) {
+            wchar_t *fpart = NULL;
+            n = SearchPathW(pathEnv, cand, NULL, (DWORD)RESOLVE_MAX, buf, &fpart);
+        } else {
+            n = GetFullPathNameW(cand, (DWORD)RESOLVE_MAX, buf, NULL);
+        }
+        if (n > 0 && n < (DWORD)RESOLVE_MAX && is_regular_file_w(buf)) {
+            result = u16_to_u8(buf);
+            break;
         }
     }
+    free(cand);
+    free(buf);
     free(pathEnv);
     free(wp);
     return result;
@@ -348,9 +362,19 @@ static int mt_error(Tcl_Interp *interp, const char *domain, const char *code, co
  * double-NUL-terminated block) or -1 and sets *err on bad input / overflow. buf
  * is the caller's (stack) buffer -- valid only for that frame, which suffices
  * because CreateProcess copies the block into the child at launch. */
+/* Tcl spells an embedded NUL as the two bytes C0 80, so a memchr for a zero
+ * byte alone never sees one. */
+static int has_embedded_nul(const char *s, Tcl_Size len) {
+    if (memchr(s, '\0', (size_t)len) != NULL) return 1;
+    for (Tcl_Size i = 0; i + 1 < len; i++) {
+        if ((unsigned char)s[i] == 0xC0 && (unsigned char)s[i + 1] == 0x80) return 1;
+    }
+    return 0;
+}
+
 static const char *obj_no_nul(Tcl_Obj *obj, Tcl_Size *len) {
     const char *s = Tcl_GetStringFromObj(obj, len);
-    return memchr(s, '\0', (size_t)*len) == NULL ? s : NULL;
+    return has_embedded_nul(s, *len) ? NULL : s;
 }
 
 typedef struct {
@@ -585,7 +609,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
         if (i + 1 >= objc) return mt_error(interp, dom, "usage", "option needs a value");
         Tcl_Size vlen = 0;
         const char *v = Tcl_GetStringFromObj(objv[i + 1], &vlen);
-        int has_nul = memchr(v, '\0', (size_t)vlen) != NULL;
+        int has_nul = has_embedded_nul(v, vlen);
         if (strcmp(a, "-timeout") == 0) {
             if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
@@ -1413,8 +1437,8 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         if (objc != 3 && objc != 4) return mt_error(interp, "CHILD", "usage", "child kill token ?exitCode?");
         unsigned code = 1;
         if (objc >= 4) {
-            int v;
-            if (Tcl_GetIntFromObj(interp, objv[3], &v) != TCL_OK)
+            Tcl_WideInt v;
+            if (Tcl_GetWideIntFromObj(interp, objv[3], &v) != TCL_OK || v < 0 || v > 0xFFFFFFFFLL)
                 return mt_error(interp, "CHILD", "badvalue", "bad exit code");
             code = (unsigned)v;
         }
@@ -1455,10 +1479,10 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     }
     case CLOSE:
         if (objc != 3) return mt_error(interp, "CHILD", "usage", "child close token");
-        /* Channels first: closing the stdin channel is what gives the worker its
-         * EOF, so a well-behaved worker exits on its own and child_free has
-         * nothing to kill. Doing it the other way round would terminate every
-         * worker by force and call that normal. */
+        /* Channels first, so a worker sees EOF on its stdin before the tree
+         * is terminated; `close` is a kill by contract, and a director that
+         * wants a worker to finish on its own closes the stdin channel itself
+         * and waits before closing the handle (as `pool close` does). */
         child_channels_free(interp, c);
         registry_remove(ctx, c);
         child_free(c); /* kills first if still running */
@@ -1520,7 +1544,9 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             }
         }
         /* -any and some are already done, or nothing left to wait on. */
-        if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) break;
+        Tcl_Size ndone = 0;
+        Tcl_ListObjLength(NULL, done, &ndone);
+        if (nh == 0 || (any && ndone > 0)) break;
 
         DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
         if (r == WAIT_FAILED) {
@@ -1645,8 +1671,47 @@ typedef struct pty_s {
     pty_output_t *queued_head; /* output drained while a send was blocked */
     pty_output_t *queued_tail;
     size_t queued_bytes;
+    char   carry[4];   /* an incomplete trailing UTF-8 sequence, held back */
+    int    carry_len;
     struct pty_s *next;
 } pty_t;
+
+/* Deliver console bytes as a Tcl string without splitting a UTF-8 sequence at
+ * a read boundary: an incomplete trailing sequence is held back and prepended
+ * to the next delivery, so a multibyte character that straddles two reads
+ * still arrives whole. */
+static void pty_deliver(Tcl_Interp *interp, pty_t *p, const char *bytes, size_t n) {
+    size_t total = (size_t)p->carry_len + n;
+    char *joined = (char *)malloc(total + 1);
+    if (joined == NULL) {
+        /* Degrade to raw delivery rather than lose bytes. */
+        Tcl_Obj *raw = Tcl_NewStringObj(p->carry, p->carry_len);
+        Tcl_AppendToObj(raw, bytes, (Tcl_Size)n);
+        p->carry_len = 0;
+        Tcl_SetObjResult(interp, raw);
+        return;
+    }
+    memcpy(joined, p->carry, (size_t)p->carry_len);
+    memcpy(joined + p->carry_len, bytes, n);
+    size_t keep = 0;
+    for (size_t back = 1; back <= 3 && back <= total; back++) {
+        unsigned char c = (unsigned char)joined[total - back];
+        if ((c & 0xC0) == 0x80) continue;   /* continuation byte: find its lead */
+        size_t need = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        if (need > back) keep = back;         /* a lead byte short of its followers */
+        break;
+    }
+    p->carry_len = (int)keep;
+    memcpy(p->carry, joined + (total - keep), keep);
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(joined, (Tcl_Size)(total - keep)));
+    free(joined);
+}
+
+/* At end of output whatever was held back is delivered as it is. */
+static void pty_deliver_eof(Tcl_Interp *interp, pty_t *p) {
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(p->carry, p->carry_len));
+    p->carry_len = 0;
+}
 
 static pty_t *pty_find(proc_ctx *ctx, const char *token) {
     for (pty_t *p = ctx->ptys; p; p = p->next) {
@@ -1729,8 +1794,7 @@ static int pty_output_result(pty_t *p, Tcl_Interp *interp) {
     p->queued_head = chunk->next;
     if (p->queued_head == NULL) p->queued_tail = NULL;
     p->queued_bytes -= (size_t)chunk->length;
-    Tcl_SetObjResult(interp,
-                     Tcl_NewStringObj(chunk->bytes, (Tcl_Size)chunk->length));
+    pty_deliver(interp, p, chunk->bytes, (size_t)chunk->length);
     free(chunk);
     return 1;
 }
@@ -2038,14 +2102,14 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         for (;;) {
             DWORD avail = 0;
             if (!PeekNamedPipe(p->outR, NULL, 0, NULL, &avail, NULL)) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("", 0)); /* EOF: output ended */
+                pty_deliver_eof(interp, p); /* EOF: output ended */
                 return TCL_OK;
             }
             if (avail > 0) {
                 DWORD want = avail < sizeof(buf) ? avail : (DWORD)sizeof(buf);
                 DWORD got = 0;
                 if (!ReadFile(p->outR, buf, want, &got, NULL)) got = 0;
-                Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, (Tcl_Size)got));
+                pty_deliver(interp, p, buf, (size_t)got);
                 return TCL_OK;
             }
             if (GetTickCount64() >= deadline) break;
@@ -2331,12 +2395,27 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         }
         wchar_t *wdir = u8_to_u16(dir);
         if (wdir == NULL) return mt_error(interp, "WATCH", "badvalue", "bad directory name");
+        DWORD attr = GetFileAttributesW(wdir);
+        if (attr == INVALID_FILE_ATTRIBUTES) {
+            DWORD e = GetLastError();
+            free(wdir);
+            if (e == ERROR_ACCESS_DENIED)
+                return mt_error(interp, "WATCH", "oserror", "access to the directory is denied");
+            return mt_error(interp, "WATCH", "notfound", "no such directory");
+        }
+        if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            free(wdir);
+            return mt_error(interp, "WATCH", "badvalue", "the path to watch is not a directory");
+        }
         HANDLE h = CreateFileW(wdir, FILE_LIST_DIRECTORY,
                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                NULL, OPEN_EXISTING,
                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
         free(wdir);
         if (h == INVALID_HANDLE_VALUE) {
+            DWORD e = GetLastError();
+            if (e == ERROR_ACCESS_DENIED)
+                return mt_error(interp, "WATCH", "oserror", "access to the directory is denied");
             return mt_error(interp, "WATCH", "notfound", "cannot open directory to watch");
         }
         watch_t *w = (watch_t *)calloc(1, sizeof(*w));
@@ -2530,11 +2609,15 @@ static void proc_cleanup(void *cd) {
         ctx->children = c->next;
         child_free(c);
     }
+    /* A failed teardown must not strand the rest; stop only if the head was
+     * not unlinked, which is the one way the loop could fail to advance. */
     while (ctx->ptys) {
-        if (pty_free(ctx, ctx->ptys) != 0) break;
+        pty_t *p = ctx->ptys;
+        if (pty_free(ctx, p) != 0 && ctx->ptys == p) break;
     }
     while (ctx->watches) {
-        if (watch_free(ctx, ctx->watches) != 0) break;
+        watch_t *w = ctx->watches;
+        if (watch_free(ctx, w) != 0 && ctx->watches == w) break;
     }
     if (ctx->root) wj_job_free(ctx->root);
 }

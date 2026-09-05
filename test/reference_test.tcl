@@ -15,7 +15,7 @@ proc errorcode {script} {
 set header [open [file join [file dirname [info script]] .. src machteld.h] r]
 set headerText [read $header]
 close $header
-regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion
+regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"} $headerText -> expectedVersion
 
 set status [docs status]
 check {status identifies schema and runtime} [expr {

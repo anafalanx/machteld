@@ -43,10 +43,10 @@ without joining it; `detach` joins neither job. Closing or killing a supervised
 handle terminates the whole child tree. Use `--` before the child command when
 its arguments can look like Machteld options.
 
-A bare command is searched only in `PATH`, never in the current directory. If
-it has no extension, Machteld tries `.exe`, `.com`, `.bat`, then `.cmd`; it does
-not consult ambient `PATHEXT`. Use an explicit path for any other executable
-spelling.
+A bare command is searched only in `PATH`, never in the current directory; a
+name with a separator resolves against the current directory. The name's own
+spelling is tried when it carries an extension, then `.exe`, `.com`, `.bat`,
+and `.cmd` are appended in turn; ambient `PATHEXT` is never consulted.
 
 The two child timeouts deliberately mean different things. `child start
 -timeout` is a lifetime deadline: Machteld kills the process tree when it

@@ -252,7 +252,26 @@ carry one. Fixed:
   `--` as an option value; `log configure` refuses `-channel` with `-file`.
 - **Build.** `-Werror` is unconditional in the release build (it was behind an
   environment variable nothing set); the reference checker uses the packaged
-  prelude list; an orphaned serializer smoke script is gone.
+  prelude list; an orphaned serializer smoke script is gone; the development
+  loop regenerates the corpus when the version or a license notice changes.
+- **Second pass.** Bare-name resolution appends the executable extensions to a
+  dotted name too, resolves a separator name against the current directory
+  only, and fits a long path; an embedded NUL in an argument is detected in
+  Tcl's own spelling; `child kill` accepts the full exit-code range; `watch
+  start` on a file or a denied directory says so; `pty read` never splits a
+  UTF-8 sequence across two reads; exit cleanup continues past one failed
+  teardown; `http` refuses credentials in a URL and an empty `-type`, and
+  trims header whitespace; `json exists` requires a path, and an `lseq` list
+  encodes as an array; `mtps` reports `access 0` when any detail query
+  failed; `dirs`/`links` name an unknown option, keep a volume-GUID root, and
+  refuse every spelling of a device path; a GUI host shows a startup failure
+  in a message box instead of exiting silently; an entry that exists but
+  cannot be opened is `oserror`; a job that allows breakaway keeps its caps;
+  the launcher refuses a command line over the Windows limit, classifies
+  `x.bat.` as a batch file, and keeps its error text per thread; three unused
+  job-object entry points are gone; `worker ops` reports a trailing `args` as
+  optional; `pool close` drains a worker's final diagnostic; a flag's default
+  is the only default `cli usage` hides.
 
 ## Candidate studies
 

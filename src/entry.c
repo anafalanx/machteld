@@ -5,6 +5,7 @@
  * captured, checked, and evaluated here so the same bytes cross the opt-in
  * boundary; immutable embedded startup stays on Tcl_Main's source path.
  */
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -290,12 +291,15 @@ validate_file(Tcl_Interp *interp, Tcl_Obj *path)
 {
     Tcl_Channel channel = Tcl_FSOpenFileChannel(interp, path, "r", 0);
     if (channel == NULL) {
+        /* Absent is notfound; a file that exists but cannot be opened is not. */
+        int error = Tcl_GetErrno();
+        const char *code = (error == ENOENT || error == ENOTDIR) ? "notfound" : "oserror";
         Tcl_Obj *detail = Tcl_DuplicateObj(Tcl_GetObjResult(interp));
         Tcl_IncrRefCount(detail);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("cannot read machteld entry %s: %s",
             Tcl_GetString(path), Tcl_GetString(detail)));
         Tcl_DecrRefCount(detail);
-        Tcl_SetErrorCode(interp, "MACHTELD", "ENTRY", "notfound", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "ENTRY", code, NULL);
         return TCL_ERROR;
     }
     if (Tcl_SetChannelOption(interp, channel, "-encoding", "utf-8") != TCL_OK) {
@@ -480,6 +484,17 @@ write_and_exit(Tcl_Interp *interp, Tcl_Channel channel, int status)
         Tcl_WriteChars(channel, text, length);
         Tcl_WriteChars(channel, "\n", 1);
         Tcl_Flush(channel);
+    } else if (channel == NULL && length != 0 && status != 0) {
+        /* A GUI host has no standard error channel; a startup failure must
+         * still reach a person rather than end in a silent exit. */
+        int wide = MultiByteToWideChar(CP_UTF8, 0, text, (int)length, NULL, 0);
+        wchar_t *message = wide > 0 ? (wchar_t *)malloc(((size_t)wide + 1) * sizeof(wchar_t)) : NULL;
+        if (message != NULL) {
+            MultiByteToWideChar(CP_UTF8, 0, text, (int)length, message, wide);
+            message[wide] = L'\0';
+            MessageBoxW(NULL, message, L"machteld", MB_ICONERROR | MB_OK);
+            free(message);
+        }
     }
     Tcl_Exit(status);
 }

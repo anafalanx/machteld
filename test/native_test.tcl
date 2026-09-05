@@ -297,6 +297,18 @@ check "json decode -typed rejects a duplicate key" [expr {
     [errcode_of {json decode -typed {{"a":1,"b":2,"a":3}}}] eq {MACHTELD JSON strict}}]
 check "json decode -typed accepts distinct keys" [expr {
     [json type [json decode -typed {{"a":1,"b":2,"c":3}}]] eq "object"}]
+check "json exists requires a path" [expr {
+    [errcode_of [list json exists $typed_array]] eq {TCL WRONGARGS}}]
+check "json encodes an arithmetic series as an array" [expr {
+    [json encode [lseq 1 3]] eq {[1,2,3]}}]
+check "http refuses credentials in a url" [expr {
+    [errcode_of {http get http://user:secret@127.0.0.1:9/}] eq {MACHTELD HTTP badvalue}}]
+check "http refuses an empty -type" [expr {
+    [errcode_of {http post http://127.0.0.1:9/ body -type ""}] eq {MACHTELD HTTP badvalue}}]
+check "watch start refuses a file by name" [expr {
+    [errcode_of [list watch start $binary_path]] eq {MACHTELD WATCH badvalue}}]
+check "dirs names an unknown option" [expr {
+    [errcode_of [list dirs $WORK -bogus 1]] eq {MACHTELD DIRS usage}}]
 
 file delete -force $WORK
 if {$fails} {
