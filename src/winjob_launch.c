@@ -144,7 +144,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     wApp = u8_to_u16(appExe);
     wCmd = u8_to_u16(cmdText); /* CreateProcessW may modify this buffer: it's our own copy */
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
-    if (wcslen(wCmd) > 32767) { *err = "command line exceeds 32767 characters"; goto done; }
+    if (wcslen(wCmd) >= 32767) { *err = "command line exceeds the 32767-character limit"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
         wDir = u8_to_u16(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }
@@ -301,7 +301,7 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
     wApp = u8_to_u16(appExe);
     wCmd = u8_to_u16(cmdText);
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
-    if (wcslen(wCmd) > 32767) { *err = "command line exceeds 32767 characters"; goto done; }
+    if (wcslen(wCmd) >= 32767) { *err = "command line exceeds the 32767-character limit"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
         wDir = u8_to_u16(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }

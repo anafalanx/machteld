@@ -209,7 +209,7 @@ proc ::machteld::CliHelpText {attrs} {
         lappend extra "at most [dict get $attrs max]"
     }
     # A flag's default 0 is noise; any other declared default is information.
-    set isFlag [expr {[dict exists $attrs type] && [dict get $attrs type] eq "flag"}]
+    set isFlag [expr {[dict get $attrs _type] eq "flag"}]
     if {[dict exists $attrs default] && [dict get $attrs default] ne "" && !$isFlag} {
         lappend extra "default [dict get $attrs default]"
     }

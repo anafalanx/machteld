@@ -127,6 +127,7 @@ static int
 Machteld_GuiAppInit(
     Tcl_Interp *interp)
 {
+    Machteld_SetGuiHost();
     if (Machteld_PreInit(interp) != TCL_OK) {
         Machteld_Fatal(interp);
     }

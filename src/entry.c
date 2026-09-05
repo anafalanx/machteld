@@ -17,11 +17,18 @@
 #include <windows.h>
 
 static int host_mode = MACHTELD_HOST_NORMAL;
+static int gui_host = 0;
 
 void
 Machteld_SetHostMode(int mode)
 {
     host_mode = mode;
+}
+
+void
+Machteld_SetGuiHost(void)
+{
+    gui_host = 1;
 }
 
 int
@@ -484,9 +491,11 @@ write_and_exit(Tcl_Interp *interp, Tcl_Channel channel, int status)
         Tcl_WriteChars(channel, text, length);
         Tcl_WriteChars(channel, "\n", 1);
         Tcl_Flush(channel);
-    } else if (channel == NULL && length != 0 && status != 0) {
-        /* A GUI host has no standard error channel; a startup failure must
-         * still reach a person rather than end in a silent exit. */
+    } else if (gui_host && channel == NULL && length != 0 && status != 0) {
+        /* The GUI host has no standard error channel; a startup failure must
+         * still reach a person rather than end in a silent exit. A console
+         * host without stdio (a detached or session-0 launch) keeps exiting
+         * quietly: a message box there would block with nobody to see it. */
         int wide = MultiByteToWideChar(CP_UTF8, 0, text, (int)length, NULL, 0);
         wchar_t *message = wide > 0 ? (wchar_t *)malloc(((size_t)wide + 1) * sizeof(wchar_t)) : NULL;
         if (message != NULL) {

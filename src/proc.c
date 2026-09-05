@@ -2110,7 +2110,12 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
                 DWORD got = 0;
                 if (!ReadFile(p->outR, buf, want, &got, NULL)) got = 0;
                 pty_deliver(interp, p, buf, (size_t)got);
-                return TCL_OK;
+                /* Only a held-back partial sequence arrived: keep waiting
+                 * while the deadline allows, rather than answer empty. */
+                Tcl_Size delivered = 0;
+                Tcl_GetStringFromObj(Tcl_GetObjResult(interp), &delivered);
+                if (delivered > 0 || GetTickCount64() >= deadline) return TCL_OK;
+                continue;
             }
             if (GetTickCount64() >= deadline) break;
             Sleep(10);
