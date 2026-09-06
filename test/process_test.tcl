@@ -134,6 +134,21 @@ check "large stdin is written completely" [expr {[dict get $result out] eq $inpu
 check "large stdin byte count is exact" [expr {
     [string trim [dict get $result err]] eq "BYTES:[string length $input]"}]
 
+# -stdin follows the byte rule shared with hash, store, and http post: a
+# bytearray is written exactly, any other value as UTF-8. 0.20 wrote the string
+# representation, so every high byte of a bytearray went out as two UTF-8 bytes.
+set stdin_bytes [binary format H* 000180ff4142007f]
+set result [run -stdin $stdin_bytes -- $FIXTURE stdin-echo]
+check "run -stdin writes a bytearray byte-for-byte" [expr {
+    [binary encode hex [dict get $result out]] eq "000180ff4142007f"}]
+set stdin_text "hëllö 世界\n"
+set result [run -stdin $stdin_text -- $FIXTURE stdin-echo]
+check "run -stdin writes a string as UTF-8" [expr {
+    [dict get $result out] eq [encoding convertto utf-8 $stdin_text]}]
+set result [run -stdin "a\0b" -- $FIXTURE stdin-echo]
+check "run -stdin writes a string's NUL as one byte" [expr {
+    [binary encode hex [dict get $result out]] eq "610062"}]
+
 # Channel mode gives EOF ownership to the caller. Closing stdin after the last
 # request lets an EOF-driven child finish; wait itself deliberately does not
 # close a protocol channel behind the caller's back.

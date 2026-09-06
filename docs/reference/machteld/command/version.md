@@ -20,7 +20,7 @@ Takes no arguments or options.
 
 ## Results
 
-Returns `0.20`, the same value returned by `package require machteld` in this
+Returns `0.21`, the same value returned by `package require machteld` in this
 release.
 
 ## Errors
@@ -34,7 +34,7 @@ Pure constant query with no retained state or timeout.
 ## Examples
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 puts "Machteld [version]"
 ```
 

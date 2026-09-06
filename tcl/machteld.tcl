@@ -3,7 +3,7 @@
 # Sourced by the C host from zipfs before Tcl_Main evaluates an entry file.
 
 namespace eval ::machteld {
-    variable version 0.20
+    variable version 0.21
     # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl
     # from the explicit native specification, after checking its command set
     # against src/*.c. Declared empty here so an unpackaged prelude never invents
@@ -362,7 +362,10 @@ proc ::machteld::_write_launcher {path archiveEntry} {
     set channel [open $path {WRONLY CREAT EXCL}]
     try {
         fconfigure $channel -encoding utf-8 -translation lf
-        puts $channel {package require machteld 0.20}
+        # The pin is the running runtime's own version, so the launcher can
+        # never disagree with the host that wraps it. The generated file still
+        # carries a literal, which is what the entry gate parses.
+        puts $channel "package require machteld [::machteld::version]"
         puts $channel "set argv0 \[file join \[file dirname \[info script\]\] [list $archiveEntry]\]"
         puts $channel {source $argv0}
     } finally {
@@ -557,9 +560,13 @@ namespace eval :: { namespace path [concat [namespace path] ::machteld] }
 # Tk on demand: a static build ships no Tk DLL, so wire `package require Tk`
 # straight to the in-process, statically-linked Tk_Init via `load {} Tk`. Tk is
 # not initialized -- and no window is created -- until a script actually asks.
-# (The version label tracks the pinned Tcl/Tk payload; `load {} Tk` itself is
-# version-agnostic and always loads whatever Tk is linked in.)
-package ifneeded Tk 9.0.4 {load {} Tk}
+# The version label is the linked library's own TK_PATCH_LEVEL, recorded by the
+# host in ::machteld::tk_patchlevel before this prelude runs, so it cannot
+# drift from the Tk that `load {} Tk` initializes. Outside a machteld host (a
+# tool sourcing this file in a plain tclsh) there is no linked Tk to register.
+if {[info exists ::machteld::tk_patchlevel]} {
+    package ifneeded Tk $::machteld::tk_patchlevel {load {} Tk}
+}
 package provide machteld $::machteld::version
 
 # One-line banner on the first interactive prompt, then a plain branded prompt.

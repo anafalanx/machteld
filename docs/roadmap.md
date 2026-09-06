@@ -159,10 +159,15 @@ Also in 0.15.0: **the pty redirected-parent fix** - a pty child's
 stdio now binds to the ConPTY even when the parent's own stdio is a
 pipe or file (found by the platform-plan review panel probing this
 roadmap's own claims; gated headless by a canary fixture, proven red
-then green); and the generated wrap launcher now derives its
-`package require machteld` pin from the running runtime's version
-instead of a hardcoded literal. This was cut as a clean state; the merge it
-anticipated was later withdrawn (see below).
+then green). This was cut as a clean state; the merge it anticipated was
+later withdrawn (see below).
+
+Correction (2026-09-05): this entry originally also claimed that the
+generated wrap launcher derived its `package require machteld` pin from
+the running runtime's version. It did not; the launcher carried a hardcoded
+literal through 0.15.0 and 0.20, kept in step by the release gate's version
+trio check. The derivation exists from 0.21 on, and the gate now refuses a
+literal.
 
 ## 0.15.1 — unreleased documentation checkpoint (2026-09-03)
 
@@ -203,6 +208,89 @@ Version 0.20 is a deliberate subtraction release: engine mode, its wire,
 `macht`, Lua, LPeg, lua-cjson, and the engine-bound `col` implementation were
 removed together, with no migration surface. It adds no replacement capability;
 the clean Tcl/Tk runtime is the baseline for subsequent development.
+
+## 0.21 — consolidation (in preparation, 2026-09-05)
+
+**Same capabilities, cleaner and more robust.** A complete read of the 0.20
+tree - every C and Tcl source, every tool, test, and page - looking for
+mistakes and for things to consolidate. Nothing is added to the palette and
+nothing is removed from it.
+
+Corrected:
+
+- `http post` read its body with `Tcl_GetByteArrayFromObj`, which sends
+  U+0080..U+00FF as Latin-1 and returns NULL (length untouched) for any
+  string beyond U+00FF; a JSON body with non-ASCII text was mis-encoded or
+  read an uninitialized length. `run`/`child start -stdin` wrote the string
+  representation, so a bytearray was never binary-safe. Both now follow the
+  one byte rule (`Machteld_ValueBytes` in `machteld.h`) that `hash` and
+  `store` already used, and the contract states the rule once. The rule
+  itself now means real UTF-8: `hash` and `store` had used Tcl's internal
+  string bytes, in which U+0000 is the two-byte sequence C0 80, so a string
+  containing NUL hashed and stored differently from its UTF-8.
+- The pool spoke to its workers over the raw binary channels `child
+  -channels` hands over, while `worker serve` spoke strict UTF-8: non-ASCII
+  text crossed the wire as Latin-1 mojibake. The channels are now strict
+  UTF-8 both ways; a worker reply that is not UTF-8 is a protocol death, and
+  `pool submit` refuses an item that cannot encode as plain JSON.
+- A worker whose handler returned a value that cannot encode as plain JSON
+  (a typed json value) swallowed the encode error and left the request
+  unanswered, holding the director until its batch timeout. It now answers
+  with `WORKER failed`.
+- Strict typed decode checked duplicate members quadratically; a 16 MiB
+  object with a few hundred thousand members turned `json decode -typed`
+  into minutes of work. Detection is now sort-based past sixteen members.
+  `lseq` values (Tcl 9's second list representation) encode as arrays;
+  `json exists` requires a path step as documented; iteration temporaries
+  use `Tcl_BounceRefCount`.
+- `json decode -typed` formatted its duplicate-key error from a pointer into
+  the document it had just freed. Unnoticed on small inputs, a crash on a
+  large one (found by the new 200k-member test). The message is now built
+  before the document is released.
+- `watch` converted names leniently, so an unrepresentable name could arrive
+  renamed to U+FFFD; it is now counted as dropped, like `dirs`.
+- A `child start -channels` whose channel setup failed leaked the stdin
+  write handle; `wait -any` tested the done list's string length instead of
+  its element count.
+- The roadmap's 0.15.0 claim that the wrap launcher derived its version pin
+  was false (see the correction above); the derivation now exists.
+- The `--machteld-engine` entry test read its exit code from a timed
+  `Start-Process` without `-Wait`, which Windows PowerShell 5.1 leaves empty;
+  the 0.20 gate was red on that one check in that shell. The test now waits
+  on the process (its stdin is an empty file, so nothing can block).
+
+Consolidated:
+
+- One Win32 text boundary, `wintext.h`/`wintext.c`, replaces six private
+  copies of the UTF-8/UTF-16 converters (two of them lenient) across proc,
+  dirs, http, ps, and the launcher.
+- One build description, `tools/buildlib.tcl`, is read by both the hermetic
+  release build and the development loop, so a dev object is a release
+  object. `-Werror` is on by default (`MACHTELD_WERROR=0` to relax), and the
+  SQLite embed compiles with `SQLITE_DQS=0`, `SQLITE_OMIT_DEPRECATED`, and
+  `SQLITE_OMIT_SHARED_CACHE`.
+- One MSYS2 discovery, `tools/toolchain.ps1`, shared by bootstrap, build, and
+  test; `dev.tcl` follows the same order and no longer carries a hardcoded
+  estate path. `--enable-threads` is gone from the Tcl/Tk configure lines
+  (Tcl 9 is always threaded and warned about the unknown option).
+- `tools/check_version.tcl` joins the release gate: every prose version claim
+  outside this history must agree with `src/machteld.h`, and a literal
+  launcher pin in the prelude is refused.
+- The Tk package registration, the reference corpus check, and the `help`
+  banner read the linked library's `TK_PATCH_LEVEL`, recorded by the host as
+  `::machteld::tk_patchlevel`, instead of two hand-maintained `9.0.4`
+  literals; the Tcl check reads `info patchlevel`.
+- Dead assignments in `cli`, `pmap`, and `worker` removed.
+
+Dependency: SQLite moves from 3.51.0 to 3.53.4 (2026-07-24). The span carries
+the WAL-reset database corruption fix (3.51.3), the nested-EXISTS incorrect
+result fixes (3.51.1, 3.51.2), and four rounds of 3.53.x fixes. The store runs
+fixed statements with bound parameters and never enables WAL, so none of the
+fixed defects were reachable through it; the bump is hygiene. The amalgamation
+is pinned by SHA-256 in the lock; its archive and its `sqlite3.c` were checked
+against sqlite.org's published SHA3-256 values before pinning. 3.53.0 changed
+SQLite's float-to-text rounding to 17 significant digits; the store never
+formats numbers, so nothing observable changes.
 
 ## Candidate studies
 

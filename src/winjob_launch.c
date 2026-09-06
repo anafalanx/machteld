@@ -8,6 +8,7 @@
  * defensively quoted cmd.exe (the CVE-2024-24576 mitigation, in winjob_cmdline.c).
  */
 #include "winjob.h"
+#include "wintext.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00 /* Windows 10/11: STARTUPINFOEX, ProcThreadAttribute* */
@@ -24,32 +25,6 @@
 #define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
 #endif
 
-/* ---- UTF-8 <-> UTF-16 (Tcl strings are UTF-8; Win32 wants UTF-16) ------- */
-
-static wchar_t *u8_to_u16(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
-    if (n <= 0) return NULL;
-    wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
-    if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) <= 0) {
-        free(w);
-        return NULL;
-    }
-    return w;
-}
-
-static char *u16_to_u8(const wchar_t *w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
-    if (n <= 0) return NULL;
-    char *s = (char *)malloc((size_t)n);
-    if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) {
-        free(s);
-        return NULL;
-    }
-    return s;
-}
-
 static int path_is_absolute(const char *p) {
     if (p == NULL || p[0] == '\0') return 0;
     if ((p[0] == '\\' || p[0] == '/') && (p[1] == '\\' || p[1] == '/')) return 1; /* UNC */
@@ -64,7 +39,7 @@ static char *comspec_path(const char **err) {
     wchar_t buf[1024];
     DWORD n = GetEnvironmentVariableW(L"ComSpec", buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
     if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
-        char *u = u16_to_u8(buf);
+        char *u = mt_wide_to_utf8(buf, -1);
         if (u != NULL && path_is_absolute(u)) return u;
         free(u);
     }
@@ -74,7 +49,7 @@ static char *comspec_path(const char **err) {
         wchar_t full[MAX_PATH + 16];
         lstrcpynW(full, sys, MAX_PATH);
         lstrcatW(full, L"\\cmd.exe");
-        return u16_to_u8(full);
+        return mt_wide_to_utf8(full, -1);
     }
     *err = "cannot locate cmd.exe to run a batch file";
     return NULL;
@@ -130,11 +105,11 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         if (cmdText == NULL) { *err = "out of memory"; goto done; }
     }
 
-    wApp = u8_to_u16(appExe);
-    wCmd = u8_to_u16(cmdText); /* CreateProcessW may modify this buffer: it's our own copy */
+    wApp = mt_utf8_to_wide(appExe);
+    wCmd = mt_utf8_to_wide(cmdText); /* CreateProcessW may modify this buffer: it's our own copy */
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
-        wDir = u8_to_u16(dir);
+        wDir = mt_utf8_to_wide(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }
     }
 
@@ -286,11 +261,11 @@ int wj_launch_pty(const char *exe, int argc, const char *const *argv, const char
         if (cmdText == NULL) { *err = "out of memory"; goto done; }
     }
 
-    wApp = u8_to_u16(appExe);
-    wCmd = u8_to_u16(cmdText);
+    wApp = mt_utf8_to_wide(appExe);
+    wCmd = mt_utf8_to_wide(cmdText);
     if (wApp == NULL || wCmd == NULL) { *err = "bad executable path or command line"; goto done; }
     if (dir != NULL && dir[0] != '\0') {
-        wDir = u8_to_u16(dir);
+        wDir = mt_utf8_to_wide(dir);
         if (wDir == NULL) { *err = "bad working directory"; goto done; }
     }
 

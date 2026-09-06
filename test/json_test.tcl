@@ -56,6 +56,8 @@ check "encode escapes"          [expr {[json encode "a\"b\nc"] eq {"a\"b\nc"}}]
 check "a sentence stays a string"  [expr {[json encode "hello world"] eq {"hello world"}}]
 check "...and a real list does not" [expr {[json encode [list hello world]] eq {["hello","world"]}}]
 check "a real dict is an object"    [expr {[json encode [dict create a 1]] eq {{"a":1}}}]
+# `lseq` builds Tcl 9's other list representation; it is a list in every sense.
+check "an lseq value is an array"    [expr {[json encode [lseq 3]] eq {[0,1,2]}}]
 check "-dict and -list are exclusive" [expr {
     [catch {json encode -dict -list {}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON usage}}]
@@ -196,6 +198,17 @@ check "typed: -maxbytes above the hard cap refuses" [expr {
 check "typed: depth cap holds in typed decode" [expr {
     [catch {json decode -typed "[string repeat {[} 600][string repeat {]} 600]"} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON depth}}]
+# Strict duplicate detection stays near-linear: a large object must not turn
+# `decode -typed` into quadratic work, and a duplicate buried in it still
+# refuses by name.
+set members {}
+for {set i 0} {$i < 200000} {incr i} { lappend members "\"k$i\":$i" }
+check "typed: a 200k-member object decodes strictly" [expr {
+    [json type [json decode -typed "\{[join $members ,]\}"]] eq "object"}]
+check "typed: a duplicate deep in a large object refuses" [expr {
+    [catch {json decode -typed "\{[join $members ,],\"k77777\":0\}"} m opts] &&
+    [dict get $opts -errorcode] eq {MACHTELD JSON strict}}]
+unset members
 
 # The access surface: type, unwrap, get, exists.
 set TYPEDDOC [json decode -typed {{"id":7,"result":{"ok":true,"n":42},"s":"S1"}}]
@@ -211,6 +224,7 @@ check "typed: exists answers, get refuses by name" [expr {
     [json exists $TYPEDDOC nope] == 0 &&
     [catch {json get $TYPEDDOC nope} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON absent}}]
+check "typed: exists requires at least one path step" [catch {json exists $TYPEDDOC}]
 
 # J7's organ half: the wire path refuses typed values by name.
 check "typed: encode -plain refuses a typed value" [expr {

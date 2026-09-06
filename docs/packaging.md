@@ -67,7 +67,7 @@ into a misleading failure.
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 0.20 prelude and public palette;
+- the full Machteld 0.21 prelude and public palette;
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl, Tk, zlib, LibTomMath, and
   yyjson distribution notices under `licenses/`;
@@ -77,7 +77,7 @@ A wrapped executable contains:
   Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
 There is no prelude-free or reduced-capability option. `package require machteld`
-inside a wrapped tool returns 0.20, `manifest` describes the same API, and
+inside a wrapped tool returns 0.21, `manifest` describes the same API, and
 binary-safe `store` has the same behavior and five-second busy timeout. Wrapping
 does not change the programmatic machine-control API. The reference corpus is
 copied so `docs`, `help`, and the reserved `--machteld-docs` host route remain
@@ -85,7 +85,7 @@ self-contained. Only basekits are distribution-only: a wrapped tool cannot run
 `wrap` again.
 
 Every host also carries Windows VERSIONINFO derived from the canonical Machteld
-version: product and file version `0.20`, the Machteld product identity, and
+version: product and file version `0.21`, the Machteld product identity, and
 Vincent Vercauteren as author, publisher, and copyright holder. A wrapped
 program inherits the console or GUI host metadata; `wrap` does not claim
 application-specific authorship or rewrite version resources. Tcl's embedded
@@ -99,7 +99,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 package require Tk
 ```
 

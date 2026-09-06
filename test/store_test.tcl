@@ -46,6 +46,9 @@ set unicode "caf\u00e9 \U0001F600"
 store put unicode-key $unicode
 check "non-bytearray strings are stored as UTF-8" [expr {
     [encoding convertfrom utf-8 [store get unicode-key]] eq $unicode}]
+store put nul-key "a\0b"
+check "a string containing NUL is stored as its three UTF-8 bytes" [expr {
+    [binary encode hex [store get nul-key]] eq "610062"}]
 
 check "missing get reports notfound" [expr {
     [errcode_of {store get absent-key}] eq {MACHTELD STORE notfound}}]

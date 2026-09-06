@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
 $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
 $LockPath = Join-Path $PSScriptRoot 'dependencies.lock.json'
 $Lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
 $BundledNotices = @($Lock.bundledNotices)
@@ -65,13 +66,6 @@ function Assert-UnderCache([string]$Path) {
     if (-not $resolved.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) {
         throw "refusing path outside dependency cache: $resolved"
     }
-}
-
-function Resolve-MsysRoot {
-    if ($MsysRoot) { return [IO.Path]::GetFullPath($MsysRoot) }
-    if ($env:MSYS2_ROOT) { return [IO.Path]::GetFullPath($env:MSYS2_ROOT) }
-    if (Test-Path -LiteralPath 'C:\msys64\usr\bin\bash.exe') { return 'C:\msys64' }
-    throw 'MSYS2 root not found; pass -MsysRoot or set MSYS2_ROOT'
 }
 
 function Assert-Hash([string]$Path, [string]$Expected, [string]$Label) {
@@ -292,7 +286,7 @@ function Find-One([string[]]$Candidates, [string]$Label) {
     throw "dependency prefix has no $Label; tried: $($Candidates -join ', ')"
 }
 
-$MsysRoot = Resolve-MsysRoot
+$MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
 $Gcc = Join-Path $MsysRoot 'ucrt64\bin\gcc.exe'
 $Strip = Join-Path $MsysRoot 'ucrt64\bin\strip.exe'
 $Windres = Join-Path $MsysRoot 'ucrt64\bin\windres.exe'
@@ -412,7 +406,7 @@ if ($LASTEXITCODE) { throw "Tcl/Tk build failed with exit code $LASTEXITCODE" }
 
 $sqliteEntry = $Lock.archives | Where-Object id -eq 'sqlite'
 $sqliteArchive = Get-Archive $sqliteEntry
-$sqliteExtract = Join-Path $SourceRoot 'sqlite-3.51.0'
+$sqliteExtract = Join-Path $SourceRoot "sqlite-$($sqliteEntry.version)"
 if (-not (Test-Path -LiteralPath (Join-Path $sqliteExtract 'sqlite3.c'))) {
     Assert-UnderCache $sqliteExtract
     Remove-Item -LiteralPath $sqliteExtract -Recurse -Force -ErrorAction SilentlyContinue

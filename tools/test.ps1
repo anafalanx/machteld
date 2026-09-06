@@ -12,11 +12,8 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $Machteld) { $Machteld = Join-Path $RepoRoot 'out\machteld.exe' }
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
-if (-not $MsysRoot) {
-    if ($env:MSYS2_ROOT) { $MsysRoot = $env:MSYS2_ROOT }
-    elseif (Test-Path -LiteralPath 'C:\msys64\usr\bin\bash.exe') { $MsysRoot = 'C:\msys64' }
-}
-if (-not $MsysRoot) { throw 'MSYS2 root not found; pass -MsysRoot or set MSYS2_ROOT' }
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
 
 if (-not $SkipBuild) {
     & (Join-Path $PSScriptRoot 'build.ps1') -Output $Machteld -CacheRoot $CacheRoot -MsysRoot $MsysRoot
@@ -96,6 +93,8 @@ if ($LASTEXITCODE) { throw "VERSIONINFO tests failed with exit code $LASTEXITCOD
 if ($LASTEXITCODE) { throw "reference generator tests failed with exit code $LASTEXITCODE" }
 & $tclsh (Join-Path $RepoRoot 'tools\check_reference.tcl')
 if ($LASTEXITCODE) { throw "reference coverage checks failed with exit code $LASTEXITCODE" }
+& $tclsh (Join-Path $RepoRoot 'tools\check_version.tcl')
+if ($LASTEXITCODE) { throw "version consistency checks failed with exit code $LASTEXITCODE" }
 
 if ($PublicTls) { $env:MACHTELD_TEST_PUBLIC_TLS = '1' }
 if ($InteractivePty) { $env:MACHTELD_TEST_PTY_IO = '1' }

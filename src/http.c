@@ -26,6 +26,7 @@
  */
 
 #include "machteld.h"
+#include "wintext.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -62,35 +63,6 @@ static int http_win_error(Tcl_Interp *interp, const char *code, const char *what
     Tcl_SetObjResult(interp, Tcl_NewStringObj(buf, -1));
     Tcl_SetErrorCode(interp, "MACHTELD", "HTTP", code, (char *)NULL);
     return TCL_ERROR;
-}
-
-static wchar_t *http_wide(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                s, -1, NULL, 0);
-    if (n <= 0) return NULL;
-    wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
-    if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-            s, -1, w, n) <= 0) {
-        free(w);
-        return NULL;
-    }
-    return w;
-}
-
-static char *http_utf8(const wchar_t *w, int wlen) {
-    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-                                w, wlen, NULL, 0, NULL, NULL);
-    if (n <= 0) return NULL;
-    char *s = (char *)malloc((size_t)n + 1);
-    if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-            w, wlen, s, n, NULL, NULL) <= 0) {
-        free(s);
-        return NULL;
-    }
-    s[n] = '\0';
-    return s;
 }
 
 /* --- the response headers ---------------------------------------------------
@@ -331,9 +303,9 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
         return http_error(interp, "toobig", "the request body exceeds WinHTTP's size limit");
     }
 
-    r.wurl   = http_wide(url);
-    r.wverb  = http_wide(verb);
-    r.wagent = http_wide(o->agent);
+    r.wurl   = mt_utf8_to_wide(url);
+    r.wverb  = mt_utf8_to_wide(verb);
+    r.wagent = mt_utf8_to_wide(o->agent);
     if (r.wurl == NULL || r.wverb == NULL || r.wagent == NULL) {
         http_cleanup(&r);
         return http_error(interp, "badvalue", "the url is not representable");
@@ -471,7 +443,7 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
     Tcl_Size hlen;
     const char *hstr = Tcl_GetStringFromObj(hdrbuf, &hlen);
     if (hlen > 0) {
-        r.whdrs = http_wide(hstr);
+        r.whdrs = mt_utf8_to_wide(hstr);
         if (r.whdrs == NULL ||
                 !WinHttpAddRequestHeaders(r.req, r.whdrs, (DWORD)-1,
                     WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE)) {
@@ -542,7 +514,7 @@ static int http_do(Tcl_Interp *interp, const char *verb, const char *url,
             return http_error(interp, "oserror", "the response headers have an invalid byte length");
         }
         raw[rawlen / sizeof(wchar_t)] = L'\0';
-        char *u = http_utf8(raw, -1);
+        char *u = mt_wide_to_utf8(raw, -1);
         free(raw);
         if (u == NULL) {
             Tcl_DecrRefCount(hdict); Tcl_DecrRefCount(rawobj);
@@ -650,7 +622,7 @@ static int HttpCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     if (objc < 3) {
         Tcl_WrongNumArgs(interp, 1, objv, "get|post url ?body? ?-headers dict? "
                                           "?-timeout 30s? ?-agent name? ?-type mime? "
-                                          "?-maxbody n?");
+                                          "?-maxbody n? ?-redirect none?");
         return TCL_ERROR;
     }
     if (Tcl_GetIndexFromObj(interp, objv[1], subs, "subcommand", TCL_EXACT, &idx) != TCL_OK) {
@@ -670,10 +642,19 @@ static int HttpCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         return TCL_ERROR;
     }
     if (http_opts(interp, objc, objv, 4, 1, &o) != TCL_OK) return TCL_ERROR;
-    Tcl_Size blen;
-    unsigned char *b = Tcl_GetByteArrayFromObj(objv[3], &blen);
+    /* The body follows the byte rule (machteld.h): a byte array is sent
+     * byte-for-byte, any other value as UTF-8. Tcl_GetByteArrayFromObj was
+     * wrong here twice over -- it coerced text to Latin-1 for U+0080..U+00FF
+     * and returned NULL (with the length untouched) for anything beyond, so
+     * a JSON body with non-ASCII text either went out mis-encoded or read an
+     * uninitialized length. */
+    Tcl_Size blen = 0;
+    Tcl_DString bds;
+    const unsigned char *b = Machteld_ValueBytes(objv[3], &blen, &bds);
     if (o.type == NULL && !o.has_content_type) o.type = "application/octet-stream";
-    return http_do(interp, "POST", url, b, blen, &o);
+    int rc = http_do(interp, "POST", url, b, blen, &o);
+    Tcl_DStringFree(&bds);
+    return rc;
 }
 
 int Machteldhttp_Init(Tcl_Interp *interp) {

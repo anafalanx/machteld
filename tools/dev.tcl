@@ -8,8 +8,9 @@
 #
 # Speed comes from a PERSISTENT cache in .cache/dev that the hermetic release
 # build never uses: the 9 MB SQLite amalgamation is compiled once and reused;
-# authored src/*.c recompile only when they change;
-# the reference corpus is reused unless a doc source is newer or -ref is given.
+# authored src/*.c recompile only when they, a header, or the build description
+# change; the reference corpus is reused unless a doc source is newer or -ref is
+# given.
 #
 # THE RULE: this loop is for iteration and it MAY drift from a clean build
 # (a stale object, a reused corpus). The release gate, tools/test.ps1, stays
@@ -17,9 +18,9 @@
 # version ships, before a version bump, and after changes to the release
 # tooling itself. Ordinary development commits push on this loop's checks;
 # drift is caught at the next release gate, which is the point of having
-# one. Compile flags here are copied verbatim from tools/build.tcl so a dev
-# object is byte-for-byte a release object; only the caching and the work
-# directory differ.
+# one. What gets compiled, and how, comes from tools/buildlib.tcl -- the same
+# words the release build reads -- so a dev object is a release object; only
+# the caching and the work directory differ.
 
 proc script_root {} {
     set s [info script]
@@ -28,57 +29,39 @@ proc script_root {} {
 }
 set ROOT [script_root]
 proc Rp {args} { return [file join $::ROOT {*}$args] }
+source [Rp tools buildlib.tcl]
+namespace import ::machteld::build::run
 
-# ---- toolchain discovery: gcc/strip from the z msys2 payload ----
+# ---- toolchain discovery: the same order as tools/toolchain.ps1 ----
 
 proc discover_msys2 {root} {
     set cands {}
-    if {[info exists ::env(Z_MSYS2)] && $::env(Z_MSYS2) ne ""} {
-        lappend cands $::env(Z_MSYS2)
+    foreach name {MSYS2_ROOT Z_MSYS2} {
+        if {[info exists ::env($name)] && $::env($name) ne ""} { lappend cands $::env($name) }
     }
-    if {[info exists ::env(Z_HOME)] && $::env(Z_HOME) ne ""} {
-        lappend cands [file join $::env(Z_HOME) r msys2]
-    } elseif {[info exists ::env(Z_ROOT)] && $::env(Z_ROOT) ne ""} {
-        lappend cands [file join $::env(Z_ROOT) .z r msys2]
-    }
-    lappend cands [file join [file dirname $root] .z r msys2]
-    lappend cands C:/dev/.z/r/msys2
+    lappend cands C:/msys64 [file join [file dirname $root] .z r msys2]
     foreach p $cands {
         if {$p ne "" && [file exists [file join $p ucrt64 bin gcc.exe]]} {
             return [file normalize $p]
         }
     }
-    error "dev.tcl: msys2 gcc not found; set Z_MSYS2 (tried: [join $cands {, }])"
+    error "dev.tcl: msys2 gcc not found; set MSYS2_ROOT (tried: [join $cands {, }])"
 }
 set MSYS2 [discover_msys2 $ROOT]
-set GCC   [file join $MSYS2 ucrt64 bin gcc.exe]
-set STRIP [file join $MSYS2 ucrt64 bin strip.exe]
+set GCC     [file join $MSYS2 ucrt64 bin gcc.exe]
+set STRIP   [file join $MSYS2 ucrt64 bin strip.exe]
 set WINDRES [file join $MSYS2 ucrt64 bin windres.exe]
+if {![file exists $WINDRES]} { error "dev.tcl: missing windres: $WINDRES" }
 set ::env(PATH) "[file nativename [file join $MSYS2 ucrt64 bin]];$::env(PATH)"
 
 # ---- machteld's own bootstrapped dependency cache (from a prior release build) ----
 
-set CACHE [expr {[info exists ::env(MACHTELD_DEPS_ROOT)] && $::env(MACHTELD_DEPS_ROOT) ne ""
-                 ? [file normalize $::env(MACHTELD_DEPS_ROOT)] : [Rp .cache deps]}]
-set PREFIX  [file join $CACHE prefix]
-set SQLITE  [file join $CACHE sqlite]
-set YYJSON  [file join $CACHE yyjson]
-set INCLUDE [file join $PREFIX include]
-proc need {label path} {
-    if {![file exists $path]} {
-        error "dev.tcl: missing $label: $path\n  run tools/build.ps1 once to bootstrap .cache/deps"
-    }
-    return $path
+set CACHE [::machteld::build::cache_root $ROOT]
+if {[catch {::machteld::build::paths $CACHE} PATHS]} {
+    error "dev.tcl: $PATHS\n  run tools/build.ps1 once to bootstrap [file nativename $CACHE]"
 }
-need "dependency cache" $CACHE
-need "windres" $WINDRES
-need "static tclsh" [set TCLSH [file join $PREFIX bin tclsh90s.exe]]
-need "tcl.h"     [file join $INCLUDE tcl.h]
-need "sqlite3.c" [file join $SQLITE sqlite3.c]
-need "yyjson.c" [file join $YYJSON yyjson.c]
-set TCLLIB   [need "libtcl90.a"   [file join $PREFIX lib libtcl90.a]]
-set TKLIB    [need "libtcl9tk90.a" [file join $PREFIX lib libtcl9tk90.a]]
-set TCLSTUB  [need "libtclstub.a" [file join $PREFIX lib libtclstub.a]]
+set TCLSH  [dict get $PATHS tclsh]
+set PREFIX [dict get $PATHS prefix]
 
 # ---- the persistent dev cache (absent from the release build) ----
 
@@ -87,36 +70,27 @@ set OBJ [file join $DEV obj]
 set REF [file join $DEV reference]
 file mkdir $OBJ
 
-# ---- compile flags: copied verbatim from tools/build.tcl ----
+set common [::machteld::build::common_flags $PATHS]
 
-set warnings {-Wall -Wextra -Wpedantic -Wformat=2 -Wundef -Werror}
-set defines {
-    -DUNICODE -D_UNICODE -DSTATIC_BUILD=1
-    -DMACHTELD_STATIC_SQLITE -DMACHTELD_PROC -DMACHTELD_JSON
-    -DMACHTELD_PS -DMACHTELD_HASH -DMACHTELD_DIRS -DMACHTELD_HTTP
-}
-set common [list -std=c23 -O2 {*}$warnings {*}$defines \
-    -ffunction-sections -fdata-sections -I$INCLUDE -I$SQLITE -I$YYJSON]
-set syslibs {
-    -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
-    -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
-    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp
-}
-
-proc run {args} {
-    if {[catch {exec {*}$args >@ stdout 2>@ stderr} message options]} {
-        if {[dict exists $options -errorcode] &&
-            [lindex [dict get $options -errorcode] 0] eq "CHILDSTATUS"} {
-            error "command failed (exit [lindex [dict get $options -errorcode] 2])"
-        }
-        return -options $options $message
+# Every authored object depends on every header and on the build description
+# itself: an edited header or a changed flag must recompile the world, not
+# only the file that happened to be saved.
+proc inputs_mtime {} {
+    set latest [file mtime [Rp tools buildlib.tcl]]
+    foreach header [glob -nocomplain -directory [Rp src] *.h] {
+        set t [file mtime $header]
+        if {$t > $latest} { set latest $t }
     }
+    return $latest
 }
+set ::INPUTS_MTIME [inputs_mtime]
 
-# Compile src -> obj only when the object is missing or older than the source.
-# Returns 1 if it compiled, 0 if the cached object was fresh.
-proc cc {obj src flags label} {
-    if {[file exists $obj] && [file mtime $obj] >= [file mtime $src]} { return 0 }
+# Compile src -> obj only when the object is missing or older than its inputs.
+# Returns 1 if it compiled, 0 if the cached object was fresh. Vendor sources
+# pass shared=0: they depend on nothing of ours.
+proc cc {obj src flags label {shared 1}} {
+    if {[file exists $obj] && [file mtime $obj] >= [file mtime $src] &&
+            (!$shared || [file mtime $obj] >= $::INPUTS_MTIME)} { return 0 }
     puts "  cc  $label"
     run $::GCC {*}$flags -c $src -o $obj
     return 1
@@ -130,10 +104,9 @@ proc version_resource {kind obj} {
             [file mtime $obj] >= [file mtime $generator]} {
         return 0
     }
-    set rc [file join $::OBJ "machteld-$kind.rc"]
-    run $::TCLSH $generator $header $kind $rc
     puts "  rc  machteld-$kind.rc"
-    run $::WINDRES --codepage=65001 -O coff -i $rc -o $obj
+    ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
+        [file join $::OBJ "machteld-$kind.rc"] $obj
     return 1
 }
 
@@ -143,13 +116,14 @@ proc dev_build {{forceRef 0}} {
     set changed 0
     puts "build: incremental (cache [file nativename $::DEV])"
 
-    # Pinned third-party sources: SQLite and yyjson, cached across builds.
-    # Vendor TUs compile with their own minimal flags, never the
-    # authored -Werror set (the sqlite3.c precedent).
-    incr changed [cc [file join $::OBJ sqlite3.o] [file join $::SQLITE sqlite3.c] \
-        {-O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION} sqlite3.c]
-    incr changed [cc [file join $::OBJ yyjson.o] [file join $::YYJSON yyjson.c] \
-        {-O2 -ffunction-sections -fdata-sections} yyjson.c]
+    # Pinned third-party sources: SQLite and yyjson, cached across builds with
+    # their own flags from buildlib.tcl, never the authored -Werror set.
+    set sqliteObj [file join $::OBJ sqlite3.o]
+    set yyjsonObj [file join $::OBJ yyjson.o]
+    incr changed [cc $sqliteObj [file join [dict get $::PATHS sqlite] sqlite3.c] \
+        $::machteld::build::SQLITE_FLAGS sqlite3.c 0]
+    incr changed [cc $yyjsonObj [file join [dict get $::PATHS yyjson] yyjson.c] \
+        $::machteld::build::YYJSON_FLAGS yyjson.c 0]
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
     set guiMain     [Rp src machteld_gui_main.c]
@@ -174,35 +148,23 @@ proc dev_build {{forceRef 0}} {
     set bareGui [file join $::DEV machteld-bare-gui.exe]
     if {$changed || ![file exists $bare] || ![file exists $bareGui]} {
         puts "  ld  machteld-bare.exe"
-        run $::GCC -municode -static-libgcc -Wl,--gc-sections \
-            $consoleObj $consoleVersionObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] \
-            $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bare
-        run $::STRIP $bare
+        ::machteld::build::link_host $::GCC $::STRIP console $consoleObj $consoleVersionObj \
+            $objects $sqliteObj $yyjsonObj $::PATHS $bare
         puts "  ld  machteld-bare-gui.exe"
-        run $::GCC -municode -mwindows -static-libgcc -Wl,--gc-sections \
-            $guiObj $guiVersionObj {*}$objects [file join $::OBJ sqlite3.o] [file join $::OBJ yyjson.o] \
-            $::TKLIB $::TCLLIB $::TCLSTUB {*}$::syslibs -o $bareGui
-        run $::STRIP $bareGui
+        ::machteld::build::link_host $::GCC $::STRIP gui $guiObj $guiVersionObj \
+            $objects $sqliteObj $yyjsonObj $::PATHS $bareGui
     } else {
         puts "  ld  (bare hosts current)"
     }
 
-    # Manifest + prelude: cheap, always regenerated (same file list as
-    # build.tcl) -- but staged to a scratch name and promoted only when the
-    # CONTENT changed, so an unchanged prelude does not force repackaging.
+    # Manifest + prelude: cheap, always regenerated -- but staged to a scratch
+    # name and promoted only when the CONTENT changed, so an unchanged prelude
+    # does not force repackaging.
     set manifest [file join $::OBJ manifest.tcl]
     run $::TCLSH [Rp tools genmanifest.tcl] [Rp src] $manifest
     set staged [file join $::OBJ prelude.tcl]
     set fresh  [file join $::OBJ prelude.new]
-    set out [open $fresh w]
-    fconfigure $out -translation lf
-    foreach part [list [Rp tcl machteld.tcl] [Rp tcl docs.tcl] [Rp tcl cli.tcl] \
-            [Rp tcl log.tcl] [Rp tcl worker.tcl] [Rp tcl pool.tcl] [Rp tcl pmap.tcl] \
-            $manifest] {
-        set in [open $part r]; fconfigure $in -translation lf
-        puts $out [read $in]; close $in
-    }
-    close $out
+    ::machteld::build::stage_prelude $::ROOT $manifest $fresh
     set preludeChanged 1
     if {[file exists $staged] && [file size $staged] == [file size $fresh]} {
         set a [open $staged r]; fconfigure $a -translation binary
@@ -310,7 +272,14 @@ proc dev_docs {} {
         puts "  ok   reference links and coverage"
     }
 
-    # 3. If a built exe exists, confirm each guide resolves in its corpus.
+    # 3. Every prose version claim agrees with src/machteld.h.
+    if {[catch {run $::TCLSH [Rp tools check_version.tcl]} err]} {
+        puts "  FAIL check_version: $err"; incr fail
+    } else {
+        puts "  ok   version claims agree with the header"
+    }
+
+    # 4. If a built exe exists, confirm each guide resolves in its corpus.
     set exe [Rp out machteld.exe]
     if {[file exists $exe]} {
         set probe [file join $::DEV docprobe.tcl]

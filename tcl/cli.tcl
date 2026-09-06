@@ -213,7 +213,6 @@ proc ::machteld::CliHelpText {attrs} {
 
 proc ::machteld::cli {args} {
     set subs {parse usage duration}
-    set opts {}
     if {[llength $args] < 1} {
         Fail CLI usage "usage: cli parse argv spec | cli usage spec ?name?"
     }

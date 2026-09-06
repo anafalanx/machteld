@@ -10,11 +10,8 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $Output) { $Output = Join-Path $RepoRoot 'out\machteld.exe' }
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
-if (-not $MsysRoot) {
-    if ($env:MSYS2_ROOT) { $MsysRoot = $env:MSYS2_ROOT }
-    elseif (Test-Path -LiteralPath 'C:\msys64\usr\bin\bash.exe') { $MsysRoot = 'C:\msys64' }
-}
-if (-not $MsysRoot) { throw 'MSYS2 root not found; pass -MsysRoot or set MSYS2_ROOT' }
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
 
 $bootstrap = Join-Path $PSScriptRoot 'bootstrap.ps1'
 $bootstrapArgs = @{ CacheRoot = $CacheRoot; MsysRoot = $MsysRoot }

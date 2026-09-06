@@ -6,46 +6,73 @@ one executable, starts no service, needs no installed Tcl, and keeps Windows
 process, ConPTY, filesystem, HTTP, hashing, JSON, and SQLite machinery behind
 Tcl-shaped commands.
 
-## 0.20 — clean Tcl/Tk foundation
+## 0.21 — consolidation
 
-**[machteld 0.20 is released](https://github.com/anafalanx/machteld/releases/tag/v0.20)**
-(2026-09-04; the executable is Authenticode-signed, with its SHA-256 checksum
-beside it). Machteld is decisively a Tcl/Tk platform, with C and C++ as its only
-admitted native implementation languages. The compute-engine architecture, the
-`macht` command, Lua, LPeg, lua-cjson, and the engine-bound column library have
-been removed together. There is no compatibility layer or migration path for
-those experimental surfaces. This deliberately smaller release is the baseline
-for further development.
+**[machteld 0.21](https://github.com/anafalanx/machteld/releases/tag/v0.21)**
+(the executable is Authenticode-signed, with its SHA-256 checksum beside it)
+has exactly the capabilities of the previous release and corrects what a
+complete read of its tree found:
 
-The existing machine-control palette remains. Its JSON reader stands on a
-vendored yyjson 0.12.0 core with a byte-faithful plain mode and a typed mode
-that preserves JSON identity through `json value/type/unwrap/get/exists`.
-`http -redirect none` stops an authenticated request at the first 3xx, and a
-pty child's stdio remains bound to the ConPTY even when the parent's own stdio
-is redirected. The commands and their intended composition live in
+- `http post` sends a string body as UTF-8 and a bytearray byte-for-byte;
+  before, it sent U+0080–U+00FF as Latin-1 and could not post text beyond it
+  at all.
+- `run -stdin` and `child start -stdin` are binary-safe under the same rule,
+  which the [contract](docs/contract.md) now states once for every byte-consuming
+  command. The rule means real UTF-8: a string containing NUL now hashes and
+  stores as its UTF-8 bytes, not as Tcl's internal two-byte spelling of NUL.
+- The `pool`/`pmap` wire is strict UTF-8 text, so non-ASCII requests and
+  replies cross intact; a worker reply that is not UTF-8 is a protocol death,
+  and an item that cannot encode is refused at `submit`.
+- A worker whose reply cannot be encoded answers with a `WORKER failed` reply
+  instead of leaving the director waiting for its batch timeout.
+- Strict typed JSON decoding detects duplicate members in near-linear time; a
+  large object can no longer turn it into quadratic work, and the duplicate-key
+  error no longer reads freed memory. `lseq` values encode as arrays, and
+  `json exists` requires a path step, as documented.
+- The wrap launcher derives its `package require machteld` pin from the running
+  runtime, the Tk registration takes its version from the linked library, and a
+  version gate makes every prose claim agree with the header.
+- One Win32 text-conversion boundary, one build description shared by the
+  release build and the development loop, `-Werror` on by default, and the
+  SQLite embed compiled with upstream's hardening options.
+- The embedded SQLite is 3.53.4, up from 3.51.0 and pinned by hash. The span
+  carries the WAL-reset corruption fix and the 3.53.x fix rounds.
+
+The previous release established the baseline this one cleans: Machteld is a Tcl/Tk
+platform with C and C++ as its only admitted native implementation languages.
+The compute-engine architecture, the `macht` command, Lua, LPeg, lua-cjson, and
+the engine-bound column library were removed together, with no compatibility
+layer or migration path. The palette is unchanged since.
+
+The machine-control palette's JSON reader stands on a vendored yyjson 0.12.0
+core with a byte-faithful plain mode and a typed mode that preserves JSON
+identity through `json value/type/unwrap/get/exists`. `http -redirect none`
+stops an authenticated request at the first 3xx, and a pty child's stdio
+remains bound to the ConPTY even when the parent's own stdio is redirected. The
+commands and their intended composition live in
 [the palette page](docs/palette.md).
 
 The bundled Tcl core is 9.0.4 plus the exact upstream correction for
 [Tcl ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb), which
 preserves executable paths below ACL-restricted directories. The backport,
 source hashes, and upstream check-in identity are locked into the local build.
-The executable's Windows properties carry exact `0.20` file/product versions
+The executable's Windows properties carry exact `0.21` file/product versions
 and identify Vincent Vercauteren as author, publisher, and copyright holder;
 local build paths are scrubbed from the packaged runtime.
 
-Machteld 0.20 supports 64-bit Windows 11 25H2 (build 26200) and Windows
+Machteld 0.21 supports 64-bit Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor; ARM64 is not a target. ConPTY sets the technical floor
 and has existed since Windows 10 1809, so the binary may start below the
 contract — but the shipped artifact is x64 and supported only on the releases
 named here.
 
-Version 0.20 deliberately has one entry route: a readable UTF-8 program file.
+Version 0.21 deliberately has one entry route: a readable UTF-8 program file.
 The conventional extension is `.tcl`, but the runtime does not require it. The
 file must begin with a literal opt-in command:
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 
 set result [run -timeout 30s -- git status --short]
 puts [dict get $result out]
@@ -113,7 +140,7 @@ machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically.
 There is no reduced runtime mode: every wrapped console or GUI tool exposes the
-same programmatic Machteld 0.20 machine-control API, including the statically
+same programmatic Machteld 0.21 machine-control API, including the statically
 linked, binary-safe SQLite `store`. Wrapped tools also retain the complete
 offline reference corpus; wrapping basekits are not embedded recursively.
 

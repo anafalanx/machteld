@@ -202,8 +202,10 @@ puts "ENTRY-LAST:[lindex $argv end]"
         ($result.Err + $result.Out)
 
     # The retired engine switch has no direct-host dispatch. With no selected
-    # startup script, the ordinary host path fails closed on redirected stdin;
-    # bound the process so this also fails promptly against the former host.
+    # startup script, the ordinary host path fails closed on redirected stdin.
+    # The input is an empty file, so nothing can block on stdin and the waited
+    # start is safe. (A timed Start-Process without -Wait left ExitCode empty
+    # under Windows PowerShell 5.1 and failed this check spuriously.)
     $engineWordInput = Join-Path $Work 'engine-word-stdin.empty'
     $engineWordStdout = Join-Path $Work 'engine-word-stdout.txt'
     $engineWordStderr = Join-Path $Work 'engine-word-stderr.txt'
@@ -213,19 +215,13 @@ puts "ENTRY-LAST:[lindex $argv end]"
         ConvertTo-NativeArgument $_
     }) -join ' ')
     $engineWordProcess = Start-Process -FilePath $Machteld `
-        -ArgumentList $engineWordArgumentLine -WorkingDirectory $Work -PassThru `
+        -ArgumentList $engineWordArgumentLine -WorkingDirectory $Work -Wait -PassThru `
         -RedirectStandardInput $engineWordInput -RedirectStandardOutput $engineWordStdout `
         -RedirectStandardError $engineWordStderr -WindowStyle Hidden
-    $engineWordCompleted = $engineWordProcess.WaitForExit(5000)
-    if (-not $engineWordCompleted) {
-        Stop-Process -InputObject $engineWordProcess -Force -ErrorAction SilentlyContinue
-        $engineWordProcess.WaitForExit()
-    }
     $engineWordOut = Get-Content -LiteralPath $engineWordStdout -Raw -ErrorAction SilentlyContinue
     $engineWordErr = Get-Content -LiteralPath $engineWordStderr -Raw -ErrorAction SilentlyContinue
-    $engineWordExit = if ($engineWordCompleted) { $engineWordProcess.ExitCode } else { $null }
     Check '--machteld-engine has no direct-host dispatch' `
-        ($engineWordCompleted -and $engineWordExit -eq 1 -and
+        ($engineWordProcess.ExitCode -eq 1 -and
          ($engineWordErr + $engineWordOut) -match 'redirected stdin is not accepted') `
         ($engineWordErr + $engineWordOut)
 
