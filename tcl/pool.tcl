@@ -130,11 +130,20 @@ proc ::machteld::PoolSpawn {tok} {
         Fail POOL launch "pool: cannot start a worker: $c"
     }
     set ci [child info $c]
+    set in  [dict get $ci stdin]
     set out [dict get $ci stdout]
     set err [dict get $ci stderr]
-    fconfigure [dict get $ci stdin] -blocking 0 -buffering line
-    fconfigure $out -blocking 0 -buffering line
-    fconfigure $err -blocking 0
+    # THE WIRE IS UTF-8 JSON LINES. `child -channels` hands over BINARY
+    # channels; left that way the director wrote a request's non-ASCII text as
+    # Latin-1 (and could not write anything past U+00FF at all) and read a
+    # worker's UTF-8 reply byte by byte as mojibake. Configure the protocol
+    # pair as strict UTF-8 text: a worker reply that is not valid UTF-8 then
+    # surfaces in PoolReadable as the protocol violation it is, never as a
+    # silently replaced character. Stderr is human diagnostics, decoded
+    # leniently so a garbled byte can never raise inside an event handler.
+    fconfigure $in  -blocking 0 -buffering line -translation lf -encoding utf-8 -profile strict
+    fconfigure $out -blocking 0 -buffering line -translation lf -encoding utf-8 -profile strict
+    fconfigure $err -blocking 0 -translation lf -encoding utf-8 -profile replace
     chan event $out readable [list ::machteld::PoolReadable $tok $c]
     chan event $err readable [list ::machteld::PoolStderr  $tok $c]
     dict set POOL $tok workers [linsert [dict get $POOL $tok workers] end $c]
@@ -172,6 +181,12 @@ proc ::machteld::PoolSubmit {tok items} {
     foreach it $items {
         if {[catch {dict size $it}]} { Fail POOL badvalue "pool submit: each item must be a dict" }
         if {![dict exists $it op]} { Fail POOL badvalue "pool submit: each item needs an op" }
+        # An item must be expressible on the wire before it is accepted.
+        # Refusing here names the caller's mistake at the boundary; discovering
+        # it at feed time would kill a healthy worker and poison the item.
+        if {[catch {json encode -plain $it}]} {
+            Fail POOL badvalue "pool submit: each item must encode as plain JSON; typed json values are refused"
+        }
         dict set it id $next
         incr next
         lappend pend $it
@@ -213,7 +228,16 @@ proc ::machteld::PoolReadable {tok c} {
     # A non-blocking `gets` returning -1 means "no COMPLETE line yet" as often as
     # it means trouble; only `eof` tells a dead worker from a slow one, and
     # confusing the two makes a pool either spin or hang.
-    while {[gets $ch line] >= 0} {
+    while {1} {
+        if {[catch {gets $ch line} count]} {
+            # Under the strict UTF-8 profile an invalid byte sequence raises
+            # here. It is the same protocol violation as malformed JSON.
+            dict set POOL $tok errbuf [string range \
+                "[dict get $POOL $tok errbuf]protocol error: worker wrote a reply that is not UTF-8\n" end-65535 end]
+            PoolDied $tok $c
+            return
+        }
+        if {$count < 0} break
         if {$line eq ""} continue
         if {[catch {json decode $line} rep] ||
             [catch {json encode -plain $rep} encoded] ||

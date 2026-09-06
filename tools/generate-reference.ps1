@@ -991,10 +991,9 @@ $MachteldVersion=$Matches[1]
 $preludeText=Read-Utf8Strict (Join-Path $RepoRoot 'tcl\machteld.tcl')
 if($preludeText-notmatch'(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$'){Fail 'tcl/machteld.tcl has no canonical version variable'}
 if($Matches[1]-ne$MachteldVersion){Fail "C/Tcl runtime version mismatch: $MachteldVersion vs $($Matches[1])"}
-if($preludeText-notmatch'(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\}\s*$'){
-    Fail 'tcl/machteld.tcl launcher has no exact versioned package require literal'
-}
-if($Matches[1]-ne$MachteldVersion){Fail "C/Tcl/launcher version mismatch: $MachteldVersion vs $($Matches[1])"}
+# The wrap launcher derives its pin from ::machteld::version at run time; a
+# literal there would be a third copy of the version that could fall behind.
+if($preludeText-match'package require machteld [0-9]'){Fail 'tcl/machteld.tcl carries a literal launcher pin'}
 
 $parent=[IO.Path]::GetDirectoryName($Output);[IO.Directory]::CreateDirectory($parent)|Out-Null
 $claim=[IO.Path]::Combine($parent,'.machteld-reference-'+[Guid]::NewGuid().ToString('n'))

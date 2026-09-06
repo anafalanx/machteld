@@ -62,8 +62,11 @@ try {
 
 Each pool accepts exactly one submitted batch. Create another for later work.
 Workers must implement the `worker serve` JSON-lines protocol and reserve
-stdout for replies. Stderr is drained continuously and retained only as a
-bounded diagnostic tail.
+stdout for replies. The protocol channels are strict UTF-8 text: non-ASCII
+request and reply text crosses intact, and a reply that is not valid UTF-8 is a
+protocol death like malformed JSON. `submit` refuses an item that cannot encode
+as plain JSON, such as one carrying a typed json value. Stderr is drained
+continuously and retained only as a bounded diagnostic tail.
 
 ## Subcommands
 

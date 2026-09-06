@@ -37,10 +37,11 @@ try {
     }
     $runtimeVersion = $Matches[1]
     if ($prelude -notmatch '(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$' -or
-            $Matches[1] -ne $runtimeVersion -or
-            $prelude -notmatch '(?m)^\s*puts\s+\$channel\s+\{package require machteld ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\}\s*$' -or
             $Matches[1] -ne $runtimeVersion) {
-        Fail 'C, Tcl package, and wrapped-launcher versions disagree'
+        Fail 'C and Tcl package versions disagree'
+    }
+    if ($prelude -match 'package require machteld [0-9]') {
+        Fail 'the wrap launcher must derive its pin from ::machteld::version, not carry a literal'
     }
     # The space-bearing parent exercises converter argv handling as well as
     # same-parent immutable publication under Windows PowerShell 5.1.

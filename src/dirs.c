@@ -15,6 +15,7 @@
  */
 #undef USE_TCL_STUBS
 #include "machteld.h"
+#include "wintext.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -131,47 +132,19 @@ typedef struct {
     Tcl_WideInt  multilink;
 } DirsWalk;
 
-/* MB_ERR_INVALID_CHARS IS THE MIRROR OF THE FLAG BELOW, and the two have to
- * match or the guard is one-directional. Without it MultiByteToWideChar
- * substitutes U+FFFD and reports SUCCESS, so a root Tcl is holding with an
- * unpaired surrogate would be silently rewritten and this verb would walk a
- * DIFFERENT directory -- or answer `notfound` blaming the caller's spelling for
- * a name the caller never wrote. The out-bound rule is that a name we cannot
- * represent is refused rather than renamed; the in-bound rule is the same one. */
-static wchar_t *u8_to_u16(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
-    if (n <= 0) return NULL;
-    wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
-    if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) <= 0) { free(w); return NULL; }
-    return w;
-}
-
-/* UTF-16 -> UTF-8, length-taking because the names in FILE_ID_BOTH_DIR_INFO are
- * NOT NUL-terminated -- FileNameLength is the only thing that says where they
- * stop, including for the `.` and `..` test.
- *
- * WC_ERR_INVALID_CHARS IS DELIBERATE AND IT IS THE POINT. NTFS accepts names
- * containing unpaired surrogates (the NT API will create them even though Win32
- * will not), and without this flag WideCharToMultiByte substitutes U+FFFD and
- * reports SUCCESS -- measured, {a, D800, b} comes back as 61 ef bf bd 62 with no
- * error. That produces a `paths` entry that cannot be reopened, and two such
- * siblings collapse into one string: a duplicate that looks like a walker bug.
- * A verb whose thesis is that silence is arithmetically impossible cannot
- * silently rename a directory, so the conversion fails and the caller turns the
- * failure into a counted `errors` row. */
-static char *u16_to_u8n(const wchar_t *w, int n) {
-    int need = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, n, NULL, 0, NULL, NULL);
-    if (need <= 0) return NULL;
-    char *s = (char *)malloc((size_t)need + 1);
-    if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, n, s, need, NULL, NULL) <= 0) {
-        free(s);
-        return NULL;
-    }
-    s[need] = '\0';
-    return s;
-}
+/* Text crosses the Win32 boundary through wintext.h, strictly in both
+ * directions, and this file is where strictness was measured to matter. NTFS
+ * accepts names containing unpaired surrogates (the NT API creates them even
+ * though Win32 will not); a lenient conversion renders such a name as U+FFFD
+ * and reports SUCCESS, producing a `paths` entry that cannot be reopened and
+ * collapsing two such siblings into one string -- a duplicate that looks like
+ * a walker bug. A verb whose thesis is that silence is arithmetically
+ * impossible cannot silently rename a directory, so the conversion fails and
+ * the caller turns the failure into a counted `errors` row. In-bound, a root
+ * Tcl is holding with an unpaired surrogate is refused rather than rewritten
+ * into a DIFFERENT directory. Names in FILE_ID_BOTH_DIR_INFO are not
+ * NUL-terminated -- FileNameLength is the only thing that says where they
+ * stop -- hence the length-taking form everywhere below. */
 
 /* FormatMessage's text, trimmed. It ends in CR LF and would otherwise carry the
  * line break into every row of the result dict and into anything comparing it.
@@ -184,7 +157,7 @@ static char *dirs_reason(DWORD e) {
                              NULL, e, 0, (wchar_t *)&wmsg, 0, NULL);
     if (n == 0 || wmsg == NULL) return NULL;
     while (n > 0 && (wmsg[n - 1] == L'\r' || wmsg[n - 1] == L'\n' || wmsg[n - 1] == L' ')) n--;
-    char *s = u16_to_u8n(wmsg, (int)n);
+    char *s = mt_wide_to_utf8(wmsg, (int)n);
     LocalFree(wmsg);
     return s;
 }
@@ -216,7 +189,7 @@ static wchar_t *dirs_join(const wchar_t *parent, size_t plen, const wchar_t *nam
  * exist. */
 static char *dirs_strip(const wchar_t *w, int unc) {
     size_t skip = unc ? 8 : 4;
-    char *tail = u16_to_u8n(w + skip, -1);
+    char *tail = mt_wide_to_utf8(w + skip, -1);
     char *out = tail;
     if (tail == NULL) return NULL;
     if (unc) {
@@ -430,7 +403,7 @@ static char *links_target(const wchar_t *path, int isdir) {
                        && (name[1] == L'N' || name[1] == L'n')
                        && (name[2] == L'C' || name[2] == L'c') && name[3] == L'\\') {
                 /* \??\UNC\server\share -> \\server\share */
-                char *tail = u16_to_u8n(name + 3, (int)(n - 3));
+                char *tail = mt_wide_to_utf8(name + 3, (int)(n - 3));
                 if (tail == NULL) { free(raw); return NULL; }
                 size_t tl = strlen(tail);
                 char *out = (char *)malloc(tl + 2);
@@ -443,7 +416,7 @@ static char *links_target(const wchar_t *path, int isdir) {
             }
         }
     }
-    char *out = u16_to_u8n(name, (int)n);
+    char *out = mt_wide_to_utf8(name, (int)n);
     free(raw);
     return out;
 }
@@ -642,7 +615,7 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
             }
             if (!skip) {
                 DirsChild *k = &kids[n];
-                k->name = u16_to_u8n(e->FileName, (int)nlen);
+                k->name = mt_wide_to_utf8(e->FileName, (int)nlen);
                 k->wname = NULL;
                 k->wlen = nlen;
                 k->tag = 0;
@@ -651,7 +624,7 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
                 k->noenter = 0;
                 k->pruned = 0;
                 if (k->name == NULL) {
-                    /* The name is not representable -- see u16_to_u8n. Counted,
+                    /* The name is not representable -- see wintext.h. Counted,
                      * against the parent, because the child has no name we could
                      * put in the row. */
                     bad_name++;
@@ -774,7 +747,7 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
         } else {
             /* Neither listed, nor counted, nor explained -- the one loss class
              * in this file that used to produce NO row at all. Every child that
-             * reached this stack had a representable name (see u16_to_u8n), so
+             * reached this stack had a representable name (see wintext.h), so
              * the only way here is an allocation failure. */
             dirs_fault(w, it.path, ERROR_NOT_ENOUGH_MEMORY);
         }
@@ -979,7 +952,7 @@ static int dirs_prefix(Tcl_Interp *interp, const char *given, wchar_t **out, int
         return dirs_error(interp, "badvalue", "a device path is not a directory tree");
     }
 
-    wchar_t *raw = u8_to_u16(given);
+    wchar_t *raw = mt_utf8_to_wide(given);
     if (raw == NULL) return dirs_error(interp, "badvalue", "the root is not valid text");
 
     wchar_t *full = NULL;

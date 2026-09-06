@@ -122,28 +122,11 @@ static int alg_open(Tcl_Interp *interp, const alg_t *a, const unsigned char *key
     return TCL_OK;
 }
 
-/* The bytes of a Tcl value, per the rule at the top of this file: a byte array
- * is its bytes, anything else is its UTF-8.
- *
- * MATCHED BY TYPE NAME, NOT BY TYPE POINTER. Tcl 9 carries two byte-array object
- * types and registers only one of them under the name "bytearray", so comparing
- * `v->typePtr` against `Tcl_GetObjType("bytearray")` returns false for the values
- * `binary decode` actually produces. That is the precise case which must not be
- * re-encoded, and the failure is silent: the bytes fall through to the string
- * path, each one is read as a character, and `binary decode hex 636166c3a9`
- * hashes as seven bytes of UTF-8 instead of five bytes of data.
- *
- * Tcl_GetBytesFromObj cannot be used as the test either -- it is a coercion, not
- * a predicate, and it happily converts the string "cafe<e9>" to four Latin-1
- * bytes. The type NAME is the one thing that is both public and true. */
-static const unsigned char *value_bytes(Tcl_Obj *v, Tcl_Size *len) {
-    const Tcl_ObjType *t = v->typePtr;
-    if (t != NULL && t->name != NULL && strcmp(t->name, "bytearray") == 0) {
-        unsigned char *b = Tcl_GetBytesFromObj(NULL, v, len);
-        if (b != NULL) return b;
-    }
-    return (const unsigned char *)Tcl_GetStringFromObj(v, len);
-}
+/* The bytes of a Tcl value come from Machteld_ValueBytes (machteld.h), the byte
+ * rule shared with store, http post, and -stdin: a byte array is its bytes,
+ * anything else is its UTF-8. The measurement that fixed the rule's shape was
+ * made here: matched by type pointer instead of type NAME, `binary decode hex
+ * 636166c3a9` hashed as seven bytes of UTF-8 instead of five bytes of data. */
 
 static Tcl_Obj *digest_obj(const unsigned char *d, DWORD n, int binary) {
     if (binary) return Tcl_NewByteArrayObj(d, (Tcl_Size)n);
@@ -258,16 +241,22 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             int binary = want_binary(interp, objc, objv, 5);
             if (binary < 0) return TCL_ERROR;
             Tcl_Size klen = 0, dlen_in = 0;
-            const unsigned char *key = value_bytes(objv[3], &klen);
-            const unsigned char *data = value_bytes(objv[4], &dlen_in);
+            Tcl_DString kds, dds;
+            const unsigned char *key = Machteld_ValueBytes(objv[3], &klen, &kds);
+            const unsigned char *data = Machteld_ValueBytes(objv[4], &dlen_in, &dds);
             if (dlen_in < 0 || (unsigned long long)dlen_in > ULONG_MAX) {
+                Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
                 return hash_error(interp, "badvalue", "the input is too large");
             }
             BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
-            if (alg_open(interp, a, key, klen, &ah, &hh, &dn) != TCL_OK) return TCL_ERROR;
+            if (alg_open(interp, a, key, klen, &ah, &hh, &dn) != TCL_OK) {
+                Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
+                return TCL_ERROR;
+            }
             unsigned char out[64];
             int ok = (BCryptHashData(hh, (PUCHAR)data, (ULONG)dlen_in, 0) == 0) &&
                      (BCryptFinishHash(hh, out, dn, 0) == 0);
+            Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
             BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
             if (!ok) return hash_error(interp, "oserror", "hmac failed");
             Tcl_Obj *result = digest_obj(out, dn, binary);
@@ -281,15 +270,21 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             int binary = want_binary(interp, objc, objv, 4);
             if (binary < 0) return TCL_ERROR;
             Tcl_Size n = 0;
-            const unsigned char *data = value_bytes(objv[3], &n);
+            Tcl_DString ds;
+            const unsigned char *data = Machteld_ValueBytes(objv[3], &n, &ds);
             if (n < 0 || (unsigned long long)n > ULONG_MAX) {
+                Tcl_DStringFree(&ds);
                 return hash_error(interp, "badvalue", "the input is too large");
             }
             BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
-            if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) return TCL_ERROR;
+            if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) {
+                Tcl_DStringFree(&ds);
+                return TCL_ERROR;
+            }
             unsigned char out[64];
             int ok = (BCryptHashData(hh, (PUCHAR)data, (ULONG)n, 0) == 0) &&
                      (BCryptFinishHash(hh, out, dn, 0) == 0);
+            Tcl_DStringFree(&ds);
             BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
             if (!ok) return hash_error(interp, "oserror", "hashing failed");
             Tcl_Obj *result = digest_obj(out, dn, binary);
@@ -359,14 +354,16 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     if (idx == UPDATE) {
         if (objc != 4) { Tcl_WrongNumArgs(interp, 2, objv, "token data"); return TCL_ERROR; }
         Tcl_Size n = 0;
-        const unsigned char *data = value_bytes(objv[3], &n);
+        Tcl_DString ds;
+        const unsigned char *data = Machteld_ValueBytes(objv[3], &n, &ds);
+        int rc = TCL_OK;
         if (n < 0 || (unsigned long long)n > ULONG_MAX) {
-            return hash_error(interp, "badvalue", "the input is too large");
+            rc = hash_error(interp, "badvalue", "the input is too large");
+        } else if (BCryptHashData(c->h, (PUCHAR)data, (ULONG)n, 0) != 0) {
+            rc = hash_error(interp, "oserror", "hashing failed");
         }
-        if (BCryptHashData(c->h, (PUCHAR)data, (ULONG)n, 0) != 0) {
-            return hash_error(interp, "oserror", "hashing failed");
-        }
-        return TCL_OK;
+        Tcl_DStringFree(&ds);
+        return rc;
     }
 
     /* FINAL consumes the token: a context cannot be finished twice, and the

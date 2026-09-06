@@ -19,6 +19,7 @@
  * result.
  */
 #include "winjob.h"
+#include "wintext.h"
 #include "machteld.h"
 
 #ifndef _WIN32_WINNT
@@ -35,26 +36,6 @@
 #include <wchar.h>
 #include <limits.h>
 #include <stdint.h>
-
-/* ---- UTF-8 <-> UTF-16 -------------------------------------------------- */
-
-static wchar_t *u8_to_u16(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
-    if (n <= 0) return NULL;
-    wchar_t *w = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
-    if (w == NULL) return NULL;
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) <= 0) { free(w); return NULL; }
-    return w;
-}
-
-static char *u16_to_u8(const wchar_t *w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
-    if (n <= 0) return NULL;
-    char *s = (char *)malloc((size_t)n);
-    if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) { free(s); return NULL; }
-    return s;
-}
 
 /* ---- human-unit parsing ------------------------------------------------ */
 
@@ -110,7 +91,7 @@ static int has_extension(const char *prog) {
 }
 
 static char *resolve_exe(const char *prog) {
-    wchar_t *wp = u8_to_u16(prog);
+    wchar_t *wp = mt_utf8_to_wide(prog);
     if (wp == NULL) return NULL;
 
     /* A bare command name (no path separator) resolves from PATH ONLY -- not the
@@ -149,7 +130,7 @@ static char *resolve_exe(const char *prog) {
         if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
             DWORD attr = GetFileAttributesW(buf);
             if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-                result = u16_to_u8(buf);
+                result = mt_wide_to_utf8(buf, -1);
                 break;
             }
         }
@@ -307,8 +288,7 @@ typedef struct {
     unsigned long long mem;
     unsigned long long cpu_100ns;
     const char        *dir;
-    const char        *stdin_text; /* NULL => child stdin is the null device */
-    Tcl_Size           stdin_len;
+    Tcl_Obj           *stdin_obj;  /* the -stdin value; NULL => child stdin is the null device */
     Tcl_Obj           *env_obj;    /* the -env {K V ...} list, or NULL to inherit */
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
@@ -402,7 +382,7 @@ static int build_env_block(Tcl_Interp *interp, Tcl_Obj *pairs, wchar_t *buf, siz
             e2 = "environment keys must be nonempty and contain neither NUL nor '='";
             break;
         }
-        okey[j] = u8_to_u16(key);
+        okey[j] = mt_utf8_to_wide(key);
         if (okey[j] == NULL) { rc = -1; e2 = "bad -env entry"; break; }
         okey_len[j] = wcslen(okey[j]);
         for (int k = 0; k < j; k++) {
@@ -469,7 +449,7 @@ static int build_env_block(Tcl_Interp *interp, Tcl_Obj *pairs, wchar_t *buf, siz
     for (int j = 0; j < nover && rc == 0; j++) {
         Tcl_Size nv = 0;
         const char *value = obj_no_nul(pv[2 * j + 1], &nv);
-        wchar_t *wv = value ? u8_to_u16(value) : NULL;
+        wchar_t *wv = value ? mt_utf8_to_wide(value) : NULL;
         size_t lk = okey_len[j], lv = wv ? wcslen(wv) : 0;
         if (value == NULL) { rc = -1; e2 = "environment values may not contain NUL"; }
         else if (okey[j] == NULL || wv == NULL) { rc = -1; e2 = "bad -env entry"; }
@@ -551,8 +531,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
     o->mem = 0;
     o->cpu_100ns = 0;
     o->dir = NULL;
-    o->stdin_text = NULL;
-    o->stdin_len = 0;
+    o->stdin_obj = NULL;
     o->env_obj = NULL;
     o->env_block = NULL;
     o->onout = NULL;
@@ -579,8 +558,39 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             continue;
         }
         if (i + 1 >= objc) return mt_error(interp, dom, "usage", "option needs a value");
+        Tcl_Obj *value = objv[i + 1];
+        /* Options that take a Tcl VALUE rather than text. -stdin follows the
+         * byte rule (machteld.h): a byte array is written exactly, anything
+         * else as UTF-8; child_launch converts it where the writer's copy is
+         * made. Reading the string representation here re-encoded every high
+         * byte, so `-stdin $bytes` was never binary-safe. The others stay
+         * objects for later evaluation or conversion. */
+        if (strcmp(a, "-stdin") == 0) {
+            if (!(allowed & OPT_STDIN)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->stdin_obj = value;
+            i++;
+            continue;
+        }
+        if (strcmp(a, "-env") == 0) {
+            if (!(allowed & OPT_ENV)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->env_obj = value;
+            i++;
+            continue;
+        }
+        if (strcmp(a, "-onout") == 0) {
+            if (!(allowed & OPT_ONOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->onout = value;
+            i++;
+            continue;
+        }
+        if (strcmp(a, "-onerr") == 0) {
+            if (!(allowed & OPT_ONERR)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            o->onerr = value;
+            i++;
+            continue;
+        }
         Tcl_Size vlen = 0;
-        const char *v = Tcl_GetStringFromObj(objv[i + 1], &vlen);
+        const char *v = Tcl_GetStringFromObj(value, &vlen);
         int has_nul = memchr(v, '\0', (size_t)vlen) != NULL;
         if (strcmp(a, "-timeout") == 0) {
             if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
@@ -610,25 +620,28 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             if (has_nul) return mt_error(interp, dom, "badvalue", "-arg0 may not contain NUL");
             /* Resolution uses the command name; -arg0 only changes argv[0]. */
             o->arg0 = v;
-        } else if (strcmp(a, "-stdin") == 0) {
-            if (!(allowed & OPT_STDIN)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            o->stdin_text = v;
-            o->stdin_len = vlen;
-        } else if (strcmp(a, "-env") == 0) {
-            if (!(allowed & OPT_ENV)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            o->env_obj = objv[i + 1];
-        } else if (strcmp(a, "-onout") == 0) {
-            if (!(allowed & OPT_ONOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            o->onout = objv[i + 1];
-        } else if (strcmp(a, "-onerr") == 0) {
-            if (!(allowed & OPT_ONERR)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            o->onerr = objv[i + 1];
         } else {
             return mt_error(interp, dom, "usage", "unknown option");
         }
         i++;
     }
     o->cmd_index = i;
+    return TCL_OK;
+}
+
+/* -env is built into a caller-owned stack block that stays valid through the
+ * launch; CreateProcess copies it into the child. One helper for the four
+ * launchers, so the domain-labelled failure and the 32K-character cap cannot
+ * drift between run, child start, detach, and pty spawn. */
+#define LAUNCH_ENV_CHARS 32768
+static int launch_env(Tcl_Interp *interp, const char *dom, run_opts *o,
+                      wchar_t *buf, size_t cap) {
+    if (o->env_obj == NULL) return TCL_OK;
+    const char *err = NULL;
+    if (build_env_block(interp, o->env_obj, buf, cap, &err) != 0) {
+        return mt_error(interp, dom, "badvalue", err);
+    }
+    o->env_block = buf;
     return TCL_OK;
 }
 
@@ -763,7 +776,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
             *err = "CreatePipe failed";
             goto fail;
         }
-        if (o->stdin_text != NULL || o->channels) {
+        if (o->stdin_obj != NULL || o->channels) {
             if (!CreatePipe(&stdinR, &stdinW, &sa, 0)) { *err = "CreatePipe(stdin) failed"; goto fail; }
         } else {
             nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -791,7 +804,7 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     if (o->inherit) {
         io = (wj_stdio){ c->inherit_in, c->inherit_out, c->inherit_err };
     } else {
-        io = (wj_stdio){ (o->stdin_text != NULL || o->channels) ? stdinR : nul, outW, errW };
+        io = (wj_stdio){ (o->stdin_obj != NULL || o->channels) ? stdinR : nul, outW, errW };
     }
     c->inherit = o->inherit;
     c->channels = o->channels;
@@ -825,16 +838,24 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
 
     if (o->channels) {
         c->inW = stdinW; stdinW = NULL;
-    } else if (o->stdin_text != NULL) {
-        if (o->stdin_len > 0) {
-            c->wi.buf = (char *)malloc((size_t)o->stdin_len);
-            if (c->wi.buf == NULL) { *err = "out of memory"; goto fail; }
-            memcpy(c->wi.buf, o->stdin_text, (size_t)o->stdin_len);
-            c->wi.len = (size_t)o->stdin_len;
+    } else if (o->stdin_obj != NULL) {
+        /* The byte rule (machteld.h): a byte array is written exactly, any
+         * other value as UTF-8. Converted here, where the writer's private
+         * copy is made, so the encoded bytes have one owner and one lifetime. */
+        Tcl_Size n = 0;
+        Tcl_DString ds;
+        const unsigned char *bytes = Machteld_ValueBytes(o->stdin_obj, &n, &ds);
+        if (n > 0) {
+            c->wi.buf = (char *)malloc((size_t)n);
+            if (c->wi.buf == NULL) { Tcl_DStringFree(&ds); *err = "out of memory"; goto fail; }
+            memcpy(c->wi.buf, bytes, (size_t)n);
+            c->wi.len = (size_t)n;
+            Tcl_DStringFree(&ds);
             c->wi.write = stdinW; stdinW = NULL;
             c->tIn = CreateThread(NULL, 0, writer_thread, &c->wi, 0, NULL);
             if (c->tIn == NULL) { *err = "cannot start stdin writer thread"; goto fail; }
         } else {
+            Tcl_DStringFree(&ds);
             CloseHandle(stdinW); stdinW = NULL;
         }
     }
@@ -1016,6 +1037,8 @@ static void child_free(child_t *c) {
     free(c->ro.buf);
     free(c->re.buf);
     free(c->wi.buf);
+    /* Still ours only when channel setup failed before Tcl took the handle. */
+    if (c->inW) CloseHandle(c->inW);
     if (c->doneEv) CloseHandle(c->doneEv);
     if (c->job) wj_job_free(c->job);
     free(c);
@@ -1219,7 +1242,7 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
         return mt_error(interp, "RUN", "usage",
                         "-inherit cannot be combined with -onout or -onerr: the child writes straight to our stdio");
     }
-    if (o.inherit && o.stdin_text != NULL) {
+    if (o.inherit && o.stdin_obj != NULL) {
         return mt_error(interp, "RUN", "usage",
                         "-inherit cannot be combined with -stdin: the child reads our stdin");
     }
@@ -1229,14 +1252,10 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
     const char **cargv = build_argv(interp, "RUN", objc, objv, o.cmd_index, &cargc);
     if (cargv == NULL) return TCL_ERROR;
 
-    wchar_t envbuf[32768];
-    if (o.env_obj != NULL) {
-        const char *ee = NULL;
-        if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
-            free(cargv);
-            return mt_error(interp, "RUN", "badvalue", ee);
-        }
-        o.env_block = envbuf; /* stack buffer, valid through the launch below */
+    wchar_t envbuf[LAUNCH_ENV_CHARS];
+    if (launch_env(interp, "RUN", &o, envbuf, LAUNCH_ENV_CHARS) != TCL_OK) {
+        free(cargv);
+        return TCL_ERROR;
     }
 
     const char *err = NULL, *code = "launch";
@@ -1279,7 +1298,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
                            OPT_STDIN | OPT_ENV | OPT_CHANNELS;
         if (parse_opts(interp, "CHILD", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
-        if (o.channels && o.stdin_text != NULL) {
+        if (o.channels && o.stdin_obj != NULL) {
             return mt_error(interp, "CHILD", "usage",
                             "-channels cannot be combined with -stdin: write to the stdin channel instead");
         }
@@ -1288,14 +1307,10 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             return mt_error(interp, "CHILD", "usage", "child start ?-opt val ...? ?--? command ?arg ...?");
         const char **cargv = build_argv(interp, "CHILD", objc, objv, o.cmd_index, &cargc);
         if (cargv == NULL) return TCL_ERROR;
-        wchar_t envbuf[32768];
-        if (o.env_obj != NULL) {
-            const char *ee = NULL;
-            if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
-                free(cargv);
-                return mt_error(interp, "CHILD", "badvalue", ee);
-            }
-            o.env_block = envbuf;
+        wchar_t envbuf[LAUNCH_ENV_CHARS];
+        if (launch_env(interp, "CHILD", &o, envbuf, LAUNCH_ENV_CHARS) != TCL_OK) {
+            free(cargv);
+            return TCL_ERROR;
         }
         const char *err = NULL, *code = "launch";
         child_t *c = child_launch(ctx, &o, cargc, cargv, 1, 0, &err, &code);
@@ -1468,7 +1483,9 @@ static int WaitCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             }
         }
         /* -any and some are already done, or nothing left to wait on. */
-        if (nh == 0 || (any && Tcl_GetCharLength(done) > 0)) break;
+        Tcl_Size ndone = 0;
+        Tcl_ListObjLength(NULL, done, &ndone);
+        if (nh == 0 || (any && ndone > 0)) break;
 
         DWORD r = WaitForMultipleObjects((DWORD)nh, h, any ? FALSE : TRUE, INFINITE);
         if (r == WAIT_FAILED) {
@@ -1521,15 +1538,8 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     void       *proch = NULL;
     int         pid = 0;
 
-    wchar_t envbuf[32768];
-    if (o.env_obj != NULL) {
-        const char *ee = NULL;
-        if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
-            mt_error(interp, "DETACH", "badvalue", ee);
-            goto cleanup;
-        }
-        o.env_block = envbuf; /* stack buffer, valid through the launch below */
-    }
+    wchar_t envbuf[LAUNCH_ENV_CHARS];
+    if (launch_env(interp, "DETACH", &o, envbuf, LAUNCH_ENV_CHARS) != TCL_OK) goto cleanup;
 
     nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                       NULL, OPEN_EXISTING, 0, NULL);
@@ -1825,14 +1835,10 @@ static int PtyCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
             return mt_error(interp, "PTY", "usage", "pty spawn ?-opt val ...? ?--? command ?arg ...?");
         const char **cargv = build_argv(interp, "PTY", objc, objv, o.cmd_index, &cargc);
         if (cargv == NULL) return TCL_ERROR;
-        wchar_t envbuf[32768];
-        if (o.env_obj != NULL) {
-            const char *ee = NULL;
-            if (build_env_block(interp, o.env_obj, envbuf, sizeof(envbuf) / sizeof(envbuf[0]), &ee) != 0) {
-                free(cargv);
-                return mt_error(interp, "PTY", "badvalue", ee);
-            }
-            o.env_block = envbuf;
+        wchar_t envbuf[LAUNCH_ENV_CHARS];
+        if (launch_env(interp, "PTY", &o, envbuf, LAUNCH_ENV_CHARS) != TCL_OK) {
+            free(cargv);
+            return TCL_ERROR;
         }
         const char *err = NULL, *code = "launch";
         pty_t *p = pty_spawn(ctx, &o, cargc, cargv, 80, 25, &err, &code);
@@ -2151,12 +2157,14 @@ static DWORD WINAPI watch_thread(LPVOID arg) {
                     break;
                 }
                 int wlen = (int)(fni->FileNameLength / sizeof(WCHAR));
-                int need = WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, NULL, 0, NULL, NULL);
-                if (need > 0) {
-                    char *u8 = (char *)malloc((size_t)need + 1);
-                    if (u8 != NULL) {
-                        WideCharToMultiByte(CP_UTF8, 0, fni->FileName, wlen, u8, need, NULL, NULL);
-                        u8[need] = '\0';
+                if (wlen > 0) {
+                    /* Strict conversion (wintext.h): a name that cannot be
+                     * represented is counted as dropped, never renamed to
+                     * U+FFFD or silently skipped. */
+                    char *u8 = mt_wide_to_utf8(fni->FileName, wlen);
+                    if (u8 == NULL) {
+                        w->dropped++;
+                    } else {
                         for (char *c = u8; *c; c++) { if (*c == '\\') *c = '/'; }
                         watch_push(w, (int)fni->Action, u8);
                         free(u8);
@@ -2269,7 +2277,7 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             if (strcmp(a, "-recursive") == 0) { recursive = 1; }
             else return mt_error(interp, "WATCH", "usage", "unknown option");
         }
-        wchar_t *wdir = u8_to_u16(dir);
+        wchar_t *wdir = mt_utf8_to_wide(dir);
         if (wdir == NULL) return mt_error(interp, "WATCH", "badvalue", "bad directory name");
         HANDLE h = CreateFileW(wdir, FILE_LIST_DIRECTORY,
                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -2353,31 +2361,27 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             return mt_error(interp, "WATCH", "oserror", "watch thread did not stop");
         return TCL_OK;
     }
-    if (idx != READ) return TCL_OK;
-
-    /* -timeout waits for the first event; -raw disables coalescing. */
+    /* READ: -timeout waits for the first event; -raw disables coalescing. */
     long long tmo = 0;
     int raw = 0;
     int saw_timeout = 0;
-    if (idx == READ) {
-        for (int i = 3; i < objc; i++) {
-            const char *a = Tcl_GetString(objv[i]);
-            if (strcmp(a, "-raw") == 0) {
-                if (raw) return mt_error(interp, "WATCH", "usage", "duplicate -raw option");
-                raw = 1;
-                continue;
-            }
-            if (strcmp(a, "-timeout") == 0) {
-                if (saw_timeout) return mt_error(interp, "WATCH", "usage", "duplicate -timeout option");
-                if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
-                tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
-                if (tmo < 0 || (unsigned long long)tmo >= WJ_INFINITE)
-                    return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
-                saw_timeout = 1;
-                continue;
-            }
-            return mt_error(interp, "WATCH", "usage", "unknown option");
+    for (int i = 3; i < objc; i++) {
+        const char *a = Tcl_GetString(objv[i]);
+        if (strcmp(a, "-raw") == 0) {
+            if (raw) return mt_error(interp, "WATCH", "usage", "duplicate -raw option");
+            raw = 1;
+            continue;
         }
+        if (strcmp(a, "-timeout") == 0) {
+            if (saw_timeout) return mt_error(interp, "WATCH", "usage", "duplicate -timeout option");
+            if (i + 1 >= objc) return mt_error(interp, "WATCH", "usage", "option needs a value");
+            tmo = parse_duration_ms(Tcl_GetString(objv[++i]));
+            if (tmo < 0 || (unsigned long long)tmo >= WJ_INFINITE)
+                return mt_error(interp, "WATCH", "badvalue", "bad -timeout value");
+            saw_timeout = 1;
+            continue;
+        }
+        return mt_error(interp, "WATCH", "usage", "unknown option");
     }
     if (tmo > 0) {
         EnterCriticalSection(&w->lock);

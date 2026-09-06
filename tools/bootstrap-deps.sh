@@ -46,10 +46,11 @@ tcl_pkgconfig=(
     "mandir_native=$runtime_root/reference"
 )
 
+# Tcl 9 is always threaded; its configure no longer knows --enable-threads and
+# only warns about it, so the flag is not passed.
 pushd "$tcl_source/win" >/dev/null
 if [[ ! -f Makefile ]]; then
-    ./configure --enable-64bit --disable-shared --enable-threads \
-        --prefix="$prefix"
+    ./configure --enable-64bit --disable-shared --prefix="$prefix"
 fi
 # Only the core static runtime, headers, stubs, and script libraries are build
 # inputs. Upstream's aggregate `all`/`install` targets also compile bundled
@@ -66,7 +67,7 @@ popd >/dev/null
 
 pushd "$tk_source/win" >/dev/null
 if [[ ! -f Makefile ]]; then
-    ./configure --enable-64bit --disable-shared --enable-threads \
+    ./configure --enable-64bit --disable-shared \
         --with-tcl="$tcl_source/win" --prefix="$prefix"
 fi
 mingw32-make -j "$jobs" binaries \

@@ -153,9 +153,10 @@ returns on EOF.
 #### Errors
 
 Bad input, unknown operation, missing field, and handler error become failure
-replies rather than server-terminating exceptions. A reply encoding/write
-failure is contained and can leave that request unanswered. Wrong command arity
-is raised before serving.
+replies rather than server-terminating exceptions. A reply that cannot be
+encoded as plain JSON, such as a result carrying a typed json value, is answered
+with a `WORKER failed` reply; only a stdout write failure can leave a request
+unanswered. Wrong command arity is raised before serving.
 
 #### Lifetime and timeouts
 

@@ -201,7 +201,10 @@ set worker [child start -channels -- $MT $WORKER]
 set info [child info $worker]
 set input [dict get $info stdin]
 set output [dict get $info stdout]
-fconfigure $input -buffering line
+# Speak the protocol the way the pool does: strict UTF-8 text over the binary
+# channels `child -channels` hands over.
+fconfigure $input -buffering line -translation lf -encoding utf-8
+fconfigure $output -translation lf -encoding utf-8
 proc ask_worker {request} {
     puts $::input [json encode -dict $request]
     flush $::input
@@ -220,6 +223,17 @@ check "malformed request gets a failure reply" [expr {
     [dict get $reply code] eq {MACHTELD WORKER parse}}]
 check "worker survives malformed input" [expr {
     [result_of [ask_worker {id 6 op echo text alive}]] eq "alive"}]
+set unicode_text "café 世界"
+check "worker protocol round-trips non-ASCII text" [expr {
+    [result_of [ask_worker [dict create id 7 op echo text $unicode_text]]] eq $unicode_text}]
+# A reply that cannot be encoded as plain JSON is still answered: an unanswered
+# request would otherwise hold a director until its batch timeout.
+set reply [ask_worker {id 8 op typed}]
+check "worker answers an unencodable reply with a failure envelope" [expr {
+    [dict get $reply id] == 8 && ![dict get $reply ok] &&
+    [dict get $reply code] eq {MACHTELD WORKER failed}}]
+check "worker survives an unencodable reply" [expr {
+    [result_of [ask_worker {id 9 op echo text still-alive}]] eq "still-alive"}]
 child close $worker
 
 # Pool correctness, ordering, large-pipe behavior and stderr draining preserve
@@ -240,6 +254,20 @@ check "healthy pool reports no worker deaths" [expr {[dict get [pool info $pool_
 check "pool rejects a second batch instead of mixing old and new replies" [expr {
     [errcode_of [list pool submit $pool_token [list [dict create op echo text later]]]]
         eq {MACHTELD POOL usage}}]
+pool close $pool_token
+
+# The wire is UTF-8: non-ASCII request and reply text crosses the pool intact,
+# and an item that cannot encode as plain JSON is refused at submission.
+set pool_token [pool create -width 2 -- $MT $WORKER]
+pool submit $pool_token [list [dict create op echo text $unicode_text] [dict create op echo text plain]]
+set replies [pool wait $pool_token -timeout 30s]
+check "pool carries non-ASCII text intact across its UTF-8 wire" [expr {
+    [lmap reply $replies {result_of $reply}] eq [list $unicode_text plain]}]
+pool close $pool_token
+set pool_token [pool create -width 1 -- $MT $WORKER]
+set typed_item [list [dict create op echo text [json value boolean true]]]
+check "pool refuses an item that cannot encode as plain JSON" [expr {
+    [errcode_of {pool submit $pool_token $typed_item}] eq {MACHTELD POOL badvalue}}]
 pool close $pool_token
 
 set pool_token [pool create -width 2 -- $MT $WORKER]
@@ -282,6 +310,9 @@ check "pmap usage advertises every supported option" [expr {
 set requests [lmap value {a b c d e f} {dict create op echo text $value}]
 check "pmap returns plain ordered results" [expr {
     [pmap $requests -width 3 -timeout 30s -- $MT $WORKER] eq {a b c d e f}}]
+check "pmap round-trips non-ASCII text" [expr {
+    [pmap [list [dict create op echo text $unicode_text]] -width 1 -timeout 30s -- $MT $WORKER]
+        eq [list $unicode_text]}]
 set before [child list]
 check "pmap preserves worker error domain" [expr {
     [errcode_of [list pmap [list {op coded}] -width 1 -timeout 30s -- $MT $WORKER]]

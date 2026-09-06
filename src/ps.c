@@ -23,6 +23,7 @@
  */
 #undef USE_TCL_STUBS
 #include "machteld.h"
+#include "wintext.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -48,20 +49,6 @@ static Tcl_WideInt ft_to_100ns(const FILETIME *ft) {
     return (Tcl_WideInt)u.QuadPart;
 }
 
-static char *u16_to_u8_dup(const wchar_t *w) {
-    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-                                w, -1, NULL, 0, NULL, NULL);
-    if (n <= 0) return NULL;
-    char *s = (char *)malloc((size_t)n);
-    if (s == NULL) return NULL;
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
-            w, -1, s, n, NULL, NULL) <= 0) {
-        free(s);
-        return NULL;
-    }
-    return s;
-}
-
 static void dict_put_str(Tcl_Obj *d, const char *k, const char *v) {
     Tcl_DictObjPut(NULL, d, Tcl_NewStringObj(k, -1), Tcl_NewStringObj(v ? v : "", -1));
 }
@@ -72,7 +59,7 @@ static void dict_put_wide(Tcl_Obj *d, const char *k, Tcl_WideInt v) {
 /* One row. `snap` fields are always present; the rest need a handle. */
 static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads) {
     Tcl_Obj *d = Tcl_NewDictObj();
-    char *nm = u16_to_u8_dup(name);
+    char *nm = mt_wide_to_utf8(name, -1);
     dict_put_wide(d, "pid", (Tcl_WideInt)pid);
     dict_put_wide(d, "ppid", (Tcl_WideInt)ppid);
     dict_put_str(d, "name", nm ? nm : "");
@@ -97,7 +84,7 @@ static Tcl_Obj *ps_row(DWORD pid, DWORD ppid, const wchar_t *name, DWORD threads
     DWORD n = 32768u;
     if (path != NULL && QueryFullProcessImageNameW(h, 0, path, &n)) {
         path[n] = L'\0';
-        char *p = u16_to_u8_dup(path);
+        char *p = mt_wide_to_utf8(path, -1);
         dict_put_str(d, "exe", p ? p : "");
         free(p);
     } else {

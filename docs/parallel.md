@@ -14,7 +14,7 @@ Code is installed once in a worker; requests carry data.
 ## Worker
 
 ```tcl
-package require machteld 0.20
+package require machteld 0.21
 
 worker on digest {path {alg sha256}} {
     hash file $alg $path
@@ -46,6 +46,11 @@ These are reply codes, so bad input does not kill the worker. A handler's own
 structured error code is preserved in its failure reply.
 
 Stdout is reserved for this protocol. Use `log`, stderr, or a file for diagnostics.
+The wire is UTF-8 on both sides: `worker serve` configures its standard
+channels that way and the pool configures the channels it hands each worker,
+so non-ASCII text in a request or reply crosses intact. A handler result that
+cannot be encoded as plain JSON is answered with a `WORKER failed` reply rather
+than left unanswered.
 
 ## Pool
 

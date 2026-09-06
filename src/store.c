@@ -44,17 +44,6 @@ static int needDb(Tcl_Interp *interp, StoreCtx *ctx) {
     return 1;
 }
 
-/* Bytearrays are stored verbatim. Other values use their UTF-8 string
- * representation, so ordinary Unicode text remains convenient. */
-static const unsigned char *store_value_bytes(Tcl_Obj *obj, Tcl_Size *length) {
-    const Tcl_ObjType *type = obj->typePtr;
-    if (type != NULL && type->name != NULL &&
-            strcmp(type->name, "bytearray") == 0) {
-        return Tcl_GetBytesFromObj(NULL, obj, length);
-    }
-    return (const unsigned char *)Tcl_GetStringFromObj(obj, length);
-}
-
 static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     StoreCtx *ctx = (StoreCtx *)cd;
     static const char *const subs[] = {
@@ -129,13 +118,17 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         }
         Tcl_Size klen, vlen;
         const char *k = Tcl_GetStringFromObj(objv[2], &klen);
-        const unsigned char *v = store_value_bytes(objv[3], &vlen);
+        /* Bytearrays are stored verbatim; other values as UTF-8 (the byte
+         * rule in machteld.h), so ordinary Unicode text remains convenient. */
+        Tcl_DString vds;
+        const unsigned char *v = Machteld_ValueBytes(objv[3], &vlen, &vds);
         int rc = sqlite3_bind_text64(st, 1, k, (sqlite3_uint64)klen,
                                      SQLITE_TRANSIENT, SQLITE_UTF8);
         if (rc == SQLITE_OK) {
             rc = sqlite3_bind_blob64(st, 2, v, (sqlite3_uint64)vlen,
                                      SQLITE_TRANSIENT);
         }
+        Tcl_DStringFree(&vds); /* SQLITE_TRANSIENT copied the bytes at bind time */
         if (rc != SQLITE_OK) {
             sqlite3_finalize(st);
             return fail(interp, sqlite3_errmsg(ctx->db));

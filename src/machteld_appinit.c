@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "machteld.h"
+#include "tk.h"
 
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
 
@@ -295,6 +296,15 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     }
     Tcl_StaticLibrary(interp, "machteldpublish", Machteldpublish_Init, NULL);
 
+    /* The prelude registers `package require Tk` against the statically
+     * linked Tk. It reads the library's own patch level from this variable,
+     * so no hand-maintained literal can drift from what `load {} Tk` provides. */
+    if (Tcl_SetVar2Ex(interp, "::machteld::tk_patchlevel", NULL,
+            Tcl_NewStringObj(TK_PATCH_LEVEL, -1),
+            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
+        return Machteld_EntryError(interp, "state",
+            "cannot record the linked Tk version");
+    }
     Tcl_Obj *prelude = payload_path(payload_root, "machteld.tcl", NULL);
     if (prelude == NULL) {
         return Machteld_EntryError(interp, "payload",

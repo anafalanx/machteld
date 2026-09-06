@@ -1,13 +1,13 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.20.
+description: Current product boundary and decision rules for Machteld 0.21.
 tags: [machteld, direction, scope]
 ---
 
 # Direction
 
-The 0.20 product sentence is the decision filter:
+The 0.21 product sentence is the decision filter:
 
 > machteld is a compact Windows machine-control runtime.
 
@@ -35,7 +35,7 @@ Current decisions:
   Launching still supports Machteld's deterministic `PATH`-only lookup for a
   bare command.
 
-Version 0.20 establishes the product boundary by subtraction: the
+Version 0.21 establishes the product boundary by subtraction: the
 compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and the
 engine-bound column library were removed. They leave no compatibility command
 or migration layer. The release adds no replacement capability; its clean

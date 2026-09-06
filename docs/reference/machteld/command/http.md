@@ -32,8 +32,10 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
   no caller-supplied header or body is forwarded. Use it on every
   authenticated request carrying manual Authorization or Cookie headers. Any
   other value is `HTTP badvalue`. Omitted, redirects follow as documented.
-- `post` treats `body` as bytes. `-type` sets Content-Type; otherwise an explicit
-  Content-Type header is retained, or `application/octet-stream` is used.
+- `post` sends a bytearray `body` byte-for-byte and any other value as UTF-8, so
+  a JSON-encoded string posts correctly whatever it contains. `-type` sets
+  Content-Type; otherwise an explicit Content-Type header is retained, or
+  `application/octet-stream` is used.
 
 ## Results
 

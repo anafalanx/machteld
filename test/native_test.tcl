@@ -78,6 +78,15 @@ check "hash file reads raw bytes including NUL/80/FF" [expr {
     [hash file sha256 $binary_path] eq [hash sum sha256 $binary_value]}]
 check "hash distinguishes a missing path" [expr {
     [errcode_of [list hash file sha256 [file join $WORK missing.bin]]] eq {MACHTELD HASH notfound}}]
+# The byte rule for a string is real UTF-8, the bytes `encoding convertto
+# utf-8` produces. Tcl's internal string representation spells U+0000 as the
+# two bytes C0 80; 0.20 digested those, so a string containing NUL hashed
+# differently from its UTF-8.
+check "hash sum of a string with NUL digests its UTF-8 bytes" [expr {
+    [hash sum sha256 "a\0b"] eq [hash sum sha256 [encoding convertto utf-8 "a\0b"]]}]
+check "hash sum of a non-ASCII string digests its UTF-8 bytes" [expr {
+    [hash sum sha256 "caf\u00e9 \u4e16\u754c"] eq
+    [hash sum sha256 [encoding convertto utf-8 "caf\u00e9 \u4e16\u754c"]]}]
 
 set encoded [json encode -dict [dict create text "héllo" enabled true count 3]]
 set decoded [json decode $encoded]
@@ -154,7 +163,7 @@ watch close $precedence_watcher
 # WinHTTP is tested without public DNS or TLS dependencies. The fixture binds
 # only the loopback interface and exits after the exact number of requests.
 set port_file [file join $WORK http.port]
-set server [child start -- $HTTP_FIXTURE $port_file 6]
+set server [child start -- $HTTP_FIXTURE $port_file 8]
 check "local HTTP fixture starts" [wait_for_file $port_file]
 set port [expr {[file exists $port_file] ? [string trim [slurp $port_file]] : 0}]
 set base http://127.0.0.1:$port
@@ -167,6 +176,19 @@ check "HTTP preserves response headers" [expr {
     [dict get $response headers x-machteld-fixture] eq "local"}]
 set response [http post $base/echo "a\0b" -type application/octet-stream -timeout 3s]
 check "HTTP POST preserves binary body" [expr {[dict get $response body] eq "a\0b"}]
+# The body follows the byte rule shared with hash, store, and -stdin: a
+# bytearray is sent byte-for-byte and any other value as UTF-8. 0.20 read it
+# with Tcl_GetByteArrayFromObj, which sent U+0080..U+00FF as Latin-1 and failed
+# past U+00FF, so a JSON-encoded document with any non-ASCII text could not be
+# posted correctly.
+set unicode_body "café 世界"
+set response [http post $base/echo $unicode_body -type text/plain -timeout 3s]
+check "HTTP POST sends a non-ASCII string body as UTF-8" [expr {
+    [dict get $response body] eq [encoding convertto utf-8 $unicode_body]}]
+set high_bytes [binary format H* 0080ff7f]
+set response [http post $base/echo $high_bytes -timeout 3s]
+check "HTTP POST sends a bytearray body byte-for-byte" [expr {
+    [binary encode hex [dict get $response body]] eq "0080ff7f"}]
 check "HTTP refuses an oversized local body" [expr {
     [errcode_of {http get $base/large -maxbody 100 -timeout 3s}] eq {MACHTELD HTTP toobig}}]
 set response [http get $base/ok#must-not-reach-server -timeout 3s]

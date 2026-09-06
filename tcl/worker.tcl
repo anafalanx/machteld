@@ -33,7 +33,6 @@ namespace eval ::machteld {
 proc ::machteld::worker {args} {
     variable WORKER_OPS
     set subs {on ops serve}
-    set opts {}
     if {![llength $args]} {
         Fail WORKER usage "usage: worker on op args body | worker ops | worker serve"
     }
@@ -114,7 +113,18 @@ proc ::machteld::WorkerAnswer {line} {
                                                    : {MACHTELD WORKER failed}}]
         set reply [dict create id -1 ok 0 code $code msg $reply]
     }
-    catch {puts [json encode -plain -dict $reply]}
+    # A reply that cannot be encoded -- a typed json value in a result, or any
+    # value the plain emitter refuses -- must still be ANSWERED. An unanswered
+    # request leaves the director waiting until its batch timeout with nothing
+    # to say about why. Fall back to a fixed failure envelope built only from
+    # plain strings, which always encodes.
+    if {[catch {json encode -plain -dict $reply} encoded]} {
+        set id [expr {[dict exists $reply id] ? [dict get $reply id] : -1}]
+        set encoded [json encode -plain -dict [dict create id $id ok 0 \
+            code {MACHTELD WORKER failed} \
+            msg "reply is not encodable as plain JSON: $encoded"]]
+    }
+    catch {puts $encoded}
     return
 }
 

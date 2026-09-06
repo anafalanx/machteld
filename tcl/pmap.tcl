@@ -39,8 +39,6 @@
 #     set digests [pmap $reqs -width 8 -- $exe --worker]
 
 proc ::machteld::pmap {args} {
-    set subs {}
-    set opts {-width -maxtries -timeout -raw}
     if {[llength $args] < 2} {
         Fail PMAP usage "usage: pmap requests ?-width n? ?-maxtries n? ?-timeout dur? ?-raw? -- command ?arg ...?"
     }

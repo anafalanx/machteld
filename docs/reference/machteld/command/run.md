@@ -36,8 +36,9 @@ Use `--` when `command` or one of its arguments could be read as an option.
 - `-env dict` overlays environment names and values on the inherited
   environment. Names compare case-insensitively on Windows.
 - `-arg0 word` changes only argument zero after executable resolution.
-- `-stdin bytes` supplies the child's standard input and then closes it. Without
-  `-stdin`, captured mode connects standard input to `NUL`.
+- `-stdin bytes` supplies the child's standard input and then closes it. A
+  bytearray is written byte-for-byte; any other value is written as UTF-8.
+  Without `-stdin`, captured mode connects standard input to `NUL`.
 - `-onout script` and `-onerr script` stream complete lines to callbacks. The
   line (without newline or a trailing carriage return) is appended as one
   argument to the script prefix and evaluated at global scope. Callback-mode

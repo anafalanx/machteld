@@ -45,6 +45,25 @@
  * (implementation-defined) decoding successfully, exactly as before. */
 #define JSON_MAX_DEPTH 512
 
+/* Structure comes from what the VALUE IS, never from what its text looks like
+ * (see json_emit). Tcl 9 has two list-shaped representations: the registered
+ * "list" type and the unregistered "arithseries" type that `lseq` produces,
+ * which can only be recognized by name. Both are arrays here. */
+static int json_dict_typed(Tcl_Obj *v) {
+    static const Tcl_ObjType *dictType = NULL;
+    if (dictType == NULL) dictType = Tcl_GetObjType("dict");
+    return v->typePtr != NULL && v->typePtr == dictType;
+}
+
+static int json_list_typed(Tcl_Obj *v) {
+    static const Tcl_ObjType *listType = NULL;
+    if (listType == NULL) listType = Tcl_GetObjType("list");
+    const Tcl_ObjType *t = v->typePtr;
+    if (t == NULL) return 0;
+    if (t == listType) return 1;
+    return t->name != NULL && strcmp(t->name, "arithseries") == 0;
+}
+
 /* Walk one yyjson value into the plain-mode Tcl mapping. NUMBER_AS_RAW makes
  * every number arrive as its LITERAL TEXT, which is the old parser's exact
  * behavior: nothing is lost to a double, Tcl 9's bignums keep 40-digit
@@ -74,7 +93,7 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
             yyjson_val *el;
             while ((el = yyjson_arr_iter_next(&it)) != NULL) {
                 Tcl_Obj *o = yy_to_tcl(el, depth + 1, depthErr);
-                if (o == NULL) { Tcl_DecrRefCount(l); return NULL; }
+                if (o == NULL) { Tcl_BounceRefCount(l); return NULL; }
                 Tcl_ListObjAppendElement(NULL, l, o);
             }
             return l;
@@ -90,8 +109,8 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
                                                (Tcl_Size)yyjson_get_len(k));
                 Tcl_Obj *vo = yy_to_tcl(val, depth + 1, depthErr);
                 if (vo == NULL) {
-                    Tcl_DecrRefCount(ko);
-                    Tcl_DecrRefCount(d);
+                    Tcl_BounceRefCount(ko);
+                    Tcl_BounceRefCount(d);
                     return NULL;
                 }
                 Tcl_DictObjPut(NULL, d, ko, vo);
@@ -223,10 +242,7 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         if (m == NULL) *err = "out of memory";
         return m;
     }
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
-    if (dictType == NULL) dictType = Tcl_GetObjType("dict");
-    if (listType == NULL) listType = Tcl_GetObjType("list");
-    if (v->typePtr != NULL && v->typePtr == dictType) {
+    if (json_dict_typed(v)) {
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
         Tcl_DictSearch s;
         Tcl_Obj *k, *val;
@@ -250,7 +266,7 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
         Tcl_DictObjDone(&s);
         return obj;
     }
-    if (v->typePtr != NULL && v->typePtr == listType) {
+    if (json_list_typed(v)) {
         yyjson_mut_val *arr = yyjson_mut_arr(doc);
         Tcl_Size n;
         Tcl_Obj **el;
@@ -292,7 +308,7 @@ static Tcl_Obj *yy_mut_to_tcl(yyjson_mut_val *v, int depth, int *depthErr) {
             yyjson_mut_val *el;
             while ((el = yyjson_mut_arr_iter_next(&it)) != NULL) {
                 Tcl_Obj *o = yy_mut_to_tcl(el, depth + 1, depthErr);
-                if (o == NULL) { Tcl_DecrRefCount(l); return NULL; }
+                if (o == NULL) { Tcl_BounceRefCount(l); return NULL; }
                 Tcl_ListObjAppendElement(NULL, l, o);
             }
             return l;
@@ -308,8 +324,8 @@ static Tcl_Obj *yy_mut_to_tcl(yyjson_mut_val *v, int depth, int *depthErr) {
                         (Tcl_Size)yyjson_mut_get_len(k));
                 Tcl_Obj *vo = yy_mut_to_tcl(val, depth + 1, depthErr);
                 if (vo == NULL) {
-                    Tcl_DecrRefCount(ko);
-                    Tcl_DecrRefCount(d);
+                    Tcl_BounceRefCount(ko);
+                    Tcl_BounceRefCount(d);
                     return NULL;
                 }
                 Tcl_DictObjPut(NULL, d, ko, vo);
@@ -341,14 +357,74 @@ static const char *JsonNodeTag(Tcl_Obj *o) {
     }
 }
 
+/* Duplicate detection for one object, linear-ish rather than quadratic: small
+ * objects (the common case) are compared pairwise, larger ones are sorted by
+ * (length, bytes) and scanned for adjacent equals, so a hostile 16 MiB object
+ * with hundreds of thousands of members cannot turn strict decoding into a
+ * denial of service. Keys are compared by length and bytes, never as C
+ * strings, so an escaped NUL inside a member name cannot fold two distinct
+ * names into a false duplicate. Returns 1 with *badKey naming the duplicate,
+ * 0 when every member is distinct, -1 when the check itself could not
+ * allocate. */
+typedef struct { const char *ptr; size_t len; } JsonKey;
+
+static int JsonKeyCompare(const void *a, const void *b) {
+    const JsonKey *x = (const JsonKey *)a, *y = (const JsonKey *)b;
+    if (x->len != y->len) return x->len < y->len ? -1 : 1;
+    return memcmp(x->ptr, y->ptr, x->len);
+}
+
+static int JsonObjHasDuplicate(yyjson_val *obj, const char **badKey) {
+    size_t n = yyjson_obj_size(obj);
+    if (n < 2) return 0;
+    yyjson_obj_iter it;
+    yyjson_val *k;
+    if (n <= 16) {
+        yyjson_obj_iter_init(obj, &it);
+        while ((k = yyjson_obj_iter_next(&it)) != NULL) {
+            const char *ks = yyjson_get_str(k);
+            size_t kl = yyjson_get_len(k);
+            yyjson_obj_iter rest = it;      /* the members after k */
+            yyjson_val *k2;
+            while ((k2 = yyjson_obj_iter_next(&rest)) != NULL) {
+                if (yyjson_get_len(k2) == kl && memcmp(yyjson_get_str(k2), ks, kl) == 0) {
+                    *badKey = ks;
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+    JsonKey *keys = (JsonKey *)malloc(n * sizeof(JsonKey));
+    if (keys == NULL) return -1;
+    size_t count = 0;
+    yyjson_obj_iter_init(obj, &it);
+    while (count < n && (k = yyjson_obj_iter_next(&it)) != NULL) {
+        keys[count].ptr = yyjson_get_str(k);
+        keys[count].len = yyjson_get_len(k);
+        count++;
+    }
+    qsort(keys, count, sizeof(JsonKey), JsonKeyCompare);
+    for (size_t i = 1; i < count; i++) {
+        if (keys[i].len == keys[i - 1].len &&
+                memcmp(keys[i].ptr, keys[i - 1].ptr, keys[i].len) == 0) {
+            *badKey = keys[i].ptr;
+            free(keys);
+            return 1;
+        }
+    }
+    free(keys);
+    return 0;
+}
+
 /* Strictness for `decode -typed`: duplicate object members refuse at every
  * nesting level (yyjson keeps duplicates in the document; walking is the
  * verified route - the library offers no rejection flag). The same walk
  * enforces the contract's depth cap, which also bounds ITS OWN recursion
  * against the 100000-deep corpus inputs yyjson parses without blinking.
- * Returns 0 with either *badKey set (a duplicate) or *tooDeep set. */
+ * Returns 0 with exactly one of *badKey (a duplicate), *tooDeep, or *oom set. */
 static int JsonCheckStrict(yyjson_val *v, int depth,
-                           const char **badKey, int *tooDeep) {
+                           const char **badKey, int *tooDeep, int *oom) {
     if (depth >= JSON_MAX_DEPTH) { *tooDeep = 1; return 0; }
     switch (yyjson_get_type(v)) {
         case YYJSON_TYPE_ARR: {
@@ -356,29 +432,20 @@ static int JsonCheckStrict(yyjson_val *v, int depth,
             yyjson_arr_iter_init(v, &it);
             yyjson_val *el;
             while ((el = yyjson_arr_iter_next(&it)) != NULL) {
-                if (!JsonCheckStrict(el, depth + 1, badKey, tooDeep)) return 0;
+                if (!JsonCheckStrict(el, depth + 1, badKey, tooDeep, oom)) return 0;
             }
             return 1;
         }
         case YYJSON_TYPE_OBJ: {
-            yyjson_obj_iter a;
-            yyjson_obj_iter_init(v, &a);
+            int duplicate = JsonObjHasDuplicate(v, badKey);
+            if (duplicate < 0) { *oom = 1; return 0; }
+            if (duplicate) return 0;
+            yyjson_obj_iter it;
+            yyjson_obj_iter_init(v, &it);
             yyjson_val *k;
-            while ((k = yyjson_obj_iter_next(&a)) != NULL) {
-                const char *ks = yyjson_get_str(k);
-                size_t kl = yyjson_get_len(k);
-                yyjson_obj_iter b;
-                yyjson_obj_iter_init(v, &b);
-                yyjson_val *k2;
-                int seen = 0;
-                while ((k2 = yyjson_obj_iter_next(&b)) != NULL) {
-                    if (yyjson_get_len(k2) == kl &&
-                        memcmp(yyjson_get_str(k2), ks, kl) == 0) {
-                        if (++seen > 1) { *badKey = ks; return 0; }
-                    }
-                }
+            while ((k = yyjson_obj_iter_next(&it)) != NULL) {
                 if (!JsonCheckStrict(yyjson_obj_iter_get_val(k), depth + 1,
-                                     badKey, tooDeep)) return 0;
+                                     badKey, tooDeep, oom)) return 0;
             }
             return 1;
         }
@@ -527,13 +594,8 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
     }
     if (as_dict) return json_emit_dict(interp, v, out, depth, plainOnly);
 
-    static const Tcl_ObjType *dictType = NULL, *listType = NULL;
-    if (dictType == NULL) dictType = Tcl_GetObjType("dict");
-    if (listType == NULL) listType = Tcl_GetObjType("list");
-
-    const Tcl_ObjType *t = v->typePtr;
-    if (t != NULL && t == dictType) return json_emit_dict(interp, v, out, depth, plainOnly);
-    if (t != NULL && t == listType) return json_emit_list(interp, v, out, depth, plainOnly);
+    if (json_dict_typed(v)) return json_emit_dict(interp, v, out, depth, plainOnly);
+    if (json_list_typed(v)) return json_emit_list(interp, v, out, depth, plainOnly);
 
     Tcl_Size n;
     const char *s = Tcl_GetStringFromObj(v, &n);
@@ -655,13 +717,17 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         }
         if (typed) {
             const char *badKey = NULL;
-            int tooDeep = 0;
-            if (!JsonCheckStrict(yyjson_doc_get_root(doc), 0, &badKey, &tooDeep)) {
-                yyjson_doc_free(doc);
-                if (tooDeep) return JsonErr(interp, "depth", "too deeply nested");
+            int tooDeep = 0, oom = 0;
+            if (!JsonCheckStrict(yyjson_doc_get_root(doc), 0, &badKey, &tooDeep, &oom)) {
+                /* badKey points INTO the document: build the message before the
+                 * document is released. Formatting it afterwards read freed
+                 * memory -- unnoticed on small inputs, a crash on a large one. */
                 char msg[160];
                 snprintf(msg, sizeof msg, "duplicate object key \"%.80s\"",
                          badKey ? badKey : "");
+                yyjson_doc_free(doc);
+                if (tooDeep) return JsonErr(interp, "depth", "too deeply nested");
+                if (oom) return JsonErr(interp, "limit", "out of memory during strict decode");
                 return JsonErr(interp, "strict", msg);
             }
             JsonDocWrap *w = (JsonDocWrap *)Tcl_Alloc(sizeof(JsonDocWrap));
@@ -806,8 +872,11 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     }
 
     if (idx == GET || idx == EXISTS) {
-        if (objc < 3) {
-            Tcl_WrongNumArgs(interp, 2, objv, "value ?key|index ...?");
+        /* `exists` asks about a path, so it needs at least one step; `get`
+         * with no step returns the value itself. */
+        if (objc < 3 || (idx == EXISTS && objc < 4)) {
+            Tcl_WrongNumArgs(interp, 2, objv, idx == EXISTS
+                ? "value key|index ?key|index ...?" : "value ?key|index ...?");
             return TCL_ERROR;
         }
         if (!JsonIsTyped(objv[2])) {

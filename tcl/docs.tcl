@@ -155,10 +155,13 @@ proc ::machteld::DocsLoad {} {
         if {[dict get $facts manual_pages] > [dict get $facts documents]} {
             DocsFail corrupt "docs: manual-page count exceeds document count for $product"
         }
+        # Each product's reference must describe the runtime that carries it.
         if {$product eq "machteld"} {
             set expectedVersion [::machteld::version]
+        } elseif {$product eq "tcl"} {
+            set expectedVersion [info patchlevel]
         } else {
-            set expectedVersion 9.0.4
+            set expectedVersion $::machteld::tk_patchlevel
         }
         if {[dict get $facts version] ne $expectedVersion} {
             DocsFail corrupt "docs: $product reference version disagrees with the runtime"
@@ -1493,9 +1496,11 @@ proc ::machteld::DocsHelpError {message options {discovery 0}} {
     Fail HELP $helpCode "help: $message"
 }
 
+# The Tk the host links, read from the package registration the prelude
+# installs, so the banner is never told a version twice.
 proc ::machteld::help {args} {
     if {![llength $args]} {
-        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl 9.0.4 — applications, language commands, and C API\n  Tk 9.0.4 — applications, widgets, and C API\n\nHost routes:\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
+        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl [info patchlevel] — applications, language commands, and C API\n  Tk $::machteld::tk_patchlevel — applications, widgets, and C API\n\nHost routes:\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
     }
     set query [join $args " "]
     if {![catch {DocsGet $query} result options]} {
