@@ -172,9 +172,10 @@ if {![file isfile $opt(--apache-license)]} {
 }
 file copy -force $opt(--apache-license) [file join $stagedLicenses Apache-2.0.txt]
 
-# Reference is a required runtime payload.  The generator publishes it only
-# after validating inventories, indexes and hashes; packaging still checks the
-# discovery/inert-index boundary instead of silently accepting an empty tree.
+# Reference is required in the full Machteld distribution; wrap includes it in
+# applications only with --with-docs. The generator publishes it only after
+# validating inventories, indexes and hashes; distribution packaging still
+# checks the discovery/inert-index boundary instead of accepting an empty tree.
 if {![file isdirectory $opt(--reference)]} {
     error "reference pack directory not found: $opt(--reference)"
 }

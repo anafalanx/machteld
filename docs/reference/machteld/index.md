@@ -32,3 +32,8 @@ reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
 the language itself, rather than the Machteld palette, is the subject. Upstream
 `application` pages describe upstream `tclsh`/`wish`; Machteld entry and host
 routes are defined only by this Machteld reference.
+
+The Machteld distribution includes this pack; wrapped tools include it only
+with `--with-docs`. Without it, `manifest` and `docs schema` still describe the
+runtime, corpus queries report `DOCS unsupported`, and bare `help` explains
+where to find the full same-version reference.

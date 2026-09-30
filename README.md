@@ -103,7 +103,8 @@ Commands live in `::machteld`; the prelude adds that namespace to the global
 command path, so small programs can use the bare names shown above. `manifest`
 returns the exact verbs, options, subcommands, declared fixed result shapes, and
 raised/protocol error codes in the running executable. `docs` searches and reads
-the exact Machteld, Tcl 9, and Tk 9 references embedded in every normal host:
+the exact Machteld, Tcl 9, and Tk 9 references embedded in the Machteld
+distribution:
 
 ```text
 machteld.exe --docs status --json
@@ -135,14 +136,19 @@ standalone console or GUI executable without a compiler:
 ```text
 machteld.exe wrap app.tcl -o app.exe
 machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
+machteld.exe wrap app.tcl -o documented-app.exe --with-docs
 ```
 
 A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
 subtree, the staged entry is validated, and the output is published atomically.
-There is no reduced runtime mode: every wrapped console or GUI tool exposes the
-same programmatic Machteld 0.21 machine-control API, including the statically
-linked, binary-safe SQLite `store`. Wrapped tools also retain the complete
-offline reference corpus; wrapping basekits are not embedded recursively.
+Every wrapped console or GUI tool exposes the same programmatic Machteld 0.21
+machine-control API, including the statically linked, binary-safe SQLite
+`store`, runtime libraries, and required license notices. The built-in reference
+corpus is omitted by default; `--with-docs` includes the complete verified
+offline Machteld/Tcl/Tk reference. Application assets and documentation are
+unaffected. Without the corpus, `docs schema` remains available, corpus queries
+report `DOCS unsupported`, and bare `help` explains the omission. Wrapping
+basekits are not embedded recursively.
 
 Start with [the documentation index](docs/index.md), the concise
 [agent bootstrap](docs/reference/machteld/agent.md), and the

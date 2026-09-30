@@ -178,6 +178,33 @@ set fixtureStatus [catch {
     set ::machteld::DOCS_SEARCH {}
     set corruptCode [errorcode {docs status}]
     set corruptHelpCode [errorcode {help dict}]
+    # This existing zipfs directory has no reference/ child: it models a
+    # wrapped payload whose runtime is present but whose corpus was omitted.
+    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/reference/markdown]
+    foreach query {
+        {docs status}
+        {docs list}
+        {docs get tcl/command/dict}
+        {docs outline tcl/command/dict}
+        {docs search dictionary}
+        {docs verify}
+    } {
+        check "omitted reference rejects $query with unsupported" [expr {
+            [errorcode $query] eq {MACHTELD DOCS unsupported}}]
+    }
+    check {omitted reference rejects extraction with unsupported} [expr {
+        [errorcode [list docs extract [file join $work omitted-export]]] eq
+            {MACHTELD DOCS unsupported} &&
+        ![file exists [file join $work omitted-export]]}]
+    check {omitted reference retains schema and maps help query errors} [expr {
+        [dict get [docs schema] schema] == 1 &&
+        [errorcode {help dict}] eq {MACHTELD HELP unsupported}}]
+    set noPackHelp [help]
+    check {omitted reference help gives honest same-version recovery guidance} [expr {
+        [string match {*carries no embedded reference pack*} $noPackHelp] &&
+        [string match "*full Machteld [version] executable*" $noPackHelp] &&
+        [string match {*wrap --with-docs*docs schema*} $noPackHelp] &&
+        ![string match {*contains the complete*} $noPackHelp]}]
     set fixtureResult ""
 } fixtureError]
 if {$rootRenamed} {

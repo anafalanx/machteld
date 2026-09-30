@@ -15,6 +15,18 @@ puts $f "argv:$argv"
 puts $f "tcl_library:$::tcl_library"
 puts $f "tk_library:$::tk_library"
 puts $f "run:[expr {[llength [info commands ::machteld::run]] ? {yes} : {no}}]"
+puts $f "docs-schema:[dict get [docs schema] schema]"
+if {[catch {docs status} docs_result docs_options]} {
+    puts $f "docs-errorcode:[dict get $docs_options -errorcode]"
+} else {
+    puts $f "docs-corpus:[dict get $docs_result corpus_sha256]"
+}
+if {[catch {help tcl/command/dict} help_result help_options]} {
+    puts $f "help-errorcode:[dict get $help_options -errorcode]"
+} else {
+    puts $f "help-query:ok"
+}
+puts $f "help-banner:[list [help]]"
 if {[catch {
     set msgcat_version [package require msgcat 1.7]
     set module_path [file normalize [file join [file dirname [info library]] tcl9 9.0]]

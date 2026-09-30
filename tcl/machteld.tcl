@@ -374,12 +374,13 @@ proc ::machteld::_write_launcher {path archiveEntry} {
 }
 
 proc ::machteld::wrap {args} {
-    set gui 0; set out ""; set input ""; set entry ""; set entrySet 0
+    set gui 0; set withDocs 0; set out ""; set input ""; set entry ""; set entrySet 0
     for {set i 0} {$i < [llength $args]} {incr i} {
         set a [lindex $args $i]
         switch -- $a {
             --gui        { set gui 1 }
             --console    { set gui 0 }
+            --with-docs  { set withDocs 1 }
             --entry - -o {
                 if {$i + 1 >= [llength $args]} { Fail WRAP usage "wrap: $a needs a value" }
                 set v [lindex $args [incr i]]
@@ -397,7 +398,7 @@ proc ::machteld::wrap {args} {
         }
     }
     if {$input eq "" || $out eq ""} {
-        Fail WRAP usage "usage: wrap input -o out.exe ?--entry path? ?--gui|--console?"
+        Fail WRAP usage "usage: wrap input -o out.exe ?--entry path? ?--gui|--console? ?--with-docs?"
     }
     if {![file exists $input]} { Fail WRAP notfound "wrap: input \"$input\" does not exist" }
     set single [expr {![file isdirectory $input]}]
@@ -475,17 +476,20 @@ proc ::machteld::wrap {args} {
             ![file isdirectory [file join $root tcl9]] ||
             ![file isdirectory [file join $root tk_library]] ||
             ![file isdirectory [file join $root licenses]] ||
-            ![file isdirectory [file join $root reference]] ||
             ![file isdirectory [file join $root basekit]]} {
         Fail WRAP unsupported "wrap: this executable carries no wrapper basekits"
     }
     set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
     if {![file isfile $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
-    if {[info commands ::machteld::DocsPackFiles] eq ""} {
-        Fail WRAP unsupported "wrap: embedded reference validation is unavailable"
-    }
-    if {[catch {::machteld::DocsPackFiles} referenceError]} {
-        Fail WRAP unsupported "wrap: embedded reference pack is unavailable or invalid: $referenceError"
+    # Documentation is a packaging option, not a runtime dependency. Only an
+    # explicit opt-in needs the corpus or pays for its integrity validation.
+    if {$withDocs} {
+        if {[info commands ::machteld::DocsPackFiles] eq ""} {
+            Fail WRAP unsupported "wrap: embedded reference validation is unavailable"
+        }
+        if {[catch {::machteld::DocsPackFiles} referenceError]} {
+            Fail WRAP unsupported "wrap: embedded reference pack is unavailable or invalid: $referenceError"
+        }
     }
 
     lassign [_new_workdir $outParent] work workKey
@@ -496,7 +500,9 @@ proc ::machteld::wrap {args} {
         ::machteld::_copy_tree [file join $root tcl9]        [file join $stage tcl9]
         ::machteld::_copy_tree [file join $root tk_library]  [file join $stage tk_library]
         ::machteld::_copy_tree [file join $root licenses]    [file join $stage licenses]
-        ::machteld::_copy_tree [file join $root reference]   [file join $stage reference]
+        if {$withDocs} {
+            ::machteld::_copy_tree [file join $root reference] [file join $stage reference]
+        }
         file copy [file join $root machteld.tcl] [file join $stage machteld.tcl]
         set app [file join $stage app]
         if {$single} {
@@ -547,7 +553,7 @@ proc ::machteld::wrap {args} {
 }
 
 ::machteld::MetaDefine wrap [dict create kind tcl args args domain WRAP \
-    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui -o} \
+    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui --with-docs -o} \
     doc machteld/command/wrap]
 
 # Expose the palette as bare verbs: unqualified run / child / pty / wait / scope

@@ -78,16 +78,71 @@ proc carries_reference_pack {image} {
     }
     return 1
 }
+proc omits_reference_pack {image} {
+    set mount "no-reference-[pid]-[clock clicks]"
+    if {[catch {zipfs mount $image $mount}]} { return 0 }
+    try {
+        return [expr {![file exists [file join //zipfs:/$mount reference]]}]
+    } finally {
+        catch {zipfs unmount $mount}
+    }
+}
+proc reports_omitted_reference {text} {
+    return [expr {
+        [string match {*docs-schema:1*} $text] &&
+        [string match {*docs-errorcode:MACHTELD DOCS unsupported*} $text] &&
+        [string match {*help-errorcode:MACHTELD HELP unsupported*} $text] &&
+        [string match {*This executable carries no embedded reference pack.*} $text] &&
+        [string match "*full Machteld [version] executable*" $text] &&
+        [string match {*wrap --with-docs*} $text] &&
+        ![string match {*This executable contains the complete*} $text]}]
+}
 
 set console [file join $WORK wrapped-console.exe]
-wrap $TOOL -o $console --console
+# Default wrapping must not even invoke reference validation.  The same guard
+# proves opt-in fails closed and cannot publish a misleading documented image.
+rename ::machteld::DocsPackFiles ::machteld::DocsPackFilesLive
+proc ::machteld::DocsPackFiles {} {
+    return -code error -errorcode {MACHTELD DOCS corrupt} "test: invalid reference pack"
+}
+try {
+    wrap $TOOL -o $console --console
+    set refused [file join $WORK invalid-reference.exe]
+    check "wrap --with-docs refuses invalid reference without publishing" [expr {
+        [catch {wrap $TOOL -o $refused --console --with-docs} message options] &&
+        [dict get $options -errorcode] eq {MACHTELD WRAP unsupported} &&
+        ![file exists $refused]}]
+    set channel [open $refused w]
+    puts -nonewline $channel KEEP-EXISTING-OUTPUT
+    close $channel
+    check "invalid reference opt-in preserves an existing output" [expr {
+        [catch {wrap $TOOL -o $refused --console --with-docs} message options] &&
+        [dict get $options -errorcode] eq {MACHTELD WRAP unsupported} &&
+        [slurp $refused] eq "KEEP-EXISTING-OUTPUT"}]
+    file delete $refused
+    proc ::machteld::DocsPackFiles {} {
+        return -code error -errorcode {MACHTELD DOCS unsupported} "test: reference pack omitted"
+    }
+    check "wrap --with-docs refuses an omitted reference without publishing" [expr {
+        [catch {wrap $TOOL -o $refused --console --with-docs} message options] &&
+        [dict get $options -errorcode] eq {MACHTELD WRAP unsupported} &&
+        ![file exists $refused]}]
+    rename ::machteld::DocsPackFiles {}
+    check "wrap --with-docs refuses unavailable validation without publishing" [expr {
+        [catch {wrap $TOOL -o $refused --console --with-docs} message options] &&
+        [dict get $options -errorcode] eq {MACHTELD WRAP unsupported} &&
+        ![file exists $refused]}]
+} finally {
+    catch {rename ::machteld::DocsPackFiles {}}
+    rename ::machteld::DocsPackFilesLive ::machteld::DocsPackFiles
+}
 check "wrap produces a console executable" [file executable $console]
 check "wrapped console needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped console carries exact runtime license notices" \
     [carries_runtime_notices $console]
-check "wrapped console carries the complete reference pack" \
-    [carries_reference_pack $console]
+check "wrapped console omits the reference pack by default" \
+    [omits_reference_pack $console]
 set marker [file join $WORK _hello_ran.txt]
 set result [run -- $console --help payload]
 check "wrapped console receives its own --help argument" [expr {
@@ -96,6 +151,8 @@ set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
 check "wrapped console loads the current package" [string match *version:[version]* $text]
 check "wrapped console owns --help/--version spelling" [string match *argv:--help\ payload* $text]
 check "wrapped console carries native process API" [string match *run:yes* $text]
+check "wrapped console keeps schema and reports omitted docs/help honestly" \
+    [reports_omitted_reference $text]
 check "wrapped console carries static binary store" [string match *store:yes* $text]
 check "wrapped console carries Tcl modules and timezone data" [expr {
     [string match *runtime:msgcat:1.7.1\ modules:embedded\ cp1252:80\ clock:*1970* $text] &&
@@ -116,12 +173,16 @@ check "wrapped console leaves retired --machteld-engine to its application" [exp
     [string match *argv:--machteld-engine\ application-owned* $text]}]
 file delete -force $marker
 set result [run -- $console --machteld-docs status --json]
-check "wrapped console exposes the namespaced documentation escape" [expr {
+set failure_json "[dict get $result out][dict get $result err]"
+set failure [json decode $failure_json]
+check "wrapped console documentation escape reports the omitted pack" [expr {
+    [dict get $result status] eq "error" && [dict get $result exit] == 1 &&
+    ![dict get $failure ok] && [dict get $failure error domain] eq "DOCS" &&
+    [dict get $failure error code] eq "unsupported" && ![file exists $marker]}]
+set result [run -- $console --machteld-docs schema --json]
+check "wrapped console schema escape works without a reference pack" [expr {
     [dict get $result status] eq "ok" &&
-    [string match *\"ok\":true* [dict get $result out]] &&
-    [string match *\"result\"* [dict get $result out]] &&
-    [string match *\"schema\"* [dict get $result out]] &&
-    [string match *9.0.4* [dict get $result out]] &&
+    [dict get [json decode [dict get $result out]] result schema] == 1 &&
     ![file exists $marker]}]
 set result [run -- $console --machteld-docs get no-such-product/no-such-page --json]
 set failure_json "[dict get $result out][dict get $result err]"
@@ -129,18 +190,19 @@ check "wrapped console emits a JSON failure envelope and nonzero exit" [expr {
     [dict get $result status] eq "error" && [dict get $result exit] == 1 &&
     [string match *\"ok\":false* $failure_json] &&
     [string match *\"error\"* $failure_json] &&
-    [string match -nocase *notfound* $failure_json] && ![file exists $marker]}]
+    [string match *unsupported* $failure_json] && ![file exists $marker]}]
 
 # Application files are namespaced below archive-root app/, so nested entries
 # retain their own script-relative assets and may use runtime-looking names.
 set nested [file join $WORK nested-tool]
 file mkdir [file join $nested src] [file join $nested docs] \
     [file join $nested basekit] [file join $nested tcl_library] \
-    [file join $nested main.tcl] [file join $nested empty-directory]
+    [file join $nested main.tcl] [file join $nested reference] \
+    [file join $nested empty-directory]
 set channel [open [file join $nested src sibling.txt] w]
 puts -nonewline $channel NESTED-ASSET
 close $channel
-foreach relative {docs/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {
+foreach relative {docs/app.txt reference/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {
     set channel [open [file join $nested {*}[file split $relative]] w]
     puts -nonewline $channel "APP-NAME:$relative"
     close $channel
@@ -152,7 +214,7 @@ puts $channel {puts [read $f]}
 puts $channel {close $f}
 puts $channel {puts "ARGV0-MATCH:[expr {$argv0 eq [info script]}]"}
 puts $channel {set root [file dirname [file dirname [info script]]]}
-puts $channel {foreach relative {docs/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {set f [open [file join $root {*}[file split $relative]] r]; puts [read $f]; close $f}}
+puts $channel {foreach relative {docs/app.txt reference/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {set f [open [file join $root {*}[file split $relative]] r]; puts [read $f]; close $f}}
 close $channel
 set nested_exe [file join $WORK nested-console.exe]
 wrap $nested -o $nested_exe --entry src/main.tcl --console
@@ -162,7 +224,7 @@ check "nested wrap entry reads a sibling asset via info script" [expr {
     [string match *NESTED-ASSET* [dict get $result out]]}]
 check "nested wrapped entry sees argv0 equal to info script" [expr {
     [string match *ARGV0-MATCH:1* [dict get $result out]]}]
-foreach relative {docs/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {
+foreach relative {docs/app.txt reference/app.txt basekit/app.txt tcl_library/app.txt main.tcl/app.txt} {
     check "application may contain runtime-looking $relative" [expr {
         [string match *APP-NAME:$relative* [dict get $result out]]}]
 }
@@ -210,8 +272,8 @@ check "wrapped GUI needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped GUI carries exact runtime license notices" \
     [carries_runtime_notices $gui]
-check "wrapped GUI carries the complete reference pack" \
-    [carries_reference_pack $gui]
+check "wrapped GUI omits the reference pack by default" \
+    [omits_reference_pack $gui]
 file delete -force $marker [file join $WORK _hello_store.db]
 set hostile_tcl [file join $WORK hostile-tcl]
 set hostile_tk [file join $WORK hostile-tk]
@@ -241,6 +303,8 @@ check "wrapped GUI selftest exits cleanly" [expr {
 child close $gui_child
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
 check "wrapped GUI loads the current package" [string match *version:[version]* $text]
+check "wrapped GUI keeps schema and reports omitted docs/help honestly" \
+    [reports_omitted_reference $text]
 regexp -line {^argc:(.*)$} $text _ observed_argc
 regexp -line {^argv:(.*)$} $text _ observed_argv
 check "wrapped GUI preserves exact original argc" [expr {
@@ -298,12 +362,52 @@ set gui_child [child start -- $gui --machteld-docs status --json --output $gui_d
 set gui_result [child wait $gui_child -timeout 5s]
 child close $gui_child
 set gui_docs_text [expr {[file exists $gui_docs] ? [slurp $gui_docs] : ""}]
-check "wrapped GUI exposes a headless documentation escape" [expr {
-    [dict get $gui_result status] eq "ok" && [dict get $gui_result exit] == 0 &&
-    [string match *\"ok\":true* $gui_docs_text] &&
-    [string match *\"result\"* $gui_docs_text] &&
-    [string match *\"schema\"* $gui_docs_text] &&
-    [string match *9.0.4* $gui_docs_text] && ![file exists $marker]}]
+set failure [json decode $gui_docs_text]
+check "wrapped GUI documentation escape reports the omitted pack headlessly" [expr {
+    [dict get $gui_result status] eq "error" && [dict get $gui_result exit] == 1 &&
+    ![dict get $failure ok] && [dict get $failure error domain] eq "DOCS" &&
+    [dict get $failure error code] eq "unsupported" && ![file exists $marker]}]
+
+# Opt-in includes the same validated corpus on either subsystem.  Each image
+# is wrapped once, then reused for archive, application, and host-route checks.
+set expected_corpus [dict get [docs status] corpus_sha256]
+foreach mode {console gui} {
+    set documented [file join $WORK documented-$mode.exe]
+    wrap $TOOL -o $documented --$mode --with-docs
+    check "wrapped $mode --with-docs carries the full reference tree" \
+        [carries_reference_pack $documented]
+    check "wrapped $mode --with-docs retains exact runtime license notices" \
+        [carries_runtime_notices $documented]
+    set minimal [expr {$mode eq "console" ? $console : $gui}]
+    check "wrapped $mode default is smaller than --with-docs" [expr {
+        [file size $minimal] < [file size $documented]}]
+    puts "size $mode: default [file size $minimal] bytes; with-docs [file size $documented] bytes"
+    file delete -force $marker [file join $WORK _hello_store.db]
+    set app_child [child start -env [list MACHTELD_WRAP_GUI_SELFTEST 1] -- \
+        $documented --help application-owned]
+    set app_result [child wait $app_child -timeout 5s]
+    child close $app_child
+    set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
+    check "wrapped $mode --with-docs retains application help and runtime" [expr {
+        [dict get $app_result status] eq "ok" && [dict get $app_result exit] == 0 &&
+        [string match {*argv:--help application-owned*} $text] &&
+        [string match {*store:yes*} $text] && [string match {*docs-schema:1*} $text] &&
+        [string match *docs-corpus:$expected_corpus* $text] &&
+        [string match {*help-query:ok*} $text] &&
+        [string match {*This executable contains the complete*} $text]}]
+    file delete -force $marker [file join $WORK _hello_store.db]
+    set verification_file [file join $WORK verified-$mode.json]
+    set docs_child [child start -- $documented --machteld-docs verify --json \
+        --output $verification_file]
+    set docs_result [child wait $docs_child -timeout 10s]
+    child close $docs_child
+    set verification [json decode [slurp $verification_file]]
+    check "wrapped $mode --with-docs verifies the exact full host corpus headlessly" [expr {
+        [dict get $docs_result status] eq "ok" && [dict get $docs_result exit] == 0 &&
+        [dict get $verification ok] && [dict get $verification result ok] &&
+        [dict get $verification result corpus_sha256] eq $expected_corpus &&
+        [dict get $verification result files] > 1000 && ![file exists $marker]}]
+}
 
 file delete -force $WORK
 if {$fails} {

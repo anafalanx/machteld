@@ -12,6 +12,11 @@ commands: docs, docs status, docs schema, docs verify, docs list, docs get, docs
 Tk 9 reference corpus carried by the running executable. It never consults the
 network or a machine-wide documentation installation.
 
+The Machteld distribution always includes the complete corpus. Wrapped tools
+omit it by default; `wrap --with-docs` includes the full verified pack. Without
+the corpus, `docs schema` still works, but corpus operations (`status`, `verify`,
+`list`, `get`, `outline`, `search`, and `extract`) report `DOCS unsupported`.
+
 ## Synopsis
 
 ```tcl
@@ -40,6 +45,12 @@ successful replies are `{ok true result ...}` and failures are
 `{ok false error {domain DOCS code ... message ...}}`, rendered as JSON objects.
 `--output FILE` atomically writes that same envelope or human result; GUI hosts
 require output except for extraction.
+
+Wrapped tools reserve `--machteld-docs` for the same host operations, without
+consuming their ordinary application arguments. That route remains reserved
+when the corpus is omitted: schema queries still work, and corpus queries
+report the same structured unavailable error. JSON envelopes and GUI output
+requirements are unchanged.
 
 ## Arguments and options
 
@@ -99,15 +110,17 @@ Raised codes are `DOCS ambiguous`, `DOCS badvalue`, `DOCS corrupt`,
 `DOCS usage`.
 `ambiguous` identifies an alias with multiple exact candidates; its message
 lists the canonical IDs so callers can choose rather than accept a guess.
-`unsupported` also covers requesting a representation that document does not
-carry.
+`unsupported` covers corpus queries in tools wrapped without `--with-docs`, as
+well as requesting a representation that a document does not carry. It does
+not mean the machine-control runtime or its license notices were omitted.
 `corrupt` means packaged catalog/content/hash invariants failed; results are not
 silently returned from a mismatched corpus.
 
 ## Lifetime and timeouts
 
-Status, schema, verify, list, get, outline, and search read the immutable
-self-mounted zipfs payload and retain no handles. Search is local and bounded.
+Schema returns local API metadata without needing the reference pack. Status,
+verify, list, get, outline, and search read the immutable self-mounted zipfs
+payload and retain no handles. Search is local and bounded.
 Extraction stages a complete randomly named sibling directory and publishes it
 by same-volume rename, so an incomplete tree is never presented as success.
 Cleanup after an interrupted extraction is best effort. There is no network or
@@ -231,7 +244,8 @@ formats, and the structured `{MACHTELD DOCS code}` error pattern.
 
 #### Errors
 
-Missing or malformed packaged API metadata reports `unsupported` or `corrupt`.
+Malformed calls report `DOCS usage`. This query does not require the reference
+pack and remains available in tools wrapped without `--with-docs`.
 
 #### Lifetime and timeouts
 
@@ -268,7 +282,8 @@ cataloged representation hashes, byte sizes, and corpus identity. It returns
 
 #### Errors
 
-Any missing, mismatched, or malformed content reports `DOCS corrupt`.
+An omitted reference pack reports `DOCS unsupported`. Missing, mismatched, or
+malformed content within a reference pack reports `DOCS corrupt`.
 
 #### Lifetime and timeouts
 
