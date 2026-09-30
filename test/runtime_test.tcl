@@ -303,6 +303,99 @@ set before [child list]
 scope { pool create -width 3 -- $MT $WORKER }
 check "scope reaps every pool worker" [expr {[child list] eq $before}]
 
+# A GUI/event callback may close a pool while PoolWait is running its event
+# loop. Both a normal deadline and a simultaneously-ready zero timer must
+# report the invalidated token, never an internal missing array element.
+foreach observation_timeout {30s 0ms} {
+    set before_children [child list]
+    set before_channels [lsort [chan names]]
+    set before_timers [lsort [after info]]
+    set pool_token [pool create -width 2 -- $MT $WORKER]
+    pool submit $pool_token [list [dict create op delay milliseconds 10000 text late]]
+    after 0 [list pool close $pool_token]
+    set close_code [errcode_of [list pool wait $pool_token -timeout $observation_timeout]]
+    check "callback-close during wait ($observation_timeout) reports POOL nohandle" [expr {
+        $close_code eq {MACHTELD POOL nohandle}}]
+    check "callback-close ($observation_timeout) removes workers, channels and wait timer" [expr {
+        [child list] eq $before_children && [lsort [chan names]] eq $before_channels &&
+        [lsort [after info]] eq $before_timers &&
+        ![info exists ::machteld::POOL_DONE($pool_token)]}]
+    check "closed pool stays invalid for wait and repeated close" [expr {
+        [errcode_of [list pool wait $pool_token]] eq {MACHTELD POOL nohandle} &&
+        [errcode_of [list pool close $pool_token]] eq {MACHTELD POOL nohandle}}]
+}
+
+# An observation timeout does not terminate work. Completion subsequently
+# wins over a zero observation bound, and every wait cancels its own timer.
+set before_timers [lsort [after info]]
+set pool_token [pool create -width 1 -- $MT $WORKER]
+pool submit $pool_token [list [dict create op delay milliseconds 200 text eventual]]
+check "pool observation timeout leaves work running" [expr {
+    [errcode_of [list pool wait $pool_token -timeout 0ms]] eq {MACHTELD POOL timeout} &&
+    [dict get [pool info $pool_token] workers] == 1 &&
+    [lsort [after info]] eq $before_timers}]
+set replies [pool wait $pool_token -timeout 30s]
+check "pool completes after observation timeout without a stale timer" [expr {
+    [result_of [lindex $replies 0]] eq "eventual" &&
+    [pool wait $pool_token -timeout 0ms] eq $replies &&
+    [lsort [after info]] eq $before_timers}]
+pool close $pool_token
+
+# Fault-inject only the event-loop primitive. This exercises the production
+# PoolWait cleanup path and proves cleanup neither leaks its timer nor replaces
+# the original exception. Cancel any leaked timer after the assertion so a red
+# regression run cannot contaminate subsequent tests.
+set before_children [child list]
+set before_channels [lsort [chan names]]
+set before_timers [lsort [after info]]
+set pool_token [pool create -width 1 -- $MT $WORKER]
+pool submit $pool_token [list [dict create op delay milliseconds 10000 text late]]
+proc ::machteld::vwait {name} {
+    return -code error -errorcode {TEST WAIT original} "injected wait failure"
+}
+try {
+    set wait_rc [catch {pool wait $pool_token -timeout 30s} wait_message wait_options]
+    check "pool wait preserves an event-loop failure and cancels its timer" [expr {
+        $wait_rc == 1 && $wait_message eq "injected wait failure" &&
+        [dict get $wait_options -errorcode] eq {TEST WAIT original} &&
+        [lsort [after info]] eq $before_timers}]
+} finally {
+    rename ::machteld::vwait {}
+    foreach timer [after info] {
+        if {$timer ni $before_timers} { after cancel $timer }
+    }
+    pool close $pool_token
+}
+check "closing after wait failure removes workers and channel callbacks" [expr {
+    [child list] eq $before_children && [lsort [chan names]] eq $before_channels}]
+
+# Force a real replacement launch failure after initially successful startup.
+# Changing the private recorded command is deliberate fault injection; worker
+# death, launch refusal, event dispatch, waiting and cleanup remain production
+# paths. A second live worker proves close also cleans surviving siblings.
+set before_children [child list]
+set before_channels [lsort [chan names]]
+set before_timers [lsort [after info]]
+set pool_token [pool create -width 2 -- $MT $WORKER]
+dict set ::machteld::POOL $pool_token cmd [list [file join $WORK missing-worker.exe]]
+try {
+    pool submit $pool_token [list [dict create op die] \
+        [dict create op delay milliseconds 10000 text late]]
+    set launch_rc [catch {pool wait $pool_token -timeout 30s} launch_message launch_options]
+    check "replacement launch failure wakes pool wait with its structured error" [expr {
+        $launch_rc == 1 && [dict get $launch_options -errorcode] eq {MACHTELD POOL launch} &&
+        [string match {*cannot start a worker*} $launch_message] &&
+        [lsort [after info]] eq $before_timers}]
+    check "replacement failure remains available on a repeated wait" [expr {
+        [errcode_of [list pool wait $pool_token -timeout 0ms]] eq {MACHTELD POOL launch}}]
+} finally {
+    pool close $pool_token
+}
+check "replacement failure cleanup removes surviving workers and callbacks" [expr {
+    [child list] eq $before_children && [lsort [chan names]] eq $before_channels &&
+    [lsort [after info]] eq $before_timers &&
+    ![info exists ::machteld::POOL_DONE($pool_token)]}]
+
 # pmap closes its pool on all paths and re-raises a worker's structured failure.
 set pmap_usage_rc [catch {pmap} pmap_usage_message pmap_usage_options]
 check "pmap usage advertises every supported option" [expr {

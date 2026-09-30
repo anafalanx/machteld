@@ -1513,7 +1513,7 @@ proc ::machteld::help {args} {
     if {![catch {DocsGet $query} result options]} {
         set text [dict get $result text]
         if {[dict get $result truncated]} {
-            append text "\n\n[Page truncated; continue with: docs get [dict get $result id] -offset [dict get $result next]]"
+            append text "\n\n\[Page truncated; continue with: docs get [dict get $result id] -offset [dict get $result next]\]"
         }
         return $text
     }

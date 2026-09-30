@@ -1,6 +1,10 @@
 package require machteld
 
 worker on echo {text} { return $text }
+worker on delay {milliseconds text} {
+    after $milliseconds
+    return $text
+}
 worker on big {bytes} { return [string repeat x $bytes] }
 worker on noise {bytes} {
     puts stderr [string repeat diagnostic $bytes]
