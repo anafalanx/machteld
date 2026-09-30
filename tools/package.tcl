@@ -8,9 +8,9 @@
 #
 #   tclsh90s package.tcl --prefix <dir> --prelude <machteld.tcl> --wrapper <exe> \
 #           --licenses <dir> --apache-license <file> --reference <dir> --out <exe> \
-#           ?--embed-console <exe>? ?--embed-gui <exe>?
+#           ?--embed-console <exe>? ?--embed-gui <exe>? ?--build-info <dict-file>?
 
-array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --embed-console "" --embed-gui ""}
+array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --embed-console "" --embed-gui "" --build-info ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {![info exists opt($a)]} { error "package.tcl: unknown option $a" }
@@ -185,6 +185,29 @@ foreach relative {catalog.dict catalog.json search.dict manifest.sha256 schema.j
     }
 }
 copy_tree $opt(--reference) [file join $stage reference]
+
+# An optional development receipt identifies content without changing the API
+# version. Read data, never source/eval it. Staging it inside the executable
+# avoids pairing a new binary with an old adjacent receipt. The source revision
+# is the working tree's base, not a clean-checkout claim; input_sha256 identifies
+# the actual build inputs, including any uncommitted runtime changes.
+if {$opt(--build-info) ne ""} {
+    source [file join [file dirname [info script]] build_identity.tcl]
+    set identity [::machteld::buildidentity::read $opt(--build-info)]
+    set f [open $PREL r]
+    try { set preludeText [read $f] } finally { close $f }
+    if {![regexp -line {^\s*variable version ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$} \
+            $preludeText -> runtimeVersion] ||
+            $runtimeVersion ne [dict get $identity runtime_version]} {
+        error "build identity runtime version disagrees with the staged prelude"
+    }
+    set f [open [file join $stage reference catalog.dict] r]
+    try { set catalog [read $f] } finally { close $f }
+    if {[dict get $catalog corpus_sha256] ne [dict get $identity reference_sha256]} {
+        error "build identity reference hash disagrees with the staged corpus"
+    }
+    ::machteld::buildidentity::write [file join $stage build-info.dict] $identity
+}
 
 # The basekits are console and GUI copies of the bare host, so `wrap` can make a
 # standalone exe with no toolchain, no `sdx` and no Tcl install anywhere. It

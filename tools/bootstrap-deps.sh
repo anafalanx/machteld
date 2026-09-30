@@ -22,6 +22,12 @@ export CC=gcc
 export AR=ar
 export RANLIB=ranlib
 export RC=windres
+# Configure's default /etc/config.site and user-selected site scripts are not
+# part of the pinned recipe. Locale and timezone must not select host policy.
+export CONFIG_SITE=/dev/null
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
 
 mkdir -p "$prefix"
 

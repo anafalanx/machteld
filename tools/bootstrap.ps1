@@ -11,6 +11,20 @@ $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
 $CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
 . (Join-Path $PSScriptRoot 'toolchain.ps1')
+$MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
+. (Join-Path $PSScriptRoot 'toolchain-fingerprint.ps1')
+foreach ($name in @('CPATH','C_INCLUDE_PATH','CPLUS_INCLUDE_PATH','OBJC_INCLUDE_PATH','LIBRARY_PATH',
+        'GCC_EXEC_PREFIX','COMPILER_PATH','CFLAGS','CPP','CPPFLAGS','CXXFLAGS','LDFLAGS','LIBS','ARFLAGS','RCFLAGS',
+        'MAKEFLAGS','MAKEFILES','MAKEOVERRIDES','MFLAGS','GNUMAKEFLAGS',
+        'BASH_ENV','ENV','BASHOPTS','SHELLOPTS','CONFIG_SITE',
+        'TCL_LIBRARY','TCLLIBPATH','TK_LIBRARY')) {
+    if ([Environment]::GetEnvironmentVariable($name)) { throw "unset $name for a tracked Machteld bootstrap" }
+}
+foreach ($item in Get-ChildItem Env:) {
+    if ($item.Name -like 'TCL*_TM_PATH' -and $item.Value) { throw "unset $($item.Name) for a tracked Machteld bootstrap" }
+    if ($item.Name -like 'BASH_FUNC_*' -and $item.Value) { throw "unset $($item.Name) for a tracked Machteld bootstrap" }
+}
+$ToolchainHash = [MachteldContentHash]::Toolchain($MsysRoot)
 $LockPath = Join-Path $PSScriptRoot 'dependencies.lock.json'
 $Lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
 $BundledNotices = @($Lock.bundledNotices)
@@ -40,13 +54,16 @@ $PatchPaths = @($Lock.patches | ForEach-Object {
     }
     Join-Path $PSScriptRoot ($_.file.Replace('/', '\'))
 })
-$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh')) +
+$StateInputs = @($LockPath, $PSCommandPath, (Join-Path $PSScriptRoot 'bootstrap-deps.sh'),
+    (Join-Path $PSScriptRoot 'toolchain.ps1'), (Join-Path $PSScriptRoot 'toolchain-fingerprint.ps1')) +
     $PatchPaths + $BundledNoticePaths
 $StateMaterial = foreach ($path in $StateInputs) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "missing bootstrap input: $path" }
     "{0} {1}" -f ([IO.Path]::GetFileName($path)),
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+$StateMaterial += "effective-toolchain $ToolchainHash"
+$StateMaterial += "source-date-epoch $env:SOURCE_DATE_EPOCH"
 $StateBytes = [Text.Encoding]::UTF8.GetBytes(($StateMaterial -join "`n"))
 $StateHasher = [Security.Cryptography.SHA256]::Create()
 try {
@@ -401,7 +418,11 @@ $cygpath = Join-Path $MsysRoot 'usr\bin\cygpath.exe'
 $sourceUnix = (& $cygpath -u $extract).Trim()
 $prefixUnix = (& $cygpath -u $Prefix).Trim()
 $scriptUnix = (& $cygpath -u (Join-Path $PSScriptRoot 'bootstrap-deps.sh')).Trim()
-& $Bash -lc "'$scriptUnix' '$sourceUnix' '$prefixUnix' '$Jobs'"
+# Do not load user login profiles or a BASH_ENV script into a tracked build.
+# Pass the script directly to this explicit Bash. Executing its /usr/bin/env
+# shebang first would require bash on the inherited PATH before the script has
+# established its own /ucrt64/bin:/usr/bin search path.
+& $Bash --noprofile --norc $scriptUnix $sourceUnix $prefixUnix "$Jobs"
 if ($LASTEXITCODE) { throw "Tcl/Tk build failed with exit code $LASTEXITCODE" }
 
 $sqliteEntry = $Lock.archives | Where-Object id -eq 'sqlite'
@@ -451,6 +472,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $yyjsonStage 'yyjson.c'))) {
     }
 }
 
+# Do not bless a mixture if a recipe/toolchain was edited during the build.
+$FinalStateMaterial = foreach ($path in $StateInputs) {
+    "{0} {1}" -f ([IO.Path]::GetFileName($path)),
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$FinalStateMaterial += "effective-toolchain $([MachteldContentHash]::Toolchain($MsysRoot))"
+$FinalStateMaterial += "source-date-epoch $env:SOURCE_DATE_EPOCH"
+if ([MachteldContentHash]::Text(($FinalStateMaterial -join "`n")) -ne $StateHash) {
+    throw 'bootstrap recipe/toolchain changed during generation; cache not recorded'
+}
 Write-ArtifactManifest
 [IO.File]::WriteAllText($StatePath, "$StateHash`n", [Text.UTF8Encoding]::new($false))
 Write-Host "dependency cache ready ($StateHash)"

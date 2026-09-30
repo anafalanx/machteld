@@ -86,6 +86,10 @@ try {
 }
 & (Join-Path $RepoRoot 'test\package_test.ps1') -Tclsh $tclsh
 if ($LASTEXITCODE) { throw "package parser tests failed with exit code $LASTEXITCODE" }
+& $tclsh (Join-Path $RepoRoot 'test\build_identity_test.tcl')
+if ($LASTEXITCODE) { throw "build identity tests failed with exit code $LASTEXITCODE" }
+& $tclsh (Join-Path $RepoRoot 'test\dev_cache_test.tcl')
+if ($LASTEXITCODE) { throw "incremental cache tests failed with exit code $LASTEXITCODE" }
 & (Join-Path $RepoRoot 'test\version_resource_test.ps1') `
     -Machteld $Machteld -CacheRoot $CacheRoot
 if ($LASTEXITCODE) { throw "VERSIONINFO tests failed with exit code $LASTEXITCODE" }

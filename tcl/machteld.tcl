@@ -504,6 +504,11 @@ proc ::machteld::wrap {args} {
             ::machteld::_copy_tree [file join $root reference] [file join $stage reference]
         }
         file copy [file join $root machteld.tcl] [file join $stage machteld.tcl]
+        # Runtime provenance is independent of application assets and the
+        # optional reference corpus. Older released hosts have no such record.
+        if {[file isfile [file join $root build-info.dict]]} {
+            file copy [file join $root build-info.dict] [file join $stage build-info.dict]
+        }
         set app [file join $stage app]
         if {$single} {
             file mkdir $app
