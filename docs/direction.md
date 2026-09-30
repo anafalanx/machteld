@@ -22,8 +22,10 @@ Current decisions:
   only general program entry; `.tcl` is conventional, not required.
 - `wrap` is subordinate deployment machinery and accepts the same opt-in.
 - Every full or wrapped host exposes one Machteld version and the same
-  machine-control/data API, including static SQLite `store`, plus the complete
-  exact-version reference corpus. Nested wrapping remains distribution-only.
+  machine-control/data API, including static SQLite `store`. The distribution
+  includes the complete exact-version reference corpus; wrapped tools omit it
+  unless `--with-docs` is requested. Runtime libraries and license notices remain
+  included. Nested wrapping remains distribution-only.
 - Documentation is a runtime interface: offline, versioned, machine-readable,
   provenance-bearing, and equally discoverable by people and agents.
 - Native and Tcl manifest facts are explicit metadata, never inferred from

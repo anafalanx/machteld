@@ -16,12 +16,15 @@ help ?query ...?
 
 ## Arguments and options
 
-With no query, returns the short agent/human documentation bootstrap. Its first
-screen explicitly identifies the complete offline Machteld 0.21, Tcl 9.0.4,
-and Tk 9.0.4 references carried by the executable. A query can be an exact
-stable document ID such as `machteld/command/run` or natural search words.
-Multiple words are joined as one search query. For stable, structured
-programmatic access use `docs` directly.
+With no query, returns the short agent/human documentation bootstrap. When the
+reference pack is present, its first screen identifies the complete offline
+Machteld 0.21, Tcl 9.0.4, and Tk 9.0.4 references carried by the executable.
+Without the pack, it explains the omission and points to the full same-version
+Machteld executable, `wrap --with-docs`, `manifest`, and `docs schema`.
+
+A query can be an exact stable document ID such as `machteld/command/run` or
+natural search words. Multiple words are joined as one search query. For stable,
+structured programmatic access use `docs` directly.
 
 ## Results
 
@@ -32,8 +35,10 @@ format and wording are not a machine protocol.
 ## Errors
 
 Documentation failures use `HELP notfound`, `HELP oserror`, or
-`HELP unsupported`. The complete 0.21 hosts and newly wrapped tools carry the
-reference pack; `unsupported` protects deliberately bare/internal hosts.
+`HELP unsupported`. The Machteld distribution and tools wrapped with
+`--with-docs` carry the reference pack. In default wrapped tools and deliberately
+bare/internal hosts, a query reports `HELP unsupported`; bare `help` still
+returns explanatory text. Application-provided help is unaffected.
 
 ## Lifetime and timeouts
 

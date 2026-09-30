@@ -35,9 +35,12 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 0.21 API. The
-complete versioned reference corpus is copied into wrapped tools; nested
-wrapping basekits remain distribution-only and are not copied recursively.
+SQLite, so a wrapped entry sees the same programmatic Machteld 0.21
+machine-control API. Runtime libraries and license notices are always included.
+The complete versioned reference corpus is verified and copied only when
+`--with-docs` is requested; it is omitted by default. Application assets are
+unaffected. Nested wrapping basekits remain distribution-only and are not copied
+recursively.
 
 Tcl 9.0.4 predates the upstream fix for ACL-restricted Windows path
 normalization. Dependency bootstrap applies Tcl core check-in `0ac314cb96`
@@ -62,7 +65,10 @@ normalized Markdown while preserving source and HTML representations. It
 combines those pages with authored Machteld command references, creates a
 deterministic catalog/search index, and hashes the corpus. `docs` reads only
 this trusted self-mounted payload and exposes exact lookup, sections, bounded
-search, verification, provenance, and safe extraction.
+search, verification, provenance, and safe extraction. The distribution always
+carries this corpus; wrapped applications opt in with `--with-docs`. Without
+it, `docs schema` still describes the API, corpus queries report `DOCS
+unsupported`, and bare `help` explains how to obtain the reference.
 
 ## Lifetime
 

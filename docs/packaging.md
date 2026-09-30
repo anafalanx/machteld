@@ -31,6 +31,7 @@ reviewer, packager, and the Tcl package system in the same spelling.
 machteld.exe wrap app.tcl -o app.exe
 machteld.exe wrap appdir -o app.exe --console
 machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
+machteld.exe wrap appdir -o documented-app.exe --with-docs
 ```
 
 The input is either one opted-in entry file or a directory. For a directory,
@@ -71,18 +72,34 @@ A wrapped executable contains:
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl, Tk, zlib, LibTomMath, and
   yyjson distribution notices under `licenses/`;
-- the complete indexed Machteld, Tcl 9, and Tk 9 reference corpus;
 - the application entry and assets in zipfs;
 - the same native Windows core, statically linked public-domain SQLite store,
   Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
-There is no prelude-free or reduced-capability option. `package require machteld`
-inside a wrapped tool returns 0.21, `manifest` describes the same API, and
-binary-safe `store` has the same behavior and five-second busy timeout. Wrapping
-does not change the programmatic machine-control API. The reference corpus is
-copied so `docs`, `help`, and the reserved `--machteld-docs` host route remain
-self-contained. Only basekits are distribution-only: a wrapped tool cannot run
-`wrap` again.
+There is no prelude-free or reduced machine-control runtime option. `package
+require machteld` inside a wrapped tool returns 0.21, `manifest` describes the
+same API, and binary-safe `store` has the same behavior and five-second busy
+timeout. Wrapping does not change the programmatic machine-control API.
+
+The built-in reference corpus is omitted from wrapped tools by default. The
+`--with-docs` flag includes the complete indexed Machteld, Tcl 9, and Tk 9
+reference after verifying the pack; it is not a partial-reference selector.
+Machteld itself always carries the full reference. Application documentation
+and assets remain under `app/` regardless of this flag, and all runtime
+libraries and license notices listed above remain included.
+
+Without the built-in corpus, `docs schema` still works and `manifest` still
+describes the runtime. Corpus queries report `DOCS unsupported`; a `help` query
+reports `HELP unsupported`, while bare `help` explains how to use the full
+same-version Machteld executable or package with `--with-docs`. A wrapped
+application's own help and ordinary arguments are unaffected. The reserved
+`--machteld-docs` host route remains available: corpus queries return the usual
+structured error envelope with `--json`. GUI hosts still require `--output FILE`
+except for extraction. With `--with-docs`, `docs`, `help`, and that host route
+provide the full offline reference.
+
+Basekits are distribution-only: a wrapped tool cannot run `wrap` again, with or
+without the reference pack.
 
 Every host also carries Windows VERSIONINFO derived from the canonical Machteld
 version: product and file version `0.21`, the Machteld product identity, and

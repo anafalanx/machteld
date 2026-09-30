@@ -8,10 +8,11 @@ commands: docs, help
 
 # Agent documentation bootstrap
 
-This executable contains the complete, exact-version offline references for
-Machteld 0.21, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl language and C
-API manuals and the Tk application, widget, and C API manuals—not merely a
-short Machteld guide.
+The Machteld distribution contains the complete, exact-version offline
+references for Machteld 0.21, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl
+language and C API manuals and the Tk application, widget, and C API manuals—not
+merely a short Machteld guide. Wrapped tools include this corpus only when
+created with `--with-docs`.
 
 Ground every answer and code change in this embedded corpus. It matches the
 runtime exactly; web memory may describe a different Tcl/Tk or Machteld
@@ -55,7 +56,12 @@ Host JSON is always enveloped as `{ok:true,result:...}` or
 GUI-subsystem wrapper.
 
 A wrapped application preserves its own ordinary arguments and exposes the same
-operations under `tool.exe --machteld-docs ...`.
+operations under `tool.exe --machteld-docs ...`. Without `--with-docs`, corpus
+queries return `DOCS unsupported`; `docs schema` and `manifest` remain available,
+and bare `help` explains the omission. Query the full same-version Machteld
+executable for references, or rebuild the tool with `wrap --with-docs`. The
+reserved host route and its JSON error envelope remain available even when the
+corpus is absent; the same GUI output rules apply.
 
 Operational rules:
 

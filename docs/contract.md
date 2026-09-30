@@ -203,11 +203,16 @@ the originating handoff lives at the repository root):
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
 0.21 and the same machine-control, data, process, and Tcl composition commands,
-including `package require Tk`, static `store`, and the complete exact-version
-reference corpus. Nested wrapping alone is intentionally nonrecursive: `wrap`
-reports `WRAP unsupported` because tools carry no nested basekits. Deliberately
-bare internal hosts can report `DOCS unsupported`/`HELP unsupported` because
-they carry no reference payload.
+including `package require Tk` and static `store`. The distribution includes the
+complete exact-version reference corpus. Wrapped tools omit it by default;
+`wrap --with-docs` includes the verified complete corpus. Runtime libraries,
+license notices, and application assets are retained either way. Without the
+corpus, `docs schema` remains available, corpus queries report `DOCS unsupported`,
+and `help` queries report `HELP unsupported`; bare `help` explains the omission.
+The reserved `--machteld-docs` host route remains available with structured
+unavailable replies for corpus queries. Nested wrapping is intentionally
+nonrecursive: `wrap` reports `WRAP unsupported` because tools carry no nested
+basekits, even when they include the reference.
 
 The API remains pre-1.0: 0.x releases may remove a mistaken surface. Within a
 release, `version`, `manifest`, package version, docs, and both wrapper hosts must

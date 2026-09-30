@@ -1500,6 +1500,13 @@ proc ::machteld::DocsHelpError {message options {discovery 0}} {
 # installs, so the banner is never told a version twice.
 proc ::machteld::help {args} {
     if {![llength $args]} {
+        if {[catch {DocsRoot} message options]} {
+            if {![dict exists $options -errorcode] ||
+                    [dict get $options -errorcode] ne {MACHTELD DOCS unsupported}} {
+                DocsHelpError $message $options
+            }
+            return "machteld [::machteld::version]\n\nThis executable carries no embedded reference pack.\nUse the full Machteld [::machteld::version] executable for offline documentation,\nor package the application with wrap --with-docs to include it.\n\nRuntime commands remain available. Use `manifest` for command metadata\nand `docs schema` for the documentation query contract."
+        }
         return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl [info patchlevel] — applications, language commands, and C API\n  Tk $::machteld::tk_patchlevel — applications, widgets, and C API\n\nHost routes:\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
     }
     set query [join $args " "]

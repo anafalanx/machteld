@@ -39,6 +39,8 @@ check "manifest exposes the compact runtime surface" [expr {
 check "retired macht command is absent" [expr {
     [info commands ::machteld::macht] eq "" && ![dict exists [manifest] macht]}]
 set metadata [manifest]
+check "wrap manifest advertises explicit documentation opt-in" [expr {
+    [dict get $metadata wrap options] eq {--console --entry --gui --with-docs -o}}]
 set pty_map [namespace ensemble configure ::machteld::pty -map]
 check "PTY public ensemble agrees with merged manifest" [expr {
     [lsort [dict keys $pty_map]] eq

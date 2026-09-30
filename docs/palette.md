@@ -10,7 +10,8 @@ tags: [machteld, api, tcl, windows]
 All commands are in `::machteld` and resolve as bare names in a top-level entry.
 This page is a composition tour. The [complete reference](reference/machteld/index.md)
 has the exact command pages; `[manifest]` describes the running build and `docs`
-queries the complete embedded Machteld/Tcl/Tk corpus.
+queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
+tools wrapped with `--with-docs`.
 
 ## Process control
 
@@ -304,20 +305,25 @@ help contract
 
 wrap app.tcl -o app.exe --console
 wrap appdir -o app.exe --entry src/main.tcl --gui
+wrap app.tcl -o documented-app.exe --with-docs
 ```
 
 `version` and `package require machteld` return `0.21`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
 `replycodes` are fixed protocol failures carried as data. `docs` provides exact,
 bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9
-references; `help` is its human-facing shorthand.
+references in the distribution and tools wrapped with `--with-docs`; `help` is
+its human-facing shorthand. Without that corpus, `docs schema` still works,
+corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
 
 `wrap` accepts only an opted-in Machteld entry. A directory defaults to
 `main.tcl`; `--entry` selects another file inside it. It includes hidden assets
 under an application subtree, validates the staged entry, publishes atomically,
 and produces a console or GUI host with the same machine-control/data API,
-static SQLite, Tcl/Tk libraries, version, and complete reference. Basekits are
-not copied recursively, so a wrapped tool cannot perform another wrap. See
+static SQLite, Tcl/Tk libraries, license notices, and version. The built-in
+reference is omitted by default; `--with-docs` includes the full verified corpus.
+Application documentation and assets are unaffected. Basekits are not copied
+recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).
 
 ## Complete verb list
