@@ -8,6 +8,12 @@ Tcl-shaped commands.
 
 ## 0.21 — consolidation
 
+This checkout includes unreleased changes beyond the signed release below,
+including optional documentation in wrapped applications. The published 0.21
+executable does not have that opt-in behavior. Incremental development builds
+carry an embedded `build-info.dict` identifying their build inputs and reference
+corpus separately from the runtime version; they are not replacement releases.
+
 **[machteld 0.21](https://github.com/anafalanx/machteld/releases/tag/v0.21)**
 (the executable is Authenticode-signed, with its SHA-256 checksum beside it)
 has exactly the capabilities of the previous release and corrects what a

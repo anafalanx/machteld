@@ -90,8 +90,10 @@ function Invoke-Host(
     $process = Start-Process @start
     [pscustomobject]@{
         Exit = $process.ExitCode
-        Out = Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
-        Err = Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue
+        # Tcl 9 uses UTF-8 on the supported Windows versions. PowerShell 5.1
+        # otherwise guesses an ANSI code page for these BOM-less captures.
+        Out = Get-Content -LiteralPath $stdout -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+        Err = Get-Content -LiteralPath $stderr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
     }
 }
 
@@ -183,6 +185,8 @@ puts "ENTRY-OK:$argv"
 puts "ENTRY-PATH:[expr {$argv0 eq [info script]}]"
 puts "ENTRY-ARGC:$argc"
 puts "ENTRY-LAST:[lindex $argv end]"
+puts "ENTRY-UTF8:\u00e9\u4e16\u754c"
+puts stderr "ENTRY-UTF8:\u00e9\u4e16\u754c"
 '@
     $result = Invoke-Host @($accepted, 'one', 'two words')
     Check 'direct invocation accepts arbitrary extension and literal opt-in' `
@@ -192,6 +196,12 @@ puts "ENTRY-LAST:[lindex $argv end]"
     Check 'direct invocation preserves a spaced argument as one item' `
         ($result.Exit -eq 0 -and $result.Out -match 'ENTRY-ARGC:2' -and
          $result.Out -match 'ENTRY-LAST:two words') ($result.Err + $result.Out)
+    # Build the expectation from code points so the script-file encoding cannot
+    # accidentally make both the fixture and expected value share mojibake.
+    $utf8Expected = 'ENTRY-UTF8:' + [char]0x00e9 + [char]0x4e16 + [char]0x754c
+    Check 'captured stdout and stderr preserve UTF-8 text' `
+        ($result.Exit -eq 0 -and $result.Out.Contains($utf8Expected) -and
+         $result.Err.Contains($utf8Expected)) ($result.Err + $result.Out)
 
     $exactProgram = Join-Path $Work 'exact-version.tcl'
     Write-Utf8 $exactProgram "package require -exact machteld $MachteldVersion`nputs `"ENTRY-EXACT:[package require machteld]`"`n"
@@ -489,7 +499,7 @@ puts "TK-LIB:$::tk_library"
     $process = Start-Process -FilePath $Machteld -ArgumentList @('-') -Wait -PassThru `
         -RedirectStandardInput $stdin -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
     Check 'stdin programs are refused with status one' ($process.ExitCode -eq 1) `
-        (Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
+        (Get-Content $stderr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
 
     $stdinMarker = Join-Path $Work 'stdin-ran.txt'
     Write-Utf8 $stdin "set f [open {$($stdinMarker.Replace('\', '/'))} w]`nputs `$f ran`nclose `$f`n"
@@ -499,8 +509,8 @@ puts "TK-LIB:$::tk_library"
         -RedirectStandardInput $stdin -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
     Check 'redirected stdin without a startup file exits without eval' `
         ($process.ExitCode -eq 1 -and -not (Test-Path -LiteralPath $stdinMarker)) `
-        ((Get-Content $stderr -Raw -ErrorAction SilentlyContinue) +
-         (Get-Content $stdout -Raw -ErrorAction SilentlyContinue))
+        ((Get-Content $stderr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue) +
+         (Get-Content $stdout -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
 
     $help = Invoke-Host @('--help')
     Check '--help is a host mode' ($help.Exit -eq 0 -and $help.Out.Length -gt 0) $help.Err
@@ -532,7 +542,7 @@ puts "TK-LIB:$::tk_library"
     Check '--docs with no operation returns the agent documentation bootstrap' `
         ($docsBootstrap.Exit -eq 0 -and
          $docsBootstrap.Out -match '(?m)^# Agent documentation bootstrap' -and
-         $docsBootstrap.Out -match '(?i)complete, exact-version offline references' -and
+         $docsBootstrap.Out -match '(?i)complete, exact-version offline\s+references' -and
          $docsBootstrap.Out -match 'Tcl 9\.0\.4' -and $docsBootstrap.Out -match 'Tk 9\.0\.4' -and
          $docsBootstrap.Out -match 'docs status' -and $docsBootstrap.Out -match 'docs get' -and
          $docsBootstrap.Out -match 'docs search' -and $docsBootstrap.Out -match 'docs extract') `
@@ -619,8 +629,8 @@ puts "TK-LIB:$::tk_library"
         $stderr = Join-Path $Work 'bare-stderr.txt'
         $process = Start-Process -FilePath $Bare -ArgumentList @('--version') -Wait -PassThru `
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
-        $text = (Get-Content $stderr -Raw -ErrorAction SilentlyContinue) +
-                (Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
+        $text = (Get-Content $stderr -Raw -Encoding UTF8 -ErrorAction SilentlyContinue) +
+                (Get-Content $stdout -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)
         Check 'bare host refuses to run without its packaged payload' `
             ($process.ExitCode -eq 1 -and $text -match 'payload') $text
     }

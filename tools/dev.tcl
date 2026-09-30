@@ -8,19 +8,13 @@
 #
 # Speed comes from a PERSISTENT cache in .cache/dev that the hermetic release
 # build never uses: the 9 MB SQLite amalgamation is compiled once and reused;
-# authored src/*.c recompile only when they, a header, or the build description
-# change; the reference corpus is reused unless a doc source is newer or -ref is
-# given.
+# authored src/*.c recompile only when their recorded content/configuration
+# inputs change; reference generations are immutable and reused by content.
 #
-# THE RULE: this loop is for iteration and it MAY drift from a clean build
-# (a stale object, a reused corpus). The release gate, tools/test.ps1, stays
-# authoritative and hermetic, and runs at RELEASE boundaries: before a
-# version ships, before a version bump, and after changes to the release
-# tooling itself. Ordinary development commits push on this loop's checks;
-# drift is caught at the next release gate, which is the point of having
-# one. What gets compiled, and how, comes from tools/buildlib.tcl -- the same
-# words the release build reads -- so a dev object is a release object; only
-# the caching and the work directory differ.
+# Freshness uses SHA-256 of contents, names and configuration, never mtimes.
+# A changed dependency recipe requires bootstrap rather than blessing an old
+# installed prefix. The release gate still adds a clean reconstruction and
+# comprehensive validation. Compilation/linking share tools/buildlib.tcl.
 
 proc script_root {} {
     set s [info script]
@@ -29,7 +23,27 @@ proc script_root {} {
 }
 set ROOT [script_root]
 proc Rp {args} { return [file join $::ROOT {*}$args] }
-source [Rp tools buildlib.tcl]
+set LOADED_RECIPES {}
+proc load_recipe {path {evaluate 1}} {
+    set ch [open $path rb]
+    try { set bytes [read $ch] } finally { close $ch }
+    dict set ::LOADED_RECIPES $path $bytes
+    # Both helpers live beside this script, so their info-script directory is
+    # unchanged. Evaluate the exact captured bytes, not a second mutable read.
+    if {$evaluate} { uplevel #0 [encoding convertfrom -profile strict utf-8 $bytes] }
+}
+proc verify_loaded_recipes {} {
+    dict for {path loaded} $::LOADED_RECIPES {
+        set ch [open $path rb]
+        try { set current [read $ch] } finally { close $ch }
+        if {$current ne $loaded} { error "build recipe changed after loading; restart development build: $path" }
+    }
+}
+# Capture the running coordinator before slow bootstrap verification too; an
+# edit during that interval must not pair old procedures with a new input key.
+load_recipe [Rp tools dev.tcl] 0
+load_recipe [Rp tools buildlib.tcl]
+load_recipe [Rp tools devcache.tcl]
 namespace import ::machteld::build::run
 
 # ---- toolchain discovery: the same order as tools/toolchain.ps1 ----
@@ -72,49 +86,120 @@ file mkdir $OBJ
 
 set common [::machteld::build::common_flags $PATHS]
 
-# Every authored object depends on every header and on the build description
-# itself: an edited header or a changed flag must recompile the world, not
-# only the file that happened to be saved.
-proc inputs_mtime {} {
-    set latest [file mtime [Rp tools buildlib.tcl]]
-    foreach header [glob -nocomplain -directory [Rp src] *.h] {
-        set t [file mtime $header]
-        if {$t > $latest} { set latest $t }
-    }
-    return $latest
+# Snapshot the C toolchain's transitive implementation, headers and libraries,
+# not the entire MSYS installation. This relatively expensive group is hashed
+# once per guard snapshot, never once per object. Include DLLs
+# because gcc/as/ld can change behavior without their own executable changing.
+proc toolchain_key {} {
+    return [::machteld::devcache::request toolchain $::MSYS2]
 }
-set ::INPUTS_MTIME [inputs_mtime]
 
-# Compile src -> obj only when the object is missing or older than its inputs.
-# Returns 1 if it compiled, 0 if the cached object was fresh. Vendor sources
-# pass shared=0: they depend on nothing of ours.
-proc cc {obj src flags label {shared 1}} {
-    if {[file exists $obj] && [file mtime $obj] >= [file mtime $src] &&
-            (!$shared || [file mtime $obj] >= $::INPUTS_MTIME)} { return 0 }
+proc guard_spec {{toolchainKey ""}} {
+    if {$toolchainKey eq ""} { set toolchainKey [toolchain_key] }
+    set spec [dict create files {} trees {}]
+    foreach name {src tcl docs licenses tools} { dict lappend spec trees [Rp $name] }
+    foreach name {prefix sqlite yyjson downloads} { dict lappend spec trees [file join $::CACHE $name] }
+    dict lappend spec files [Rp LICENSE]
+    # Reject untracked external search paths rather than assuming a stable path
+    # string proves the contents of headers/libraries located through it.
+    dict set spec values [list toolchain $toolchainKey environment [::machteld::devcache::compiler_environment]]
+    return $spec
+}
+
+proc compile_candidate {src flags label candidate} {
     puts "  cc  $label"
-    run $::GCC {*}$flags -c $src -o $obj
-    return 1
+    run $::GCC {*}$flags -c $src -o $candidate
+}
+
+proc cc {obj src flags label {shared 1}} {
+    set spec [dict create files [list $src [Rp tools buildlib.tcl]] \
+        values [list flags $flags toolchain $::TOOLCHAIN_KEY dependencies $::DEPS_KEY environment $::BUILD_ENV]]
+    if {$shared} {
+        dict lappend spec values headers $::HEADERS_KEY
+    } else {
+        dict set spec trees [list [file dirname $src]]
+    }
+    return [::machteld::devcache::ensure $obj.record $spec $obj [list compile_candidate $src $flags $label]]
+}
+
+proc resource_candidate {kind candidate} {
+    puts "  rc  machteld-$kind.rc"
+    ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
+        [file join $::OBJ "machteld-$kind.rc"] $candidate
 }
 
 proc version_resource {kind obj} {
-    set header [Rp src machteld.h]
-    set generator [Rp tools generate-version-resource.tcl]
-    if {[file exists $obj] &&
-            [file mtime $obj] >= [file mtime $header] &&
-            [file mtime $obj] >= [file mtime $generator]} {
-        return 0
+    set spec [dict create files [list [Rp src machteld.h] [Rp tools generate-version-resource.tcl] \
+        [Rp tools buildlib.tcl] $::TCLSH] values [list $kind $::TOOLCHAIN_KEY $::BUILD_ENV]]
+    return [::machteld::devcache::ensure $obj.record $spec $obj [list resource_candidate $kind]]
+}
+
+proc link_candidate {kind main resource objects sqlite yyjson candidate} {
+    puts "  ld  $kind host"
+    ::machteld::build::link_host $::GCC $::STRIP $kind $main $resource $objects $sqlite $yyjson $::PATHS $candidate
+}
+
+proc prelude_candidate {candidate} {
+    set manifest [file join $::OBJ manifest.tcl]
+    run $::TCLSH [Rp tools genmanifest.tcl] [Rp src] $manifest
+    ::machteld::build::stage_prelude $::ROOT $manifest $candidate
+}
+
+proc reference_candidate {candidate} {
+    puts "  ref generating corpus (previous generations remain untouched)"
+    ::machteld::devcache::windows_powershell [list run powershell.exe -NoProfile -ExecutionPolicy Bypass -File [Rp tools generate-reference.ps1] \
+        -CacheRoot $::CACHE -Output $candidate -Tclsh $::TCLSH]
+}
+
+proc package_candidate {staged bare bareGui reference candidate} {
+    # The input guard covers shared group snapshots used by compilation. Check
+    # both before and after packaging so an edit during a long generation is
+    # never published as a verified current build.
+    ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
+    set identity [::machteld::devcache::cache_candidate [file join $::OBJ build-info.dict]]
+    source [Rp tools build_identity.tcl]
+    set ch [open [Rp src machteld.h] r]
+    try { set header [read $ch] } finally { close $ch }
+    if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $header -> version]} {
+        error "missing canonical runtime version"
     }
-    puts "  rc  machteld-$kind.rc"
-    ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
-        [file join $::OBJ "machteld-$kind.rc"] $obj
-    return 1
+    set ch [open [file join $reference catalog.dict] r]
+    fconfigure $ch -encoding utf-8 -translation lf
+    try { set catalog [read $ch] } finally { close $ch }
+    try {
+        ::machteld::buildidentity::create $identity $version $::SOURCE_REVISION $::PACKAGE_INPUT_KEY [dict get $catalog corpus_sha256]
+        run $::TCLSH [Rp tools package.tcl] --prefix $::PREFIX --prelude $staged --wrapper $bare --out $candidate \
+            --licenses [Rp licenses] --apache-license [Rp LICENSE] --reference $reference \
+            --embed-console $bare --embed-gui $bareGui --build-info $identity
+    } finally { if {[file exists $identity]} { file delete $identity } }
+    ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
 }
 
 # ---- the incremental build ----
 
 proc dev_build {{forceRef 0}} {
-    set changed 0
+    set lock [file join $::DEV build.lock]
+    if {[catch {::machteld::devcache::request lock $lock} reason]} {
+        error "development cache is in use by another build: $reason"
+    }
+    try { dev_build_unlocked $forceRef } finally { catch {::machteld::devcache::request unlock $lock} }
+}
+
+proc dev_build_unlocked {{forceRef 0}} {
     puts "build: incremental (cache [file nativename $::DEV])"
+    ::machteld::devcache::compiler_environment
+    ::machteld::devcache::windows_powershell [list run powershell.exe -NoProfile -ExecutionPolicy Bypass -File [Rp tools bootstrap.ps1] \
+        -CacheRoot $::CACHE -MsysRoot $::MSYS2 -VerifyOnly]
+    # Missing/legacy records cause a rebuild. In particular a timestamp-only
+    # reference.stamp is never accepted as proof of a generated pack's inputs.
+    set ::TOOLCHAIN_KEY [toolchain_key]
+    set ::GUARD_SPEC [guard_spec $::TOOLCHAIN_KEY]
+    set ::GUARD_KEY [::machteld::devcache::fingerprint $::GUARD_SPEC]
+    verify_loaded_recipes
+    set ::BUILD_ENV [::machteld::devcache::compiler_environment]
+    set ::DEPS_KEY [::machteld::devcache::fingerprint [::machteld::devcache::dependency_spec $::ROOT $::CACHE]]
+    set ::HEADERS_KEY [::machteld::devcache::fingerprint [::machteld::devcache::native_shared_spec $::ROOT $::PATHS $::TOOLCHAIN_KEY]]
+    set changed 0
 
     # Pinned third-party sources: SQLite and yyjson, cached across builds with
     # their own flags from buildlib.tcl, never the authored -Werror set.
@@ -143,108 +228,43 @@ proc dev_build {{forceRef 0}} {
     incr changed [version_resource console $consoleVersionObj]
     incr changed [version_resource gui $guiVersionObj]
 
-    # Link the two bare hosts when any object changed or a host is missing.
+    # Link keys include static libraries and toolchain/configuration identity,
+    # not merely whether this invocation compiled an object.
     set bare    [file join $::DEV machteld-bare.exe]
     set bareGui [file join $::DEV machteld-bare-gui.exe]
-    if {$changed || ![file exists $bare] || ![file exists $bareGui]} {
-        puts "  ld  machteld-bare.exe"
-        ::machteld::build::link_host $::GCC $::STRIP console $consoleObj $consoleVersionObj \
-            $objects $sqliteObj $yyjsonObj $::PATHS $bare
-        puts "  ld  machteld-bare-gui.exe"
-        ::machteld::build::link_host $::GCC $::STRIP gui $guiObj $guiVersionObj \
-            $objects $sqliteObj $yyjsonObj $::PATHS $bareGui
-    } else {
-        puts "  ld  (bare hosts current)"
+    foreach kind {console gui} main [list $consoleObj $guiObj] resource [list $consoleVersionObj $guiVersionObj] output [list $bare $bareGui] {
+        set inputs [list $main $resource {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
+        foreach name {tcllib tklib tclstub} { lappend inputs [dict get $::PATHS $name] }
+        set spec [dict create files $inputs values [list $kind $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
+        ::machteld::devcache::ensure $output.record $spec $output [list link_candidate $kind $main $resource $objects $sqliteObj $yyjsonObj]
     }
 
-    # Manifest + prelude: cheap, always regenerated -- but staged to a scratch
-    # name and promoted only when the CONTENT changed, so an unchanged prelude
-    # does not force repackaging.
-    set manifest [file join $::OBJ manifest.tcl]
-    run $::TCLSH [Rp tools genmanifest.tcl] [Rp src] $manifest
+    # Manifest + prelude: unchanged builds invoke neither generator.
     set staged [file join $::OBJ prelude.tcl]
-    set fresh  [file join $::OBJ prelude.new]
-    ::machteld::build::stage_prelude $::ROOT $manifest $fresh
-    set preludeChanged 1
-    if {[file exists $staged] && [file size $staged] == [file size $fresh]} {
-        set a [open $staged r]; fconfigure $a -translation binary
-        set b [open $fresh  r]; fconfigure $b -translation binary
-        set preludeChanged [expr {[read $a] ne [read $b]}]
-        close $a; close $b
-    }
-    if {$preludeChanged} { file rename -force $fresh $staged } \
-    else { file delete $fresh }
+    set inputs [list $::TCLSH [Rp tools genmanifest.tcl] [Rp tools manifest_spec.tcl] [Rp tools buildlib.tcl]]
+    foreach name $::machteld::build::PRELUDE_PARTS { lappend inputs [Rp tcl $name] }
+    set spec [dict create files $inputs trees [list [Rp src]]]
+    ::machteld::devcache::ensure $staged.record $spec $staged prelude_candidate
 
-    # Reference corpus: reuse the cache unless forced or a doc source is newer.
-    if {$forceRef || [ref_stale]} {
-        puts "  ref generating corpus (this step uses the existing PowerShell generator)"
-        file delete -force $::REF
-        run powershell.exe -NoProfile -ExecutionPolicy Bypass \
-            -File [Rp tools generate-reference.ps1] \
-            -CacheRoot $::CACHE -Output $::REF -Tclsh $::TCLSH
-        write_ref_stamp
-    } else {
-        puts "  ref (corpus current)"
-    }
+    set ::REF [::machteld::devcache::immutable [file join $::DEV reference.record] \
+        [::machteld::devcache::reference_spec $::ROOT $::CACHE $::TCLSH] \
+        $::DEV reference_candidate $forceRef]
 
-    # Package to out/machteld.exe -- skipped when the exe is already newer
-    # than every ingredient (hosts, prelude content, corpus stamp).
     set final [Rp out machteld.exe]
     file mkdir [Rp out]
-    if {!$preludeChanged && !$changed && [file exists $final]} {
-        set t [file mtime $final]
-        if {$t >= [file mtime $bare] && $t >= [file mtime $bareGui] &&
-                $t >= [file mtime [ref_stamp]] && $t >= [file mtime $staged]} {
-            puts "build: out/machteld.exe current ([file size $final] bytes)"
-            return
-        }
+    set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $bareGui $::REF]
+    if {[catch {exec git -C $::ROOT rev-parse HEAD} ::SOURCE_REVISION]} { set ::SOURCE_REVISION unknown }
+    set ::SOURCE_REVISION [string trim $::SOURCE_REVISION]
+    dict set spec values [list source_revision $::SOURCE_REVISION build_inputs $::GUARD_KEY]
+    set ::PACKAGE_INPUT_KEY [::machteld::devcache::fingerprint $spec]
+    if {[::machteld::devcache::ensure [file join $::DEV package.record] $spec $final \
+            [list package_candidate $staged $bare $bareGui $::REF]]} {
+        puts "build: out/machteld.exe ([file size $final] bytes)"
+    } else {
+        # Cache hits skip package_candidate, but must not skip the final guard.
+        ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
+        puts "build: out/machteld.exe current ([file size $final] bytes)"
     }
-    # package.tcl demands an absent candidate named like a build invocation:
-    # .machteld-build-<32 hex>.exe.
-    set id [format %016llx%08x%08x [clock microseconds] [pid] \
-        [expr {int(rand() * 0xFFFFFFFF)}]]
-    set cand [file join $::DEV ".machteld-build-$id.exe"]
-    file delete -force $cand
-    run $::TCLSH [Rp tools package.tcl] \
-        --prefix $::PREFIX --prelude $staged --wrapper $bare --out $cand \
-        --licenses [Rp licenses] --apache-license [Rp LICENSE] \
-        --reference $::REF --embed-console $bare --embed-gui $bareGui
-    file delete -force $final
-    file rename -force $cand $final
-    puts "build: out/machteld.exe  ([file size $final] bytes)"
-}
-
-# Corpus staleness: any authored doc or command page newer than the stamp.
-proc ref_stamp {} { return [file join $::DEV reference.stamp] }
-proc write_ref_stamp {} {
-    set f [open [ref_stamp] w]; puts $f [clock seconds]; close $f
-}
-proc ref_stale {} {
-    if {![file isdirectory $::REF] || ![file exists [ref_stamp]]} { return 1 }
-    set stamp [file mtime [ref_stamp]]
-
-    # A timestamp walk cannot notice a deleted source page. Compare the
-    # authored and generated Machteld page sets before considering mtimes so a
-    # removed command or guide cannot survive in the cached corpus.
-    foreach pair [list \
-            [list [Rp docs] [file join $::REF markdown machteld guide]] \
-            [list [Rp docs reference machteld] [file join $::REF markdown machteld]] \
-            [list [Rp docs reference machteld command] [file join $::REF markdown machteld command]]] {
-        lassign $pair sourceDir generatedDir
-        set sourceNames [lsort [lmap f [glob -nocomplain -directory $sourceDir *.md] {
-            file tail $f
-        }]]
-        set generatedNames [lsort [lmap f [glob -nocomplain -directory $generatedDir *.md] {
-            file tail $f
-        }]]
-        if {$sourceNames ne $generatedNames} { return 1 }
-    }
-    foreach pat {docs/*.md docs/reference/machteld/*.md docs/reference/machteld/command/*.md} {
-        foreach f [glob -nocomplain [Rp {*}[split $pat /]]] {
-            if {[file mtime $f] > $stamp} { return 1 }
-        }
-    }
-    return 0
 }
 
 # ---- docs checks: no build ----
@@ -340,19 +360,25 @@ proc dev_test {lanes} {
 }
 
 proc dev_clean {} {
-    file delete -force $::DEV
-    puts "cleaned [file nativename $::DEV]"
+    set expected [file normalize [Rp .cache dev]]
+    if {[file normalize $::DEV] ne $expected} { error "refusing unexpected development cache path: $::DEV" }
+    ::machteld::devcache::clean $expected
+    puts "cleaned [file nativename $expected] (empty build.lock retained; no live lock remains)"
 }
 
 # ---- dispatch ----
 
 set task [lindex $argv 0]
 set rest [lrange $argv 1 end]
-switch -- $task {
-    ""      { puts "tasks: docs | build ?-ref? | test LANE ... | clean" }
-    docs    { dev_docs }
-    build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
-    test    { dev_test $rest }
-    clean   { dev_clean }
-    default { puts "unknown task '$task' (docs build test clean)"; exit 2 }
+try {
+    switch -- $task {
+        ""      { puts "tasks: docs | build ?-ref? | test LANE ... | clean" }
+        docs    { dev_docs }
+        build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
+        test    { dev_test $rest }
+        clean   { dev_clean }
+        default { error "unknown task '$task' (docs build test clean)" }
+    }
+} finally {
+    ::machteld::devcache::shutdown
 }

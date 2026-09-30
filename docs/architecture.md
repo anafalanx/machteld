@@ -50,6 +50,19 @@ executable path component when an ancestor can be traversed but not enumerated.
 
 ## Self-description
 
+Incremental development builds carry an inert `build-info.dict` at the archive
+root, beside `machteld.tcl`. It records schema `1`, channel `development`, the
+unchanged runtime version, the working tree's base source revision, an input
+SHA-256, and the reference corpus SHA-256. The revision is not a clean-checkout
+claim: the input digest identifies the actual build ingredients, including
+uncommitted runtime changes. The record contains no build-machine paths or
+wall-clock timestamps. It is packaged and published with the executable and
+copied into wrapped tools even when their reference is omitted. It describes
+the embedded runtime, not the wrapped application's authorship or version.
+Historical release artifacts do not carry this development record. Absence is
+not evidence of signing or release authenticity; verify the artifact's hash
+and signature separately. `version` continues to report the runtime API version.
+
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`
 merges the two tables; an incompatible duplicate fails loudly. The sole
