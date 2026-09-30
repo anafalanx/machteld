@@ -292,6 +292,13 @@ check {GUI adapter requires output with a typed failure envelope} [expr {
 
 check {help delegates exact pages through the trusted reference} [expr {
     [string length [help tcl/command/dict]] > 100}]
+set longPage [docs get tk/command/text]
+set longHelpRc [catch {help tk/command/text} longHelp]
+set continuation [format {[Page truncated; continue with: docs get %s -offset %s]} \
+    [dict get $longPage id] [dict get $longPage next]]
+check {help returns a truncated real page with a literal continuation hint} [expr {
+    [dict get $longPage truncated] && !$longHelpRc &&
+    $longHelp eq "[dict get $longPage text]\n\n$continuation"}] $longHelpRc
 check {help translates docs discovery failures into its own domain} [expr {
     [errorcode {help a}] eq {MACHTELD HELP notfound}}]
 check {help discovery advertises agent query primitives} [expr {

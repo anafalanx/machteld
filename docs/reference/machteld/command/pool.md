@@ -45,6 +45,9 @@ A pool owns supervised channel-mode child trees. One item is in flight per
 worker. A worker death requeues that known item and spawns a replacement until
 its per-item attempt limit. `wait` timeout leaves the pool owned and running;
 `close` terminates workers and invalidates the token.
+If an event callback closes the pool during `wait`, that wait wakes and raises
+`POOL nohandle`. Completion or close already processed by the event loop is
+not overwritten by a simultaneously ready observation timer.
 
 ## Examples
 
@@ -161,6 +164,7 @@ Returns all replies ordered by assigned submission ID.
 #### Errors
 
 Timeout is raised as `POOL timeout`; replacement launch failure is `POOL launch`.
+Closing the pool from an event callback during the wait raises `POOL nohandle`.
 
 #### Lifetime and timeouts
 
@@ -236,6 +240,8 @@ A stale token reports `POOL nohandle`; individual child cleanup is best effort.
 
 Disables channel events, closes worker stdin, closes each child tree, discards
 pending/results state, and invalidates the token.
+An active `wait` is woken and reports `POOL nohandle`; its observation timer is
+cancelled on exit, including error paths.
 
 #### Examples
 

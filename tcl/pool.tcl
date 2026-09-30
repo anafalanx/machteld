@@ -325,6 +325,15 @@ proc ::machteld::PoolCheckDone {tok} {
     }
 }
 
+# A ready timer can run in the same event-loop turn as completion or close.
+# Never overwrite completion or recreate a closed pool's notification element.
+proc ::machteld::PoolWaitTimeout {tok} {
+    variable POOL
+    if {[dict exists $POOL $tok] && ![dict get $POOL $tok done]} {
+        set ::machteld::POOL_DONE($tok) timeout
+    }
+}
+
 proc ::machteld::PoolWait {tok argl} {
     variable POOL
     set ms 300000
@@ -339,9 +348,16 @@ proc ::machteld::PoolWait {tok argl} {
     }
     if {![dict get $POOL $tok done]} {
         set ::machteld::POOL_DONE($tok) 0
-        set timer [after $ms [list set ::machteld::POOL_DONE($tok) timeout]]
-        vwait ::machteld::POOL_DONE($tok)
-        after cancel $timer
+        set timer [after $ms [list ::machteld::PoolWaitTimeout $tok]]
+        try {
+            vwait ::machteld::POOL_DONE($tok)
+        } finally {
+            after cancel $timer
+        }
+        # `close` unsets POOL_DONE to wake vwait. Check the owned state before
+        # touching the notification or results, since a GUI callback may have
+        # invalidated the token while this wait was servicing events.
+        if {![dict exists $POOL $tok]} { Fail POOL nohandle "no such pool" }
         if {$::machteld::POOL_DONE($tok) eq "timeout"} {
             Fail POOL timeout "pool timed out with [dict size [dict get $POOL $tok inflight]] item(s) in flight"
         }

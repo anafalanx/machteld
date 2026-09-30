@@ -31,6 +31,8 @@ structured programmatic access use `docs` directly.
 Returns human-oriented text. Exact IDs return their document; a nonexact query
 returns concise ranked search results and guidance for retrieving one. Output
 format and wording are not a machine protocol.
+An exact page longer than the default `docs get` bound is followed by a literal
+continuation hint naming the document ID and next offset.
 
 ## Errors
 
