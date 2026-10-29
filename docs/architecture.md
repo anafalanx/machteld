@@ -123,8 +123,8 @@ runtimes are reported, never counted as passing instrumentation. See
 [native validation](native-validation.md) for coverage and limitations.
 `reference-generator` is the separate, expensive
 uncached conversion/determinism group. Only explicit `-Group release` builds
-before running every group. `z devtest` likewise tests without an implicit build.
-The GUI model runs in `fast`; `-InteractiveGui` explicitly enables the visible
+before running every group. `tools/dev.tcl test` likewise tests without an
+implicit build. The GUI model runs in `fast`; `-InteractiveGui` explicitly enables the visible
 Tk-widget checks. Manual interaction remains part of release acceptance.
 
 ## Lifetime

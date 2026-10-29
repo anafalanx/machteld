@@ -2,8 +2,6 @@
 *.c text eol=lf
 *.h text eol=lf
 *.json text eol=lf
-*.sh text eol=lf
-*.ps1 text eol=lf
 *.tcl text eol=lf
 *.md text eol=lf
 LICENSE text eol=lf

@@ -27,10 +27,9 @@ set WRAP $opt(--wrapper)
 set OUT  [file normalize $opt(--out)]
 
 # package.tcl is deliberately not a release-file replacer. Its caller gives it
-# an absent, invocation-owned candidate path; tools/build.ps1 performs the one
-# native Windows operation that publishes that candidate as the requested
-# release name. Tcl's `file rename -force` replacement path is multi-step on
-# Windows and cannot provide this prior-output guarantee.
+# an absent, invocation-owned candidate path; tools/release.tcl publishes that
+# candidate under the requested release name. A non-replacing rename here is
+# what guarantees an existing output is never touched.
 if {![regexp {^\.machteld-build-[0-9a-f]{32}\.exe$} [file tail $OUT]]} {
     error "package output is not an invocation-owned build candidate: $OUT"
 }

@@ -20,7 +20,7 @@ are different claims; see the [contract](contract.md).
 
 ## Running it
 
-Build deliberately with `z devbuild`, then run:
+Build deliberately with `tools/dev.tcl build`, then run:
 
 ```powershell
 ./tools/test.ps1 -Group native-validation

@@ -88,7 +88,7 @@ proc ::machteld::build::cache_root {root} {
     return [file join $root .cache deps]
 }
 
-# The dependency cache created by tools/bootstrap.ps1, located tolerant of
+# The dependency cache created by tools/bootstrap.tcl, located tolerant of
 # upstream install-name variants. Every consumer asks this dict rather than
 # spelling the layout itself. Raises when a required input is absent.
 proc ::machteld::build::paths {cache} {

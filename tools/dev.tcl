@@ -1,10 +1,13 @@
+package require machteld 0.21
+
 # tools/dev.tcl -- the fast development loop for machteld. NOT the release gate.
 #
-# Run through the z toolchain (z.json maps `z dev*` to `tclsh90 tools/dev.tcl`):
-#     z devdocs           docs checks only, no build (seconds)
-#     z devbuild          incremental build -> out/machteld.exe
-#     z devtest LANE ...  named pure-Tcl lane(s) against the existing executable
-#     z devclean          delete the dev cache
+# Run on the build runtime, as every tool here is (dist/0.21/machteld.exe,
+# the signed machteld 0.21; MSYS2 from MSYS2_ROOT or C:/msys64):
+#     machteld.exe tools/dev.tcl docs           docs checks only, no build (seconds)
+#     machteld.exe tools/dev.tcl build ?-ref?   incremental build -> out/machteld.exe
+#     machteld.exe tools/dev.tcl test LANE ...  named pure-Tcl lane(s) against the existing executable
+#     machteld.exe tools/dev.tcl clean          delete the dev cache
 #
 # Speed comes from a PERSISTENT cache in .cache/dev that the hermetic release
 # build never uses: the 9 MB SQLite amalgamation is compiled once and reused;
@@ -13,8 +16,9 @@
 #
 # Freshness uses SHA-256 of contents, names and configuration, never mtimes.
 # A changed dependency recipe requires bootstrap rather than blessing an old
-# installed prefix. The release gate still adds a clean reconstruction and
-# comprehensive validation. Compilation/linking share tools/buildlib.tcl.
+# installed prefix. The release gate, tools/gate.tcl, still adds a clean
+# reconstruction and comprehensive validation. Compilation/linking share
+# tools/buildlib.tcl.
 
 proc script_root {} {
     set s [info script]
@@ -28,9 +32,18 @@ proc load_recipe {path {evaluate 1}} {
     set ch [open $path rb]
     try { set bytes [read $ch] } finally { close $ch }
     dict set ::LOADED_RECIPES $path $bytes
-    # Both helpers live beside this script, so their info-script directory is
-    # unchanged. Evaluate the exact captured bytes, not a second mutable read.
-    if {$evaluate} { uplevel #0 [encoding convertfrom -profile strict utf-8 $bytes] }
+    # Evaluate the exact captured bytes, not a second mutable read, with
+    # `info script` naming the helper itself, as `source` would: bootstrap.tcl
+    # finds its root by it and runs its main only as the entry script.
+    if {$evaluate} {
+        set caller [info script]
+        info script $path
+        try {
+            uplevel #0 [encoding convertfrom -profile strict utf-8 $bytes]
+        } finally {
+            info script $caller
+        }
+    }
 }
 proc verify_loaded_recipes {} {
     dict for {path loaded} $::LOADED_RECIPES {
@@ -44,24 +57,14 @@ proc verify_loaded_recipes {} {
 load_recipe [Rp tools dev.tcl] 0
 load_recipe [Rp tools buildlib.tcl]
 load_recipe [Rp tools devcache.tcl]
+load_recipe [Rp tools bootstrap.tcl]
+# Global `run` is buildlib's streaming exec; the runtime's own run stays
+# reachable as ::machteld::run.
 namespace import ::machteld::build::run
 
-# ---- toolchain discovery: the same order as tools/toolchain.ps1 ----
+# ---- toolchain discovery: bootstrap's order, MSYS2_ROOT then C:/msys64 ----
 
-proc discover_msys2 {root} {
-    set cands {}
-    foreach name {MSYS2_ROOT Z_MSYS2} {
-        if {[info exists ::env($name)] && $::env($name) ne ""} { lappend cands $::env($name) }
-    }
-    lappend cands C:/msys64 [file join [file dirname $root] .z r msys2]
-    foreach p $cands {
-        if {$p ne "" && [file exists [file join $p ucrt64 bin gcc.exe]]} {
-            return [file normalize $p]
-        }
-    }
-    error "dev.tcl: msys2 gcc not found; set MSYS2_ROOT (tried: [join $cands {, }])"
-}
-set MSYS2 [discover_msys2 $ROOT]
+set MSYS2 [::boot::msysRoot ""]
 set GCC     [file join $MSYS2 ucrt64 bin gcc.exe]
 set STRIP   [file join $MSYS2 ucrt64 bin strip.exe]
 set WINDRES [file join $MSYS2 ucrt64 bin windres.exe]
@@ -72,7 +75,7 @@ set ::env(PATH) "[file nativename [file join $MSYS2 ucrt64 bin]];$::env(PATH)"
 
 set CACHE [::machteld::build::cache_root $ROOT]
 if {[catch {::machteld::build::paths $CACHE} PATHS]} {
-    error "dev.tcl: $PATHS\n  run tools/build.ps1 once to bootstrap [file nativename $CACHE]"
+    error "dev.tcl: $PATHS\n  run tools/bootstrap.tcl once to bootstrap [file nativename $CACHE]"
 }
 set TCLSH  [dict get $PATHS tclsh]
 set PREFIX [dict get $PATHS prefix]
@@ -91,7 +94,7 @@ set common [::machteld::build::common_flags $PATHS]
 # once per guard snapshot, never once per object. Include DLLs
 # because gcc/as/ld can change behavior without their own executable changing.
 proc toolchain_key {} {
-    return [::machteld::devcache::request toolchain $::MSYS2]
+    return [::machteld::devcache::toolchain_digest $::MSYS2]
 }
 
 proc guard_spec {{toolchainKey ""}} {
@@ -153,8 +156,8 @@ proc prelude_candidate {candidate} {
 
 proc reference_candidate {candidate} {
     puts "  ref generating corpus (previous generations remain untouched)"
-    ::machteld::devcache::windows_powershell [list run powershell.exe -NoProfile -ExecutionPolicy Bypass -File [Rp tools generate-reference.ps1] \
-        -CacheRoot $::CACHE -Output $candidate -Tclsh $::TCLSH -StageCache [file join $::DEV reference-stages]]
+    run [info nameofexecutable] [Rp tools reference.tcl] \
+        --cache $::CACHE --output $candidate --tclsh $::TCLSH
 }
 
 proc package_candidate {staged bare bareGui reference candidate} {
@@ -185,17 +188,16 @@ proc package_candidate {staged bare bareGui reference candidate} {
 
 proc dev_build {{forceRef 0}} {
     set lock [file join $::DEV build.lock]
-    if {[catch {::machteld::devcache::request lock $lock} reason]} {
+    if {[catch {::machteld::devcache::lock $lock} reason]} {
         error "development cache is in use by another build: $reason"
     }
-    try { dev_build_unlocked $forceRef } finally { catch {::machteld::devcache::request unlock $lock} }
+    try { dev_build_unlocked $forceRef } finally { catch {::machteld::devcache::unlock $lock} }
 }
 
 proc dev_build_unlocked {{forceRef 0}} {
     puts "build: incremental (cache [file nativename $::DEV])"
     ::machteld::devcache::compiler_environment
-    ::machteld::devcache::windows_powershell [list run powershell.exe -NoProfile -ExecutionPolicy Bypass -File [Rp tools bootstrap.ps1] \
-        -CacheRoot $::CACHE -MsysRoot $::MSYS2 -VerifyOnly]
+    run [info nameofexecutable] [Rp tools bootstrap.tcl] --cache $::CACHE --msys $::MSYS2 --verify-only
     # Missing/legacy records cause a rebuild. In particular a timestamp-only
     # reference.stamp is never accepted as proof of a generated pack's inputs.
     set ::TOOLCHAIN_KEY [toolchain_key]
@@ -323,10 +325,10 @@ proc dev_docs {} {
         puts $p {exit [expr {$bad != 0}]}
         close $p
         if {[catch {run $exe $probe} err]} {
-            puts "  FAIL corpus probe (built exe may be stale; z devbuild to refresh)"; incr fail
+            puts "  FAIL corpus probe (built exe may be stale; dev.tcl build to refresh)"; incr fail
         }
     } else {
-        puts "  --   no out/machteld.exe yet; z devbuild to check the built corpus"
+        puts "  --   no out/machteld.exe yet; dev.tcl build to check the built corpus"
     }
     if {$fail} { puts "docs: $fail problem(s)"; exit 1 }
     puts "docs: ok"
@@ -334,8 +336,9 @@ proc dev_docs {} {
 
 # ---- targeted test lanes (the pure-Tcl ones you iterate on) ----
 
-# Fixture-heavy lanes use tools/test.ps1 -Group integration or packaging.
-# Full conversion/determinism is the separate reference-generator group.
+# Lanes needing compiled C fixtures or basekit extraction (process, native,
+# store, wrap, entry) and the full conversion/determinism check (the reference
+# generator) run in tools/gate.tcl.
 set ::LANES {
     filesystem test/filesystem_test.tcl
     runtime    test/runtime_test.tcl
@@ -347,9 +350,9 @@ set ::LANES {
 
 proc dev_test {lanes} {
     set exe [Rp out machteld.exe]
-    if {![file isfile $exe]} { error "missing $exe; run z devbuild explicitly first" }
+    if {![file isfile $exe]} { error "missing $exe; run dev.tcl build explicitly first" }
     puts "test: existing executable [file nativename $exe]"
-    set exeHash [::machteld::devcache::request file $exe]
+    set exeHash [::machteld::devcache::file_digest $exe]
     puts "test: SHA-256 $exeHash"
     if {![llength $lanes]} {
         puts "test: name one or more lanes: [dict keys $::LANES]"; exit 2
@@ -358,7 +361,7 @@ proc dev_test {lanes} {
     foreach lane $lanes {
         if {![dict exists $::LANES $lane]} {
             puts "test: unknown lane '$lane' (known: [dict keys $::LANES]);"
-            puts "      fixture-heavy lanes (process native store wrap entry) use tools/test.ps1"
+            puts "      fixture-heavy lanes (process native store wrap entry) use tools/gate.tcl"
             incr fail; continue
         }
         set path [Rp {*}[split [dict get $::LANES $lane] /]]
@@ -366,7 +369,7 @@ proc dev_test {lanes} {
         if {[catch {run $exe $path} err]} { puts "  FAIL $lane"; incr fail } \
         else { puts "  ok   $lane" }
     }
-    if {[::machteld::devcache::request file $exe] ne $exeHash} { error "tested executable changed during the test run" }
+    if {[::machteld::devcache::file_digest $exe] ne $exeHash} { error "tested executable changed during the test run" }
     if {$fail} { puts "test: $fail lane(s) failed"; exit 1 }
     puts "test: ok"
 }
@@ -375,22 +378,18 @@ proc dev_clean {} {
     set expected [file normalize [Rp .cache dev]]
     if {[file normalize $::DEV] ne $expected} { error "refusing unexpected development cache path: $::DEV" }
     ::machteld::devcache::clean $expected
-    puts "cleaned [file nativename $expected] (empty build.lock retained; no live lock remains)"
+    puts "cleaned [file nativename $expected] (its build.lock released last)"
 }
 
 # ---- dispatch ----
 
 set task [lindex $argv 0]
 set rest [lrange $argv 1 end]
-try {
-    switch -- $task {
-        ""      { puts "tasks: docs | build ?-ref? | test LANE ... | clean" }
-        docs    { dev_docs }
-        build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
-        test    { dev_test $rest }
-        clean   { dev_clean }
-        default { error "unknown task '$task' (docs build test clean)" }
-    }
-} finally {
-    ::machteld::devcache::shutdown
+switch -- $task {
+    ""      { puts "tasks: docs | build ?-ref? | test LANE ... | clean" }
+    docs    { dev_docs }
+    build   { dev_build [expr {[lindex $rest 0] eq "-ref"}] }
+    test    { dev_test $rest }
+    clean   { dev_clean }
+    default { error "unknown task '$task' (docs build test clean)" }
 }
