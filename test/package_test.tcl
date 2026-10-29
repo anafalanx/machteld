@@ -279,14 +279,14 @@ proc ::pt::publicationTests {} {
         [expr {$problem eq "" && ![file exists $candidate] && [readBytes $output] eq "replacement release"}] $problem
 
     # A Tcl channel shares neither delete nor rename, so holding the output
-    # open fails the replacement; two attempts keep the test short.
+    # open refuses the replacement; two attempts keep the test short.
     set candidate [candidate $folder "locked replacement"]
     set held [open $output rb]
-    set ::boot::renameAttempts 2
+    set ::release::publishAttempts 2
     try {
         set problem [publish $candidate $output]
     } finally {
-        set ::boot::renameAttempts 40
+        set ::release::publishAttempts 40
         close $held
     }
     check "locked-output publication reports an error" [expr {$problem ne ""}]
@@ -317,10 +317,11 @@ proc ::pt::publicationTests {} {
         check "repeated build publication $generation succeeds" \
             [expr {$problem eq "" && [readBytes $collision] eq "generation $generation"}] $problem
     }
-    # Tcl's replacement renames the old file to tclr*.TMP beside it first.
+    # Publish keeps its .machteld-publish-backup-* only while it replaces, as
+    # Tcl's `file rename -force` kept tclr*.TMP; neither may outlast it.
     set debris [lsort -unique [concat \
-        [glob -nocomplain -tails -types {f hidden} -directory $folder .machteld-build-* tclr*] \
-        [glob -nocomplain -tails -directory $folder .machteld-build-* tclr*]]]
+        [glob -nocomplain -tails -types {f hidden} -directory $folder .machteld-build-* .machteld-publish-backup-* tclr*] \
+        [glob -nocomplain -tails -directory $folder .machteld-build-* .machteld-publish-backup-* tclr*]]]
     check "repeated publications leave no candidate or rename debris" [expr {![llength $debris]}] $debris
 
     set channel [open [file join $root tools build.tcl] rb]
@@ -336,6 +337,12 @@ proc ::pt::publicationTests {} {
     check "package publication is a non-replacing same-directory rename" \
         [expr {[string first {file rename $outputCandidate $OUT} $packageTcl] >= 0 &&
                [string first {file rename -force $outputCandidate $OUT} $packageTcl] < 0}]
+    set channel [open [file join $root tools release.tcl] rb]
+    set releaseTcl [read $channel]
+    close $channel
+    check "release publication is the runtime's one-operation Publish, not a rename pair" \
+        [expr {[string first {::machteld::Publish $candidate $output} $releaseTcl] >= 0 &&
+               [string first {renameWaiting $candidate $output} $releaseTcl] < 0}]
 }
 
 proc ::pt::main {argv} {
