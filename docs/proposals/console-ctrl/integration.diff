@@ -1,0 +1,109 @@
+diff --git a/runtime/docs/reference/mt/index.md b/runtime/docs/reference/mt/index.md
+index 31b0e1e..773d392 100644
+--- a/runtime/docs/reference/mt/index.md
++++ b/runtime/docs/reference/mt/index.md
+@@ -20,7 +20,7 @@ namespace path.
+ 
+ ## Command groups
+ 
+-- Process control: `run`, `child`, `wait`, `scope`, and `detach`.
++- Process control: `run`, `child`, `wait`, `scope`, `detach`, and `console`.
+ - Interactive processes: `pty`.
+ - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, and `mtps`.
+ - Data and network: `http`, `json`, `hash`, and `store`.
+diff --git a/runtime/src/mt_appinit.c b/runtime/src/mt_appinit.c
+index 32d6435..ab79426 100644
+--- a/runtime/src/mt_appinit.c
++++ b/runtime/src/mt_appinit.c
+@@ -17,6 +17,7 @@ extern int Mtjson_Init(Tcl_Interp *interp); /* src/json.c */
+ #endif
+ #ifdef MT_PS
+ extern int Mtps_Init(Tcl_Interp *interp); /* src/ps.c */
++extern int Mtconsole_Init(Tcl_Interp *interp); /* src/console.c */
+ #endif
+ #ifdef MT_HASH
+ extern int Mthash_Init(Tcl_Interp *interp); /* src/hash.c */
+@@ -266,6 +267,13 @@ Mt_RegisterLibs(Tcl_Interp *interp)
+         return TCL_ERROR;
+     }
+     Tcl_StaticLibrary(interp, "mtps", Mtps_Init, NULL);
++
++    /* Console control-event ownership, for front doors that hand a child the
++     * host's console and must let the child decide what Ctrl-C means. */
++    if (Mtconsole_Init(interp) == TCL_ERROR) {
++        return TCL_ERROR;
++    }
++    Tcl_StaticLibrary(interp, "mtconsole", Mtconsole_Init, NULL);
+ #endif
+ 
+ #ifdef MT_HASH
+diff --git a/runtime/test/process_test.tcl b/runtime/test/process_test.tcl
+index 7973ada..8f506bd 100644
+--- a/runtime/test/process_test.tcl
++++ b/runtime/test/process_test.tcl
+@@ -329,6 +329,34 @@ if {[info exists ::env(MT_TEST_PTY_IO)] && $::env(MT_TEST_PTY_IO) eq "1"} {
+     catch {pty close $repl}
+ }
+ 
++# ---- console ctrl: who answers Ctrl-C when a child shares the console ----
++# The OS-level effect (the host surviving a CTRL_C_EVENT that the child
++# handles) cannot be exercised hermetically without a private console, so the
++# gate pins the verb's contract: exact arity, the two modes, the readable
++# state, and that the state actually round-trips through the OS call.
++check "console ctrl reports default before any change" [expr {
++    [console ctrl] eq "default"}]
++check "console ctrl ignore is applied and reported" [expr {
++    [console ctrl ignore] eq "ignore" && [console ctrl] eq "ignore"}]
++check "console ctrl default restores and reports" [expr {
++    [console ctrl default] eq "default" && [console ctrl] eq "default"}]
++check "console ctrl rejects an unknown mode" [expr {
++    [errcode_of {console ctrl sometimes}] eq {MT CONSOLE badvalue}}]
++check "console ctrl has exact arity" [expr {
++    [errcode_of {console ctrl ignore extra}] eq {MT CONSOLE usage}}]
++check "console rejects an unknown subcommand" [expr {
++    [errcode_of {console tone}] eq {MT CONSOLE usage}}]
++check "console requires a subcommand" [expr {
++    [errcode_of {console}] eq {MT CONSOLE usage}}]
++# A child launched while the host ignores Ctrl-C inherits that disposition;
++# the fixture's environment probe is a cheap way to launch one and confirm the
++# host is still fully functional afterwards.
++console ctrl ignore
++set result [run -- $FIXTURE ok]
++console ctrl default
++check "run still works while console ctrl is ignore" [expr {
++    [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
++
+ file delete -force $WORK
+ if {$fails} {
+     puts stderr "$fails process test(s) failed"
+diff --git a/runtime/tools/manifest_spec.tcl b/runtime/tools/manifest_spec.tcl
+index f509703..1f8939e 100644
+--- a/runtime/tools/manifest_spec.tcl
++++ b/runtime/tools/manifest_spec.tcl
+@@ -30,6 +30,13 @@ set ::mt::manifest::native {
+             close {options {} doc mt/command/child#close}
+         }
+     }
++    console {
++        kind c domain CONSOLE codes {badvalue oserror usage} options {}
++        doc mt/command/console
++        subcommands {
++            ctrl {options {} doc mt/command/console#ctrl}
++        }
++    }
+     detach {
+         kind c domain DETACH codes {badvalue launch notfound oserror usage}
+         doc mt/command/detach
+diff --git a/runtime/test/process_test.tcl b/runtime/test/process_test.tcl
+index 8f506bd..06bd32b 100644
+--- a/runtime/test/process_test.tcl
++++ b/runtime/test/process_test.tcl
+@@ -352,7 +352,7 @@ check "console requires a subcommand" [expr {
+ # the fixture's environment probe is a cheap way to launch one and confirm the
+ # host is still fully functional afterwards.
+ console ctrl ignore
+-set result [run -- $FIXTURE ok]
++set result [run -- $FIXTURE ok payload]
+ console ctrl default
+ check "run still works while console ctrl is ignore" [expr {
+     [dict get $result status] eq "ok" && [dict get $result exit] == 0}]

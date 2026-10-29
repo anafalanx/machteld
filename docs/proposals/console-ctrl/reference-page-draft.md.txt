@@ -1,0 +1,99 @@
+---
+id: mt/command/console
+type: command
+title: console
+summary: Decide whether the host or its console-sharing child answers Ctrl-C.
+commands: console, console ctrl
+---
+
+# console
+
+## Synopsis
+
+```tcl
+console ctrl ?ignore|default?
+```
+
+## Arguments and options
+
+`console` takes exactly one subcommand, `ctrl`. With no mode it reports the
+current setting; with `ignore` or `default` it sets it. There are no options.
+
+## Results
+
+`ctrl` returns the setting in force after the call: `ignore` or `default`.
+
+## Errors
+
+Raised codes are `CONSOLE badvalue` (a mode other than `ignore` or
+`default`), `CONSOLE oserror` (the OS refused the change), and `CONSOLE usage`.
+
+## Lifetime and timeouts
+
+The setting belongs to the host process and lasts until changed or until the
+host exits. It is synchronous and has no timeout.
+
+## Examples
+
+```tcl
+console ctrl ignore
+set r [run -inherit -- build.exe --all]
+console ctrl default
+exit [dict get $r exit]
+```
+
+## Constraints
+
+Only `CTRL_C_EVENT` is affected; Ctrl-Break and window-close events keep the
+host's default handling. Children created after `ignore` inherit it unless
+they install their own handler, which console programs that care do.
+
+## See also
+
+`mt/command/run`, `mt/command/detach`, `mt/guide/execution-model`.
+
+<a id="ctrl"></a>
+### ctrl
+
+#### Synopsis
+
+```tcl
+console ctrl ?ignore|default?
+```
+
+#### Arguments and options
+
+`ignore` makes the host ignore Ctrl-C so a child sharing the console -- a
+`run -inherit` child -- receives it and decides what it means. `default`
+restores the OS handling, under which Ctrl-C ends the host and, through the
+kill-on-close root job, the child tree with it. Omitted, the current mode is
+returned.
+
+#### Results
+
+The mode in force after the call.
+
+#### Errors
+
+`CONSOLE badvalue`, `CONSOLE oserror`, `CONSOLE usage`.
+
+#### Lifetime and timeouts
+
+Process-wide, until changed or exit. Synchronous.
+
+#### Examples
+
+```tcl
+console ctrl            ;# default
+console ctrl ignore     ;# ignore
+```
+
+#### Constraints
+
+A front door that forwards a child's exit code verbatim wants `ignore` for the
+duration of the child and `default` afterwards; leaving `ignore` on makes the
+host itself uninterruptible.
+
+#### See also
+
+`mt/command/run`.
