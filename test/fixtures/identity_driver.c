@@ -6,10 +6,15 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include "../../src/wintext.h"
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 extern int Machteldresource_Init(Tcl_Interp *interp);
 
 int wmain(int argc, wchar_t **argv) {
+    /* Built with undefined-behavior traps by the gate: a trap must end the
+     * process with its status, never open a crash dialog. */
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     if (argc < 2) return 2;
     char *executable = mt_wide_to_utf8(argv[0], -1);
     if (executable == NULL) return 2;

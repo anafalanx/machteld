@@ -86,13 +86,16 @@ foreach option {--public-tls --interactive-pty} {
             ![catch {::gate::parse [list --group integration $option]}] &&
             ![catch {::gate::parse [list $option]}]}]
 }
-check {--native-scaling needs the native-validation or release group} \
-    [expr {[refused {--group integration --native-scaling} {*needs the native-validation or release group*}] &&
-        ![catch {::gate::parse {--group native-validation --native-scaling}}] &&
-        ![catch {::gate::parse {--native-scaling}}]}]
+foreach option {--native-scaling --native-analysis} {
+    check "$option needs the native-validation or release group" \
+        [expr {[refused [list --group integration $option] "*$option needs the native-validation or release group*"] &&
+            ![catch {::gate::parse [list --group native-validation $option]}] &&
+            ![catch {::gate::parse [list $option]}]}]
+}
 set optins [::gate::parse {--group integration --public-tls --interactive-gui}]
 check {each option records only itself} \
-    [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui] && ![dict get $optins scaling]}]
+    [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui] &&
+        ![dict get $optins scaling] && ![dict get $optins analysis]}]
 
 # ---- what each group needs and plans ----
 
@@ -112,9 +115,10 @@ check {the integration group compiles its own fixtures and the process fixture} 
         {fixture sqlite_lock_fixture.c} {fixture cmdline_test.c}]}]
 check {the packaging group compiles only the process fixture} \
     [expr {[compiled [::gate::plan [settings {--group packaging}]]] eq {{fixture process_fixture.c}}}]
-check {the native-validation group compiles the process fixture and the telemetry probe} \
-    [expr {[compiled [::gate::plan [settings {--group native-validation}]]] eq
-        {{fixture process_fixture.c} {fixture native_probe.c}}}]
+set nvPlan [::gate::plan [settings {--group native-validation}]]
+check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
+    [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 7}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
 
@@ -137,14 +141,53 @@ check {native validation plans the lifecycle lane with the probe and the process
 check {the observational scaling lane runs only behind --native-scaling} \
     [expr {"native_scaling_test.tcl" ni [scripts $releasePlan] &&
         "native_scaling_test.tcl" in [scripts [::gate::plan [settings {--native-scaling}]]]}]
+check {the full native analysis runs only behind --native-analysis} \
+    [expr {"native-analysis.tcl" ni [scripts $releasePlan] &&
+        "native-analysis.tcl" in [scripts [::gate::plan [settings {--native-analysis}]]]}]
+
+# The trapped drivers: the canary first, its two faults ending in
+# STATUS_ILLEGAL_INSTRUCTION under a deadline, every driver compiled with the
+# traps and -Werror, every boundary the candidate's analysis drove, and the
+# identity primitives on basekits of the runtime under test.
+set nvLabels [labels $nvPlan]
+set faults [lmap step $nvPlan {if {![string match {UB-trap canary traps *} [dict get $step label]]} continue; set step}]
+check {native validation shows the traps fire before any trapped driver runs} \
+    [expr {[llength $faults] == 2 &&
+        [lsearch -exact $nvLabels {UB-trap canary runs clean}] < [lsearch -exact $nvLabels {UB-trap canary traps overflow}] &&
+        [lsearch -exact $nvLabels {UB-trap canary traps bounds}] < [lsearch -glob $nvLabels {trapped *}] &&
+        [llength [lmap step $faults {
+            if {[dict get $step expect] != 0xC000001D || ![dict exists $step timeout]} continue; set step}]] == 2}]
+set untrapped {}
+foreach step $nvPlan {
+    if {![string match {trapped *: compile} [dict get $step label]]} continue
+    foreach flag {-Werror -fsanitize=undefined -fsanitize-undefined-trap-on-error} {
+        if {$flag ni [dict get $step argv]} { lappend untrapped "[dict get $step label] $flag" }
+    }
+}
+check {every trapped driver compiles with the undefined-behavior traps and -Werror} [expr {![llength $untrapped]}] $untrapped
+set driven {}
+foreach step $nvPlan {
+    if {![string match {trapped *} [dict get $step label]] || [string match {*: compile} [dict get $step label]]} continue
+    lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
+}
+check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, hash and identity boundaries} \
+    [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
+        {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
+        native-boundary-trap.exe hash-boundary-trap.exe {identity-trap.exe identity_native_test.tcl}]}] $driven
+set identityRun [lindex $nvPlan [lsearch -exact $nvLabels {trapped identity}]]
+check {the trapped identity driver gets both basekits and a work folder, all deleted after it} \
+    [expr {[dict keys [dict get $identityRun extract]] eq {basekit/console.exe basekit/gui.exe} &&
+        [dict get $identityRun cleanup] eq [lrange [dict get $identityRun argv] 2 4]}]
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 check {the window-opening GUI lane runs only behind --interactive-gui, last} \
     [expr {"gui_widget_test.tcl" ni [scripts $releasePlan] &&
         [file tail [lindex [dict get [lindex $guiPlan end] argv] 1]] eq "gui_widget_test.tcl"}]
 set entry [lindex $releasePlan [lsearch -exact $releaseLabels entry]]
-check {the entry test gets the process fixture and a bare host of its own} \
-    [expr {[dict exists $entry bare] && [lindex [dict get $entry argv] end] eq [dict get $entry bare] &&
-        [string match .machteld-entry-basekit-*.exe [file tail [dict get $entry bare]]]}]
+set bareHost [lindex [dict get $entry argv] end]
+check {the entry test gets the process fixture and a bare host of its own, deleted after it} \
+    [expr {[dict get $entry extract] eq [list basekit/console.exe $bareHost] &&
+        [dict get $entry cleanup] eq [list $bareHost] &&
+        [string match .machteld-entry-basekit-*.exe [file tail $bareHost]]}]
 set missing {}
 foreach step [concat $releasePlan [::gate::plan [settings {--native-scaling --interactive-gui}]]] {
     foreach word [dict get $step argv] {
@@ -156,6 +199,33 @@ foreach step [concat $releasePlan [::gate::plan [settings {--native-scaling --in
     }
 }
 check {every program and source the plan names exists} [expr {![llength $missing]}] $missing
+
+# Every test program and C source under test/ is something the gate runs or
+# compiles, behind an option or not, or is run by another test (named here
+# with that test, which must name it).
+set everything [concat $releasePlan [::gate::plan [settings {--native-scaling --native-analysis --interactive-gui}]]]
+set named {}
+foreach step $everything {
+    foreach word [dict get $step argv] {
+        dict set named [file tail $word] 1
+    }
+}
+proc mentions {path name} {
+    set channel [open $path rb]
+    try { expr {[string first $name [read $channel]] >= 0} } finally { close $channel }
+}
+set inner [dict create gui_model_fairness_test.tcl test/gui_model_test.tcl \
+    protocol_fairness_test.tcl test/protocol_test.tcl identity_native_test.tcl test/app_identity_test.tcl \
+    tk_index_format_test.c tools/native-analysis.tcl]
+set unwired {}
+foreach path [lsort [concat [glob -directory [file join $root test] *_test.tcl *.c] \
+        [glob -directory [file join $root test fixtures] *.c]]] {
+    set name [file tail $path]
+    if {[dict exists $named $name]} continue
+    if {[dict exists $inner $name] && [mentions [file join $root {*}[split [dict get $inner $name] /]] $name]} continue
+    lappend unwired $name
+}
+check {every test program and C source is run, compiled, or run by another test} [expr {![llength $unwired]}] $unwired
 
 # ---- the lanes' environment ----
 
