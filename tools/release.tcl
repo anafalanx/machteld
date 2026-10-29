@@ -3,18 +3,20 @@ package require machteld 0.21
 # tools/release.tcl -- the hermetic release build: the dependency cache
 # bootstrapped or verified, the reference generated, the hosts compiled and
 # packaged by tools/build.tcl on the cache's static tclsh, and the result
-# published under the requested name in one rename.
+# published under the requested name in one operation.
 #
 #     machteld.exe tools/release.tcl ?--output FILE? ?--cache DIR? ?--msys DIR? ?--skip-bootstrap?
 #
 # The package and every linker intermediate get names this invocation owns
 # (.machteld-build-<32 hex>.exe and .work beside the output), so publication is
-# one same-volume rename and cleanup deletes only what this run made. The Tcl
+# one same-folder replacement and cleanup deletes only what this run made. The Tcl
 # port (2026-10-28) of tools/build.ps1 and tools/publish-output.ps1.
 
 namespace eval ::release {
     namespace path ::machteld
     variable root [file dirname [file dirname [file normalize [info script]]]]
+    # Publication attempts, 500 ms apart.
+    variable publishAttempts 40
 }
 source -encoding utf-8 [file join $::release::root tools bootstrap.tcl]
 
@@ -140,13 +142,16 @@ proc ::release::main {argv} {
     }
 }
 
-# Publishes the candidate under the output name, beside it. The PowerShell
-# publisher made this one MoveFileExW call; the runtime has none, so this is
-# Tcl's `file rename -force`: the old file renamed aside in the same folder,
-# the candidate renamed in, the old one deleted, or put back if the second
-# rename fails. A held output fails the first rename and leaves both files
-# whole; the name is absent only between two renames in one folder.
+# Publishes the candidate under the output name, beside it, in one operation,
+# as tools/publish-output.ps1 did with one MoveFileExW call: the runtime's
+# Publish, the primitive behind `wrap` that tools/devcache.tcl uses too,
+# moves the candidate onto an absent name (MoveFileExW) or replaces the
+# existing file (ReplaceFileW, with a backup it deletes or puts back). The
+# name never goes missing, and a held output refuses the replacement with both
+# files whole. Attempts are 500 ms apart for 20 s, which outlasts the virus
+# scanner's hold on a file just written.
 proc ::release::publish {candidate output} {
+    variable publishAttempts
     set candidate [file normalize $candidate]
     set output [file normalize $output]
     if {![string equal -nocase [file dirname $candidate] [file dirname $output]]} {
@@ -164,7 +169,15 @@ proc ::release::publish {candidate output} {
     if {[file isdirectory $output]} {
         fail "requested output is a directory: [file nativename $output]"
     }
-    ::boot::renameWaiting $candidate $output
+    for {set attempt 1} {1} {incr attempt} {
+        if {![catch {::machteld::Publish $candidate $output} problem]} {
+            break
+        }
+        if {$attempt >= $publishAttempts} {
+            fail "publication failed for [file nativename $output]: $problem"
+        }
+        after 500
+    }
     puts "published [file nativename $output]"
 }
 
