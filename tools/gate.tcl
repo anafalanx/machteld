@@ -6,7 +6,7 @@ package require machteld 0.21
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
 #         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty?
-#         ?--interactive-gui? ?--native-scaling?
+#         ?--interactive-gui? ?--native-scaling? ?--native-analysis?
 #
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
 #
@@ -24,7 +24,13 @@ package require machteld 0.21
 #                        publication, VERSIONINFO, wrap and basekits, the README
 #                        examples wrapped, wrap inventory, application identity,
 #                        the examples packaged
-#   native-validation    native lifetime with the telemetry probe
+#   native-validation    native lifetime with the telemetry probe, and the
+#                        undefined-behavior-trapped drivers of
+#                        tools/native-analysis.tcl after their trap canary:
+#                        command line and its allocation failures, Unicode,
+#                        the JSON corpus and adversarial inputs, the native
+#                        filesystem and SQLite boundaries, the hash boundary,
+#                        and the identity primitives on the runtime's basekits
 #   reference-generator  two cold reference generations, byte for byte
 #   release              alone: the build, then every group above (the default)
 #
@@ -37,6 +43,10 @@ package require machteld 0.21
 #                        both open windows, so this is the owner's check only
 #   --native-scaling     (native-validation or release) the observational
 #                        worker-scaling lane, whose timings are not a gate
+#   --native-analysis    (native-validation or release) the full harness of
+#                        tools/native-analysis.tcl: GCC's analyzer, sanitizer
+#                        probes, the Tk formatter, Unicode output paths, and
+#                        a report under out/native-analysis-<id>/
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
 # under test, the Tcl-only checks on the dependency cache's static tclsh. The
@@ -61,6 +71,7 @@ namespace eval ::gate {
     }
 }
 source -encoding utf-8 [file join $::gate::root tools bootstrap.tcl]
+source -encoding utf-8 [file join $::gate::root tools native-analysis.tcl]
 
 proc ::gate::fail {message} {
     return -code error -errorcode {GATE fail} "gate: $message"
@@ -73,7 +84,7 @@ proc ::gate::parse {argv} {
     variable groups
     set settings [dict create runtime [file join $root out machteld.exe] \
         cache [file join $root .cache deps] msys "" skipBuild 0 \
-        tls 0 pty 0 gui 0 scaling 0]
+        tls 0 pty 0 gui 0 scaling 0 analysis 0]
     set requested {}
     while {[llength $argv]} {
         set argv [lassign $argv option]
@@ -94,6 +105,7 @@ proc ::gate::parse {argv} {
             --interactive-pty {dict set settings pty 1}
             --interactive-gui {dict set settings gui 1}
             --native-scaling {dict set settings scaling 1}
+            --native-analysis {dict set settings analysis 1}
             default {fail "unknown option $option"}
         }
     }
@@ -117,8 +129,10 @@ proc ::gate::parse {argv} {
     if {([dict get $settings tls] || [dict get $settings pty]) && "integration" ni $chosen} {
         fail "--public-tls and --interactive-pty need the integration or release group"
     }
-    if {[dict get $settings scaling] && "native-validation" ni $chosen} {
-        fail "--native-scaling needs the native-validation or release group"
+    foreach option {scaling analysis} {
+        if {[dict get $settings $option] && "native-validation" ni $chosen} {
+            fail "--native-$option needs the native-validation or release group"
+        }
     }
     return $settings
 }
@@ -169,9 +183,9 @@ proc ::gate::addLane {stepsVar runtime group label script args} {
 
 # The steps of the selected groups, in order, after the build: each a dict
 # with group, label and argv, and optionally expect (the exit code, 0 by
-# default), timeout and bare (a path where the packaged console basekit is
-# put for the step and deleted after it). A step already planned (the same
-# argv) is not planned twice.
+# default), timeout, extract (payload paths of the runtime under test and the
+# files they are copied to before the step) and cleanup (what is deleted after
+# it). A step already planned (the same argv) is not planned twice.
 proc ::gate::plan {settings} {
     variable root
     set runtime [file normalize [dict get $settings runtime]]
@@ -236,7 +250,7 @@ proc ::gate::plan {settings} {
                 set bare [file join $out .machteld-entry-basekit-[pid]-[binary encode hex [hash random 16]].exe]
                 addStep steps packaging "build identity of the runtime" [list $tclsh [file join $test build_identity_test.tcl] $runtime]
                 addStep steps packaging entry [list $driver [file join $test entry_test.tcl] $runtime \
-                    --fixture $processFixture --bare $bare] bare $bare
+                    --fixture $processFixture --bare $bare] extract [list basekit/console.exe $bare] cleanup [list $bare]
                 addStep steps packaging "package and publication" [list $driver [file join $test package_test.tcl] --tclsh $tclsh]
                 addStep steps packaging VERSIONINFO [list $driver [file join $test version_resource_test.tcl] $runtime --cache $cache]
                 addLane steps $runtime packaging wrap/basekits wrap_test.tcl
@@ -255,6 +269,13 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
                 if {[dict get $settings scaling]} {
                     addLane steps $runtime native-validation "native scaling (observational)" native_scaling_test.tcl $probe $processFixture
+                }
+                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
+                    addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
+                }
+                if {[dict get $settings analysis]} {
+                    addStep steps native-validation "native analysis (full harness)" [list $driver \
+                        [file join $root tools native-analysis.tcl] --cache $cache --msys $msys]
                 }
             }
             reference-generator {
@@ -336,9 +357,9 @@ proc ::gate::seconds {started} {
     format %.2f [expr {([clock milliseconds] - $started) / 1000.0}]
 }
 
-# Runs one step on this console; the bare host, when the step has one, is put
-# in place before and deleted after. When identity is given, the tested
-# executable must still have it afterwards.
+# Runs one step on this console: what it extracts from the runtime under test
+# is put in place first, and what it cleans up is deleted after it, passed or
+# failed. When identity is given, the tested executable must still have it.
 proc ::gate::execute {step runtime identity} {
     set label [dict get $step label]
     puts "\n== $label =="
@@ -350,15 +371,17 @@ proc ::gate::execute {step runtime identity} {
     }
     set expect [expr {[dict exists $step expect] ? [dict get $step expect] : 0}]
     try {
-        if {[dict exists $step bare]} {
-            extractBare $runtime [dict get $step bare]
+        if {[dict exists $step extract]} {
+            extract $runtime [dict get $step extract]
         }
         if {[catch {run -inherit {*}$options -- {*}[dict get $step argv]} result]} {
             fail "$label could not run: $result"
         }
     } finally {
-        if {[dict exists $step bare]} {
-            file delete [dict get $step bare]
+        if {[dict exists $step cleanup]} {
+            foreach path [dict get $step cleanup] {
+                file delete -force -- $path
+            }
         }
     }
     # run reports a nonzero exit as status error; a deadline or a kill always
@@ -373,13 +396,15 @@ proc ::gate::execute {step runtime identity} {
     puts "PASS $label ([seconds $started]s)"
 }
 
-# The bare host is the packaged console basekit: the entry test's payload
-# refusal runs it with nothing appended.
-proc ::gate::extractBare {runtime path} {
-    set mount gate-basekit-[pid]
+# Copies files out of the runtime's own payload: the packaged basekits, which
+# the entry test's payload refusal and the trapped identity driver use bare.
+proc ::gate::extract {runtime pairs} {
+    set mount gate-payload-[pid]
     zipfs mount $runtime $mount
     try {
-        file copy //zipfs:/$mount/basekit/console.exe $path
+        foreach {inner path} $pairs {
+            file copy //zipfs:/$mount/$inner $path
+        }
     } finally {
         zipfs unmount $mount
     }
