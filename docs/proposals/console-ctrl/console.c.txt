@@ -1,0 +1,89 @@
+/*
+ * console.c -- ::mt::console: who owns the console's control events.
+ *
+ * WHY THIS EXISTS. `run -inherit` hands a child the host's own console, so
+ * Ctrl-C reaches both. Windows then delivers CTRL_C_EVENT to every process
+ * attached to that console; the host's default handler exits the host, and
+ * because supervised children are born into the host's kill-on-close root job,
+ * the child tree is torn down with it -- the child never gets to decide.
+ *
+ * A front door (x, the z successor) needs the opposite contract: the parent
+ * ignores console interrupts so the child -- which shares the console -- sees
+ * Ctrl-C / Ctrl-Break and decides what to do, and the parent then returns
+ * whatever exit code the child produced. That is the contract z's Go spawn
+ * honoured with signal.Ignore(os.Interrupt); this verb is its mt equivalent.
+ *
+ * SetConsoleCtrlHandler(NULL, TRUE) sets the calling process to ignore
+ * CTRL_C_EVENT (inherited by children created afterwards unless they reset
+ * it, which console programs that care do). Ctrl-Break is not affected; that
+ * matches z, which ignored only os.Interrupt.
+ *
+ * The verb is deliberately a plain switch with a readable state, no callback
+ * surface: `console ctrl ignore`, `console ctrl default`, `console ctrl` to
+ * query. Nothing here touches the console's input mode.
+ */
+#undef USE_TCL_STUBS
+#include "mt.h"
+
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <string.h>
+
+static int ctrl_ignored = 0;
+
+static int console_error(Tcl_Interp *interp, const char *code, const char *msg) {
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(msg ? msg : "command failed", -1));
+    Tcl_SetErrorCode(interp, "MT", "CONSOLE", code, (char *)NULL);
+    return TCL_ERROR;
+}
+
+static int console_ctrl(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    if (objc == 2) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(ctrl_ignored ? "ignore" : "default", -1));
+        return TCL_OK;
+    }
+    if (objc != 3) {
+        return console_error(interp, "usage", "console ctrl ?ignore|default?");
+    }
+    const char *mode = Tcl_GetString(objv[2]);
+    int want;
+    if (strcmp(mode, "ignore") == 0) {
+        want = 1;
+    } else if (strcmp(mode, "default") == 0) {
+        want = 0;
+    } else {
+        return console_error(interp, "badvalue", "console ctrl mode must be ignore or default");
+    }
+    if (!SetConsoleCtrlHandler(NULL, want ? TRUE : FALSE)) {
+        return console_error(interp, "oserror", "SetConsoleCtrlHandler failed");
+    }
+    ctrl_ignored = want;
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(want ? "ignore" : "default", -1));
+    return TCL_OK;
+}
+
+static int ConsoleCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
+    (void)cd;
+    if (objc < 2) {
+        return console_error(interp, "usage", "console ctrl ?ignore|default?");
+    }
+    const char *sub = Tcl_GetString(objv[1]);
+    if (strcmp(sub, "ctrl") == 0) {
+        return console_ctrl(interp, objc, objv);
+    }
+    return console_error(interp, "usage", "console subcommand must be ctrl");
+}
+
+int Mtconsole_Init(Tcl_Interp *interp) {
+    if (Tcl_CreateObjCommand(interp, "::mt::console", ConsoleCmd, NULL, NULL) == NULL) {
+        return TCL_ERROR;
+    }
+    if (Tcl_PkgProvide(interp, "mt::console", MT_VERSION) != TCL_OK) {
+        Tcl_DeleteCommand(interp, "::mt::console");
+        return TCL_ERROR;
+    }
+    return TCL_OK;
+}

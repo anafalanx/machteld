@@ -1,0 +1,410 @@
+diff --git a/README.md b/README.md
+index 7f0fd81..b9e7426 100644
+--- a/README.md
++++ b/README.md
+@@ -60,7 +60,8 @@ an explicit dependency, not an inference from a filename.
+ ## The palette
+ 
+ - Process control: supervised `run`, `child`, `wait`, and `scope`; independent
+-  `detach`.
++  `detach`; `console` decides who answers Ctrl-C when a child shares the
++  host's console.
+ - Interactive programs: `pty spawn/send/read/expect/strip/close` over ConPTY.
+ - Machine observation: `watch`, `mtps`, `dirs`, `links`, and `canon`.
+ - Data and network: `store`, `json`, `hash`, and `http`.
+diff --git a/docs/execution-model.md b/docs/execution-model.md
+index ed8f4df..b7a65d6 100644
+--- a/docs/execution-model.md
++++ b/docs/execution-model.md
+@@ -60,7 +60,10 @@ result dict; `child start -channels` exposes pipes for protocols, so its caller
+ drains output and closes stdin to signal EOF before an EOF-driven worker can
+ complete. `pty` owns terminal semantics. `run -inherit` is the explicit
+ human-facing path for color, pagers,
+-Ctrl-C, and a child's direct use of the current terminal.
++Ctrl-C, and a child's direct use of the current terminal; `console ctrl
++ignore` lets that child, rather than the host, decide what Ctrl-C means.
++Captured children and detached processes are created without a console
++window, so a host that has no console of its own never pops one per launch.
+ 
+ Channels and protocol data have different jobs. A worker's stdout is its
+ JSON-lines wire and must contain nothing else; stderr is drained for diagnostics.
+diff --git a/docs/palette.md b/docs/palette.md
+index 74f6dda..8806a0d 100644
+--- a/docs/palette.md
++++ b/docs/palette.md
+@@ -36,6 +36,7 @@ detach -dir C:/service -- daemon.exe
+ | `wait` | Wait for child or filesystem-watch handles; `-any` returns when the first is ready. |
+ | `scope` | Evaluate a Tcl body and close every child born inside it, even when the body errors. |
+ | `detach` | Launch an independent daemon and return its PID. Success is verified outside every Windows job; an enclosing policy that denies breakaway raises `{MACHTELD DETACH launch}`. |
++| `console` | `ctrl ignore` makes the host ignore Ctrl-C so a `run -inherit` child sharing the console decides what it means; `ctrl default` restores OS handling; `ctrl` alone reports the mode. |
+ 
+ Every supervised process launch is born into the host-owned root Job Object and
+ a narrower per-command job before user code can run. The host owns the root job
+@@ -351,6 +352,7 @@ not copied recursively, so a wrapped tool cannot perform another wrap. See
+ 
+ ## Complete verb list
+ 
+-`canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
+-`links`, `log`, `macht`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`,
+-`scope`, `store`, `version`, `wait`, `watch`, `worker`, and `wrap`.
++`canon`, `child`, `cli`, `console`, `detach`, `dirs`, `docs`, `hash`, `help`,
++`http`, `json`, `links`, `log`, `macht`, `manifest`, `mtps`, `pmap`, `pool`,
++`pty`, `run`, `scope`, `store`, `version`, `wait`, `watch`, `worker`, and
++`wrap`.
+diff --git a/docs/reference/machteld/command/child.md b/docs/reference/machteld/command/child.md
+index 77d04ce..54847f0 100644
+--- a/docs/reference/machteld/command/child.md
++++ b/docs/reference/machteld/command/child.md
+@@ -50,6 +50,8 @@ Every token owns a complete process tree. A start-time `-timeout` is enforced by
+ a monitor even if the script never waits. A wait-time `-timeout` bounds only
+ that call and leaves a running child alive. `close` is the release operation and
+ terminates the tree if needed. Interpreter shutdown also closes owned children.
++Every child is created with `CREATE_NO_WINDOW`: it has a console of its own but
++never a console window, even when the host has no console.
+ 
+ ## Examples
+ 
+diff --git a/docs/reference/machteld/command/detach.md b/docs/reference/machteld/command/detach.md
+index 827942c..91228dd 100644
+--- a/docs/reference/machteld/command/detach.md
++++ b/docs/reference/machteld/command/detach.md
+@@ -36,6 +36,9 @@ Windows policy that forbids strict breakaway.
+ Machteld relinquishes its process handle immediately after successful launch.
+ The detached process and its descendants can outlive the host. There is no
+ timeout and no later Machteld handle with which to observe or terminate it.
++The process is created with `CREATE_NO_WINDOW`: it has a console of its own
++but never a console window, and it does not share the host's console, so
++closing the host's terminal cannot end it.
+ 
+ ## Examples
+ 
+diff --git a/docs/reference/machteld/command/run.md b/docs/reference/machteld/command/run.md
+index a06242b..90641d0 100644
+--- a/docs/reference/machteld/command/run.md
++++ b/docs/reference/machteld/command/run.md
+@@ -68,7 +68,10 @@ value-conversion errors.
+ The call blocks until the whole Job Object is empty, including descendants, or
+ until its lifetime deadline kills that tree. Capture drains concurrently to
+ avoid pipe deadlock. Callback mode pumps output on the calling thread; it does
+-not promise to service unrelated Tcl events.
++not promise to service unrelated Tcl events. A captured child is created with
++`CREATE_NO_WINDOW`: it has a console of its own but never a console window,
++even when the host has no console; `-inherit` passes the host's console
++through unchanged, so the child is as visible and interruptible as the host.
+ 
+ ## Examples
+ 
+diff --git a/docs/reference/machteld/index.md b/docs/reference/machteld/index.md
+index 0f65bba..111c340 100644
+--- a/docs/reference/machteld/index.md
++++ b/docs/reference/machteld/index.md
+@@ -20,7 +20,7 @@ namespace path.
+ 
+ ## Command groups
+ 
+-- Process control: `run`, `child`, `wait`, `scope`, and `detach`.
++- Process control: `run`, `child`, `wait`, `scope`, `detach`, and `console`.
+ - Interactive processes: `pty`.
+ - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, and `mtps`.
+ - Data and network: `http`, `json`, `hash`, and `store`.
+diff --git a/src/machteld_appinit.c b/src/machteld_appinit.c
+index 0c5fe4b..0f77ce1 100644
+--- a/src/machteld_appinit.c
++++ b/src/machteld_appinit.c
+@@ -17,6 +17,7 @@ extern int Machteldjson_Init(Tcl_Interp *interp); /* src/json.c */
+ #endif
+ #ifdef MACHTELD_PS
+ extern int Machteldps_Init(Tcl_Interp *interp); /* src/ps.c */
++extern int Machteldconsole_Init(Tcl_Interp *interp); /* src/console.c */
+ #endif
+ #ifdef MACHTELD_HASH
+ extern int Machteldhash_Init(Tcl_Interp *interp); /* src/hash.c */
+@@ -266,6 +267,13 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
+         return TCL_ERROR;
+     }
+     Tcl_StaticLibrary(interp, "machteldps", Machteldps_Init, NULL);
++
++    /* Console control-event ownership, for front doors that hand a child the
++     * host's console and must let the child decide what Ctrl-C means. */
++    if (Machteldconsole_Init(interp) == TCL_ERROR) {
++        return TCL_ERROR;
++    }
++    Tcl_StaticLibrary(interp, "machteldconsole", Machteldconsole_Init, NULL);
+ #endif
+ 
+ #ifdef MACHTELD_HASH
+diff --git a/src/proc.c b/src/proc.c
+index 8da4422..d11992e 100644
+--- a/src/proc.c
++++ b/src/proc.c
+@@ -792,7 +792,12 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
+     c->stream = stream;
+     const char **largv = argv_with_arg0(o, cargc, cargv, err);
+     if (largv == NULL) goto fail;
+-    int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err);
++    /* Captured stdio (pipes or NUL) never reaches a terminal, so the child gets
++     * CREATE_NO_WINDOW: its own console, no window, even when the host itself
++     * has no console. Inherit mode passes the host's console through with no
++     * creation flag at all, exactly as before, so the child stays interactive. */
++    int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, !o->inherit,
++                        o->env_block, &c->pid, &c->proc, err);
+     if (largv != cargv) free((void *)largv);
+     if (lrc != 0) goto fail;
+     if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
+@@ -1531,8 +1536,12 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
+     wj_stdio io = { nul, nul, nul };
+     const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
+     if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
++    /* Stdio is NUL, so the daemon gets no console window; and because it no
++     * longer shares the launcher's console, closing that console window can no
++     * longer take the daemon down with a CTRL_CLOSE_EVENT. */
+     int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
+-                        1 /* strict breakaway */, o.env_block, &pid, &proch, &err);
++                        1 /* strict breakaway */, 1 /* no window */, o.env_block,
++                        &pid, &proch, &err);
+     if (dargv != cargv) free((void *)dargv);
+     if (drc != 0) {
+         mt_error(interp, "DETACH", "launch", err);
+diff --git a/src/winjob.h b/src/winjob.h
+index 8e04fcf..f12102c 100644
+--- a/src/winjob.h
++++ b/src/winjob.h
+@@ -132,10 +132,18 @@ typedef struct {
+  * "K=V\0...\0\0" environment block, or NULL to inherit machteld's environment.
+  * want_breakaway is the detach path: njobs must be zero, the process is created
+  * suspended with CREATE_BREAKAWAY_FROM_JOB, verified to belong to no job, then
+- * resumed. If an enclosing job retains it, launch fails before user code runs. */
++ * resumed. If an enclosing job retains it, launch fails before user code runs.
++ * no_window adds CREATE_NO_WINDOW: a console child still gets a console of its
++ * own, but never a window. Callers pass it whenever the stdio handles are pipes
++ * or NUL (nothing the child prints reaches a terminal, so a window would only
++ * ever be empty), and leave it clear when handing over the parent's console so
++ * an interactive child stays on the terminal the user is looking at. It is
++ * never combined with DETACHED_PROCESS or CREATE_NEW_CONSOLE, which would
++ * cancel it. */
+ int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
+               void *const *job_handles, int njobs, const wj_stdio *io,
+-              int want_breakaway, void *env_block, int *pid, void **proc, const char **err);
++              int want_breakaway, int no_window, void *env_block, int *pid, void **proc,
++              const char **err);
+ 
+ /* ConPTY variant of wj_launch. The pseudoconsole supplies the child's stdio,
+  * while the same born-in-job, UTF-8 conversion, custom environment, and safe
+diff --git a/src/winjob_launch.c b/src/winjob_launch.c
+index 7eb51d2..3084fa6 100644
+--- a/src/winjob_launch.c
++++ b/src/winjob_launch.c
+@@ -82,7 +82,8 @@ static char *comspec_path(const char **err) {
+ 
+ int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
+               void *const *job_handles, int njobs, const wj_stdio *io,
+-              int want_breakaway, void *env_block, int *pid, void **proc, const char **err) {
++              int want_breakaway, int no_window, void *env_block, int *pid, void **proc,
++              const char **err) {
+     if (exe == NULL || exe[0] == '\0') { *err = "empty exe"; return -1; }
+     if (argc <= 0 || argv == NULL) { *err = "empty argv"; return -1; }
+     if (io == NULL || io->in == NULL || io->out == NULL || io->err == NULL) {
+@@ -201,6 +202,14 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
+     ZeroMemory(&pi, sizeof(pi));
+     DWORD flags = EXTENDED_STARTUPINFO_PRESENT;
+     if (want_breakaway) flags |= CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED;
++    /* A console child whose parent has no console (a hidden shell, a service,
++     * an editor's tool runner) would otherwise be given a NEW, VISIBLE console
++     * window for its lifetime -- one empty terminal per captured launch.
++     * CREATE_NO_WINDOW keeps the console (programs that open CONOUT$ or query
++     * the console still work) and drops the window. The flag is inert for a
++     * GUI child and is deliberately never paired with DETACHED_PROCESS or
++     * CREATE_NEW_CONSOLE, either of which would override it. */
++    if (no_window) flags |= CREATE_NO_WINDOW;
+     if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT; /* a UTF-16 env block was supplied */
+     BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, env_block, wDir, &six.StartupInfo, &pi);
+     if (!ok) {
+diff --git a/test/fixtures/process_fixture.c b/test/fixtures/process_fixture.c
+index 33982ac..dde9582 100644
+--- a/test/fixtures/process_fixture.c
++++ b/test/fixtures/process_fixture.c
+@@ -228,6 +228,67 @@ static int daemon_marker(const wchar_t *path, DWORD delay_ms) {
+     return write_pid_path(path, GetCurrentProcessId()) ? 0 : EXIT_PIDFILE;
+ }
+ 
++/* Report the console this process was given: whether it has a window, whether
++ * that window is visible, and whether the named parent PID is attached to the
++ * same console. A captured launch must answer "no visible window, not shared".
++ * A launcher that omits CREATE_NO_WINDOW is caught either way: the child shares
++ * the host's console when the host has one, and pops a fresh visible window
++ * when the host has none. The report goes to stdout, or to a file when the
++ * launch has no stdout worth reading (detach). */
++static int console_window_report(const wchar_t *parent_text, const wchar_t *path) {
++    DWORD parent = milliseconds(parent_text);
++    if (parent == UINT32_MAX) {
++        return EXIT_USAGE;
++    }
++    HWND window = GetConsoleWindow();
++    int visible = window != NULL && IsWindowVisible(window) ? 1 : 0;
++
++    DWORD stack_list[64];
++    DWORD *list = stack_list;
++    DWORD count = GetConsoleProcessList(list, 64);
++    if (count > 64) {
++        list = (DWORD *)calloc(count, sizeof(DWORD));
++        if (list == NULL) {
++            return EXIT_OUTPUT;
++        }
++        DWORD again = GetConsoleProcessList(list, count);
++        count = again > count ? 0 : again;
++    }
++    int shared = 0;
++    for (DWORD index = 0; index < count; index++) {
++        if (list[index] == parent) {
++            shared = 1;
++        }
++    }
++    if (list != stack_list) {
++        free(list);
++    }
++
++    char text[96];
++    int length = snprintf(text, sizeof(text),
++                          "CONSOLE hwnd=%d visible=%d shared=%d procs=%lu\n",
++                          window != NULL ? 1 : 0, visible, shared,
++                          (unsigned long)count);
++    if (length <= 0 || (size_t)length >= sizeof(text)) {
++        return EXIT_OUTPUT;
++    }
++    if (path == NULL || path[0] == L'\0') {
++        return write_all(GetStdHandle(STD_OUTPUT_HANDLE), text, (DWORD)length)
++                   ? 0
++                   : EXIT_OUTPUT;
++    }
++    HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
++                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    if (file == INVALID_HANDLE_VALUE) {
++        return EXIT_PIDFILE;
++    }
++    int ok = write_all(file, text, (DWORD)length) && FlushFileBuffers(file);
++    if (!CloseHandle(file)) {
++        ok = 0;
++    }
++    return ok ? 0 : EXIT_PIDFILE;
++}
++
+ /* Environment entries normally split at their first '='. The hidden per-drive
+  * current-directory entries use =C:=C:\path, whose name is =C:. */
+ static size_t environment_name_length(const wchar_t *entry) {
+@@ -376,5 +437,8 @@ int wmain(int argc, wchar_t **argv) {
+     if (wcscmp(argv[1], L"environment-order") == 0 && argc >= 3) {
+         return environment_order(argc - 2, argv + 2);
+     }
++    if (wcscmp(argv[1], L"console-window") == 0 && (argc == 3 || argc == 4)) {
++        return console_window_report(argv[2], argc == 4 ? argv[3] : NULL);
++    }
+     return EXIT_USAGE;
+ }
+diff --git a/test/process_test.tcl b/test/process_test.tcl
+index 4a8ba4b..8222a5f 100644
+--- a/test/process_test.tcl
++++ b/test/process_test.tcl
+@@ -369,6 +369,72 @@ if {[info exists ::env(MACHTELD_TEST_PTY_IO)] && $::env(MACHTELD_TEST_PTY_IO) eq
+     catch {pty close $repl}
+ }
+ 
++# ---- console ctrl: who answers Ctrl-C when a child shares the console ----
++# The OS-level effect (the host surviving a CTRL_C_EVENT that the child
++# handles) cannot be exercised hermetically without a private console, so the
++# gate pins the verb's contract: exact arity, the two modes, the readable
++# state, and that the state actually round-trips through the OS call.
++check "console ctrl reports default before any change" [expr {
++    [console ctrl] eq "default"}]
++check "console ctrl ignore is applied and reported" [expr {
++    [console ctrl ignore] eq "ignore" && [console ctrl] eq "ignore"}]
++check "console ctrl default restores and reports" [expr {
++    [console ctrl default] eq "default" && [console ctrl] eq "default"}]
++check "console ctrl rejects an unknown mode" [expr {
++    [errcode_of {console ctrl sometimes}] eq {MACHTELD CONSOLE badvalue}}]
++check "console ctrl has exact arity" [expr {
++    [errcode_of {console ctrl ignore extra}] eq {MACHTELD CONSOLE usage}}]
++check "console rejects an unknown subcommand" [expr {
++    [errcode_of {console tone}] eq {MACHTELD CONSOLE usage}}]
++check "console requires a subcommand" [expr {
++    [errcode_of {console}] eq {MACHTELD CONSOLE usage}}]
++# A child launched while the host ignores Ctrl-C inherits that disposition;
++# the fixture's environment probe is a cheap way to launch one and confirm the
++# host is still fully functional afterwards.
++console ctrl ignore
++set result [run -- $FIXTURE ok payload]
++console ctrl default
++check "run still works while console ctrl is ignore" [expr {
++    [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
++
++# ---- captured children never get a console window ----
++# A console child whose parent has no console is handed a NEW, VISIBLE console
++# window unless CreateProcess is told otherwise; a harness run from a hidden
++# shell used to pop one empty terminal per captured launch. The fixture reports
++# the console it was given: whether its window is visible, and whether the host
++# (the PID passed in) is attached to the same console. A captured launch must
++# answer "no visible window, not shared", which catches a launcher that omits
++# CREATE_NO_WINDOW either way: it shares the host's console when the host has
++# one, and pops a fresh visible window when it has none. (With Windows Terminal
++# as the default terminal a fresh console reports only its hidden pseudo-window,
++# so the visibility probe is weaker there; the sharing probe still holds
++# whenever the host has a console.)
++proc console_report {text} {
++    if {![regexp {CONSOLE hwnd=(\d+) visible=(\d+) shared=(\d+) procs=(\d+)} \
++            $text -> hwnd visible shared procs]} { return {} }
++    return [dict create hwnd $hwnd visible $visible shared $shared procs $procs]
++}
++proc console_hidden {report} {
++    expr {$report ne "" && ![dict get $report visible] && ![dict get $report shared]}
++}
++set result [run -- $FIXTURE console-window [pid]]
++check "captured run child reports its console" [expr {
++    [dict get $result status] eq "ok" && [console_report [dict get $result out]] ne ""}]
++check "captured run child has no visible window and no share of the host console" \
++    [console_hidden [console_report [dict get $result out]]]
++set token [child start -- $FIXTURE console-window [pid]]
++set result [child wait $token -timeout 5s]
++child close $token
++check "child start child has no visible window and no share of the host console" \
++    [console_hidden [console_report [dict get $result out]]]
++set console_file [file join $WORK detach-console.txt]
++if {![catch {detach -- $FIXTURE console-window [pid] $console_file}]} {
++    check "detached process reports its console" [wait_for_file $console_file]
++    check "detached process has no visible window and no share of the host console" \
++        [console_hidden [console_report [expr {
++            [file exists $console_file] ? [slurp $console_file] : ""}]]]
++}
++
+ file delete -force $WORK
+ if {$fails} {
+     puts stderr "$fails process test(s) failed"
+diff --git a/test/runtime_test.tcl b/test/runtime_test.tcl
+index 2133543..a350359 100644
+--- a/test/runtime_test.tcl
++++ b/test/runtime_test.tcl
+@@ -32,7 +32,7 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> ex
+     error "src/machteld.h has no canonical MACHTELD_VERSION"
+ }
+ 
+-set expected {canon child cli detach dirs docs hash help http json links log macht manifest mtps pmap pool pty run scope store version wait watch worker wrap}
++set expected {canon child cli console detach dirs docs hash help http json links log macht manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+ check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
+ check "manifest exposes the compact runtime surface" [expr {
+     [lsort [dict keys [manifest]]] eq $expected}]
+diff --git a/tools/manifest_spec.tcl b/tools/manifest_spec.tcl
+index d039616..ee13ee1 100644
+--- a/tools/manifest_spec.tcl
++++ b/tools/manifest_spec.tcl
+@@ -30,6 +30,13 @@ set ::machteld::manifest::native {
+             close {options {} doc machteld/command/child#close}
+         }
+     }
++    console {
++        kind c domain CONSOLE codes {badvalue oserror usage} options {}
++        doc machteld/command/console
++        subcommands {
++            ctrl {options {} doc machteld/command/console#ctrl}
++        }
++    }
+     detach {
+         kind c domain DETACH codes {badvalue launch notfound oserror usage}
+         doc machteld/command/detach

@@ -334,6 +334,15 @@ formats numbers, so nothing observable changes.
 
 ## Candidate studies
 
+- **Console control ownership** (written up, with working code, in
+  `docs/proposals/console-ctrl/`). Two gaps about the
+  console a launch gets: an inherited child cannot own Ctrl-C, because the
+  host's default handler exits the host and the root job takes the child
+  tree with it; and a captured launch from a host that has no console pops
+  a visible empty console window per child. The first wants a `console
+  ctrl ignore|default` verb, the second `CREATE_NO_WINDOW` on the
+  pipe-and-NUL launch paths only. Raised by the `x` front door, which
+  needs a dispatched tool to decide what Ctrl-C means.
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
 
