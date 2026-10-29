@@ -11,18 +11,19 @@ package require machteld 0.21
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
 #
 #   fast                 no compiler and no MSYS2: reference coverage, version
-#                        claims and their regressions, build identity, this
-#                        gate's own test, and the runtime lanes that need no
-#                        fixture (filesystem, runtime services, protocol, GUI
-#                        model, embedded reference, README examples,
-#                        JSONTestSuite, native adversarial inputs and
-#                        filesystem boundaries)
+#                        claims and their regressions, build identity, the
+#                        reference serializer, this gate's own test, and the
+#                        runtime lanes that need no fixture (filesystem,
+#                        runtime services, protocol, GUI model, embedded
+#                        reference, README examples, JSONTestSuite, native
+#                        adversarial inputs and filesystem boundaries)
 #   integration          the C fixtures, the command-line golden vectors, the
 #                        development cache, and the process, store, native and
 #                        streaming-bounds lanes
 #   packaging            the runtime's build identity, entry, package and
 #                        publication, VERSIONINFO, wrap and basekits, the README
-#                        examples wrapped, wrap inventory, the examples packaged
+#                        examples wrapped, wrap inventory, application identity,
+#                        the examples packaged
 #   native-validation    native lifetime with the telemetry probe
 #   reference-generator  two cold reference generations, byte for byte
 #   release              alone: the build, then every group above (the default)
@@ -198,6 +199,7 @@ proc ::gate::plan {settings} {
                 addStep steps fast "version consistency" [list $tclsh [file join $root tools check_version.tcl]]
                 addStep steps fast "version-check regressions" [list $tclsh [file join $test check_version_test.tcl]]
                 addStep steps fast "build identity" [list $tclsh [file join $test build_identity_test.tcl]]
+                addStep steps fast "reference serializer" [list $driver [file join $test reference_serializer_test.tcl] --tclsh $tclsh]
                 addStep steps fast "gate groups and environment" [list $driver [file join $test gate_test.tcl]]
                 addLane steps $runtime fast filesystem filesystem_test.tcl
                 addLane steps $runtime fast "runtime services" runtime_test.tcl
@@ -240,6 +242,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging wrap/basekits wrap_test.tcl
                 addLane steps $runtime packaging "README examples wrapped" documentation_examples_test.tcl --packaging
                 addLane steps $runtime packaging "wrap inventory" wrap_inventory_test.tcl
+                addStep steps packaging "application identity" [list $driver [file join $test app_identity_test.tcl] $runtime]
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
             }
             native-validation {

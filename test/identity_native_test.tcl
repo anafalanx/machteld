@@ -1,5 +1,7 @@
-# Focused, headless regressions for ValidateIdentity/StampIdentity. Run with
-# identity_driver.exe SCRIPT BARE-CONSOLE BARE-GUI WORKDIR. The caller owns work.
+# Focused, headless regressions for ValidateIdentity/StampIdentity. Run by
+# test/app_identity_test.tcl on the runtime under test (RUNTIME SCRIPT
+# BARE-CONSOLE BARE-GUI WORKDIR), or with test/fixtures/identity_driver.exe
+# SCRIPT BARE-CONSOLE BARE-GUI WORKDIR. The caller owns work.
 package require machteld
 lassign $argv console gui work
 file mkdir $work
@@ -119,7 +121,8 @@ foreach kind {console gui} bare [list $console $gui] {
     check "$kind stamping returns normalized identity" [expr {$stamped eq [::machteld::ValidateIdentity $multiple]}]
     check "$kind stamping actually changes resource bytes" [expr {[slurp $target] ne $before}]
     # Re-stamping also exercises removal/replacement of existing icons rather
-    # than accumulating stale IDs. The PS test inspects the resource inventory.
+    # than accumulating stale IDs. test/app_identity_test.tcl inspects the
+    # resource inventory.
     ::machteld::StampIdentity $target [dict replace $withIcon name "Second $name" version 3.4.5.6]
     set overlay [file join $work $kind-overlay.exe]
     bytes $overlay "[slurp $target]ZIP-PAYLOAD"
