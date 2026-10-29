@@ -168,9 +168,9 @@ the [GUI example](examples/project-inspector/README.md), and the
 ## Development checks
 
 After provisioning the pinned build dependencies, invoke the incremental build
-explicitly with `.cache/deps/prefix/bin/tclsh90s.exe tools/dev.tcl build`.
-The owner's `z devbuild` is a convenience alias, not an additional dependency
-for running the delivered executable. Tests select an existing artifact:
+explicitly with `dist/0.21/machteld.exe tools/dev.tcl build`: every build and
+test tool runs on that build runtime, the signed 0.21 release. Tests select an
+existing artifact:
 `./tools/test.ps1 -Group fast`, `integration`, `packaging`, or
 `native-validation`, with `-Machteld <path>` to override `out/machteld.exe`.
 These groups never rebuild the runtime or regenerate reference documentation.

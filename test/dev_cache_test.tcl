@@ -1,12 +1,18 @@
-# Content-cache and publication regressions. Run with the bootstrapped Tcl 9:
-#   .cache/deps/prefix/bin/tclsh90s.exe test/dev_cache_test.tcl
-# No upstream conversion, network, or active build cache is used. Tiny native
-# fixtures also verify the exact compiler environment with the pinned tools.
-# The tiny products below exercise the production cache/publisher, not a second
-# cache implementation. The separate production-spec tests check input selection.
+package require machteld 0.21
+
+# Content-cache and publication regressions. Run on the build runtime, as
+# tools/dev.tcl runs:
+#   dist/0.21/machteld.exe test/dev_cache_test.tcl ?--msys DIR?
+# MSYS2 is found as tools/bootstrap.tcl finds it (--msys, MSYS2_ROOT, then
+# C:/msys64). No upstream conversion, network, or active build cache is used.
+# Tiny native fixtures also verify the exact compiler environment with the
+# pinned tools. The tiny products below exercise the production
+# cache/publisher, not a second cache implementation. The separate
+# production-spec tests check input selection.
 
 set repo [file normalize [file join [file dirname [info script]] ..]]
 source [file join $repo tools devcache.tcl]
+source -encoding utf-8 [file join $repo tools bootstrap.tcl]
 
 proc write_bytes {path bytes} {
     file mkdir [file dirname $path]
@@ -80,11 +86,17 @@ if {[lindex $argv 0] eq "--interrupt"} {
     exit 90
 }
 if {[lindex $argv 0] eq "--lock"} {
-    ::machteld::devcache::request lock [lindex $argv 1]
+    ::machteld::devcache::lock [lindex $argv 1]
     puts LOCKED
     flush stdout
     vwait ::never
     exit 90
+}
+set msysRequested ""
+if {[lindex $argv 0] eq "--msys" && [llength $argv] == 2} {
+    set msysRequested [lindex $argv 1]
+} elseif {[llength $argv]} {
+    error "usage: dev_cache_test.tcl ?--msys DIR?"
 }
 
 set fails 0
@@ -152,20 +164,17 @@ proc spec_tracks {stage path} {
 }
 proc toolchain_tracks {root relative} {
     set path [file join $root {*}[split $relative /]]
-    set before [::machteld::devcache::request toolchain $root]
+    set before [::machteld::devcache::toolchain_digest $root]
     set bytes [read_bytes $path]
     set time [file mtime $path]
     write_bytes $path "${bytes}-changed"
     file mtime $path $time
     check "shared toolchain tracks $relative with unchanged mtime" \
-        [expr {$before ne [::machteld::devcache::request toolchain $root]}]
+        [expr {$before ne [::machteld::devcache::toolchain_digest $root]}]
     write_bytes $path $bytes
     file mtime $path $time
     check {restored toolchain bytes restore the provenance key} \
-        [expr {$before eq [::machteld::devcache::request toolchain $root]}]
-}
-proc ps_literal {value} {
-    return "'[string map [list ' ''] $value]'"
+        [expr {$before eq [::machteld::devcache::toolchain_digest $root]}]
 }
 
 set marker [file tempfile claim]
@@ -173,9 +182,11 @@ close $marker
 set work [file normalize "${claim}.d"]
 file mkdir $work
 try {
-    check {hash protocol returns an exact lowercase SHA-256 without CRLF} \
-        [expr {[::machteld::devcache::request text ""] eq \
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}]
+    check {text digest is the exact lowercase SHA-256 of the UTF-8 bytes} \
+        [expr {[::machteld::devcache::text_digest ""] eq \
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" &&
+            [::machteld::devcache::text_digest "[format %c 233]\0"] eq \
+                [::machteld::hash sum sha256 [binary format H* c3a900]]}]
     set source [file join $work inputs source.c]
     set header [file join $work inputs headers core.h]
     set library [file join $work inputs libs static.a]
@@ -294,7 +305,7 @@ try {
     } finally {
         after cancel $timeout
         chan event $pipe readable {}
-        # Kill only Tcl: its hashing helper must exit when its owner dies.
+        # Kill the generating process outright, as an interruption would.
         foreach child $childPids { catch {exec taskkill.exe /F /PID $child 2>@1} }
         catch {close $pipe}
     }
@@ -307,8 +318,9 @@ try {
     check {clean and incrementally rebuilt fixture contents agree} \
         [expr {[read_bytes $output] eq [read_bytes $cleanOutput]}]
 
-    # Objects/preludes use the helper's generic atomic publication path rather
-    # than the executable publisher. Exercise it against an OS-locked output.
+    # Objects/preludes use the generic atomic publication path rather than the
+    # executable publisher. Exercise it against an output another handle holds:
+    # Tcl opens files without FILE_SHARE_DELETE, so the replacement is refused.
     set objectOutput [file join $work cached-object.o]
     set objectRecord [file join $work cached-object.record]
     expect_miss {non-executable cache stage builds} $spec $objectRecord $objectOutput
@@ -316,18 +328,21 @@ try {
     set objectBytes [read_bytes $objectOutput]
     set objectRecordBytes [read_bytes $objectRecord]
     dict lappend spec values changed-for-locked-publication
-    ::machteld::devcache::request lock $objectOutput
+    set held [open $objectOutput rb]
+    set attempts $::machteld::devcache::publishAttempts
+    set ::machteld::devcache::publishAttempts 2
     try {
         set failed [catch {::machteld::devcache::ensure $objectRecord $spec $objectOutput \
             [list fixture_build $spec]} message]
     } finally {
-        ::machteld::devcache::request unlock $objectOutput
+        set ::machteld::devcache::publishAttempts $attempts
+        close $held
     }
-    check {locked non-executable output refuses publication} $failed $message
+    check {held non-executable output refuses publication} $failed $message
     check {publication failure preserves the complete object and record} \
         [expr {[read_bytes $objectOutput] eq $objectBytes && \
             [read_bytes $objectRecord] eq $objectRecordBytes}]
-    expect_miss {object publication recovers after the lock is released} $spec $objectRecord $objectOutput
+    expect_miss {object publication recovers once the holder closes the output} $spec $objectRecord $objectOutput
     set objectSpec $spec
 
     # Immutable reference-style directory generations are selected by a record.
@@ -373,8 +388,9 @@ try {
     check {malformed outputs list in a directory record is a cache miss} \
         [expr {!$badRecordFailed && $builds == $count + 1}] $message
 
-    # The production lock is an OS-held handle. Killing its owner must make an
-    # existing lock file reusable; a mere leftover filename must not deadlock.
+    # The production lock is a file naming its holder's process and start time.
+    # Killing its owner must make the lock it leaves behind reusable; a mere
+    # leftover filename must not deadlock.
     set cleanRoot [file join $work clean-fixture]
     write_bytes [file join $cleanRoot object.o] keep-object
     write_bytes [file join $cleanRoot reference page.md] keep-reference
@@ -390,7 +406,7 @@ try {
         vwait ::childState
         check {build lock fixture acquires a real process-held lock} \
             [expr {$::childState eq "LOCKED"}] $::childState
-        set contended [catch {::machteld::devcache::request lock $lockFile} message]
+        set contended [catch {::machteld::devcache::lock $lockFile} message]
         check {another process cannot acquire a held build lock} $contended $message
         set refused [catch {::machteld::devcache::clean $cleanRoot} message]
         check {clean refuses a cache owned by an active build} $refused $message
@@ -400,24 +416,30 @@ try {
     } finally {
         after cancel $timeout
         chan event $pipe readable {}
-        # Do not use /T: the helper's owner watcher must release this lock.
         foreach child $childPids { catch {exec taskkill.exe /F /PID $child 2>@1} }
         catch {close $pipe}
     }
     check {killed lock owner leaves its lock filename behind} [file isfile $lockFile]
-    set reacquired [expr {![catch {::machteld::devcache::request lock $lockFile} message]}]
-    check {owner termination releases the lock without deleting its file} $reacquired $message
-    if {$reacquired} { ::machteld::devcache::request unlock $lockFile }
-    set reacquired [expr {![catch {::machteld::devcache::request lock $lockFile} message]}]
+    set reacquired [expr {![catch {::machteld::devcache::lock $lockFile} message]}]
+    check {a killed owner's lock is taken over} $reacquired $message
+    if {$reacquired} { ::machteld::devcache::unlock $lockFile }
+    check {normal unlock removes this holder's lock file} [expr {![file exists $lockFile]}]
+    set reacquired [expr {![catch {::machteld::devcache::lock $lockFile} message]}]
     check {normal unlock permits another acquisition} $reacquired $message
-    if {$reacquired} { ::machteld::devcache::request unlock $lockFile }
+    if {$reacquired} { ::machteld::devcache::unlock $lockFile }
+    write_bytes $lockFile {}
+    file mtime $lockFile [expr {[clock seconds] - 60}]
+    set reacquired [expr {![catch {::machteld::devcache::lock $lockFile} message]}]
+    check {an old lock file that names no holder is taken over} $reacquired $message
+    if {$reacquired} { ::machteld::devcache::unlock $lockFile }
     ::machteld::devcache::clean $cleanRoot
-    check {uncontended clean removes fixtures but retains the unlocked claim file} \
-        [expr {[lsort [glob -tails -nocomplain -directory $cleanRoot *]] eq {build.lock} && \
-            [file isfile $lockFile]}]
-    set reacquired [expr {![catch {::machteld::devcache::request lock $lockFile} message]}]
-    check {successful clean releases its process-held lock} $reacquired $message
-    if {$reacquired} { ::machteld::devcache::request unlock $lockFile }
+    check {uncontended clean removes fixtures and its own lock file} \
+        [expr {[glob -tails -nocomplain -directory $cleanRoot *] eq {} && \
+            [glob -tails -nocomplain -types hidden -directory $cleanRoot *] eq {} && \
+            [file isdirectory $cleanRoot]}]
+    set reacquired [expr {![catch {::machteld::devcache::lock $lockFile} message]}]
+    check {successful clean releases its lock} $reacquired $message
+    if {$reacquired} { ::machteld::devcache::unlock $lockFile }
 
     # Input selection is tested through the production stage-spec builders.
     # Files here are tiny stand-ins; no native code or real manuals are built.
@@ -430,9 +452,8 @@ try {
         yyjson [file join $::fixtureCache yyjson] \
         tclsh [file join $prefix bin tclsh90s.exe]]
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.ps1 tools/bootstrap-deps.sh
-        tools/toolchain.ps1 tools/toolchain-fingerprint.ps1 tools/patches/dependency.patch tools/buildlib.tcl
-        tools/generate-reference.ps1 tools/reference-data.cs tools/reference-cache.ps1 tools/package.tcl tools/publish-output.ps1
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch tools/buildlib.tcl
+        tools/reference.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
         tcl/pool.tcl LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
@@ -453,8 +474,7 @@ try {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"
     }
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.ps1 tools/bootstrap-deps.sh
-        tools/toolchain.ps1 tools/toolchain-fingerprint.ps1 tools/patches/dependency.patch
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch
     } {
         spec_tracks dependencies [file join $::fixtureRoot {*}[split $relative /]]
     }
@@ -491,7 +511,7 @@ try {
     file delete $additionalHeader
 
     foreach relative {
-        LICENSE tools/generate-reference.ps1 tools/reference-data.cs tools/reference-cache.ps1
+        LICENSE tools/reference.tcl
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         docs/overview.md docs/reference/machteld/command/help.md
     } {
@@ -500,6 +520,10 @@ try {
     foreach relative {prefix/bin/tclsh90s.exe downloads/tcl904-src.zip downloads/tk904-src.zip} {
         spec_tracks reference [file join $::fixtureCache {*}[split $relative /]]
     }
+    # tools/reference.tcl runs on the build runtime; its bytes are an input.
+    check {reference dependency includes the converting build runtime} \
+        [expr {[file normalize [info nameofexecutable]] in \
+            [lmap path [dict get [production_spec reference] files] {file normalize $path}]}]
     set before [production_key reference]
     set priorNative [production_key native]
     set renamedDoc [file join $::fixtureRoot docs renamed.md]
@@ -530,7 +554,7 @@ try {
     check {runtime version change regenerates the reference} [expr {$before ne [production_key reference]}]
 
     foreach relative {
-        LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl tools/publish-output.ps1
+        LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl
         tools/build_identity.tcl staged/prelude.tcl staged/console.exe staged/gui.exe
         staged/reference/manifest.sha256 staged/reference/markdown/page.md
     } {
@@ -543,9 +567,9 @@ try {
         spec_tracks package [file join $::fixtureCache {*}[split $relative /]]
     }
 
-    # Bootstrap and incremental builds share this exact C# fingerprint. Use a
-    # tiny fake MSYS tree to verify transitive input selection without reading
-    # or altering the real toolchain and without invoking a compiler.
+    # The incremental build keys on this byte-level toolchain fingerprint. Use
+    # a tiny fake MSYS tree to verify transitive input selection without
+    # reading or altering the real toolchain and without invoking a compiler.
     set toolchainRoot [file join $work fake-msys]
     set toolchainFiles {
         ucrt64/include/windows.h
@@ -566,37 +590,40 @@ try {
     set unrelatedPython [file join $toolchainRoot ucrt64 lib python3 site-packages arbitrary.py]
     write_bytes $unrelatedPython unrelated-python
     foreach relative $toolchainFiles { toolchain_tracks $toolchainRoot $relative }
-    set before [::machteld::devcache::request toolchain $toolchainRoot]
+    set before [::machteld::devcache::toolchain_digest $toolchainRoot]
     write_bytes $unrelatedPython modified-python
     check {unrelated nested Python library changes do not invalidate the C toolchain} \
-        [expr {$before eq [::machteld::devcache::request toolchain $toolchainRoot]}]
+        [expr {$before eq [::machteld::devcache::toolchain_digest $toolchainRoot]}]
     set extraHeader [file join $toolchainRoot ucrt64 include added.h]
     write_bytes $extraHeader added-system-header
-    set added [::machteld::devcache::request toolchain $toolchainRoot]
+    set added [::machteld::devcache::toolchain_digest $toolchainRoot]
     check {shared toolchain detects newly added system headers} [expr {$before ne $added}]
     set renamedHeader [file join $toolchainRoot ucrt64 include renamed.h]
     file rename $extraHeader $renamedHeader
     check {shared toolchain detects renamed system headers} \
-        [expr {$added ne [::machteld::devcache::request toolchain $toolchainRoot]}]
+        [expr {$added ne [::machteld::devcache::toolchain_digest $toolchainRoot]}]
     file delete $renamedHeader
     check {shared toolchain detects deleted system headers} \
-        [expr {$before eq [::machteld::devcache::request toolchain $toolchainRoot]}]
+        [expr {$before eq [::machteld::devcache::toolchain_digest $toolchainRoot]}]
     set extraLibrary [file join $toolchainRoot ucrt64 lib new-import.a]
     write_bytes $extraLibrary new-import-library
     check {shared toolchain detects added import libraries} \
-        [expr {$before ne [::machteld::devcache::request toolchain $toolchainRoot]}]
+        [expr {$before ne [::machteld::devcache::toolchain_digest $toolchainRoot]}]
     file delete $extraLibrary
     set hiddenBootstrapTool [file join $toolchainRoot usr bin .hidden-bootstrap]
     write_bytes $hiddenBootstrapTool hidden-bootstrap-input
     check {shared toolchain includes hidden bootstrap inputs} \
-        [expr {$before ne [::machteld::devcache::request toolchain $toolchainRoot]}]
+        [expr {$before ne [::machteld::devcache::toolchain_digest $toolchainRoot]}]
     file delete $hiddenBootstrapTool
 
     # Source the real development coordinator in an isolated interpreter and
     # repository. No build is requested; fake tools/prefix satisfy discovery.
     # Edit the copied scripts after startup, never the working source files.
+    # A child interpreter has no runtime package of its own: it is given this
+    # runtime's version and the commands the coordinator's helpers call.
     set startupRoot [file join $work coordinator-fixture]
-    foreach name {dev.tcl buildlib.tcl devcache.tcl} {
+    set recipes {dev.tcl buildlib.tcl devcache.tcl bootstrap.tcl}
+    foreach name $recipes {
         write_bytes [file join $startupRoot tools $name] \
             [read_bytes [file join $repo tools $name]]
     }
@@ -615,6 +642,12 @@ try {
     try {
         set ::env(MSYS2_ROOT) $toolchainRoot
         set ::env(MACHTELD_DEPS_ROOT) $::fixtureCache
+        interp eval $startup [list package provide machteld [package require machteld]]
+        interp eval $startup {namespace eval ::machteld {}}
+        foreach command {hash links mtps run json Publish} {
+            interp alias $startup ::machteld::$command {} ::machteld::$command
+        }
+        interp eval $startup [list set argv0 [file join $startupRoot tools dev.tcl]]
         interp eval $startup {set argv {}}
         interp eval $startup [list source [file join $startupRoot tools dev.tcl]]
         set loaded [interp eval $startup {set ::LOADED_RECIPES}]
@@ -647,7 +680,7 @@ try {
             [expr {$nativePaths eq [lrepeat 3 $expectedNativePath]}]
         check {native entry points preserve caller PATH for other build stages} \
             [interp eval $startup {expr {$::env(PATH) eq $::inheritedPath}}]
-        foreach name {dev.tcl buildlib.tcl devcache.tcl} {
+        foreach name $recipes {
             set path [file join $startupRoot tools $name]
             set bytes [read_bytes $path]
             set time [file mtime $path]
@@ -669,76 +702,12 @@ try {
         }
     }
 
-    # Execute the actual bootstrap command shape against a tiny shell fixture.
-    # An indirect '-c script' invocation hits its /usr/bin/env shebang before
-    # bootstrap-deps.sh can set PATH; direct Bash script execution must work.
-    set msysCandidates {}
-    foreach name {MSYS2_ROOT Z_MSYS2} {
-        if {[info exists ::env($name)] && $::env($name) ne ""} { lappend msysCandidates $::env($name) }
+    # The real pinned MSYS2, found as tools/bootstrap.tcl finds it, for the
+    # constrained native PATH and the tiny native products below.
+    set realMsys [::boot::msysRoot $msysRequested]
+    if {![file isfile [file join $realMsys ucrt64 bin gcc.exe]]} {
+        error "native environment checks require the configured MSYS2 gcc"
     }
-    lappend msysCandidates C:/msys64 [file join [file dirname $repo] .z r msys2]
-    set realMsys ""
-    foreach candidate $msysCandidates {
-        if {[file isfile [file join $candidate usr bin bash.exe]] && \
-                [file isfile [file join $candidate usr bin cygpath.exe]]} {
-            set realMsys $candidate
-            break
-        }
-    }
-    if {$realMsys eq ""} { error "bootstrap launch test requires the configured MSYS2 Bash" }
-    set bootstrapText [read_bytes [file join $repo tools bootstrap.ps1]]
-    if {![regexp -line {^& \$Bash[^\r\n]+} $bootstrapText bashInvocation]} {
-        error "cannot locate production bootstrap Bash invocation"
-    }
-    set shellFixture [file join $work {bootstrap source Ω} {fixture with spaces.sh}]
-    write_bytes $shellFixture [encoding convertto utf-8 {#!/usr/bin/env bash
-set -euo pipefail
-printf '<%s>\n' "$@"
-}]
-    set sourceArgument {/source path/Ω}
-    set prefixArgument {/prefix with 'apostrophe'/α}
-    set shellDriver [file join $work bootstrap-launch.ps1]
-    set shellDriverText [string map [list \
-        @BASH@ [ps_literal [file join $realMsys usr bin bash.exe]] \
-        @CYGPATH@ [ps_literal [file join $realMsys usr bin cygpath.exe]] \
-        @SCRIPT@ [ps_literal $shellFixture] \
-        @SOURCE@ [ps_literal $sourceArgument] \
-        @PREFIX@ [ps_literal $prefixArgument] \
-        @INVOKE@ $bashInvocation] {
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$Bash = @BASH@
-$cygpath = @CYGPATH@
-$scriptUnix = (& $cygpath -u @SCRIPT@).Trim()
-$sourceUnix = @SOURCE@
-$prefixUnix = @PREFIX@
-$Jobs = 3
-$env:PATH = [IO.Path]::Combine($env:SystemRoot, 'System32')
-@INVOKE@
-if ($LASTEXITCODE) { throw "fixture Bash launch failed: $LASTEXITCODE" }
-}]
-    # Windows PowerShell reads non-ASCII .ps1 source as UTF-8 only with a BOM.
-    write_bytes $shellDriver [encoding convertto utf-8 "\ufeff$shellDriverText"]
-    set launchFailed [catch {::machteld::devcache::windows_powershell {
-        exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shellDriver 2>@1
-    }} launchResult]
-    check {production bootstrap Bash invocation works with System32-only PATH} \
-        [expr {!$launchFailed}] $launchResult
-    set expectedArgs "<$sourceArgument>\n<$prefixArgument>\n<3>"
-    check {bootstrap launch preserves spaces, Unicode, apostrophes and job count} \
-        [expr {!$launchFailed && [string trim $launchResult] eq $expectedArgs}] $launchResult
-    # Red/green proof: remove the apostrophe from this historical invocation so
-    # its failure specifically exercises the shebang/PATH problem, not quoting.
-    set oldInvocation {& $Bash --noprofile --norc -c "'$scriptUnix' '$sourceUnix' '$prefixUnix' '$Jobs'"}
-    set oldDriverText [string map [list $bashInvocation $oldInvocation \
-        [ps_literal $prefixArgument] [ps_literal /plain-prefix]] $shellDriverText]
-    set oldDriver [file join $work bootstrap-old-launch.ps1]
-    write_bytes $oldDriver [encoding convertto utf-8 "\ufeff$oldDriverText"]
-    set oldFailed [catch {::machteld::devcache::windows_powershell {
-        exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File $oldDriver 2>@1
-    }} oldResult]
-    check {former indirect Bash invocation fails at env shebang under minimal PATH} \
-        [expr {$oldFailed && [string match {*env*bash*} $oldResult]}] $oldResult
 
     # Compiler lookup must be constrained in execution, not merely omitted
     # from a cache key. Real tiny compiler/resource/link products verify that
@@ -850,33 +819,6 @@ if ($LASTEXITCODE) { throw "fixture Bash launch failed: $LASTEXITCODE" }
         }
     }
 
-    # A Tcl process launched from PowerShell 7 inherits its module search path.
-    # Windows PowerShell must receive its own default; caller state is restored
-    # on both success and failure. This exercises the same launch wrapper as dev.
-    set modulePathPresent [info exists ::env(PSModulePath)]
-    if {$modulePathPresent} { set modulePathSaved $::env(PSModulePath) }
-    try {
-        set ::env(PSModulePath) [file join $work foreign-powershell-modules]
-        set suppliedModulePath $::env(PSModulePath)
-        set moduleFailed [catch {::machteld::devcache::windows_powershell {
-            exec powershell.exe -NoProfile -Command {(Get-Command Get-FileHash -ErrorAction Stop).Name} 2>@1
-        }} result]
-        check {Windows PowerShell child resolves its built-in modules} \
-            [expr {!$moduleFailed && [string trim $result] eq "Get-FileHash"}] $result
-        check {PowerShell launch restores the caller module path} \
-            [expr {$::env(PSModulePath) eq $suppliedModulePath}]
-        catch {::machteld::devcache::windows_powershell {error expected-launch-failure}} result
-        check {failed PowerShell launch restores the caller module path} \
-            [expr {$::env(PSModulePath) eq $suppliedModulePath}]
-        unset ::env(PSModulePath)
-        ::machteld::devcache::windows_powershell {set childSawPath [info exists ::env(PSModulePath)]}
-        check {an initially absent module path remains absent} \
-            [expr {!$childSawPath && ![info exists ::env(PSModulePath)]}]
-    } finally {
-        if {$modulePathPresent} { set ::env(PSModulePath) $modulePathSaved } \
-        else { unset -nocomplain ::env(PSModulePath) }
-    }
-
     # External include/library search overrides cannot be safely represented by
     # their strings alone. Production rejects those untracked inputs explicitly.
     set compilerNames {CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH
@@ -899,22 +841,6 @@ if ($LASTEXITCODE) { throw "fixture Bash launch failed: $LASTEXITCODE" }
                 [expr {$rejected && [string match "*unset $name*" $message]}] $message
             unset ::env($name)
         }
-        set rejectedCache [file join $work environment-rejected-cache]
-        write_bytes [file join $rejectedCache sentinel] must-remain-unchanged
-        foreach name {CPATH CFLAGS MAKEFLAGS MAKEFILES BASH_ENV ENV CONFIG_SITE BASH_FUNC_cache_fixture%% TCL9.0_TM_PATH} {
-            set ::env($name) [file join $work external-search]
-            try {
-                set rejected [catch {::machteld::devcache::windows_powershell {
-                    exec powershell.exe -NoProfile -ExecutionPolicy Bypass \
-                        -File [file join $repo tools bootstrap.ps1] -CacheRoot $rejectedCache \
-                        -VerifyOnly 2>@1
-                }} message]
-                check "actual bootstrap rejects untracked $name before cache work" \
-                    [expr {$rejected && [string match "*unset $name*" $message]}] $message
-            } finally { unset -nocomplain ::env($name) }
-        }
-        check {bootstrap environment refusal preserves every cache input} \
-            [expr {[fixture_entries $rejectedCache] eq {sentinel must-remain-unchanged}}]
     } finally {
         foreach name $compilerNames {
             if {[dict exists $savedCompilerEnv $name]} { set ::env($name) [dict get $savedCompilerEnv $name] } \
@@ -927,17 +853,15 @@ if ($LASTEXITCODE) { throw "fixture Bash launch failed: $LASTEXITCODE" }
     set staleCache [file join $work stale-dependency-cache]
     write_bytes [file join $staleCache lock.sha256] [string repeat 0 64]
     set staleBefore [fixture_entries $staleCache]
-    set failed [catch {::machteld::devcache::windows_powershell {
-        exec powershell.exe -NoProfile -ExecutionPolicy Bypass \
-            -File [file join $repo tools bootstrap.ps1] -CacheRoot $staleCache \
-            -VerifyOnly 2>@1
-    }} message]
+    set result [run -timeout 5m -- [info nameofexecutable] [file join $repo tools bootstrap.tcl] \
+        --cache $staleCache --msys $realMsys --verify-only]
+    set failed [expr {[dict get $result exit] != 0}]
+    set message [encoding convertfrom utf-8 [dict get $result err]][encoding convertfrom utf-8 [dict get $result out]]
     check {production bootstrap verification refuses a stale dependency lock} \
         [expr {$failed && [string match {*dependency cache is absent or stale*} $message]}] $message
     check {verify-only refusal does not mutate the dependency cache} \
         [expr {$staleBefore eq [fixture_entries $staleCache]}]
 } finally {
-    ::machteld::devcache::shutdown
     # Only the invocation-owned child of the exact tempfile marker is removed.
     if {[file normalize $work] eq [file normalize "${claim}.d"] && \
             [file dirname $work] eq [file dirname [file normalize $claim]] && \

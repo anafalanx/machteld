@@ -1,7 +1,7 @@
 # Build the self-contained Windows hosts from the repository-local dependency
-# prefix created by tools/bootstrap.ps1.
+# prefix created by tools/bootstrap.tcl.
 #
-# Prefer tools/build.ps1, which verifies/bootstraps the cache and owns a unique
+# Prefer tools/release.tcl, which verifies/bootstraps the cache and owns a unique
 # work directory plus an absent output candidate. Direct callers must provide
 # MACHTELD_BUILD_ROOT and MACHTELD_REFERENCE_ROOT with the same guarantees.
 #
@@ -19,8 +19,8 @@ namespace import ::machteld::build::run
 set GCC [expr {[info exists ::env(MACHTELD_GCC)] ? $::env(MACHTELD_GCC) : ""}]
 set STRIP [expr {[info exists ::env(MACHTELD_STRIP)] ? $::env(MACHTELD_STRIP) : ""}]
 set WINDRES [expr {[info exists ::env(MACHTELD_WINDRES)] ? $::env(MACHTELD_WINDRES) : ""}]
-if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/build.ps1" }
-if {$WINDRES eq ""} { error "build.tcl: MACHTELD_WINDRES is not set; use tools/build.ps1" }
+if {$GCC eq ""} { error "build.tcl: MACHTELD_GCC is not set; use tools/release.tcl" }
+if {$WINDRES eq ""} { error "build.tcl: MACHTELD_WINDRES is not set; use tools/release.tcl" }
 foreach {label path} [list gcc $GCC windres $WINDRES] {
     if {![file exists $path]} { error "build.tcl: missing $label: $path" }
 }
@@ -39,7 +39,7 @@ if {![catch {file lstat $OUT ignored}]} {
 }
 if {![info exists ::env(MACHTELD_BUILD_ROOT)] ||
         $::env(MACHTELD_BUILD_ROOT) eq ""} {
-    error "MACHTELD_BUILD_ROOT is not set by tools/build.ps1"
+    error "MACHTELD_BUILD_ROOT is not set by tools/release.tcl"
 }
 set BUILDROOT [file normalize $::env(MACHTELD_BUILD_ROOT)]
 if {![file isdirectory $BUILDROOT]} {
@@ -118,7 +118,7 @@ set staged [file join $OBJDIR prelude.tcl]
 
 if {![info exists ::env(MACHTELD_REFERENCE_ROOT)] ||
         $::env(MACHTELD_REFERENCE_ROOT) eq ""} {
-    error "MACHTELD_REFERENCE_ROOT is not set by tools/build.ps1"
+    error "MACHTELD_REFERENCE_ROOT is not set by tools/release.tcl"
 }
 set referenceRoot [file normalize $::env(MACHTELD_REFERENCE_ROOT)]
 if {![file isdirectory $referenceRoot]} {
