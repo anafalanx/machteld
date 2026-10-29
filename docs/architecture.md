@@ -103,29 +103,33 @@ corpus hashes do not independently authenticate an unsigned executable. During
 unreleased work the runtime version alone does not identify the source revision
 or corpus: compare the embedded build and reference identities as well.
 
-The development pipeline has separately content-verified caches for upstream
-Tcl/Tk conversion, authored Machteld pages, the assembled reference, and final
-packaging. An authored page edit reuses upstream conversion; a Tcl implementation
-edit does not invalidate documentation. Runtime version declarations must still
-agree, and a version change invalidates authored records. Cache generations are
-immutable; corrupted or incomplete entries are misses, not freshness evidence.
-The byte-compatible serializers are build-only C# helpers, not runtime features.
-Release builds do not reuse development conversion caches.
+The development loop records its stages by content: compiled objects, the
+prelude, each reference generation, and the final package. A reference
+generation is immutable and is reused while the documentation, the generator,
+and the runtime version stay the same; an authored page edit generates the
+reference again, and a Tcl implementation edit does not invalidate
+documentation. Runtime version declarations must still agree, and a version
+change invalidates the reference record. Corrupted or incomplete records are
+misses, not freshness evidence. The generator's serializers are build-only Tcl,
+not runtime features, and release builds do not reuse development records.
 
-`tools/test.ps1` defaults to the `fast` group against an existing executable.
-`integration` adds native fixtures, native stream limits, and build-cache
-tests; `packaging` checks entry points, wrapping, publication, and Windows
-metadata. Each run identifies and hashes its executable and refuses a changed
-binary at completion. `native-validation` adds headless lifetime stress,
-worker-scaling measurements, static analysis, and capability-probed native
-instrumentation. Negative controls must fail as expected; unavailable sanitizer
-runtimes are reported, never counted as passing instrumentation. See
+`tools/gate.tcl` builds and then runs every test group; `--group` selects
+groups to run against an existing executable without building. `fast` needs no
+compiler; `integration` adds native fixtures, native stream limits, and
+build-cache tests; `packaging` checks entry points, wrapping, publication, and
+Windows metadata. A run that tests an executable identifies it by version and
+SHA-256 and refuses one that changes during the run. `native-validation` adds
+headless lifetime stress and the undefined-behavior-trapped native drivers;
+worker-scaling measurements (`--native-scaling`) and static analysis with
+capability-probed instrumentation (`--native-analysis`) are explicit options.
+Negative controls must fail as expected; unavailable sanitizer runtimes are
+reported, never counted as passing instrumentation. See
 [native validation](native-validation.md) for coverage and limitations.
-`reference-generator` is the separate, expensive
-uncached conversion/determinism group. Only explicit `-Group release` builds
-before running every group. `tools/dev.tcl test` likewise tests without an
-implicit build. The GUI model runs in `fast`; `-InteractiveGui` explicitly enables the visible
-Tk-widget checks. Manual interaction remains part of release acceptance.
+`reference-generator` is the separate, expensive determinism group: two cold
+conversions compared byte for byte. `tools/dev.tcl test` likewise tests
+without an implicit build. The GUI model runs in `fast`; `--interactive-gui`
+explicitly enables the visible Tk-widget checks. Manual interaction remains
+part of release acceptance.
 
 ## Lifetime
 

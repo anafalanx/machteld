@@ -338,7 +338,8 @@ proc dev_docs {} {
 
 # Lanes needing compiled C fixtures or basekit extraction (process, native,
 # store, wrap, entry) and the full conversion/determinism check (the reference
-# generator) run in tools/gate.tcl.
+# generator) run in tools/gate.tcl, alone with --group integration, packaging
+# or reference-generator.
 set ::LANES {
     filesystem test/filesystem_test.tcl
     runtime    test/runtime_test.tcl
@@ -361,7 +362,7 @@ proc dev_test {lanes} {
     foreach lane $lanes {
         if {![dict exists $::LANES $lane]} {
             puts "test: unknown lane '$lane' (known: [dict keys $::LANES]);"
-            puts "      fixture-heavy lanes (process native store wrap entry) use tools/gate.tcl"
+            puts "      fixture-heavy lanes (process native store wrap entry) use tools/gate.tcl --group integration or packaging"
             incr fail; continue
         }
         set path [Rp {*}[split [dict get $::LANES $lane] /]]
