@@ -41,10 +41,16 @@ consumes its queued state; a completed child remains ready.
 ## Examples
 
 ```tcl
-set build [child start -- build.exe]
-set changes [watch start C:/src -recursive]
-set ready [wait -any $build $changes]
-if {$changes in $ready} { set events [watch read $changes] }
+scope {
+    set build [child start -- build.exe]
+    set changes [watch start C:/src -recursive]
+    try {
+        set ready [wait -any $build $changes]
+        if {$changes in $ready} { set events [watch read $changes] }
+    } finally {
+        watch close $changes
+    }
+}
 ```
 
 ## Constraints

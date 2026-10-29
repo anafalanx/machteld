@@ -12,9 +12,10 @@
 # with its parent, is tree-killed rather than asked to stop, can be capped with
 # -mem, and is reaped by `scope` at the closing brace.
 #
-# NO POLLING ANYWHERE. `chan event` on each worker's stdout does the multiplexing
-# that `wait -any` does by blocking, so a Tk tool stays responsive and an idle
-# pool costs nothing.
+# `chan event` does the multiplexing without polling. After each bounded read,
+# the channel is paused through an idle turn before rearming: continuously
+# ready pipes must not starve Tk's idle redraw/layout work. An idle pool still
+# has no recurring timer.
 #
 # ONE ITEM IN FLIGHT PER WORKER. Not a throughput choice -- a legibility one. With
 # a single outstanding request the mapping from a reply to the item it answers is
@@ -31,11 +32,18 @@ namespace eval ::machteld {
 
 set ::machteld::POOL_ERRCAP 65536   ;# per pool, so a chatty worker cannot grow without bound
 
+proc ::machteld::PoolBound {domain option value} {
+    set value [ProtocolLimit $domain $option $value]
+    if {$option eq "-width" && $value > 256} {
+        Fail $domain badvalue "-width must be between 1 and 256"
+    }
+    return $value
+}
+
 proc ::machteld::pool {args} {
     variable POOL
     variable POOL_SEQ
     set subs {create submit wait info close}
-    set opts {-width -maxtries -timeout -arg0 -cpu -dir -env -mem}
 
     if {![llength $args]} {
         Fail POOL usage "usage: pool create ?-width n? -- command ?arg ...?"
@@ -75,7 +83,8 @@ proc ::machteld::PoolCreate {argl} {
     variable POOL
     variable POOL_SEQ
     set width 4
-    set maxtries 3
+    set maxtries 1
+    set limits [dict create maxframe 16777216 maxitems 10000 maxbatch 67108864 maxresults 67108864]
     set launch {}
     set i 0
     for {} {$i < [llength $argl]} {incr i} {
@@ -86,16 +95,13 @@ proc ::machteld::PoolCreate {argl} {
         set v [lindex $argl [expr {$i + 1}]]
         switch -- $a {
             -width {
-                if {![string is integer -strict $v] || $v < 1 || $v > 256} {
-                    Fail POOL badvalue "pool create: -width must be between 1 and 256"
-                }
-                set width $v
+                set width [PoolBound POOL $a $v]
             }
             -maxtries {
-                if {![string is integer -strict $v] || $v < 1} {
-                    Fail POOL badvalue "pool create: -maxtries must be at least 1"
-                }
-                set maxtries $v
+                set maxtries [PoolBound POOL $a $v]
+            }
+            -maxframe - -maxitems - -maxbatch - -maxresults {
+                dict set limits [string range $a 1 end] [ProtocolLimit POOL $a $v]
             }
             -arg0 - -cpu - -dir - -env - -mem - -timeout {
                 lappend launch $a $v
@@ -109,8 +115,9 @@ proc ::machteld::PoolCreate {argl} {
 
     set tok pool#[incr POOL_SEQ]
     dict set POOL $tok [dict create cmd $cmd launch $launch width $width maxtries $maxtries \
-        pending {} results {} inflight {} workers {} nextid 0 \
-        dead 0 requeued 0 errbuf "" fatal "" done 1 submitted 0 submitted_once 0]
+        limits $limits pending {} results {} inflight {} workers {} readers {} resumes {} nextid 0 \
+        batchbytes 0 resultbytes 0 dead 0 requeued 0 errbuf "" fatal "" fatalcode {} \
+        done 1 submitted 0 submitted_once 0]
     if {[catch {
         for {set k 0} {$k < $width} {incr k} { PoolSpawn $tok }
     } msg opts]} {
@@ -133,19 +140,14 @@ proc ::machteld::PoolSpawn {tok} {
     set in  [dict get $ci stdin]
     set out [dict get $ci stdout]
     set err [dict get $ci stderr]
-    # THE WIRE IS UTF-8 JSON LINES. `child -channels` hands over BINARY
-    # channels; left that way the director wrote a request's non-ASCII text as
-    # Latin-1 (and could not write anything past U+00FF at all) and read a
-    # worker's UTF-8 reply byte by byte as mojibake. Configure the protocol
-    # pair as strict UTF-8 text: a worker reply that is not valid UTF-8 then
-    # surfaces in PoolReadable as the protocol violation it is, never as a
-    # silently replaced character. Stderr is human diagnostics, decoded
-    # leniently so a garbled byte can never raise inside an event handler.
-    fconfigure $in  -blocking 0 -buffering line -translation lf -encoding utf-8 -profile strict
-    fconfigure $out -blocking 0 -buffering line -translation lf -encoding utf-8 -profile strict
-    fconfigure $err -blocking 0 -translation lf -encoding utf-8 -profile replace
-    chan event $out readable [list ::machteld::PoolReadable $tok $c]
-    chan event $err readable [list ::machteld::PoolStderr  $tok $c]
+    # Frame binary bytes first, then decode a complete bounded frame strictly.
+    # The nonblocking output queue is capped separately in PoolFeed.
+    foreach ch [list $in $out $err] {
+        fconfigure $ch -blocking 0 -buffering none -translation binary
+    }
+    chan event $out readable [list ::machteld::PoolEvent $tok $c readable]
+    chan event $err readable [list ::machteld::PoolEvent $tok $c stderr]
+    dict set POOL $tok readers $c ""
     dict set POOL $tok workers [linsert [dict get $POOL $tok workers] end $c]
     return $c
 }
@@ -158,7 +160,7 @@ proc ::machteld::PoolStderr {tok c} {
     if {[catch {child info $c} ci]} return
     if {![dict exists $ci stderr]} return
     set ch [dict get $ci stderr]
-    if {[catch {read $ch} chunk]} return
+    set chunk [read $ch 65536]
     if {$chunk ne ""} {
         set buf [dict get $POOL $tok errbuf]
         append buf $chunk
@@ -167,42 +169,139 @@ proc ::machteld::PoolStderr {tok c} {
         }
         dict set POOL $tok errbuf $buf
     }
+    if {[eof $ch]} { chan event $ch readable {} }
+}
+
+# Every event boundary is contained. An unexpected callback error must wake
+# waiters and clean up, never disappear into bgerror while the pool stalls.
+proc ::machteld::PoolEvent {tok c kind} {
+    variable POOL
+    if {![dict exists $POOL $tok] || $c ni [dict get $POOL $tok workers]} return
+    if {[catch {
+        set ci [child info $c]
+        set ch [dict get $ci [expr {$kind eq "stderr" ? "stderr" : "stdout"}]]
+        # Suppress file events while processing and until an idle pass has run.
+        # Merely limiting reads or using after 0 leaves the event queue always
+        # nonempty under sustained I/O, which starves Tk's idle handlers.
+        chan event $ch readable {}
+        set key [list $c $kind]
+        if {[dict exists $POOL $tok resumes $key]} {
+            after cancel [dict get $POOL $tok resumes $key]
+            dict unset POOL $tok resumes $key
+        }
+        if {$kind eq "stderr"} { PoolStderr $tok $c } else { PoolReadable $tok $c }
+        if {[dict exists $POOL $tok] && $c in [dict get $POOL $tok workers] &&
+                !($kind eq "stderr" && [eof $ch])} {
+            dict set POOL $tok resumes $key \
+                [after idle [list ::machteld::PoolAfterIdle $tok $c $kind]]
+        }
+    } msg]} {
+        PoolAbort $tok failed "pool callback failed: $msg"
+    }
+}
+
+# The idle callback itself does no I/O. Its zero-delay continuation runs only
+# after the current idle pass, giving already-queued GUI work its opportunity.
+# Both stages are recorded and canceled by death, abort and close.
+proc ::machteld::PoolAfterIdle {tok c kind} {
+    variable POOL
+    set key [list $c $kind]
+    if {![dict exists $POOL $tok resumes $key] || $c ni [dict get $POOL $tok workers]} return
+    dict set POOL $tok resumes $key [after 0 [list ::machteld::PoolRearm $tok $c $kind]]
+}
+
+proc ::machteld::PoolRearm {tok c kind} {
+    variable POOL
+    set key [list $c $kind]
+    if {![dict exists $POOL $tok resumes $key] || $c ni [dict get $POOL $tok workers]} return
+    dict unset POOL $tok resumes $key
+    if {[catch {
+        set ci [child info $c]
+        set ch [dict get $ci [expr {$kind eq "stderr" ? "stderr" : "stdout"}]]
+        if {$kind eq "readable" &&
+                ([string first \n [dict get $POOL $tok readers $c]] >= 0 || [eof $ch])} {
+            # Buffered complete frames need work even without new pipe bytes.
+            PoolEvent $tok $c $kind
+        } else {
+            chan event $ch readable [list ::machteld::PoolEvent $tok $c $kind]
+        }
+    } msg]} {
+        PoolAbort $tok failed "pool channel rearm failed: $msg"
+    }
+}
+
+proc ::machteld::PoolDiagnostic {tok message} {
+    variable POOL
+    variable POOL_ERRCAP
+    set tail [dict get $POOL $tok errbuf]
+    append tail [encoding convertto utf-8 $message]
+    dict set POOL $tok errbuf [string range $tail end-[expr {$POOL_ERRCAP - 1}] end]
 }
 
 proc ::machteld::PoolSubmit {tok items} {
     variable POOL
+    if {[dict get $POOL $tok fatal] ne ""} {
+        return -code error -errorcode [dict get $POOL $tok fatalcode] [dict get $POOL $tok fatal]
+    }
     if {[dict get $POOL $tok submitted_once]} {
         Fail POOL usage "pool submit: a pool accepts exactly one batch; create another pool"
+    }
+    set limits [dict get $POOL $tok limits]
+    if {[llength $items] > [dict get $limits maxitems]} {
+        Fail POOL limit "pool submit: batch exceeds -maxitems ([dict get $limits maxitems])"
     }
     # `items` is always a list of request dicts; Tcl values do not preserve how
     # the caller happened to spell a one-element list.
     set pend [dict get $POOL $tok pending]
     set next [dict get $POOL $tok nextid]
+    set bytes 0
     foreach it $items {
         if {[catch {dict size $it}]} { Fail POOL badvalue "pool submit: each item must be a dict" }
         if {![dict exists $it op]} { Fail POOL badvalue "pool submit: each item needs an op" }
         # An item must be expressible on the wire before it is accepted.
         # Refusing here names the caller's mistake at the boundary; discovering
         # it at feed time would kill a healthy worker and poison the item.
-        if {[catch {json encode -plain $it}]} {
+        dict set it id $next
+        if {[catch {json encode -plain -dict $it} encoded]} {
             Fail POOL badvalue "pool submit: each item must encode as plain JSON; typed json values are refused"
         }
-        dict set it id $next
+        set frame [encoding convertto utf-8 $encoded]
+        set size [string length $frame]
+        if {$size > [dict get $limits maxframe]} {
+            Fail POOL limit "pool submit: request exceeds -maxframe ([dict get $limits maxframe] bytes)"
+        }
+        incr bytes [expr {$size + 1}]
+        if {$bytes > [dict get $limits maxbatch]} {
+            Fail POOL limit "pool submit: batch exceeds -maxbatch ([dict get $limits maxbatch] bytes)"
+        }
         incr next
-        lappend pend $it
+        # Retain exactly the validated wire representation, not a second copy
+        # of caller dicts that can be much larger than their encoded payload.
+        lappend pend [list id [dict get $it id] frame $frame]
     }
     dict set POOL $tok pending $pend
     dict set POOL $tok nextid $next
     dict set POOL $tok submitted $next
+    dict set POOL $tok batchbytes $bytes
     dict set POOL $tok submitted_once 1
     dict set POOL $tok done 0
+    # Idle workers may have exited while the caller was doing other event-loop
+    # work before submit. Do not leave an accepted batch with no live readers.
+    if {[llength $pend] && ![llength [dict get $POOL $tok workers]]} {
+        if {[catch {PoolSpawn $tok} message]} {
+            PoolAbort $tok launch $message
+            return -code error -errorcode {MACHTELD POOL launch} $message
+        }
+    }
     foreach c [dict get $POOL $tok workers] { PoolFeed $tok $c }
+    PoolCheckDone $tok
     return
 }
 
 proc ::machteld::PoolFeed {tok c} {
     variable POOL
     if {![dict exists $POOL $tok]} return
+    if {[dict get $POOL $tok fatal] ne "" || $c ni [dict get $POOL $tok workers]} return
     if {[dict exists [dict get $POOL $tok inflight] $c]} return
     set pend [dict get $POOL $tok pending]
     if {![llength $pend]} { PoolCheckDone $tok ; return }
@@ -212,7 +311,13 @@ proc ::machteld::PoolFeed {tok c} {
     if {[catch {
         set ci [child info $c]
         set in [dict get $ci stdin]
-        puts $in [json encode -plain $item]
+        set frame [dict get $item frame]
+        if {[chan pending output $in] + [string length $frame] + 1 >
+            [dict get $POOL $tok limits maxframe] + 1} {
+            PoolAbort $tok limit "worker input queue exceeds -maxframe"
+            return
+        }
+        puts $in $frame
         flush $in
     }]} {
         PoolDied $tok $c
@@ -225,51 +330,92 @@ proc ::machteld::PoolReadable {tok c} {
     if {[catch {child info $c} ci]} { PoolDied $tok $c ; return }
     if {![dict exists $ci stdout]} { PoolDied $tok $c ; return }
     set ch [dict get $ci stdout]
-    # A non-blocking `gets` returning -1 means "no COMPLETE line yet" as often as
-    # it means trouble; only `eof` tells a dead worker from a slow one, and
-    # confusing the two makes a pool either spin or hang.
-    while {1} {
-        if {[catch {gets $ch line} count]} {
-            # Under the strict UTF-8 profile an invalid byte sequence raises
-            # here. It is the same protocol violation as malformed JSON.
-            dict set POOL $tok errbuf [string range \
-                "[dict get $POOL $tok errbuf]protocol error: worker wrote a reply that is not UTF-8\n" end-65535 end]
+    set maxframe [dict get $POOL $tok limits maxframe]
+    set buffer [dict get $POOL $tok readers $c]
+    # At most 64KiB are read, and at most 64 records (including empty ones)
+    # handled per event. A sustained writer cannot monopolize the Tk loop.
+    if {[string first \n $buffer] < 0} {
+        append buffer [read $ch [expr {min(65536, $maxframe + 1 - [string length $buffer])}]]
+    }
+    set records 0
+    while {$records < 64} {
+        set lf [string first \n $buffer]
+        if {$lf >= 0} {
+            set frame [string range $buffer 0 $lf-1]
+            set buffer [string range $buffer $lf+1 end]
+        } elseif {[string length $buffer] > $maxframe} {
+            PoolAbort $tok limit "worker reply exceeds -maxframe ($maxframe bytes)"
+            return
+        } elseif {[eof $ch] && $buffer ne ""} {
+            # Like gets, accept the final complete JSON value without LF.
+            set frame $buffer
+            set buffer ""
+        } else {
+            break
+        }
+        incr records
+        if {[string length $frame] > $maxframe} {
+            PoolAbort $tok limit "worker reply exceeds -maxframe ($maxframe bytes)"
+            return
+        }
+        if {$frame eq ""} continue
+        if {[catch {encoding convertfrom -profile strict utf-8 $frame} line]} {
+            PoolDiagnostic $tok "protocol error: worker wrote a reply that is not UTF-8\n"
             PoolDied $tok $c
             return
         }
-        if {$count < 0} break
-        if {$line eq ""} continue
         if {[catch {json decode $line} rep] ||
             [catch {json encode -plain $rep} encoded] ||
             ![string match \{* $encoded] ||
-            ![dict exists $rep id] || ![dict exists $rep ok]} {
-            dict set POOL $tok errbuf [string range \
-                "[dict get $POOL $tok errbuf]protocol error: worker wrote a malformed reply\n" end-65535 end]
+            ![dict exists $rep id] || ![dict exists $rep ok] ||
+            ![string is boolean -strict [dict get $rep ok]]} {
+            PoolDiagnostic $tok "protocol error: worker wrote a malformed reply\n"
             PoolDied $tok $c
             return
         }
         if {![dict exists [dict get $POOL $tok inflight] $c] ||
             [dict get $rep id] ne [dict get $POOL $tok inflight $c id]} {
-            dict set POOL $tok errbuf [string range \
-                "[dict get $POOL $tok errbuf]protocol error: worker replied with an unexpected id\n" end-65535 end]
+            PoolDiagnostic $tok "protocol error: worker replied with an unexpected id\n"
             PoolDied $tok $c
             return
         }
-        dict set POOL $tok results [linsert [dict get $POOL $tok results] end $rep]
+        if {![PoolResult $tok $rep [expr {[string length $frame] + 1}]]} return
         dict set POOL $tok inflight [dict remove [dict get $POOL $tok inflight] $c]
         PoolFeed $tok $c
+        if {$c ni [dict get $POOL $tok workers]} return
     }
-    if {[eof $ch]} { PoolDied $tok $c ; return }
+    dict set POOL $tok readers $c $buffer
+    if {[eof $ch] && $buffer eq ""} { PoolDied $tok $c ; return }
     PoolCheckDone $tok
 }
 
-# A worker died. Its outstanding item goes back -- unless it has already killed
-# enough workers to look like the item's fault rather than the worker's, which is
-# the difference between resilience and an infinite loop.
+proc ::machteld::PoolResult {tok reply bytes} {
+    variable POOL
+    set total [expr {[dict get $POOL $tok resultbytes] + $bytes}]
+    if {$total > [dict get $POOL $tok limits maxresults]} {
+        PoolAbort $tok limit "retained replies exceed -maxresults ([dict get $POOL $tok limits maxresults] bytes)"
+        return 0
+    }
+    dict set POOL $tok resultbytes $total
+    dict set POOL $tok results [linsert [dict get $POOL $tok results] end $reply]
+    return 1
+}
+
+# A worker died without a reply. The operation's outcome is unknown. Replay is
+# explicit opt-in, bounded by total attempts; replacement for other pending
+# items is independent of whether this lost item may be replayed.
 proc ::machteld::PoolDied {tok c} {
     variable POOL
     if {![dict exists $POOL $tok]} return
     if {$c ni [dict get $POOL $tok workers]} return
+    foreach kind {readable stderr} {
+        set key [list $c $kind]
+        if {[dict exists $POOL $tok resumes $key]} {
+            after cancel [dict get $POOL $tok resumes $key]
+            dict unset POOL $tok resumes $key
+        }
+    }
+    dict unset POOL $tok readers $c
     catch {
         set ci [child info $c]
         foreach k {stdout stderr} {
@@ -283,13 +429,12 @@ proc ::machteld::PoolDied {tok c} {
     set infl [dict get $POOL $tok inflight]
     dict set POOL $tok inflight [dict remove $infl $c]
     PoolRequeue $tok $c $infl
+    if {[dict get $POOL $tok fatal] ne ""} return
     # Per-item maxtries makes replacement finite without a global death ceiling,
     # which could strand later items after earlier poison consumed the allowance.
     if {[llength [dict get $POOL $tok pending]]} {
         if {[catch {PoolSpawn $tok} new]} {
-            dict set POOL $tok fatal $new
-            dict set POOL $tok done 1
-            set ::machteld::POOL_DONE($tok) 1
+            PoolAbort $tok launch $new
         } else {
             PoolFeed $tok $new
         }
@@ -309,9 +454,10 @@ proc ::machteld::PoolRequeue {tok c infl} {
         dict set POOL $tok pending [linsert [dict get $POOL $tok pending] 0 $item]
         dict set POOL $tok requeued [expr {[dict get $POOL $tok requeued] + 1}]
     } else {
-        dict set POOL $tok results [linsert [dict get $POOL $tok results] end \
-            [dict create id $id ok 0 code {MACHTELD POOL poison} \
-                         msg "killed $tries workers; giving up"]]
+        set reply [dict create id $id ok 0 code {MACHTELD POOL poison} \
+            msg "no valid reply after $tries attempt(s); the operation may already have taken effect"]
+        PoolResult $tok $reply [expr {[string length [encoding convertto utf-8 \
+            [json encode -plain -dict $reply]]] + 1}]
     }
 }
 
@@ -344,7 +490,7 @@ proc ::machteld::PoolWait {tok argl} {
         set ms [_dur2ms POOL [lindex $argl [expr {$i + 1}]]]
     }
     if {[dict get $POOL $tok fatal] ne ""} {
-        return -code error -errorcode {MACHTELD POOL launch} [dict get $POOL $tok fatal]
+        return -code error -errorcode [dict get $POOL $tok fatalcode] [dict get $POOL $tok fatal]
     }
     if {![dict get $POOL $tok done]} {
         set ::machteld::POOL_DONE($tok) 0
@@ -363,7 +509,7 @@ proc ::machteld::PoolWait {tok argl} {
         }
     }
     if {[dict get $POOL $tok fatal] ne ""} {
-        return -code error -errorcode {MACHTELD POOL launch} [dict get $POOL $tok fatal]
+        return -code error -errorcode [dict get $POOL $tok fatalcode] [dict get $POOL $tok fatal]
     }
     # IN SUBMISSION ORDER. Replies arrive in whatever order the workers finish,
     # which is not an order any caller asked for; the id is the item's index, so
@@ -389,11 +535,17 @@ proc ::machteld::PoolInfo {tok} {
         requeued [dict get $POOL $tok requeued] \
         done     [dict get $POOL $tok done] \
         fatal    [dict get $POOL $tok fatal] \
-        stderr   [dict get $POOL $tok errbuf]]
+        maxtries [dict get $POOL $tok maxtries] \
+        limits   [dict get $POOL $tok limits] \
+        batchbytes [dict get $POOL $tok batchbytes] \
+        resultbytes [dict get $POOL $tok resultbytes] \
+        stderr   [encoding convertfrom -profile replace utf-8 [dict get $POOL $tok errbuf]]]
 }
 
-proc ::machteld::PoolClose {tok} {
+proc ::machteld::PoolStop {tok} {
     variable POOL
+    dict for {c timer} [dict get $POOL $tok resumes] { after cancel $timer }
+    dict set POOL $tok resumes {}
     foreach c [dict get $POOL $tok workers] {
         catch {
             set ci [child info $c]
@@ -406,17 +558,36 @@ proc ::machteld::PoolClose {tok} {
         }
         catch {child close $c}
     }
+    dict set POOL $tok workers {}
+    dict set POOL $tok readers {}
+}
+
+proc ::machteld::PoolAbort {tok code message} {
+    variable POOL
+    if {![dict exists $POOL $tok]} return
+    PoolStop $tok
+    dict set POOL $tok fatal $message
+    dict set POOL $tok fatalcode [list MACHTELD POOL $code]
+    dict set POOL $tok done 1
+    set ::machteld::POOL_DONE($tok) 1
+}
+
+proc ::machteld::PoolClose {tok} {
+    variable POOL
+    PoolStop $tok
     dict unset POOL $tok
     catch {unset ::machteld::POOL_DONE($tok)}
     return
 }
 
 ::machteld::MetaDefine pool [dict create kind tcl args args domain POOL \
-    codes {badvalue launch nohandle timeout usage} replycodes {poison} \
-    options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} doc machteld/command/pool \
+    codes {badvalue failed launch limit nohandle timeout usage} replycodes {poison} \
+    options {-arg0 -cpu -dir -env -maxbatch -maxframe -maxitems -maxresults -maxtries -mem -timeout -width} \
+    defaults [dict create maxtries 1 maxframe 16777216 maxitems 10000 maxbatch 67108864 maxresults 67108864] \
+    doc machteld/command/pool \
     subcommands [dict create \
-        create [dict create options {-arg0 -cpu -dir -env -maxtries -mem -timeout -width} doc machteld/command/pool#create] \
+        create [dict create options {-arg0 -cpu -dir -env -maxbatch -maxframe -maxitems -maxresults -maxtries -mem -timeout -width} doc machteld/command/pool#create] \
         submit [dict create options {} doc machteld/command/pool#submit] \
         wait [dict create options {-timeout} doc machteld/command/pool#wait] \
-        info [dict create options {} returns {dead done fatal inflight pending requeued results stderr width workers} doc machteld/command/pool#info] \
+        info [dict create options {} returns {batchbytes dead done fatal inflight limits maxtries pending requeued resultbytes results stderr width workers} doc machteld/command/pool#info] \
         close [dict create options {} doc machteld/command/pool#close]]]

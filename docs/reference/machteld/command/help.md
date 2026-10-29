@@ -18,7 +18,7 @@ help ?query ...?
 
 With no query, returns the short agent/human documentation bootstrap. When the
 reference pack is present, its first screen identifies the complete offline
-Machteld 0.21, Tcl 9.0.4, and Tk 9.0.4 references carried by the executable.
+Machteld 0.22, Tcl 9.0.4, and Tk 9.0.4 references carried by the executable.
 Without the pack, it explains the omission and points to the full same-version
 Machteld executable, `wrap --with-docs`, `manifest`, and `docs schema`.
 
@@ -59,6 +59,10 @@ puts [help channel binary encoding]
 
 For agents and programs, `docs get`, `docs search`, and their bounded result
 dicts are the stable interface. `help` exists for concise discovery and people.
+If consulting another host because this one omits the reference, match its
+runtime artifact identity as well as its package version. Different candidate
+builds may report the same version while containing different code or references.
+The older signed release's reference describes that release, not this candidate.
 
 ## See also
 

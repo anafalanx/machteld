@@ -7,17 +7,24 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-machteld 0.21 is a single-executable Windows runtime for small machine-control
+machteld 0.22 is a candidate single-executable Windows runtime for small machine-control
 programs. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY, filesystem
 observation, WinHTTP, cryptography, JSON, and SQLite. The surface stays Tcl-like:
 commands return values, options are explicit, and failures have trap-able codes.
 
+It is Vincent Vercauteren's personal platform. Use by others is welcome, but
+adoption, a plugin marketplace, and integration with another agent platform are
+not current product goals. This checkout contains the unsigned candidate and
+its stabilization work, not a completed release. The historical signed release
+is preserved separately. Build identities, artifact hashes, and verification
+receipts distinguish candidate artifacts while the release gate is in progress.
+
 It is not an environment-specific resolver, package manager, command catalogue,
 activity recorder, or replacement shell. It does not guess that an arbitrary Tcl file wants Machteld.
-The program says so as its first executable command:
+The program declares that dependency as its first executable command:
 
 ```tcl
-package require machteld 0.21
+package require machteld 0.22
 
 set tree [dirs C:/work -depth 2 -prune {.git node_modules}]
 puts "[dict get $tree dirs] directories"
@@ -45,8 +52,20 @@ it when wanted. Application documentation and assets are unaffected. Nested
 wrapping remains in the distribution host. It is a deployment form, not a second
 language.
 
-The default model is linear and explicitly owned: long-running operations use
-visible deadlines where their command offers one, supervised children and PTYs
+The default model is linear and explicitly owned: operations use visible
+deadlines where their command offers one, supervised children and PTYs
 are born into the host-owned kill-on-close root and a per-command Job Object,
 and `scope` shortens lifetime further. Channel events are used when a pool or GUI
 genuinely needs concurrency.
+
+This is trusted-code execution, not a sandbox. A script or loaded native
+extension has the user's authority; the entry declaration does not restrict it.
+Job Objects govern owned process lifetimes and requested resource limits, not
+filesystem or credential access. `-dir` chooses a working directory and `-env`
+overlays the inherited environment; neither creates isolation.
+
+Long synchronous filesystem, HTTP, hashing, storage, and packaging calls can
+block the caller. Keep them off a responsive Tk callback, using an owned worker
+when necessary. The [execution model](execution-model.md) explains the evented
+pattern; the [contract](contract.md) distinguishes intended Windows targets from
+the acceptance evidence actually recorded.

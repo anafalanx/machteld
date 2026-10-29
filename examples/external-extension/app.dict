@@ -1,0 +1,10 @@
+schema 1
+files {main.tcl}
+metadata {
+    name {External Extension Example}
+    version 1.0
+    description {Explicit adjacent Tcl-stubs extension demonstration}
+    author {Vincent Vercauteren}
+    publisher {Vincent Vercauteren}
+    copyright {Copyright (c) Vincent Vercauteren}
+}

@@ -1,15 +1,19 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.21.
+description: Current product boundary and decision rules for the Machteld 0.22 candidate.
 tags: [machteld, direction, scope]
 ---
 
 # Direction
 
-The 0.21 product sentence is the decision filter:
+The product sentence remains the decision filter:
 
 > machteld is a compact Windows machine-control runtime.
+
+It is Vincent Vercauteren's personal platform. Other users are welcome, but
+growth in adoption is not the acceptance criterion for a feature. The repository
+remains private; integration with kuu is not current work.
 
 It runs explicitly opted-in Tcl programs, exposes a small native/Tcl palette,
 and packages those programs without changing their API. A proposed feature must
@@ -30,18 +34,22 @@ Current decisions:
   provenance-bearing, and equally discoverable by people and agents.
 - Native and Tcl manifest facts are explicit metadata, never inferred from
   implementation bodies.
-- Linear blocking operations remain the default; concurrency is explicit and
-  bounded by Job Objects, handles, deadlines, and lexical scope.
+- Linear blocking operations remain the default; concurrency is explicit.
+  Job Objects and lexical scope govern owned lifetimes. Deadlines, buffering,
+  and resource limits exist where the particular command documents them; they
+  are not a universal time bound or a sandbox.
 - Environment-specific project selection, command catalogues/resolvers,
   activity recording, and directory caching live outside this runtime.
   Launching still supports Machteld's deterministic `PATH`-only lookup for a
   bare command.
 
-Version 0.21 establishes the product boundary by subtraction: the
-compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and the
-engine-bound column library were removed. They leave no compatibility command
-or migration layer. The release adds no replacement capability; its clean
-Tcl/Tk runtime is the baseline for subsequent development.
+The compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and
+the engine-bound column library were removed. They leave no compatibility
+command or migration layer. The current candidate is Machteld 0.22, containing
+the stabilization work but not yet released or signed. Explicit wrapper
+inventories, application identity, and native hardening must not be attributed
+retroactively to the historical signed artifact. Candidate acceptance is current
+work; signing and publication require a separate decision.
 
 Standing architectural decisions:
 
@@ -53,8 +61,10 @@ Standing architectural decisions:
   SQLite and yyjson. A second embedded scripting language is not retained for
   hypothetical future use.
 - A user may bring their own Tcl packages and DLLs in a folder beside a built
-  tool, loaded by ordinary Tcl mechanics. Machteld does not package them, and
-  such a tool is deliberately no longer a single file.
+  tool, loaded by ordinary Tcl mechanics. Selected script packages can be
+  embedded as application assets; binary extensions are deployed separately on
+  disk. Machteld does not discover or resolve either dependency set. A tool with
+  adjacent DLLs is deliberately no longer a single file.
 - External software is commanded through `run`, `child`, and `scope`. It is an
   ordinary supervised process, not a privileged extension architecture.
 - Parallel work uses threads inside carefully bounded native commands or Tcl
@@ -70,6 +80,11 @@ Admission questions, in order:
 4. Can its runtime behavior be included identically in direct, console-wrapped,
    and GUI-wrapped hosts?
 5. Can the exact surface be stated in `manifest` without inference?
+
+These are admission questions, not a certification of arbitrary application
+code. A working directory is not confinement, and an environment overlay does
+not remove inherited credentials. The opt-in entry and ordinary workers run
+trusted code with the user's permissions.
 
 A "no" does not mean the idea is bad; it means the idea belongs in a program or
 another project rather than in the runtime.

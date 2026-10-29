@@ -1,0 +1,7 @@
+examplemath 1.0
+Copyright (c) Vincent Vercauteren
+Licensed under the Apache License, Version 2.0.
+See LICENSE-examplemath.txt in the same distribution directory.
+
+This example DLL uses the Tcl 9 stubs library. The wrapped Machteld host carries
+the Tcl license and its other runtime notices in its embedded licenses directory.

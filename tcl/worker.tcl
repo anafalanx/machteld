@@ -6,8 +6,8 @@
 #   worker serve                   ;# read a line, dispatch, write a line, to EOF
 #
 # One JSON object per line, in and out. `json encode` escapes newlines, so a
-# value can never split its own record -- which is what makes `gets` a safe frame
-# reader and saves inventing a length prefix.
+# value can never split its own record. Read bounded binary chunks before
+# decoding: nonblocking gets can otherwise retain an unlimited partial line.
 #
 #   request   {id 7 op hash path C:/x.iso}
 #   reply     {id 7 ok 1 result 9f86d0...}
@@ -28,6 +28,15 @@
 
 namespace eval ::machteld {
     variable WORKER_OPS {}      ;# op -> the proc implementing it
+    variable WORKER_SERVE_SEQ 0
+}
+
+# Shared by worker, pool and pmap. Limits count wire bytes, not Tcl characters.
+proc ::machteld::ProtocolLimit {domain option value} {
+    if {![string is entier -strict $value] || $value < 1 || $value > 2147483647} {
+        Fail $domain badvalue "$option must be an integer between 1 and 2147483647 bytes/items"
+    }
+    return $value
 }
 
 proc ::machteld::worker {args} {
@@ -89,23 +98,61 @@ proc ::machteld::worker {args} {
         return $out
     }
 
-    # SERVE. Blocking on purpose: a worker's whole job is to answer, so there is
-    # nothing else for it to be doing between requests, and a blocking `gets` is
-    # both simpler and cheaper than an event loop that never has a second source.
-    if {[llength $args] != 1} { Fail WORKER usage "usage: worker serve" }
-    fconfigure stdin  -translation lf -encoding utf-8
+    # SERVE remains a synchronous command, but reads are bounded nonblocking
+    # chunks. Waiting for a complete fixed-size blocking read deadlocks a short
+    # request; gets, on the other hand, can buffer an unbounded unterminated one.
+    set maxframe 16777216
+    if {[llength $args] == 3 && [lindex $args 1] eq "-maxframe"} {
+        set maxframe [ProtocolLimit WORKER -maxframe [lindex $args 2]]
+    } elseif {[llength $args] != 1} {
+        Fail WORKER usage "usage: worker serve ?-maxframe bytes?"
+    }
+    variable WORKER_SERVE_SEQ
+    set wake ::machteld::WORKER_WAKE[incr WORKER_SERVE_SEQ]
+    fconfigure stdin -blocking 0 -translation binary
     fconfigure stdout -translation lf -encoding utf-8 -buffering line
-    while {[gets stdin line] >= 0} {
-        if {$line eq ""} continue
-        WorkerAnswer $line
+    set buffer ""
+    chan event stdin readable [list set $wake 1]
+    try {
+        while {1} {
+            set lf [string first \n $buffer]
+            if {$lf >= 0} {
+                set line [string range $buffer 0 $lf-1]
+                set buffer [string range $buffer $lf+1 end]
+            } elseif {[string length $buffer] > $maxframe} {
+                Fail WORKER limit "request exceeds -maxframe ($maxframe bytes)"
+            } elseif {[eof stdin]} {
+                if {$buffer eq ""} break
+                set line $buffer
+                set buffer ""
+            } else {
+                set chunk [read stdin [expr {min(65536, $maxframe + 1 - [string length $buffer])}]]
+                append buffer $chunk
+                if {$chunk eq "" && ![eof stdin]} { vwait $wake }
+                continue
+            }
+            if {[string length $line] > $maxframe} {
+                Fail WORKER limit "request exceeds -maxframe ($maxframe bytes)"
+            }
+            if {$line eq ""} continue
+            if {[catch {encoding convertfrom -profile strict utf-8 $line} text]} {
+                WorkerWriteReply [dict create id -1 ok 0 code {MACHTELD WORKER parse} \
+                    msg "request is not valid UTF-8"] $maxframe
+            } else {
+                WorkerAnswer $text $maxframe
+            }
+        }
+    } finally {
+        chan event stdin readable {}
+        unset -nocomplain $wake
     }
     return
 }
 
-# One request in, one reply out. Nothing in here may throw: a worker that dies on
-# a malformed line takes its in-flight item with it and forces the director to
-# notice a death, requeue, and respawn -- an expensive way to report a typo.
-proc ::machteld::WorkerAnswer {line} {
+# One request in, one reply out. Handler/protocol errors are data. Terminal
+# transport failures may throw: continuing after a lost director would perform
+# work whose outcome can no longer be reported.
+proc ::machteld::WorkerAnswer {line {maxframe 16777216}} {
     # WorkerDispatch returns a reply dict. Encoding and writing are kept at this
     # one boundary so no handler can accidentally split the JSON-lines protocol.
     if {[catch {WorkerDispatch $line} reply opts]} {
@@ -113,6 +160,11 @@ proc ::machteld::WorkerAnswer {line} {
                                                    : {MACHTELD WORKER failed}}]
         set reply [dict create id -1 ok 0 code $code msg $reply]
     }
+    WorkerWriteReply $reply $maxframe
+    return
+}
+
+proc ::machteld::WorkerWriteReply {reply maxframe} {
     # A reply that cannot be encoded -- a typed json value in a result, or any
     # value the plain emitter refuses -- must still be ANSWERED. An unanswered
     # request leaves the director waiting until its batch timeout with nothing
@@ -124,7 +176,17 @@ proc ::machteld::WorkerAnswer {line} {
             code {MACHTELD WORKER failed} \
             msg "reply is not encodable as plain JSON: $encoded"]]
     }
-    catch {puts $encoded}
+    if {[string length [encoding convertto utf-8 $encoded]] > $maxframe} {
+        set id [expr {[dict exists $reply id] ? [dict get $reply id] : -1}]
+        set encoded [json encode -plain -dict [dict create id $id ok 0 \
+            code {MACHTELD WORKER limit} msg "reply exceeds -maxframe ($maxframe bytes)"]]
+        if {[string length [encoding convertto utf-8 $encoded]] > $maxframe} {
+            Fail WORKER limit "even the failure reply exceeds -maxframe ($maxframe bytes)"
+        }
+    }
+    # A broken director pipe is terminal; continuing could repeat side effects
+    # after no reply can be delivered.
+    puts $encoded
     return
 }
 
@@ -182,8 +244,9 @@ proc ::machteld::WorkerDispatch {line} {
 }
 
 ::machteld::MetaDefine worker [dict create kind tcl args args domain WORKER \
-    codes {badvalue usage} replycodes {failed notfound parse usage} doc machteld/command/worker \
+    codes {badvalue limit usage} replycodes {failed limit notfound parse usage} \
+    options {-maxframe} defaults [dict create maxframe 16777216] doc machteld/command/worker \
     subcommands [dict create \
         on [dict create options {} doc machteld/command/worker#on] \
         ops [dict create options {} doc machteld/command/worker#ops] \
-        serve [dict create options {} doc machteld/command/worker#serve]]]
+        serve [dict create options {-maxframe} doc machteld/command/worker#serve]]]

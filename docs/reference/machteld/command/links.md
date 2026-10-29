@@ -55,6 +55,8 @@ foreach row [dict get $report links] {
 
 `-hardlinks` costs an additional handle query per file. The result is a
 time-varying snapshot; always inspect the completeness fields and `errors`.
+The complete survey is materialized in memory; there is no streaming cursor or
+row/byte cap. Depth and pruning limit traversal rather than total memory.
 
 ## See also
 

@@ -247,6 +247,43 @@ static int process_handle_count(DWORD pid) {
                : EXIT_OUTPUT;
 }
 
+/* Deliberately bypass text-mode stdio: record boundaries, short UTF-8 writes,
+ * and unterminated records must reach the reader exactly as requested. */
+static int stream_line(DWORD bytes, int newline, int stderr_mode) {
+    HANDLE output = GetStdHandle(stderr_mode ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    char block[8192];
+    memset(block, 'x', sizeof(block));
+    while (bytes != 0) {
+        DWORD count = bytes < sizeof(block) ? bytes : (DWORD)sizeof(block);
+        if (!write_all(output, block, count)) return EXIT_OUTPUT;
+        bytes -= count;
+    }
+    if (newline == 2 && !write_text(output, "\r")) return EXIT_OUTPUT;
+    if (newline && !write_text(output, "\n")) return EXIT_OUTPUT;
+    return 0;
+}
+
+static int stream_split(void) {
+    const unsigned char text[] = {0x68, 0xc3, 0xab, 0xe4, 0xb8, 0x96,
+                                  0xf0, 0x9f, 0x98, 0x80, 0x0d, 0x0a};
+    for (size_t i = 0; i < sizeof(text); i++) {
+        if (!write_all(GetStdHandle(STD_OUTPUT_HANDLE), text + i, 1)) return EXIT_OUTPUT;
+        Sleep(10);
+    }
+    return write_text(GetStdHandle(STD_OUTPUT_HANDLE), "tail") ? 0 : EXIT_OUTPUT;
+}
+
+static int stream_bursts(void) {
+    char block[4096];
+    memset(block, 'x', sizeof(block));
+    block[sizeof(block) - 1] = '\n';
+    for (unsigned i = 0; i < 256; i++) {
+        if (!write_all(GetStdHandle(STD_OUTPUT_HANDLE), block, sizeof(block)) ||
+            !write_all(GetStdHandle(STD_ERROR_HANDLE), block, sizeof(block))) return EXIT_OUTPUT;
+    }
+    return 0;
+}
+
 /* Environment entries normally split at their first '='. The hidden per-drive
  * current-directory entries use =C:=C:\path, whose name is =C:. */
 static size_t environment_name_length(const wchar_t *entry) {
@@ -386,6 +423,28 @@ int wmain(int argc, wchar_t **argv) {
     }
     if (wcscmp(argv[1], L"flood-capture") == 0 && argc == 2) {
         return flood_capture();
+    }
+    if (wcscmp(argv[1], L"stream-line") == 0 && argc == 5) {
+        DWORD bytes = milliseconds(argv[2]);
+        if (bytes == UINT32_MAX) return EXIT_USAGE;
+        int newline = wcscmp(argv[3], L"crlf") == 0 ? 2 : wcscmp(argv[3], L"lf") == 0;
+        return stream_line(bytes, newline,
+                           wcscmp(argv[4], L"err") == 0);
+    }
+    if (wcscmp(argv[1], L"stream-overflow-tree") == 0 && argc == 3) {
+        /* Keep the root marker distinct from the descendant's explicit path. */
+        SetEnvironmentVariableW(L"MACHTELD_TEST_PIDFILE", NULL);
+        int result = descendant_parent(10000, argv[2]);
+        if (result != 0) return result;
+        result = stream_line(16u * 1024u * 1024u + 1u, 0, 0);
+        Sleep(10000);
+        return result;
+    }
+    if (wcscmp(argv[1], L"stream-split") == 0 && argc == 2) return stream_split();
+    if (wcscmp(argv[1], L"stream-bursts") == 0 && argc == 2) return stream_bursts();
+    if (wcscmp(argv[1], L"stream-invalid") == 0 && argc == 2) {
+        const unsigned char bytes[] = {0xe4, 0xb8};
+        return write_all(GetStdHandle(STD_OUTPUT_HANDLE), bytes, sizeof(bytes)) ? 0 : EXIT_OUTPUT;
     }
     if (wcscmp(argv[1], L"daemon-marker") == 0 && argc == 4) {
         DWORD delay = milliseconds(argv[3]);

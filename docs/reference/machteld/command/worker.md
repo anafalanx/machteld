@@ -13,7 +13,7 @@ commands: worker, worker on, worker ops, worker serve
 ```tcl
 worker on operation arglist body
 worker ops
-worker serve
+worker serve ?-maxframe bytes?
 ```
 
 ## Arguments and options
@@ -21,7 +21,10 @@ worker serve
 Operation names begin with a letter or underscore and then use letters, digits,
 underscore, dot, or hyphen. `arglist` is a Tcl procedure argument list and is
 the request schema; defaults make fields optional. The handler is compiled as a
-real proc in the caller's namespace. There are no options.
+real proc in the caller's namespace. `serve -maxframe` bounds each request and
+reply to 16777216 (16 MiB) UTF-8 bytes by default, excluding LF but including
+any trailing CR. It accepts integers from 1 through 2147483647; size suffixes
+and an unlimited setting are not supported.
 
 ## Results
 
@@ -32,15 +35,22 @@ success is `{id N ok 1 result value}` and failure is
 
 ## Errors
 
-Direct command failures are `WORKER badvalue` and `WORKER usage`. Protocol
-failures are reply data with `WORKER failed`, `WORKER notfound`, `WORKER parse`,
+Direct command failures are `WORKER badvalue`, `WORKER limit`, and `WORKER usage`.
+Protocol failures are reply data with `WORKER failed`, `WORKER limit`, `WORKER notfound`, `WORKER parse`,
 or `WORKER usage`. A handler's structured error code is preserved in its reply.
+An oversized request terminates `serve` with `WORKER limit` before JSON decode
+or handler dispatch, even without LF or EOF. An oversized encoded reply becomes
+a small `WORKER limit` failure reply; if even that cannot fit (for example an
+extremely small limit or enormous echoed ID), `serve` raises `WORKER limit`.
+Stdout I/O failure also terminates serving instead of silently continuing.
 
 ## Lifetime and timeouts
 
 Definitions persist for the interpreter lifetime; redefining an operation
 replaces its proc mapping. `serve` blocks reading requests until EOF and has no
-timeout. A pool provides the supervising lifetime and retry policy.
+timeout. A pool provides the supervising lifetime and retry policy. The
+default pool policy is one attempt: a lost reply may follow a completed side
+effect and is not automatically replayed.
 
 ## Examples
 
@@ -138,12 +148,15 @@ The schemas describe fields/defaults, not handler result types.
 
 #### Synopsis
 
-`worker serve`
+`worker serve ?-maxframe bytes?`
 
 #### Arguments and options
 
-Configures stdin/stdout as UTF-8 LF streams and reads one nonempty JSON line per
-request until EOF.
+Reads bounded binary chunks from stdin, then strictly decodes each complete
+nonempty UTF-8 JSON line. A split UTF-8 character is retained until its frame
+is complete. A complete final JSON object without LF is accepted at EOF.
+Stdout carries UTF-8 LF-delimited replies. `-maxframe` applies independently
+of the director/pool's configured frame limit.
 
 #### Results
 
@@ -155,12 +168,19 @@ returns on EOF.
 Bad input, unknown operation, missing field, and handler error become failure
 replies rather than server-terminating exceptions. A reply that cannot be
 encoded as plain JSON, such as a result carrying a typed json value, is answered
-with a `WORKER failed` reply; only a stdout write failure can leave a request
-unanswered. Wrong command arity is raised before serving.
+with a `WORKER failed` reply. Invalid UTF-8 becomes a `WORKER parse` reply.
+Oversized input terminates serving; oversized output is handled as described
+above. A failed write or an impossibly small reply limit can leave a request
+unanswered. Wrong command arity or invalid bounds are raised before serving.
 
 #### Lifetime and timeouts
 
-Intentionally blocking and unbounded; the director closes stdin to stop it.
+Intentionally synchronous; the director closes stdin to stop it after already
+accepted requests have been handled. EOF is not cancellation of an executing
+handler. Frame memory is bounded, but handler running time and handler-created
+data are not. Use the supervising child's lifetime deadline and per-process
+memory cap where needed, or close the owned child to terminate it. None of
+these actions rolls back a handler's side effects.
 
 #### Examples
 
@@ -168,7 +188,10 @@ Intentionally blocking and unbounded; the director closes stdin to stop it.
 
 #### Constraints
 
-Any handler output to stdout corrupts framing and can cause pool retry/poison.
+Any handler output to stdout corrupts framing and can cause a pool poison
+reply (and retries only when explicitly enabled). The frame limit is not a
+whole-process memory bound: JSON serialization and decoded Tcl values have
+overhead, and handler results already exist before encoding.
 
 #### See also
 

@@ -14,7 +14,7 @@ The product has three layers:
    WinHTTP, BCrypt, JSON, and statically linked SQLite.
 2. **Tcl runtime.** The prelude adds `version`, `manifest`, `scope`,
    `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs`, `help`,
-   and `wrap`, then provides package `machteld 0.21`.
+   and `wrap`, then provides package `machteld 0.22`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
    `argv` and resolves palette commands through `::machteld` on the global
    namespace path.
@@ -24,6 +24,12 @@ the entry gate before Tcl evaluates a program. The gate parses the first command
 without evaluating it. Interactive startup is still available when no file is
 selected; `--help`, `--version`, `--docs`, and the subordinate `wrap` route are
 handled by the host.
+
+For a native startup file, the host captures the file once, checks that decoded
+value, and evaluates the same value; a second path read cannot substitute a
+different entry after validation. Subsequent `source`, `load`, file access, and
+subprocess operations are ordinary trusted Tcl behavior. The gate is a
+dependency declaration, not code review, permission reduction, or a sandbox.
 
 ## Hosts and archives
 
@@ -35,7 +41,7 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 0.21
+SQLite, so a wrapped entry sees the same programmatic Machteld 0.22
 machine-control API. Runtime libraries and license notices are always included.
 The complete versioned reference corpus is verified and copied only when
 `--with-docs` is requested; it is omitted by default. Application assets are
@@ -52,16 +58,26 @@ executable path component when an ancestor can be traversed but not enumerated.
 
 Incremental development builds carry an inert `build-info.dict` at the archive
 root, beside `machteld.tcl`. It records schema `1`, channel `development`, the
-unchanged runtime version, the working tree's base source revision, an input
+runtime API version, the working tree's base source revision, an input
 SHA-256, and the reference corpus SHA-256. The revision is not a clean-checkout
 claim: the input digest identifies the actual build ingredients, including
 uncommitted runtime changes. The record contains no build-machine paths or
-wall-clock timestamps. It is packaged and published with the executable and
-copied into wrapped tools even when their reference is omitted. It describes
-the embedded runtime, not the wrapped application's authorship or version.
-Historical release artifacts do not carry this development record. Absence is
-not evidence of signing or release authenticity; verify the artifact's hash
+wall-clock timestamps. It is embedded when the build publishes its local
+executable and copied into wrapped tools even when their reference is omitted.
+It describes the embedded runtime, not the wrapped application's authorship or
+version.
+Clean reconstruction and historical release artifacts do not carry this
+development record. Absence is not evidence of signing or release authenticity;
+verify the artifact's hash
 and signature separately. `version` continues to report the runtime API version.
+
+Wrapped applications additionally carry an inert `app-info.dict`. It describes
+the selected application files and their hashes, host kind, reference choice,
+and explicit application metadata, separately from the runtime identity.
+`wrap --plan` returns that record before packaging. Optional Windows resources
+are stamped on a disposable bare-host copy before the ZIP payload is attached;
+the completed payload is checked before atomic publication. Neither this record
+nor VERSIONINFO is a signature or an authority boundary.
 
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`
@@ -77,11 +93,39 @@ The documentation build transforms pinned upstream Tcl/Tk manpages into
 normalized Markdown while preserving source and HTML representations. It
 combines those pages with authored Machteld command references, creates a
 deterministic catalog/search index, and hashes the corpus. `docs` reads only
-this trusted self-mounted payload and exposes exact lookup, sections, bounded
+the executable's self-mounted payload and exposes exact lookup, sections, bounded
 search, verification, provenance, and safe extraction. The distribution always
 carries this corpus; wrapped applications opt in with `--with-docs`. Without
 it, `docs schema` still describes the API, corpus queries report `DOCS
 unsupported`, and bare `help` explains how to obtain the reference.
+The payload is trusted because the executable was chosen as trusted code;
+corpus hashes do not independently authenticate an unsigned executable. During
+unreleased work the runtime version alone does not identify the source revision
+or corpus: compare the embedded build and reference identities as well.
+
+The development pipeline has separately content-verified caches for upstream
+Tcl/Tk conversion, authored Machteld pages, the assembled reference, and final
+packaging. An authored page edit reuses upstream conversion; a Tcl implementation
+edit does not invalidate documentation. Runtime version declarations must still
+agree, and a version change invalidates authored records. Cache generations are
+immutable; corrupted or incomplete entries are misses, not freshness evidence.
+The byte-compatible serializers are build-only C# helpers, not runtime features.
+Release builds do not reuse development conversion caches.
+
+`tools/test.ps1` defaults to the `fast` group against an existing executable.
+`integration` adds native fixtures, native stream limits, and build-cache
+tests; `packaging` checks entry points, wrapping, publication, and Windows
+metadata. Each run identifies and hashes its executable and refuses a changed
+binary at completion. `native-validation` adds headless lifetime stress,
+worker-scaling measurements, static analysis, and capability-probed native
+instrumentation. Negative controls must fail as expected; unavailable sanitizer
+runtimes are reported, never counted as passing instrumentation. See
+[native validation](native-validation.md) for coverage and limitations.
+`reference-generator` is the separate, expensive
+uncached conversion/determinism group. Only explicit `-Group release` builds
+before running every group. `z devtest` likewise tests without an implicit build.
+The GUI model runs in `fast`; `-InteractiveGui` explicitly enables the visible
+Tk-widget checks. Manual interaction remains part of release acceptance.
 
 ## Lifetime
 
@@ -91,3 +135,15 @@ PTYs are born into both that root job and a narrower per-command job. `scope`
 gives a lexical lifetime inside the process. `detach` is the explicit exception:
 on success it belongs to no Windows job and creates an independent process tree.
 An enclosing Windows job may forbid breakaway, in which case launch is rejected.
+
+These are ownership and resource-management boundaries, not security isolation.
+`-dir` does not restrict paths, `-env` overlays inherited variables rather than
+removing credentials, and a child normally runs as the launching user. Native
+DLLs execute inside the host with that same authority. The host exposes ordinary
+Tcl facilities as well as the palette.
+
+The native wrappers are not uniformly asynchronous. HTTP, directory walks,
+hashing, storage and packaging can block; a timeout may cover one operation or
+network phase rather than a total wall-clock budget. `pool`'s evented channels
+and application-owned children let a Tk controller keep slow work outside the
+GUI thread. See [execution model](execution-model.md) before composing callbacks.

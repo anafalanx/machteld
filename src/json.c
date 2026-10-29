@@ -45,6 +45,60 @@
  * (implementation-defined) decoding successfully, exactly as before. */
 #define JSON_MAX_DEPTH 512
 
+static int JsonErr(Tcl_Interp *interp, const char *code, const char *msg);
+
+/* Tcl's string representation is modified UTF-8 (notably C0 80 for NUL).
+ * JSON strings and member names use real UTF-8. Keep this boundary explicit:
+ * a lone surrogate must fail, never become replacement text or invalid JSON. */
+static int JsonStringBytes(Tcl_Obj *value, Tcl_DString *bytes) {
+    Tcl_Size length;
+    const char *text = Tcl_GetStringFromObj(value, &length);
+    Tcl_Encoding utf8 = Tcl_GetEncoding(NULL, "utf-8");
+    Tcl_DStringInit(bytes);
+    if (utf8 == NULL) return TCL_ERROR;
+    int status = Tcl_UtfToExternalDStringEx(NULL, utf8, text, length,
+        TCL_ENCODING_START | TCL_ENCODING_END | TCL_ENCODING_PROFILE_STRICT,
+        bytes, NULL);
+    Tcl_FreeEncoding(utf8);
+    return status;
+}
+
+static yyjson_mut_val *JsonMutString(yyjson_mut_doc *doc, Tcl_Obj *value,
+                                    const char **err) {
+    Tcl_DString bytes;
+    if (JsonStringBytes(value, &bytes) != TCL_OK) {
+        Tcl_DStringFree(&bytes);
+        *err = "string contains an unpaired Unicode surrogate";
+        return NULL;
+    }
+    yyjson_mut_val *node = yyjson_mut_strncpy(doc, Tcl_DStringValue(&bytes),
+        (size_t)Tcl_DStringLength(&bytes));
+    Tcl_DStringFree(&bytes);
+    if (node == NULL) *err = "out of memory";
+    return node;
+}
+
+static Tcl_Obj *JsonTclString(const char *text, size_t length) {
+    if (memchr(text, '\0', length) == NULL) {
+        return Tcl_NewStringObj(text, (Tcl_Size)length);
+    }
+    /* Tcl dictionary hashing uses its canonical modified UTF-8 form. Merely
+     * putting raw NUL bytes in Tcl_NewStringObj produces a key that ordinary
+     * Tcl "a\0b" cannot look up, even though the displayed text is identical. */
+    Tcl_Encoding utf8 = Tcl_GetEncoding(NULL, "utf-8");
+    Tcl_DString value;
+    Tcl_DStringInit(&value);
+    if (utf8 == NULL || Tcl_ExternalToUtfDStringEx(NULL, utf8, text,
+            (Tcl_Size)length, TCL_ENCODING_START | TCL_ENCODING_END |
+            TCL_ENCODING_PROFILE_STRICT, &value, NULL) != TCL_OK) {
+        Tcl_Panic("invalid UTF-8 in a validated JSON string");
+    }
+    Tcl_FreeEncoding(utf8);
+    Tcl_Obj *result = Tcl_NewStringObj(Tcl_DStringValue(&value), Tcl_DStringLength(&value));
+    Tcl_DStringFree(&value);
+    return result;
+}
+
 /* Structure comes from what the VALUE IS, never from what its text looks like
  * (see json_emit). Tcl 9 has two list-shaped representations: the registered
  * "list" type and the unregistered "arithseries" type that `lseq` produces,
@@ -84,8 +138,7 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
             return Tcl_NewStringObj(yyjson_get_raw(v),
                                     (Tcl_Size)yyjson_get_len(v));
         case YYJSON_TYPE_STR:
-            return Tcl_NewStringObj(yyjson_get_str(v),
-                                    (Tcl_Size)yyjson_get_len(v));
+            return JsonTclString(yyjson_get_str(v), yyjson_get_len(v));
         case YYJSON_TYPE_ARR: {
             Tcl_Obj *l = Tcl_NewListObj(0, NULL);
             yyjson_arr_iter it;
@@ -105,8 +158,7 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
             yyjson_val *k;
             while ((k = yyjson_obj_iter_next(&it)) != NULL) {
                 yyjson_val *val = yyjson_obj_iter_get_val(k);
-                Tcl_Obj *ko = Tcl_NewStringObj(yyjson_get_str(k),
-                                               (Tcl_Size)yyjson_get_len(k));
+                Tcl_Obj *ko = JsonTclString(yyjson_get_str(k), yyjson_get_len(k));
                 Tcl_Obj *vo = yy_to_tcl(val, depth + 1, depthErr);
                 if (vo == NULL) {
                     Tcl_BounceRefCount(ko);
@@ -114,6 +166,9 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
                     return NULL;
                 }
                 Tcl_DictObjPut(NULL, d, ko, vo);
+                /* A duplicate member replaces its value but keeps Tcl's
+                 * existing key object. Release our unused zero-ref key. */
+                Tcl_BounceRefCount(ko);
             }
             return d;
         }
@@ -198,7 +253,12 @@ static char *JsonNodeWrite(Tcl_Obj *o, size_t *lenOut) {
 static void JsonTypeString(Tcl_Obj *o) {
     size_t n = 0;
     char *s = JsonNodeWrite(o, &n);
-    if (s == NULL) { s = strdup("null"); n = 4; }
+    /* An updateStringProc cannot report an error. Like Tcl_Alloc, fail loudly
+     * on allocation exhaustion instead of silently changing the value to null. */
+    if (s == NULL || n >= (size_t)TCL_SIZE_MAX) {
+        free(s);
+        Tcl_Panic("cannot allocate the string representation of a JSON value");
+    }
     o->bytes = Tcl_Alloc((Tcl_Size)n + 1);
     memcpy(o->bytes, s, n);
     o->bytes[n] = '\0';
@@ -220,6 +280,56 @@ static int JsonIsTyped(Tcl_Obj *o) {
     return o->typePtr == &jsonValueType;
 }
 
+/* A typed subtree's root can be shallow while its descendants are not.
+ * Enforce the same total depth when composing/re-emitting typed values as on
+ * decode and unwrap. Each walk stops before recursion can exceed the cap. */
+static int JsonImmutableDepth(yyjson_val *v, int depth) {
+    if (depth >= JSON_MAX_DEPTH) return 0;
+    if (yyjson_is_arr(v)) {
+        yyjson_arr_iter it;
+        yyjson_arr_iter_init(v, &it);
+        yyjson_val *el;
+        while ((el = yyjson_arr_iter_next(&it)) != NULL) {
+            if (!JsonImmutableDepth(el, depth + 1)) return 0;
+        }
+    } else if (yyjson_is_obj(v)) {
+        yyjson_obj_iter it;
+        yyjson_obj_iter_init(v, &it);
+        yyjson_val *key;
+        while ((key = yyjson_obj_iter_next(&it)) != NULL) {
+            if (!JsonImmutableDepth(yyjson_obj_iter_get_val(key), depth + 1)) return 0;
+        }
+    }
+    return 1;
+}
+
+static int JsonMutableDepth(yyjson_mut_val *v, int depth) {
+    if (depth >= JSON_MAX_DEPTH) return 0;
+    if (yyjson_mut_is_arr(v)) {
+        yyjson_mut_arr_iter it;
+        yyjson_mut_arr_iter_init(v, &it);
+        yyjson_mut_val *el;
+        while ((el = yyjson_mut_arr_iter_next(&it)) != NULL) {
+            if (!JsonMutableDepth(el, depth + 1)) return 0;
+        }
+    } else if (yyjson_mut_is_obj(v)) {
+        yyjson_mut_obj_iter it;
+        yyjson_mut_obj_iter_init(v, &it);
+        yyjson_mut_val *key;
+        while ((key = yyjson_mut_obj_iter_next(&it)) != NULL) {
+            if (!JsonMutableDepth(yyjson_mut_obj_iter_get_val(key), depth + 1)) return 0;
+        }
+    }
+    return 1;
+}
+
+static int JsonTypedDepth(Tcl_Obj *value, int depth) {
+    JsonDocWrap *w = JWRAP(value);
+    return w->idoc != NULL
+        ? JsonImmutableDepth((yyjson_val *)JNODE(value), depth)
+        : JsonMutableDepth((yyjson_mut_val *)JNODE(value), depth);
+}
+
 /* Build a mutable copy of a typed value's node inside doc (cross-document
  * composition: a leaf decoded from the wire can enter a constructed tree). */
 static yyjson_mut_val *JsonNodeToMut(yyjson_mut_doc *doc, Tcl_Obj *o) {
@@ -238,12 +348,17 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
                                     Tcl_Obj *v, int depth, const char **err) {
     if (depth >= JSON_MAX_DEPTH) { *err = "value is too deeply nested"; return NULL; }
     if (JsonIsTyped(v)) {
+        if (!JsonTypedDepth(v, depth)) {
+            *err = "value is too deeply nested";
+            return NULL;
+        }
         yyjson_mut_val *m = JsonNodeToMut(doc, v);
         if (m == NULL) *err = "out of memory";
         return m;
     }
     if (json_dict_typed(v)) {
         yyjson_mut_val *obj = yyjson_mut_obj(doc);
+        if (obj == NULL) { *err = "out of memory"; return NULL; }
         Tcl_DictSearch s;
         Tcl_Obj *k, *val;
         int done;
@@ -252,9 +367,7 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
             return NULL;
         }
         for (; !done; Tcl_DictObjNext(&s, &k, &val, &done)) {
-            Tcl_Size kl;
-            const char *ks = Tcl_GetStringFromObj(k, &kl);
-            yyjson_mut_val *mk = yyjson_mut_strncpy(doc, ks, (size_t)kl);
+            yyjson_mut_val *mk = JsonMutString(doc, k, err);
             yyjson_mut_val *mv = JsonBuildMut(interp, doc, val, depth + 1, err);
             if (mk == NULL || mv == NULL) {
                 Tcl_DictObjDone(&s);
@@ -268,6 +381,7 @@ static yyjson_mut_val *JsonBuildMut(Tcl_Interp *interp, yyjson_mut_doc *doc,
     }
     if (json_list_typed(v)) {
         yyjson_mut_val *arr = yyjson_mut_arr(doc);
+        if (arr == NULL) { *err = "out of memory"; return NULL; }
         Tcl_Size n;
         Tcl_Obj **el;
         if (Tcl_ListObjGetElements(interp, v, &n, &el) != TCL_OK) {
@@ -298,9 +412,9 @@ static Tcl_Obj *yy_mut_to_tcl(yyjson_mut_val *v, int depth, int *depthErr) {
                                     (Tcl_Size)yyjson_mut_get_len(v));
         case YYJSON_TYPE_NUM:
         case YYJSON_TYPE_STR:
-            return Tcl_NewStringObj(yyjson_mut_get_str(v) != NULL
+            return JsonTclString(yyjson_mut_get_str(v) != NULL
                     ? yyjson_mut_get_str(v) : "",
-                    (Tcl_Size)yyjson_mut_get_len(v));
+                    yyjson_mut_get_len(v));
         case YYJSON_TYPE_ARR: {
             Tcl_Obj *l = Tcl_NewListObj(0, NULL);
             yyjson_mut_arr_iter it;
@@ -320,8 +434,7 @@ static Tcl_Obj *yy_mut_to_tcl(yyjson_mut_val *v, int depth, int *depthErr) {
             yyjson_mut_val *k;
             while ((k = yyjson_mut_obj_iter_next(&it)) != NULL) {
                 yyjson_mut_val *val = yyjson_mut_obj_iter_get_val(k);
-                Tcl_Obj *ko = Tcl_NewStringObj(yyjson_mut_get_str(k),
-                        (Tcl_Size)yyjson_mut_get_len(k));
+                Tcl_Obj *ko = JsonTclString(yyjson_mut_get_str(k), yyjson_mut_get_len(k));
                 Tcl_Obj *vo = yy_mut_to_tcl(val, depth + 1, depthErr);
                 if (vo == NULL) {
                     Tcl_BounceRefCount(ko);
@@ -329,6 +442,7 @@ static Tcl_Obj *yy_mut_to_tcl(yyjson_mut_val *v, int depth, int *depthErr) {
                     return NULL;
                 }
                 Tcl_DictObjPut(NULL, d, ko, vo);
+                Tcl_BounceRefCount(ko);
             }
             return d;
         }
@@ -395,6 +509,7 @@ static int JsonObjHasDuplicate(yyjson_val *obj, const char **badKey) {
         }
         return 0;
     }
+    if (n > SIZE_MAX / sizeof(JsonKey)) return -1;
     JsonKey *keys = (JsonKey *)malloc(n * sizeof(JsonKey));
     if (keys == NULL) return -1;
     size_t count = 0;
@@ -507,6 +622,17 @@ static void json_quote(Tcl_DString *out, const char *s, Tcl_Size n) {
     Tcl_DStringAppend(out, "\"", 1);
 }
 
+static int json_quote_obj(Tcl_Interp *interp, Tcl_DString *out, Tcl_Obj *value) {
+    Tcl_DString bytes;
+    if (JsonStringBytes(value, &bytes) != TCL_OK) {
+        Tcl_DStringFree(&bytes);
+        return JsonErr(interp, "type", "string contains an unpaired Unicode surrogate");
+    }
+    json_quote(out, Tcl_DStringValue(&bytes), Tcl_DStringLength(&bytes));
+    Tcl_DStringFree(&bytes);
+    return TCL_OK;
+}
+
 static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_dict, int depth, int plainOnly);
 
 static int json_emit_list(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int depth, int plainOnly) {
@@ -532,9 +658,10 @@ static int json_emit_dict(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int 
     for (; !done; Tcl_DictObjNext(&s, &k, &val, &done)) {
         if (!first) Tcl_DStringAppend(out, ",", 1);
         first = 0;
-        Tcl_Size kl;
-        const char *ks = Tcl_GetStringFromObj(k, &kl);
-        json_quote(out, ks, kl);       /* a JSON key is always a string */
+        if (json_quote_obj(interp, out, k) != TCL_OK) {
+            Tcl_DictObjDone(&s);
+            return TCL_ERROR;
+        }
         Tcl_DStringAppend(out, ":", 1);
         if (json_emit(interp, val, out, 0, depth + 1, plainOnly) != TCL_OK) {
             Tcl_DictObjDone(&s);
@@ -581,9 +708,13 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
             Tcl_SetErrorCode(interp, "MACHTELD", "JSON", "type", (char *)NULL);
             return TCL_ERROR;
         }
+        if (!JsonTypedDepth(v, depth)) {
+            return JsonErr(interp, "depth", "value is too deeply nested");
+        }
         size_t n = 0;
         char *s = JsonNodeWrite(v, &n);
-        if (s == NULL) {
+        if (s == NULL || n > (size_t)TCL_SIZE_MAX) {
+            free(s);
             Tcl_SetObjResult(interp, Tcl_NewStringObj("typed value write failed", -1));
             Tcl_SetErrorCode(interp, "MACHTELD", "JSON", "type", (char *)NULL);
             return TCL_ERROR;
@@ -600,8 +731,7 @@ static int json_emit(Tcl_Interp *interp, Tcl_Obj *v, Tcl_DString *out, int as_di
     Tcl_Size n;
     const char *s = Tcl_GetStringFromObj(v, &n);
     if (json_is_number_literal(s, n)) { Tcl_DStringAppend(out, s, n); return TCL_OK; }
-    json_quote(out, s, n);
-    return TCL_OK;
+    return json_quote_obj(interp, out, v);
 }
 
 /* ---- the verb ----------------------------------------------------------- */
@@ -620,9 +750,8 @@ static int JsonErr(Tcl_Interp *interp, const char *code, const char *msg) {
 
 /* Resolve one get/exists path step against a typed node. Returns the child
  * node or NULL; *stepErr distinguishes absent from a non-container. */
-static void *JsonStep(JsonDocWrap *w, void *node, Tcl_Obj *step, int *stepErr) {
-    Tcl_Size sl;
-    const char *ss = Tcl_GetStringFromObj(step, &sl);
+static void *JsonStep(JsonDocWrap *w, void *node, Tcl_Obj *step,
+                      const char *ss, size_t sl, int *stepErr) {
     *stepErr = 0;
     if (w->idoc != NULL) {
         yyjson_val *v = (yyjson_val *)node;
@@ -696,19 +825,38 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             return JsonErr(interp, "usage", "-maxbytes applies to -typed decode");
         }
         Tcl_Size n;
-        const char *s = Tcl_GetStringFromObj(textObj, &n);
+        const char *s;
+        Tcl_DString bytes;
+        Tcl_DStringInit(&bytes);
+        /* Binary input is already wire data: do not repair malformed UTF-8 by
+         * converting its bytes to Tcl characters before handing it to yyjson. */
+        if (textObj->typePtr != NULL && textObj->typePtr->name != NULL &&
+                strcmp(textObj->typePtr->name, "bytearray") == 0) {
+            s = (const char *)Tcl_GetBytesFromObj(interp, textObj, &n);
+            if (s == NULL) return TCL_ERROR;
+        } else {
+            if (JsonStringBytes(textObj, &bytes) != TCL_OK) {
+                Tcl_DStringFree(&bytes);
+                return JsonErr(interp, "parse", "JSON text contains an unpaired Unicode surrogate");
+            }
+            s = Tcl_DStringValue(&bytes);
+            n = Tcl_DStringLength(&bytes);
+        }
         if (typed) {
             if (maxBytes > (Tcl_WideInt)JSON_TYPED_HARD_MAXBYTES) {
+                Tcl_DStringFree(&bytes);
                 return JsonErr(interp, "limit",
                     "-maxbytes is above the documented hard cap (64 MiB)");
             }
             if ((Tcl_WideInt)n > maxBytes) {
+                Tcl_DStringFree(&bytes);
                 return JsonErr(interp, "limit", "document exceeds -maxbytes");
             }
         }
         yyjson_read_err rerr;
         yyjson_doc *doc = yyjson_read_opts((char *)s, (size_t)n,
             YYJSON_READ_NUMBER_AS_RAW, NULL, &rerr);
+        Tcl_DStringFree(&bytes);
         if (doc == NULL) {
             char msg[192];
             snprintf(msg, sizeof msg, "%s (byte %zu)",
@@ -769,9 +917,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         const char *err = NULL;
         switch (kind) {
             case KSTRING: {
-                Tcl_Size sl;
-                const char *ss = Tcl_GetStringFromObj(objv[3], &sl);
-                node = yyjson_mut_strncpy(doc, ss, (size_t)sl);
+                node = JsonMutString(doc, objv[3], &err);
                 break;
             }
             case KNUMBER: {
@@ -825,9 +971,7 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                 }
                 node = yyjson_mut_obj(doc);
                 for (; node != NULL && !done; Tcl_DictObjNext(&ds, &k, &val, &done)) {
-                    Tcl_Size kl;
-                    const char *ks = Tcl_GetStringFromObj(k, &kl);
-                    yyjson_mut_val *mk = yyjson_mut_strncpy(doc, ks, (size_t)kl);
+                    yyjson_mut_val *mk = JsonMutString(doc, k, &err);
                     yyjson_mut_val *mv = JsonBuildMut(interp, doc, val, 1, &err);
                     if (mk == NULL || mv == NULL) { node = NULL; break; }
                     yyjson_mut_obj_add(node, mk, mv);
@@ -838,7 +982,8 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         }
         if (node == NULL) {
             yyjson_mut_doc_free(doc);
-            return JsonErr(interp, "type",
+            return JsonErr(interp,
+                err != NULL && strcmp(err, "value is too deeply nested") == 0 ? "depth" : "type",
                 err != NULL ? err : "out of memory");
         }
         JsonDocWrap *w = (JsonDocWrap *)Tcl_Alloc(sizeof(JsonDocWrap));
@@ -886,7 +1031,14 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         void *node = JNODE(objv[2]);
         for (int i = 3; i < objc; i++) {
             int stepErr = 0;
-            node = JsonStep(w, node, objv[i], &stepErr);
+            Tcl_DString bytes;
+            if (JsonStringBytes(objv[i], &bytes) != TCL_OK) {
+                Tcl_DStringFree(&bytes);
+                return JsonErr(interp, "type", "path contains an unpaired Unicode surrogate");
+            }
+            node = JsonStep(w, node, objv[i], Tcl_DStringValue(&bytes),
+                (size_t)Tcl_DStringLength(&bytes), &stepErr);
+            Tcl_DStringFree(&bytes);
             if (node == NULL) {
                 if (idx == EXISTS) {
                     Tcl_SetObjResult(interp, Tcl_NewIntObj(0));

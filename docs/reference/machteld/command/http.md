@@ -24,7 +24,8 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
 - `-headers dict` supplies request headers. Header names and values reject
   control/newline injection; names also reject colon and whitespace controls.
 - `-timeout` defaults to `30s`, must be positive, and applies separately to
-  WinHTTP network phases rather than to the complete operation.
+  WinHTTP network phases rather than to the complete operation. The converted
+  value is limited to `2147483647` milliseconds.
 - `-agent` defaults to `machteld`.
 - `-maxbody` defaults to 64 MiB and must be a positive binary size.
 - `-redirect` takes exactly `none`: the first 3xx response returns normally
@@ -53,7 +54,9 @@ are returned normally rather than raised.
 
 Each request owns its WinHTTP session, connection, and request handles only for
 the call. Timeouts are per phase; redirects and body reads can make wall-clock
-time exceed one timeout value.
+time exceed one timeout value. Calls are synchronous and do not service Tcl
+events. A timeout or transport error does not establish whether a POST took
+effect at the server; retry only with application-level replay safety.
 
 ## Examples
 
@@ -73,6 +76,10 @@ HTTPS uses system trust, proxy discovery, redirects, and transport decoding.
 HTTPS-to-HTTP downgrade redirects are refused. There is deliberately no option
 to disable certificate validation. A body over `-maxbody` is rejected, never
 returned as plausible truncation.
+The complete response body is materialized in memory; `-maxbody` is a response
+byte limit, not a total host-memory budget or a streaming API. Request data
+already exists in memory before sending. For a GUI, put slow requests in a
+supervised worker instead of invoking them in a widget callback.
 
 ## Subcommands
 
@@ -120,8 +127,9 @@ The method is exactly GET and has no request body.
 
 #### Arguments and options
 
-`body` is sent byte-for-byte. Explicit `-type` takes precedence over a
-Content-Type supplied in `-headers`.
+Bytearray `body` is sent byte-for-byte; other values are encoded as external
+UTF-8. Explicit `-type` takes precedence over a Content-Type supplied in
+`-headers`.
 
 #### Results
 

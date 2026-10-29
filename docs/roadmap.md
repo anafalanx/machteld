@@ -1,11 +1,60 @@
 ---
 type: roadmap
 title: Roadmap
-description: What Machteld 0.20 contains and how possible additions are ordered.
+description: Unsigned Machteld 0.22 candidate, release-gate progress, and preserved release history.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
+
+## 0.22 candidate — unsigned, release gate in progress
+
+The checkout reports runtime version 0.22, selected for the next candidate.
+It is **not released or signed**. The historical signed release remains
+preserved; candidate artifacts must be identified by their hashes, verification
+receipts, `manifest`, and embedded reference. Completed stabilization steps
+1 through 11 include:
+
+- Explicit build/input identities, content-checked incremental caches, and
+  independent reference conversion caches and test groups.
+- Bounded worker frames, batches, and callbacks; one pool attempt by default;
+  explicit replay-safe retries, cancellation/cleanup, and timeout contracts.
+- A responsive project-inspector example with application-owned worker roles,
+  model tests, and separately recorded earlier GUI acceptance.
+- Optional wrapped documentation, explicit application payload manifests and
+  no-write previews, compiler-free application metadata/icons, and an adjacent
+  DLL deployment example with a license/hash inventory.
+- Native ownership, strict UTF-8/JSON, path-rejection, and boundary fixes;
+  repeatable analyzer, adversarial, lifecycle, and scaling checks with stated
+  instrumentation gaps. See [native validation](native-validation.md).
+- Reconciled guides and command contracts, runnable README checks, and a
+  context-aware version gate that allows explicitly marked history.
+
+Evidence and remaining limits are recorded in `tools/stabilization.json` in
+the source checkout; exact artifact receipts live in ignored `out/` files.
+Local stabilization ran on Windows 11 Pro x64 build 26200, not every contracted
+Windows target. Tests do not establish a sandbox, full sanitizer coverage, or
+unbounded concurrency. The store remains narrow, several APIs remain
+synchronous, and native extensions still need manual deployment.
+
+Step 12, the **release gate**, is now in progress, not complete: freeze the
+candidate, reconstruct cleanly, compare with the matching incremental artifact,
+run the acceptance matrix including the approved brief GUI check, and prepare
+accurate candidate notes. Fresh evidence must distinguish verified targets from
+unavailable acceptance; earlier stabilization receipts do not automatically
+certify a new artifact. The candidate remains unsigned. Signing and publication
+require a separate decision, the repository remains private, and the signed
+release must not be replaced. Kuu integration is not current work.
+
+## Historical record
+
+The sections below retain earlier decisions, defects, and measurements at their
+original versions. They are not current capability claims or fresh benchmark
+results. In particular, all engine/Lua functionality described in the early
+sections was removed. Local tag dates below use Europe/Brussels and are not
+claims about GitHub publication timestamps.
+
+<!-- machteld-version-history: begin -->
 
 ## 0.11.0 baseline
 
@@ -19,18 +68,6 @@ tags: [machteld, roadmap, windows]
 - Explicit native/Tcl manifest metadata and complete embedded Machteld, Tcl 9,
   and Tk 9 reference with agent-oriented query, verification, and extraction.
 - Atomic console/GUI `wrap` with hidden assets and the complete runtime.
-
-## Continuing stabilization before breadth
-
-1. Gate the opt-in parser, direct host, both wrapped hosts, and `EntryCheck`
-   against the same entry corpus.
-2. Check every manifest command, subcommand, option, result key, and error code
-   against behavior, including protocol reply codes.
-3. Stress process-tree cleanup, channel closure, ConPTY teardown, worker death,
-   pool replacement, SQLite contention, and atomic wrapper failure paths.
-4. Keep package versions and the machine-control/data surface identical across
-   all produced executables; test the documented distribution-only exceptions.
-5. Measure startup, idle memory, and packaging size after the product cut.
 
 The next three sections record the former 0.12.0-0.14.0 compute subsystem for
 release history. The complete subsystem was removed in 0.20 and is not part of
@@ -191,7 +228,7 @@ The `pty` page's own 1809 reference is about ConPTY's requirement and
 stands unchanged. This checkpoint did not become a 0.15.1 build, public tag,
 or release artifact; those steps were skipped when 0.20 became the next target.
 
-## 0.20 — clean Tcl/Tk foundation (released 2026-09-04)
+## 0.20 — clean Tcl/Tk foundation (released; local tag 2026-09-05)
 
 **The X merge is not happening.** The 2026-08-29 ruling that machteld
 and the statically typed X language would become one product is
@@ -209,7 +246,7 @@ Version 0.20 is a deliberate subtraction release: engine mode, its wire,
 removed together, with no migration surface. It adds no replacement capability;
 the clean Tcl/Tk runtime is the baseline for subsequent development.
 
-## 0.21 — consolidation (in preparation, 2026-09-05)
+## 0.21 — consolidation (released; local tag 2026-09-06)
 
 **Same capabilities, cleaner and more robust.** A complete read of the 0.20
 tree - every C and Tcl source, every tool, test, and page - looking for
@@ -273,9 +310,10 @@ Consolidated:
   test; `dev.tcl` follows the same order and no longer carries a hardcoded
   estate path. `--enable-threads` is gone from the Tcl/Tk configure lines
   (Tcl 9 is always threaded and warned about the unknown option).
-- `tools/check_version.tcl` joins the release gate: every prose version claim
-  outside this history must agree with `src/machteld.h`, and a literal
-  launcher pin in the prelude is refused.
+- `tools/check_version.tcl` joined the release gate, checking version-like
+  numerals outside the roadmap and refusing a literal launcher pin. Its broad
+  numeric matching was not a semantic check and excluded this entire roadmap;
+  the current development checker replaces that policy (see above).
 - The Tk package registration, the reference corpus check, and the `help`
   banner read the linked library's `TK_PATCH_LEVEL`, recorded by the host as
   `::machteld::tk_patchlevel`, instead of two hand-maintained `9.0.4`
@@ -292,12 +330,16 @@ against sqlite.org's published SHA3-256 values before pinning. 3.53.0 changed
 SQLite's float-to-text rounding to 17 significant digits; the store never
 formats numbers, so nothing observable changes.
 
+<!-- machteld-version-history: end -->
+
 ## Candidate studies
 
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
 
 ## Roads examined and not taken (2026-08, the runtime tour)
+
+<!-- machteld-version-history: begin -->
 
 A deliberate discourse arc examined every serious route to a vast library
 ecosystem, and the owner ruled for the narrow product: **programs are Tcl; the
@@ -320,7 +362,11 @@ built tool. Recorded so these are reopened by argument, not by forgetting:
   needs are ported on demand; only semantic mass ever argued for an
   ecosystem, and no current program needs one.
 
+<!-- machteld-version-history: end -->
+
 ## Deferred: the palette gains xml (decided 2026-08-20, deferred 2026-08-22)
+
+<!-- machteld-version-history: begin -->
 
 Solid XML handling, validation included, was decided on 2026-08-20 as a
 palette organ beside `json` — runtime capability, not an extensions-covenant
@@ -331,7 +377,10 @@ deciding programs are the rail-family operations formats
 data plane of long-lived operations environments, and a runtime that
 promises "just works for years" must read it in the box.
 
-Recorded as constraints, not answers — the route is design work:
+This is a dated proposal, not an implemented API or current dependency
+recommendation. Candidate versions and integration claims below have not been
+revalidated for admission. Recorded as constraints, not answers — the route is
+design work:
 
 - The leading vendor candidate is tDOM 0.9.7 (C, Tcl 9-ready, bundles
   expat 2.7.3): DOM, XPath, DTD validation, and its own schema engine,
@@ -350,20 +399,24 @@ Recorded as constraints, not answers — the route is design work:
   classic XML trap), manifest metadata, and tests on real rail-format
   fixtures plus hostile ones (XXE, entity expansion, depth bombs).
 
+<!-- machteld-version-history: end -->
+
 ## Candidate additions
 
 Windows registry, services, event log, network facts, users, host facts, and
-selected WMI queries remain candidates. None was included in 0.20, and none has
+selected WMI queries remain candidates. None is built into the current runtime or has
 an assigned release. Each needs a concrete program, a narrow Tcl-shaped contract,
 structured failures, manifest metadata, and tests on real Windows behavior
 before admission.
 
-The extensions covenant (see [External libraries](extensions.md)) names its
-own candidate machinery: a wrap-time dependency resolver that classifies a
-program's requires as in-box, payload, or tool-local; a hashed manifest beside
-the output; and a `--deps` mode that verifies it on the target. The policy
-is contracted now; the machinery follows the same admission bar as every
-verb.
+Earlier extension proposals included automatic dependency classification and
+a target-side `--deps` verifier. These remain unimplemented candidates, not
+part of the current wrapper contract. The current approach is explicit: select
+embedded files with a wrap manifest and maintain a separate adjacent-DLL
+deployment inventory, including licenses. See [External libraries](extensions.md)
+and the `examples/external-extension` demonstration. No automatic resolver or
+dependency discovery is provided; future machinery needs its own admission
+decision.
 
 The route to 1.0 is a smaller surface whose invariants have survived use, not a
 longer list of verbs. New policy layers and bundled applications are out of

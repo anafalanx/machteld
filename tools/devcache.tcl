@@ -58,6 +58,13 @@ proc ::machteld::devcache::clean {directory} {
 # values within one guarded build. Directory inventories include hidden files,
 # names and empty directories, detecting additions, removals and renames.
 proc ::machteld::devcache::fingerprint {spec} {
+    # Semantic inputs must be re-read at the final publication check too. Their
+    # value is already in the key; this guard rejects a changed declaration
+    # rather than silently reusing the value captured by reference_spec.
+    if {[dict exists $spec runtime_version_guard]} {
+        lassign [dict get $spec runtime_version_guard] root expected
+        if {[reference_version $root] ne $expected} { error "runtime version changed during reference generation" }
+    }
     set material [list machteld-devcache-v1]
     foreach field {values files trees} {
         set items [expr {[dict exists $spec $field] ? [dict get $spec $field] : {}}]
@@ -223,6 +230,39 @@ proc ::machteld::devcache::compiler_environment {} {
     return $values
 }
 
+# Native subprocesses need only the pinned UCRT tools and Windows itself. An
+# inherited PATH can contain per-shell/session launchers which are irrelevant
+# to compilation, yet would invalidate every object if fingerprinted as inputs.
+# Use this exact PATH both in native keys and around native invocations; keep
+# the caller's full environment for Git, hashing helpers and the build guard.
+proc ::machteld::devcache::native_environment {msys} {
+    set inherited [compiler_environment]
+    if {![info exists ::env(SystemRoot)] || $::env(SystemRoot) eq "" ||
+            [file pathtype $::env(SystemRoot)] ne "absolute"} {
+        error "native development tools require an absolute SystemRoot"
+    }
+    set windows [file normalize $::env(SystemRoot)]
+    set paths {}
+    foreach path [list [file join $msys ucrt64 bin] [file join $windows System32] $windows] {
+        lappend paths [file nativename [file normalize $path]]
+    }
+    set values [list PATH [join $paths {;}]]
+    foreach name {SOURCE_DATE_EPOCH MACHTELD_WERROR} {
+        if {[dict exists $inherited $name]} { lappend values $name [dict get $inherited $name] }
+    }
+    return $values
+}
+
+proc ::machteld::devcache::with_native_environment {msys script} {
+    set native [native_environment $msys]
+    set present [info exists ::env(PATH)]
+    if {$present} { set saved $::env(PATH) }
+    set ::env(PATH) [dict get $native PATH]
+    try { uplevel 1 $script } finally {
+        if {$present} { set ::env(PATH) $saved } else { unset -nocomplain ::env(PATH) }
+    }
+}
+
 proc ::machteld::devcache::native_shared_spec {root paths toolchainKey} {
     set files [list [file join $root tools buildlib.tcl]]
     lappend files {*}[lsort [glob -nocomplain -directory [file join $root src] *.h]]
@@ -233,13 +273,31 @@ proc ::machteld::devcache::native_shared_spec {root paths toolchainKey} {
     return [dict create values [list $toolchainKey] files $files trees $trees]
 }
 
+proc ::machteld::devcache::reference_version {root} {
+    # Runtime implementation bytes belong to the package, not conversion.
+    # Validate the two version declarations on every call, but key references
+    # on the version value and authored interface documentation only.
+    foreach path [list [file join $root src machteld.h] [file join $root tcl machteld.tcl]] \
+            pattern {{(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$} {(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$}} {
+        set ch [open $path r]
+        try { set text [read $ch] } finally { close $ch }
+        if {![regexp $pattern $text -> version]} { error "missing canonical runtime version: $path" }
+        lappend versions $version
+    }
+    if {[lindex $versions 0] ne [lindex $versions 1]} { error "C/Tcl runtime version mismatch" }
+    if {[regexp {package require machteld [0-9]} $text]} { error "Tcl wrap launcher carries a literal version pin" }
+    return [lindex $versions 0]
+}
+
 proc ::machteld::devcache::reference_spec {root cache tclsh} {
-    set files [list $tclsh [file join $root src machteld.h] [file join $root tcl machteld.tcl] [file join $root LICENSE]]
-    foreach name {generate-reference.ps1 dependencies.lock.json} { lappend files [file join $root tools $name] }
+    set version [reference_version $root]
+    set files [list $tclsh [file join $root LICENSE]]
+    foreach name {generate-reference.ps1 reference-data.cs reference-cache.ps1 dependencies.lock.json} { lappend files [file join $root tools $name] }
     foreach name {Tcl-9.0.4.txt Tk-9.0.4.txt} { lappend files [file join $root licenses $name] }
     # The generator currently requires these exact pinned archive names.
     foreach name {tcl904-src.zip tk904-src.zip} { lappend files [file join $cache downloads $name] }
-    return [dict create files $files trees [list [file join $root docs]]]
+    return [dict create values [list runtime_version $version] runtime_version_guard [list $root $version] \
+        files $files trees [list [file join $root docs]]]
 }
 
 proc ::machteld::devcache::package_spec {root paths prelude bare bareGui reference} {

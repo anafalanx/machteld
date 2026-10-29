@@ -72,16 +72,38 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             return TCL_ERROR;
         }
         const char *path = ":memory:";
+        Tcl_DString pathBytes;
+        Tcl_DStringInit(&pathBytes);
         if (objc >= 3) {
             Tcl_Size pathLen;
-            path = Tcl_GetStringFromObj(objv[2], &pathLen);
-            if (pathLen == 0 || memchr(path, '\0', (size_t)pathLen) != NULL) {
+            const Tcl_UniChar *characters = Tcl_GetUnicodeFromObj(objv[2], &pathLen);
+            if (pathLen == 0) {
                 return fail_code(interp, "badvalue",
                     "store path must be a non-empty string without NUL bytes");
             }
+            for (Tcl_Size i = 0; i < pathLen; ++i) {
+                if (characters[i] == 0 ||
+                        (characters[i] >= 0xd800 && characters[i] <= 0xdfff)) {
+                    return fail_code(interp, "badvalue",
+                        "store path must contain valid Unicode without NUL");
+                }
+            }
+            /* SQLite consumes external UTF-8, not Tcl's modified encoding. */
+            const char *text = Tcl_GetStringFromObj(objv[2], &pathLen);
+            Tcl_Encoding utf8 = Tcl_GetEncoding(NULL, "utf-8");
+            int converted = Tcl_UtfToExternalDStringEx(interp, utf8, text, pathLen,
+                TCL_ENCODING_PROFILE_STRICT, &pathBytes, NULL);
+            Tcl_FreeEncoding(utf8);
+            if (converted != TCL_OK) {
+                Tcl_DStringFree(&pathBytes);
+                return fail_code(interp, "badvalue", "store path must contain valid Unicode");
+            }
+            path = Tcl_DStringValue(&pathBytes);
         }
         if (ctx->db) { sqlite3_close(ctx->db); ctx->db = NULL; }
-        if (sqlite3_open(path, &ctx->db) != SQLITE_OK) {
+        int openResult = sqlite3_open(path, &ctx->db);
+        Tcl_DStringFree(&pathBytes);
+        if (openResult != SQLITE_OK) {
             int r = fail(interp, sqlite3_errmsg(ctx->db));
             sqlite3_close(ctx->db);
             ctx->db = NULL;
@@ -164,15 +186,18 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             int n = sqlite3_column_bytes(st, 0);
             res = Tcl_NewByteArrayObj(
                 val ? val : (const unsigned char *)"", n);
+            Tcl_IncrRefCount(res);
         }
         int frc = sqlite3_finalize(st);
-        if (rc == SQLITE_DONE) {
+        if (rc == SQLITE_DONE && frc == SQLITE_OK) {
             return fail_code(interp, "notfound", "store key not found");
         }
         if (rc != SQLITE_ROW || frc != SQLITE_OK) {
+            if (res != NULL) Tcl_DecrRefCount(res);
             return fail(interp, sqlite3_errmsg(ctx->db));
         }
         Tcl_SetObjResult(interp, res);
+        Tcl_DecrRefCount(res);
         return TCL_OK;
     }
 
@@ -185,6 +210,7 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             return fail(interp, sqlite3_errmsg(ctx->db));
         }
         Tcl_Obj *list = Tcl_NewListObj(0, NULL);
+        Tcl_IncrRefCount(list);
         int rc;
         while ((rc = sqlite3_step(st)) == SQLITE_ROW) {
             const char *k = (const char *)sqlite3_column_text(st, 0);
@@ -193,9 +219,11 @@ static int StoreCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         }
         int frc = sqlite3_finalize(st);
         if (rc != SQLITE_DONE || frc != SQLITE_OK) {
+            Tcl_DecrRefCount(list);
             return fail(interp, sqlite3_errmsg(ctx->db));
         }
         Tcl_SetObjResult(interp, list);
+        Tcl_DecrRefCount(list);
         return TCL_OK;
     }
 

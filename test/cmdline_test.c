@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 static int fails = 0, total = 0;
 
@@ -48,12 +52,16 @@ static void esc(const char *name, const char *in, const char *want) {
 
 static void bt(const char *exe, int want) {
     int got = wj_is_batch_target(exe);
+    const char *name = exe != NULL ? exe : "NULL";
     total++;
-    if ((got != 0) != (want != 0)) { fails++; printf("FAIL is_batch_target(%s) = %d, want %d\n", exe, got, want); }
-    else printf("ok   is_batch_target(%s) = %d\n", exe, got);
+    if ((got != 0) != (want != 0)) { fails++; printf("FAIL is_batch_target(%s) = %d, want %d\n", name, got, want); }
+    else printf("ok   is_batch_target(%s) = %d\n", name, got);
 }
 
 int main(void) {
+#ifdef _WIN32
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+#endif
     const char *pre = "cmd.exe /e:ON /v:OFF /d /c \"";
 
     /* batch golden vectors (drang batch_test.go) */
@@ -74,6 +82,10 @@ int main(void) {
     batch_reject("script with quote", "C:\\a\"b.bat", 0, NULL);
     batch_reject("script trailing backslash", "C:\\x\\", 0, NULL);
     batch_reject("script with CR", "C:\\x\r.bat", 0, NULL);
+    batch_reject("NULL script", NULL, 0, NULL);
+    batch_reject("negative argument count", "C:\\x.bat", -1, NULL);
+    batch_reject("NULL argument vector", "C:\\x.bat", 1, NULL);
+    { const char *a[] = {NULL};              batch_reject("NULL argument entry", "C:\\x.bat", 1, a); }
     { const char *a[] = {"a\rb"};             batch_reject("arg with CR", "C:\\x.bat", 1, a); }
     { const char *a[] = {"a\nb"};             batch_reject("arg with LF", "C:\\x.bat", 1, a); }
 
@@ -88,6 +100,7 @@ int main(void) {
     /* is_batch_target */
     bt("x.bat", 1); bt("x.cmd", 1); bt("C:\\dir\\Tool.BAT", 1); bt("C:\\dir\\run.Cmd", 1);
     bt("x.exe", 0); bt("x.com", 0); bt("x", 0); bt("x.bat.exe", 0); bt("C:\\dir\\tool.ps1", 0);
+    bt(NULL, 0);
 
     printf("\n%d/%d passed, %d failed\n", total - fails, total, fails);
     return fails ? 1 : 0;

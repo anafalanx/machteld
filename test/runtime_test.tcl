@@ -40,7 +40,7 @@ check "retired macht command is absent" [expr {
     [info commands ::machteld::macht] eq "" && ![dict exists [manifest] macht]}]
 set metadata [manifest]
 check "wrap manifest advertises explicit documentation opt-in" [expr {
-    [dict get $metadata wrap options] eq {--console --entry --gui --with-docs -o}}]
+    [dict get $metadata wrap options] eq {--console --entry --gui --manifest --plan --with-docs -o}}]
 set pty_map [namespace ensemble configure ::machteld::pty -map]
 check "PTY public ensemble agrees with merged manifest" [expr {
     [lsort [dict keys $pty_map]] eq
@@ -49,10 +49,10 @@ check "PTY manifest advertises its closed error-code set" [expr {
     [dict get $metadata pty codes] eq
     {badvalue launch limit nohandle notfound oserror timeout usage}}]
 check "worker separates reply-only protocol codes" [expr {
-    [dict get $metadata worker codes] eq {badvalue usage} &&
-    [dict get $metadata worker replycodes] eq {failed notfound parse usage}}]
+    [dict get $metadata worker codes] eq {badvalue limit usage} &&
+    [dict get $metadata worker replycodes] eq {failed limit notfound parse usage}}]
 check "pool separates poison reply from raised codes" [expr {
-    [dict get $metadata pool codes] eq {badvalue launch nohandle timeout usage} &&
+    [dict get $metadata pool codes] eq {badvalue failed launch limit nohandle timeout usage} &&
     [dict get $metadata pool replycodes] eq {poison}}]
 check "help advertises bounded embedded-reference discovery" [expr {
     [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
@@ -238,8 +238,8 @@ check "worker survives an unencodable reply" [expr {
     [result_of [ask_worker {id 9 op echo text still-alive}]] eq "still-alive"}]
 child close $worker
 
-# Pool correctness, ordering, large-pipe behavior and stderr draining preserve
-# Preserve the useful pool failure-mode findings as executable regressions.
+# Preserve pool correctness, ordering, large-pipe behavior, stderr draining and
+# failure-mode findings as executable regressions.
 set pool_token [pool create -width 4 -- $MT $WORKER]
 set requests {}
 for {set index 0} {$index < 24} {incr index} {
@@ -335,10 +335,16 @@ check "pool observation timeout leaves work running" [expr {
     [dict get [pool info $pool_token] workers] == 1 &&
     [lsort [after info]] eq $before_timers}]
 set replies [pool wait $pool_token -timeout 30s]
+# A completed batch can still have its bounded I/O rearm queued; that is owned
+# channel housekeeping, not the observation timer this regression checks.
+set remaining_timers [after info]
+dict for {stream timer} [dict get $::machteld::POOL $pool_token resumes] {
+    set remaining_timers [lsearch -all -inline -not -exact $remaining_timers $timer]
+}
 check "pool completes after observation timeout without a stale timer" [expr {
     [result_of [lindex $replies 0]] eq "eventual" &&
     [pool wait $pool_token -timeout 0ms] eq $replies &&
-    [lsort [after info]] eq $before_timers}]
+    [lsort $remaining_timers] eq $before_timers}]
 pool close $pool_token
 
 # Fault-inject only the event-loop primitive. This exercises the production
@@ -376,7 +382,7 @@ check "closing after wait failure removes workers and channel callbacks" [expr {
 set before_children [child list]
 set before_channels [lsort [chan names]]
 set before_timers [lsort [after info]]
-set pool_token [pool create -width 2 -- $MT $WORKER]
+set pool_token [pool create -width 2 -maxtries 2 -- $MT $WORKER]
 dict set ::machteld::POOL $pool_token cmd [list [file join $WORK missing-worker.exe]]
 try {
     pool submit $pool_token [list [dict create op die] \

@@ -1,6 +1,7 @@
 # Content-cache and publication regressions. Run with the bootstrapped Tcl 9:
 #   .cache/deps/prefix/bin/tclsh90s.exe test/dev_cache_test.tcl
-# No compiler, upstream conversion, network, or active build cache is used.
+# No upstream conversion, network, or active build cache is used. Tiny native
+# fixtures also verify the exact compiler environment with the pinned tools.
 # The tiny products below exercise the production cache/publisher, not a second
 # cache implementation. The separate production-spec tests check input selection.
 
@@ -431,7 +432,7 @@ try {
     foreach relative {
         tools/dependencies.lock.json tools/bootstrap.ps1 tools/bootstrap-deps.sh
         tools/toolchain.ps1 tools/toolchain-fingerprint.ps1 tools/patches/dependency.patch tools/buildlib.tcl
-        tools/generate-reference.ps1 tools/package.tcl tools/publish-output.ps1
+        tools/generate-reference.ps1 tools/reference-data.cs tools/reference-cache.ps1 tools/package.tcl tools/publish-output.ps1
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
         tcl/pool.tcl LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
@@ -441,6 +442,8 @@ try {
     } {
         write_bytes [file join $::fixtureRoot {*}[split $relative /]] "fixture:$relative"
     }
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.21"}
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.21}
     foreach relative {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
         prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
@@ -488,7 +491,7 @@ try {
     file delete $additionalHeader
 
     foreach relative {
-        src/machteld.h tcl/machteld.tcl LICENSE tools/generate-reference.ps1
+        LICENSE tools/generate-reference.ps1 tools/reference-data.cs tools/reference-cache.ps1
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         docs/overview.md docs/reference/machteld/command/help.md
     } {
@@ -515,6 +518,16 @@ try {
     write_bytes [file join $::fixtureRoot tcl pool.tcl] changed-implementation-only
     check {implementation-only Tcl edit does not regenerate the reference} \
         [expr {$before eq [production_key reference]}]
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] "variable version 0.21\n# implementation edit"
+    check {main Tcl implementation edit does not regenerate the reference} \
+        [expr {$before eq [production_key reference]}]
+    set capturedReferenceSpec [production_spec reference]
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.22"}
+    check {reference rejects inconsistent runtime versions} [catch {production_key reference}]
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.22}
+    check {reference rechecks semantic version at publication time} \
+        [catch {::machteld::devcache::fingerprint $capturedReferenceSpec}]
+    check {runtime version change regenerates the reference} [expr {$before ne [production_key reference]}]
 
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl tools/publish-output.ps1
@@ -611,6 +624,29 @@ try {
                 [dict get $loaded $coordinator] eq [read_bytes $coordinator]}]
         check {unchanged loaded recipes pass startup verification} \
             [expr {![catch {interp eval $startup verify_loaded_recipes}]}]
+        # Exercise the real coordinator's three native entry points without
+        # compiling against this deliberately fake dependency installation.
+        interp eval $startup {
+            set ::nativePaths {}
+            rename run {}
+            proc run args { lappend ::nativePaths $::env(PATH) }
+            rename ::machteld::build::version_resource {}
+            proc ::machteld::build::version_resource args { lappend ::nativePaths $::env(PATH) }
+            rename ::machteld::build::link_host {}
+            proc ::machteld::build::link_host args { lappend ::nativePaths $::env(PATH) }
+            set ::inheritedPath $::env(PATH)
+            compile_candidate source.c {-O2} fixture candidate.o
+            resource_candidate console candidate.o
+            link_candidate console main.o resource.o objects sqlite.o yyjson.o candidate.exe
+        }
+        set nativePaths [interp eval $startup {set ::nativePaths}]
+        set expectedNativePath [interp eval $startup {
+            dict get [::machteld::devcache::native_environment $::MSYS2] PATH
+        }]
+        check {compile, resource and link entry points apply the keyed native PATH} \
+            [expr {$nativePaths eq [lrepeat 3 $expectedNativePath]}]
+        check {native entry points preserve caller PATH for other build stages} \
+            [interp eval $startup {expr {$::env(PATH) eq $::inheritedPath}}]
         foreach name {dev.tcl buildlib.tcl devcache.tcl} {
             set path [file join $startupRoot tools $name]
             set bytes [read_bytes $path]
@@ -703,6 +739,116 @@ if ($LASTEXITCODE) { throw "fixture Bash launch failed: $LASTEXITCODE" }
     }} oldResult]
     check {former indirect Bash invocation fails at env shebang under minimal PATH} \
         [expr {$oldFailed && [string match {*env*bash*} $oldResult]}] $oldResult
+
+    # Compiler lookup must be constrained in execution, not merely omitted
+    # from a cache key. Real tiny compiler/resource/link products verify that
+    # this PATH is sufficient, even with executable impostors in caller PATH.
+    set nativeEnvNames {PATH SOURCE_DATE_EPOCH MACHTELD_WERROR}
+    set savedNativeEnv {}
+    foreach name $nativeEnvNames {
+        if {[info exists ::env($name)]} { dict set savedNativeEnv $name $::env($name) }
+    }
+    try {
+        unset -nocomplain ::env(SOURCE_DATE_EPOCH) ::env(MACHTELD_WERROR)
+        set ::env(PATH) "[file nativename [file join $work codex-arg0-first]];$::env(PATH)"
+        set firstInherited [::machteld::devcache::compiler_environment]
+        set firstNative [::machteld::devcache::native_environment $realMsys]
+        set nativeKey [::machteld::devcache::fingerprint [dict create values $firstNative]]
+        set ::env(PATH) "[file nativename [file join $work codex-arg0-second]];$::env(PATH)"
+        check {ephemeral caller PATH changes do not invalidate native keys} \
+            [expr {$nativeKey eq [::machteld::devcache::fingerprint [dict create values \
+                [::machteld::devcache::native_environment $realMsys]]]}]
+        check {full inherited PATH remains visible to the build guard} \
+            [expr {$firstInherited ne [::machteld::devcache::compiler_environment]}]
+        set nativeParts [split [dict get $firstNative PATH] {;}]
+        check {native PATH has only pinned tools and Windows directories} \
+            [expr {$nativeParts eq [list \
+                [file nativename [file normalize [file join $realMsys ucrt64 bin]]] \
+                [file nativename [file normalize [file join $::env(SystemRoot) System32]]] \
+                [file nativename [file normalize $::env(SystemRoot)]]]}]
+        foreach name {SOURCE_DATE_EPOCH MACHTELD_WERROR} value {946684800 0} {
+            set ::env($name) $value
+            check "native key still tracks $name" \
+                [expr {$nativeKey ne [::machteld::devcache::fingerprint [dict create values \
+                    [::machteld::devcache::native_environment $realMsys]]]}]
+            unset ::env($name)
+        }
+        set callerNativePath $::env(PATH)
+        set result [::machteld::devcache::with_native_environment $realMsys {
+            set actualNativePath $::env(PATH)
+            set callerScopeResult success
+        }]
+        check {native wrapper applies the fingerprinted PATH in caller scope} \
+            [expr {$actualNativePath eq [dict get $firstNative PATH] && $result eq "success" &&
+                $callerScopeResult eq "success"}]
+        check {successful native wrapper restores caller PATH} \
+            [expr {$::env(PATH) eq $callerNativePath}]
+        set failed [catch {::machteld::devcache::with_native_environment $realMsys {
+            return -code error -errorcode {TEST NATIVE PATH} expected-native-failure
+        }} result options]
+        check {failed native wrapper preserves error and restores caller PATH} \
+            [expr {$failed && $result eq "expected-native-failure" &&
+                [dict get $options -errorcode] eq {TEST NATIVE PATH} &&
+                $::env(PATH) eq $callerNativePath}]
+        unset ::env(PATH)
+        check {absent caller PATH uses the same native key} \
+            [expr {$nativeKey eq [::machteld::devcache::fingerprint [dict create values \
+                [::machteld::devcache::native_environment $realMsys]]]}]
+        ::machteld::devcache::with_native_environment $realMsys {set applied $::env(PATH)}
+        check {native wrapper restores an initially absent PATH} \
+            [expr {![info exists ::env(PATH)] && $applied eq [dict get $firstNative PATH]}]
+        set ::env(PATH) $callerNativePath
+
+        set nativeDir [file join $work {native tools with spaces}]
+        set fakeDir [file join $nativeDir fake-tools]
+        file mkdir $fakeDir
+        set gcc [file join $realMsys ucrt64 bin gcc.exe]
+        set windres [file join $realMsys ucrt64 bin windres.exe]
+        set strip [file join $realMsys ucrt64 bin strip.exe]
+        set fakeSource [file join $nativeDir impostor.c]
+        set fakeExe [file join $fakeDir gcc.exe]
+        write_bytes $fakeSource {int main(void) { return 97; }}
+        ::machteld::devcache::with_native_environment $realMsys {
+            exec $gcc $fakeSource -o $fakeExe 2>@1
+        }
+        file copy $fakeExe [file join $fakeDir as.exe]
+        set ::env(PATH) "[file nativename $fakeDir];$callerNativePath"
+        foreach tool {gcc.exe as.exe} {
+            set failed [catch {exec $tool --version 2>@1} result options]
+            check "negative control: caller PATH reaches external $tool" \
+                [expr {$failed && [lindex [dict get $options -errorcode] 0] eq "CHILDSTATUS" &&
+                    [lindex [dict get $options -errorcode] 2] == 97}] $result
+            set failed [catch {::machteld::devcache::with_native_environment $realMsys {
+                exec $tool --version 2>@1
+            }} result]
+            check "native PATH excludes external $tool" \
+                [expr {!$failed && [regexp {gcc\.exe|GNU assembler} $result]}] $result
+        }
+        set tinySource [file join $nativeDir tiny.c]
+        set tinyObject [file join $nativeDir tiny.o]
+        set tinyExe [file join $nativeDir tiny.exe]
+        set tinyRc [file join $nativeDir tiny.rc]
+        set tinyResource [file join $nativeDir tiny-resource.o]
+        write_bytes $tinySource {int main(void) { return 0; }}
+        write_bytes $tinyRc {1 RCDATA { 42 }}
+        set failed [catch {::machteld::devcache::with_native_environment $realMsys {
+            exec $gcc -c $tinySource -o $tinyObject 2>@1
+            exec $windres --codepage=65001 -O coff -i $tinyRc -o $tinyResource 2>@1
+            exec $gcc $tinyObject $tinyResource -o $tinyExe 2>@1
+            exec $strip $tinyExe 2>@1
+            exec $tinyExe 2>@1
+        }} result]
+        check {pinned compile, resource, link and strip work with constrained PATH} \
+            [expr {!$failed && [file isfile $tinyObject] && [file isfile $tinyResource] &&
+                [file isfile $tinyExe]}] $result
+        check {real native subprocesses preserve the caller PATH with impostors} \
+            [expr {$::env(PATH) eq "[file nativename $fakeDir];$callerNativePath"}]
+    } finally {
+        foreach name $nativeEnvNames {
+            if {[dict exists $savedNativeEnv $name]} { set ::env($name) [dict get $savedNativeEnv $name] } \
+            else { unset -nocomplain ::env($name) }
+        }
+    }
 
     # A Tcl process launched from PowerShell 7 inherits its module search path.
     # Windows PowerShell must receive its own default; caller state is restored

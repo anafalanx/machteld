@@ -14,6 +14,12 @@ errors, resource lifetime, constraints, and examples. Use `manifest` for a
 structured inventory of the running API and the documentation interface for
 exact lookup and search.
 
+The unsigned candidate reports runtime version 0.22; its release gate is still
+in progress. Match these pages to the executable's corpus and artifact identity,
+not merely its package version: candidate builds can change without a new
+version string. Conceptual guides state design intent and history separately
+from the implemented command pages.
+
 Every command lives in `::machteld` and is available unqualified at top level.
 Nested namespaces should use the qualified name or add `::machteld` to their
 namespace path.
@@ -37,3 +43,10 @@ The Machteld distribution includes this pack; wrapped tools include it only
 with `--with-docs`. Without it, `manifest` and `docs schema` still describe the
 runtime, corpus queries report `DOCS unsupported`, and bare `help` explains
 where to find the full same-version reference.
+
+Machteld executes trusted Tcl and native extensions with the user's permissions.
+Entry declarations, supervised lifetimes, resource limits, and wrapper inventories
+are not sandboxing or publisher authentication. Retrieve
+`machteld/guide/contract` for cross-command rules and
+`machteld/guide/execution-model` for GUI-safe composition of blocking and evented
+operations.

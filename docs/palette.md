@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public Machteld 0.21 commands and their intended composition.
+description: The public Machteld 0.22 candidate commands and their intended composition.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -12,6 +12,10 @@ This page is a composition tour. The [complete reference](reference/machteld/ind
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
 tools wrapped with `--with-docs`.
+
+This describes the unsigned candidate with runtime version 0.22, not the older
+signed release. Candidate acceptance is in progress; check the selected
+executable's live `manifest`, artifact identity, and embedded reference.
 
 ## Process control
 
@@ -44,6 +48,11 @@ without joining it; `detach` joins neither job. Closing or killing a supervised
 handle terminates the whole child tree. Use `--` before the child command when
 its arguments can look like Machteld options.
 
+Supervision is not a sandbox. Children retain the user's permissions. `-dir`
+sets a working directory, not a filesystem boundary; `-env` overlays inherited
+variables and does not remove credentials from the environment. Use only trusted
+programs and explicitly authorized operations.
+
 A bare command is searched only in `PATH`, never in the current directory. If
 it has no extension, Machteld tries `.exe`, `.com`, `.bat`, then `.cmd`; it does
 not consult ambient `PATHEXT`. Use an explicit path for any other executable
@@ -57,6 +66,8 @@ expires. `child wait TOKEN -timeout` bounds only that observation; it returns
 Channel mode transfers pipe ownership to the caller. Drain stdout/stderr while
 the child runs, and close the exposed stdin channel after the final request;
 `child wait` observes completion and does not manufacture EOF by closing it.
+Capture and streaming modes have their own byte/line limits; inspect the exact
+`run` and `child` pages rather than assuming an unlimited result buffer.
 
 ## Interactive processes
 
@@ -180,6 +191,12 @@ on the pinned yyjson core; the emitter's byte choices (lowercase `\u00xx`
 control escapes, the seven short escapes, unescaped solidus, raw UTF-8) are
 contract behavior.
 
+Decode treats bytearrays as exact wire bytes and ordinary Tcl strings as UTF-8
+text. Malformed UTF-8 refuses rather than being repaired. NUL values and object
+keys survive through JSON escaping; unpaired surrogates in encoded Tcl strings
+or keys refuse as well. The 512-level nesting cap applies to the complete value,
+including typed subtrees embedded in newly constructed containers.
+
 TYPED is for programs that need real JSON identity - a wire that requires a
 literal `true`, a session id that must stay a string, a null that is not an
 empty string:
@@ -206,15 +223,17 @@ may set any positive limit through that cap); number spelling survives verbatim,
 integers included; `encode` recognizes typed values at every nesting level.
 
 The shimmer caveat, stated plainly: Tcl converts representations on demand,
-and a typed handle that has been through a string operation is a plain
-string again - indistinguishable from one that was never typed. Under a
+and a string operation can replace a handle's typed representation. A value
+reconstructed from its JSON text is plain until explicitly decoded with
+`-typed`; text alone carries no type authority. Under a
 typed container nothing can shimmer (the subtree is document-backed); the
 exposed routes are the handle itself and typed leaves parked in plain
 containers. Build wire-bound trees as typed containers end to end, construct
-late, hold the handle, and never stringify it. A leaf that arrives at a
+late, hold the typed value, and avoid operations that replace its representation.
+A leaf that arrives at a
 constructor already stripped refuses by name - loud, not lucky. Typed values
-are for the program's own boundary work: stringification, `store`, and worker
-transport do not preserve the type.
+are for the program's own boundary work: reconstruction from text, `store`
+retrieval, and plain-only worker transport do not preserve typed identity.
 
 `hash` supports `md5`, `sha1`, `sha256`, `sha384`, and `sha512` through Windows
 CNG. `sum`, `file`, and `hmac` return hex unless `-binary` applies. `start`,
@@ -222,11 +241,17 @@ CNG. `sum`, `file`, and `hmac` return hex unless `-binary` applies. `start`,
 closed set. `random` returns cryptographic bytes.
 
 `store` is a binary-safe key/value layer over static SQLite. A bytearray is
-stored byte-for-byte; another Tcl value uses its UTF-8 string representation.
+stored byte-for-byte; another Tcl value uses its real UTF-8 encoding, not Tcl's
+internal modified UTF-8 representation.
 `get` always returns a bytearray and raises `STORE notfound` for absence; `del` returns 0/1. `open`
 without a path creates an in-memory store; `open path` creates or opens a durable
 database. Both use a five-second busy timeout. `version` reports the SQLite version. See the
 [contract](contract.md) for the cross-host guarantee.
+
+These commands are synchronous. HTTP's phase timeouts and SQLite's busy timeout
+are not general cancellation or total GUI-response guarantees. Directory walks,
+large hashes, database operations, and packaging can also block. Put slow work
+in an owned child when a Tk callback must stay responsive.
 
 ## Program support
 
@@ -265,7 +290,7 @@ worker serve
 
 # director
 set requests {{op digest path a.iso} {op digest path b.iso}}
-set p [pool create -width 8 -maxtries 3 -- worker.exe]
+set p [pool create -width 8 -- worker.exe]
 pool submit $p $requests
 set replies [pool wait $p -timeout 1m]
 pool info $p
@@ -284,8 +309,17 @@ worker. Each pool accepts one submitted batch; create another pool for later
 work. Results are ordered by submission ID; stderr is continuously drained and
 capped for `info`. `create` accepts `-width`, `-maxtries`, and child launch
 options `-arg0`, `-cpu`, `-dir`, `-env`, `-mem`, and `-timeout`. `wait` has its
-own `-timeout`. Worker death requeues one item; repeated death returns a `POOL
-poison` reply rather than looping.
+own observation-only `-timeout`. One attempt (`-maxtries 1`) is the default:
+a lost reply does not prove an operation had no side effects. Explicitly raise
+maxtries only for replay-safe work; exhausted attempts return a `POOL poison`
+reply. Reported handler failures are never retried.
+
+Worker and pool frames default to a 16 MiB UTF-8 byte bound (`-maxframe`). Pool
+and pmap additionally bound batch count (`-maxitems`, 10000), request bytes
+(`-maxbatch`, 64 MiB), and retained reply bytes (`-maxresults`, 64 MiB).
+Read/event budgets and bounded stdin queues keep a chatty peer from growing
+transport buffers without limit or monopolizing the event loop. These limits
+are separate from child process memory limits and handler-created data.
 
 `pmap` always closes its pool. It returns result values, or `-raw` replies. A
 handler's structured error is re-raised unchanged; an unstructured handler error
@@ -306,9 +340,11 @@ help contract
 wrap app.tcl -o app.exe --console
 wrap appdir -o app.exe --entry src/main.tcl --gui
 wrap app.tcl -o documented-app.exe --with-docs
+wrap app-stage -o app.exe --manifest app.dict --plan
+wrap app-stage -o app.exe --manifest app.dict
 ```
 
-`version` and `package require machteld` return `0.21`. `manifest` describes the
+`version` and `package require machteld` return `0.22`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
 `replycodes` are fixed protocol failures carried as data. `docs` provides exact,
 bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9
@@ -317,7 +353,11 @@ its human-facing shorthand. Without that corpus, `docs schema` still works,
 corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
 
 `wrap` accepts only an opted-in Machteld entry. A directory defaults to
-`main.tcl`; `--entry` selects another file inside it. It includes hidden assets
+`main.tcl`; `--entry` selects another file inside it. Prefer a dedicated staging
+directory and `--manifest` with an explicit file inventory; `--plan` validates and
+previews that inventory without writing an executable. Without a manifest,
+directory wrapping includes every file, hidden assets and unrelated secrets
+alike: do not wrap a repository root. It stores selected assets
 under an application subtree, validates the staged entry, publishes atomically,
 and produces a console or GUI host with the same machine-control/data API,
 static SQLite, Tcl/Tk libraries, license notices, and version. The built-in
@@ -325,6 +365,12 @@ reference is omitted by default; `--with-docs` includes the full verified corpus
 Application documentation and assets are unaffected. Basekits are not copied
 recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).
+
+Manifest metadata can set the application's Windows name, version, description,
+authorship fields, and icon without a compiler. It stays separate from the
+runtime version and Vincent Vercauteren's Machteld identity. No automatic signing
+or dependency resolution is performed; inventories and VERSIONINFO are
+descriptive, not proof of a trusted publisher.
 
 ## Complete verb list
 

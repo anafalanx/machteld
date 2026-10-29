@@ -8,7 +8,7 @@ namespace eval ::machteld::manifest {}
 
 # Internal commands are registered for cooperation with the Tcl prelude, but
 # are intentionally absent from the public manifest.
-set ::machteld::manifest::private {EntryCheck PayloadRoot Publish}
+set ::machteld::manifest::private {EntryCheck PayloadRoot Publish StampIdentity ValidateIdentity}
 
 set ::machteld::manifest::native {
     canon {
@@ -113,10 +113,11 @@ set ::machteld::manifest::native {
         }
     }
     run {
-        kind c domain RUN codes {badvalue launch notfound oserror usage}
+        kind c domain RUN codes {badvalue launch limit notfound oserror usage}
         doc machteld/command/run
         options {-arg0 -cpu -dir -env -inherit -mem -onerr -onout -stdin -timeout}
         returns {err exit out pid status truncated}
+        limits {capture_bytes_per_stream 1048576 callback_line_bytes 16777216 pump_bytes_per_stream 8192}
     }
     store {
         kind c domain STORE codes {badvalue notfound notopen sqlite} options {}

@@ -1,11 +1,17 @@
 ---
 type: index
 title: machteld documentation
-description: The documentation map for the Machteld 0.21 runtime.
+description: The documentation map for the unsigned Machteld 0.22 candidate.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld 0.21
+# machteld 0.22 candidate
+
+These pages describe the unsigned candidate while its release gate is in
+progress. The older signed release's own embedded reference and release notes
+describe its behavior. Use the selected executable's
+`manifest`, `docs status`, and (for incremental development builds)
+`build-info.dict` to identify its capabilities; see [release history](roadmap.md).
 
 machteld is a compact Windows machine-control runtime. A program is ordinary
 Tcl 9 whose first executable command explicitly requires `machteld`; the runtime
@@ -25,10 +31,18 @@ Machteld's own exact command reference.
 - [Packaging](packaging.md) - direct entries and standalone tools.
 - [External libraries](extensions.md) - Tcl extensions, precedence, and the deployment covenant.
 - [Architecture](architecture.md) - hosts, prelude, native core, and metadata.
+- [Native validation](native-validation.md) - analysis, stress/scaling evidence,
+  and instrumentation gaps.
 - [Creed](creed.md) - the design tests.
 - [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.
 - [Direction](direction.md) - current product decisions and non-goals.
 - [Roadmap](roadmap.md) - built now and possible next work.
+
+The source checkout also contains a responsive project inspector
+(`examples/project-inspector/README.md`) and an explicitly deployed external
+extension (`examples/external-extension/README.md`).
+These are examples, not additional built-in commands; their source and tests
+are not part of the embedded reference corpus.
 
 The distribution and tools wrapped with `--with-docs` carry these guides plus
 complete Machteld, Tcl 9, and Tk 9 references. Use `docs status` to establish

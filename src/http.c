@@ -101,6 +101,9 @@ static int http_put_header(Tcl_Obj *d, const char *line, size_t len) {
         Tcl_AppendToObj(joined, v, (Tcl_Size)vlen);
         Tcl_DictObjPut(NULL, d, key, joined);
     }
+    /* Replacing a duplicate header retains the dictionary's original key,
+     * not this newly allocated equivalent object. Release either way. */
+    Tcl_BounceRefCount(key);
     return 1;
 }
 

@@ -55,6 +55,10 @@ foreach path [dict get $survey paths] { puts $path }
 The returned answer is a snapshot assembled during traversal, not an atomic
 filesystem transaction. Inspect `errors`, `pruned`, and `depthlimited` before
 treating it as complete. Prune patterns match names, not full paths.
+The full result is materialized in memory, with no row/byte limit or streaming
+cursor. Depth and prune choices reduce traversal, but a single very wide
+directory can still be large. Use a supervised worker for expensive surveys
+when the host's event loop must remain responsive.
 
 ## See also
 

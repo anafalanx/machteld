@@ -99,6 +99,18 @@ native_path_from_obj(Tcl_Interp *interp, Tcl_Obj *value, const char *label,
         Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
         return TCL_ERROR;
     }
+    /* Tcl's string representation encodes NUL as C0 80. Checking the C
+     * string for zero bytes misses it; Windows would silently use the prefix
+     * of the converted native path and could replace a different file. */
+    Tcl_Size count;
+    const Tcl_UniChar *characters = Tcl_GetUnicodeFromObj(value, &count);
+    for (Tcl_Size i = 0; i < count; ++i) {
+        if (characters[i] == 0 ||
+                (characters[i] >= 0xd800 && characters[i] <= 0xdfff)) {
+            return publish_error(interp, "badvalue",
+                "publication paths must contain valid Unicode without NUL");
+        }
+    }
 
     Tcl_Obj *normalized = Tcl_FSGetNormalizedPath(interp, value);
     if (normalized == NULL) {

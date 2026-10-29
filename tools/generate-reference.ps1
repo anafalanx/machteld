@@ -3,6 +3,7 @@ param(
     [string]$CacheRoot,
     [string]$Output,
     [string]$Tclsh,
+    [string]$StageCache,
     [switch]$KeepWork
 )
 
@@ -21,8 +22,43 @@ $Output = [IO.Path]::GetFullPath($Output)
 $LockPath = Join-Path $PSScriptRoot 'dependencies.lock.json'
 $Utf8NoBom = New-Object Text.UTF8Encoding($false)
 $GeneratorVersion = 'machteld-reference-v1'
+$totalTimer = [Diagnostics.Stopwatch]::StartNew()
+# Execute captured helper text, then verify those exact loaded recipes again
+# before key creation and publication. A changed file must never label already
+# loaded code with a new source hash, even in a long-lived PowerShell session.
+$LoadedReferenceRecipes = [ordered]@{}
+$LoadedReferenceRecipes[$PSCommandPath] = $MyInvocation.MyCommand.ScriptBlock.Ast.Extent.Text
+$recipeDecoder = New-Object Text.UTF8Encoding($false, $true)
+foreach ($helperName in @('reference-data.cs','reference-cache.ps1')) {
+    $helperPath = Join-Path $PSScriptRoot $helperName
+    $LoadedReferenceRecipes[$helperPath] = [IO.File]::ReadAllText($helperPath, $recipeDecoder)
+}
+$dataPath = Join-Path $PSScriptRoot 'reference-data.cs'
+$recipeSha = [Security.Cryptography.SHA256]::Create()
+try {
+    $dataIdentity = [BitConverter]::ToString($recipeSha.ComputeHash($Utf8NoBom.GetBytes($LoadedReferenceRecipes[$dataPath])))
+} finally { $recipeSha.Dispose() }
+if ('MachteldReferenceData' -as [type]) {
+    $loadedIdentity = Get-Variable -Name MachteldReferenceDataSourceIdentity -Scope Global -ErrorAction SilentlyContinue
+    if ($null -eq $loadedIdentity -or $loadedIdentity.Value -cne $dataIdentity) {
+        throw 'generate-reference: reference-data.cs differs from the loaded or unidentified helper; start a fresh PowerShell process'
+    }
+} else {
+    Add-Type -TypeDefinition $LoadedReferenceRecipes[$dataPath]
+    Set-Variable -Name MachteldReferenceDataSourceIdentity -Scope Global -Value $dataIdentity
+}
+. ([scriptblock]::Create($LoadedReferenceRecipes[(Join-Path $PSScriptRoot 'reference-cache.ps1')]))
+if ($StageCache) { $StageCache = [IO.Path]::GetFullPath($StageCache) }
 
 function Fail([string]$Message) { throw "generate-reference: $Message" }
+
+function Assert-ReferenceRecipes {
+    foreach ($entry in $LoadedReferenceRecipes.GetEnumerator()) {
+        if ([IO.File]::ReadAllText($entry.Key, $recipeDecoder) -cne $entry.Value) {
+            Fail "loaded generator recipe changed; restart generation: $($entry.Key)"
+        }
+    }
+}
 
 function Write-Utf8Lf([string]$Path, [string]$Text) {
     $parent = [IO.Path]::GetDirectoryName($Path)
@@ -65,10 +101,8 @@ function Assert-NoSurrogates([string]$Text, [string]$Label) {
     # Tcl's string offsets count Unicode characters while .NET indexes UTF-16
     # code units.  The upstream corpus currently contains no non-BMP text.  A
     # future occurrence fails closed instead of publishing divergent offsets.
-    for ($i = 0; $i -lt $Text.Length; $i++) {
-        if ([char]::IsSurrogate($Text[$i])) {
-            Fail "$Label contains non-BMP text; section offset encoding must be upgraded"
-        }
+    if ([MachteldReferenceData]::HasSurrogates($Text)) {
+        Fail "$Label contains non-BMP text; section offset encoding must be upgraded"
     }
 }
 
@@ -164,34 +198,7 @@ function Rewrite-AuthoredLinks([string]$Text, [string]$SourceKind) {
 }
 
 function Tcl-Word([string]$Value) {
-    if ($Value.Length -eq 0) { return '{}' }
-    $b = New-Object Text.StringBuilder
-    foreach ($c in $Value.ToCharArray()) {
-        $code=[int][char]$c
-        switch ($code) {
-            8  { [void]$b.Append('\b'); continue }
-            9  { [void]$b.Append('\t'); continue }
-            10 { [void]$b.Append('\n'); continue }
-            11 { [void]$b.Append('\v'); continue }
-            12 { [void]$b.Append('\f'); continue }
-            13 { [void]$b.Append('\r'); continue }
-            32 { [void]$b.Append('\ '); continue }
-            34 { [void]$b.Append('\"'); continue }
-            36 { [void]$b.Append('\$'); continue }
-            59 { [void]$b.Append('\;'); continue }
-            91 { [void]$b.Append('\['); continue }
-            92 { [void]$b.Append('\\'); continue }
-            93 { [void]$b.Append('\]'); continue }
-            123 { [void]$b.Append('\{'); continue }
-            125 { [void]$b.Append('\}'); continue }
-            default {
-                if($code-lt32-or$code-eq127-or[char]::IsWhiteSpace($c)){
-                    [void]$b.Append(('\u{0:x4}'-f$code))
-                }else{[void]$b.Append($c)}
-            }
-        }
-    }
-    return $b.ToString()
+    return [MachteldReferenceData]::Word($Value)
 }
 
 function Dictionary-Keys([Collections.IDictionary]$Value) {
@@ -201,46 +208,11 @@ function Dictionary-Keys([Collections.IDictionary]$Value) {
 }
 
 function Tcl-Data($Value) {
-    if ($null -eq $Value) { return '' }
-    if ($Value -is [Collections.IDictionary]) {
-        $words = New-Object Collections.Generic.List[string]
-        foreach ($entry in $Value.GetEnumerator()) {
-            $words.Add((Tcl-Word ([string]$entry.Key)))
-            $words.Add((Tcl-Word (Tcl-Data $entry.Value)))
-        }
-        return [string]::Join(' ', $words.ToArray())
-    }
-    if (($Value -is [Collections.IEnumerable]) -and -not ($Value -is [string])) {
-        $words = New-Object Collections.Generic.List[string]
-        foreach ($item in $Value) { $words.Add((Tcl-Word (Tcl-Data $item))) }
-        return [string]::Join(' ', $words.ToArray())
-    }
-    if ($Value -is [bool]) { if ($Value) { return '1' } else { return '0' } }
-    return [string]$Value
+    return [MachteldReferenceData]::Tcl($Value)
 }
 
 function Convert-JsonDeterministic($Value) {
-    function Json-String([string]$s) {
-        $b=New-Object Text.StringBuilder;[void]$b.Append('"')
-        foreach($c in $s.ToCharArray()){
-            switch([int][char]$c){
-                8 {[void]$b.Append('\b')} 9 {[void]$b.Append('\t')} 10 {[void]$b.Append('\n')}
-                12 {[void]$b.Append('\f')} 13 {[void]$b.Append('\r')} 34 {[void]$b.Append('\"')}
-                92 {[void]$b.Append('\\')}
-                default {if([int][char]$c-lt32){[void]$b.Append(('\u{0:x4}'-f[int][char]$c))}else{[void]$b.Append($c)}}
-            }
-        }
-        [void]$b.Append('"');return $b.ToString()
-    }
-    function Json-Value($v){
-        if($null-eq$v){return 'null'}
-        if($v-is[Collections.IDictionary]){$parts=New-Object Collections.Generic.List[string];foreach($entry in $v.GetEnumerator()){$parts.Add((Json-String ([string]$entry.Key))+':'+(Json-Value $entry.Value))};return '{'+[string]::Join(',',$parts.ToArray())+'}'}
-        if(($v-is[Collections.IEnumerable])-and-not($v-is[string])){$parts=New-Object Collections.Generic.List[string];foreach($x in $v){$parts.Add((Json-Value $x))};return '['+[string]::Join(',',$parts.ToArray())+']'}
-        if($v-is[bool]){if($v){return 'true'}else{return 'false'}}
-        if($v-is[byte]-or$v-is[int16]-or$v-is[int32]-or$v-is[int64]-or$v-is[uint16]-or$v-is[uint32]-or$v-is[uint64]){return $v.ToString([Globalization.CultureInfo]::InvariantCulture)}
-        return Json-String ([string]$v)
-    }
-    return (Json-Value $Value)+"`n"
+    return [MachteldReferenceData]::Json($Value)+"`n"
 }
 
 # OrderedDictionary exposes adapter properties such as Keys, but a data entry
@@ -969,6 +941,7 @@ function Corpus-Hash([Collections.IDictionary]$Inventory){
     }finally{$b.Dispose()}
 }
 
+Assert-ReferenceRecipes
 if (-not [IO.File]::Exists($LockPath)) { Fail "dependency lock missing: $LockPath" }
 $lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json
 $tclLock = $lock.archives | Where-Object id -eq 'tcltk'
@@ -995,11 +968,25 @@ if($Matches[1]-ne$MachteldVersion){Fail "C/Tcl runtime version mismatch: $Machte
 # literal there would be a third copy of the version that could fall behind.
 if($preludeText-match'package require machteld [0-9]'){Fail 'tcl/machteld.tcl carries a literal launcher pin'}
 
+$recipeFiles = @($PSCommandPath, (Join-Path $PSScriptRoot 'reference-data.cs'),
+    (Join-Path $PSScriptRoot 'reference-cache.ps1'))
+$upstreamInputs = $recipeFiles + @($Tclsh, $tclArchive, $tkArchive)
+$authoredInputs = $recipeFiles + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'docs') -Recurse -File |
+    Sort-Object FullName | ForEach-Object { $_.FullName })
+$upstreamKey = Reference-StageKey upstream $upstreamInputs
+$authoredKey = Reference-StageKey authored $authoredInputs $MachteldVersion
+
 $parent=[IO.Path]::GetDirectoryName($Output);[IO.Directory]::CreateDirectory($parent)|Out-Null
 $claim=[IO.Path]::Combine($parent,'.machteld-reference-'+[Guid]::NewGuid().ToString('n'))
 $work="$claim.work";$candidate="$claim.output"
 [IO.Directory]::CreateDirectory($work)|Out-Null
 try{
+    [IO.Directory]::CreateDirectory($candidate)|Out-Null
+    foreach($dir in @('markdown','source','html','licenses')){[IO.Directory]::CreateDirectory((Join-Path $candidate $dir))|Out-Null}
+    $stageTimer = [Diagnostics.Stopwatch]::StartNew()
+    $upstreamState = Read-ReferenceStage upstream $upstreamKey $candidate
+    $upstreamHit = $null -ne $upstreamState
+    if (-not $upstreamHit) {
     $source=Join-Path $work 'source-stage';[IO.Directory]::CreateDirectory($source)|Out-Null
     Extract-ControlledSources $tclArchive 'tcl9.0.4' 'tcl' $source $true
     Extract-ControlledSources $tkArchive 'tk9.0.4' 'tk' $source $false
@@ -1039,8 +1026,6 @@ try{
     $appCount=@(Get-ChildItem -LiteralPath (Join-Path $htmlOut 'UserCmd') -Filter '*.html' -File | Where-Object { $_.BaseName -ne 'index' }).Count
     if($appCount -ne 2){Fail "converted application inventory is $appCount, expected 2"}
 
-    [IO.Directory]::CreateDirectory($candidate)|Out-Null
-    foreach($dir in @('markdown','source','html','licenses')){[IO.Directory]::CreateDirectory((Join-Path $candidate $dir))|Out-Null}
     # Preserve every official HTML artifact, including indexes, keyword pages,
     # and CSS, so cross-links remain useful after extraction.
     Copy-Item -Path (Join-Path $htmlOut '*') -Destination (Join-Path $candidate 'html') -Recurse -Force
@@ -1101,7 +1086,19 @@ try{
         }
     }
 
-    # Authored command/index/agent pages.
+    $upstreamState = [ordered]@{documents=$documents;aliases=$aliases;fragments=$fragments}
+    Assert-ReferenceRecipes
+    if ((Reference-StageKey upstream $upstreamInputs) -cne $upstreamKey) { Fail 'upstream conversion inputs changed during generation' }
+    Write-ReferenceStage upstream $upstreamKey $candidate $upstreamState
+    }
+    Write-Host ('reference: upstream {0} ({1:n2}s)' -f $(if($upstreamHit){'cache hit'}else{'converted'}), $stageTimer.Elapsed.TotalSeconds)
+
+    $stageTimer.Restart()
+    $authoredState = Read-ReferenceStage authored $authoredKey $candidate
+    $authoredHit = $null -ne $authoredState
+    if (-not $authoredHit) {
+    $documents=[ordered]@{};$aliases=[ordered]@{};$fragments=[ordered]@{}
+    # Authored command/index/agent pages, independent of upstream conversion.
     $authored=New-Object Collections.Generic.List[object]
     $authoredPaths = @(
         @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'docs\reference\machteld') -Filter '*.md' -File) +
@@ -1135,6 +1132,26 @@ try{
         foreach($alias in @($id,$base,$title)){Add-Unique $aliases (Normalize-Search $alias) $id}
     }
 
+    $authoredState = [ordered]@{documents=$documents;aliases=$aliases;fragments=$fragments}
+    Assert-ReferenceRecipes
+    $currentAuthoredInputs = $recipeFiles + @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'docs') -Recurse -File |
+        Sort-Object FullName | ForEach-Object { $_.FullName })
+    if ((Reference-StageKey authored $currentAuthoredInputs $MachteldVersion) -cne $authoredKey) { Fail 'authored conversion inputs changed during generation' }
+    Write-ReferenceStage authored $authoredKey $candidate $authoredState
+    }
+    Write-Host ('reference: authored {0} ({1:n2}s)' -f $(if($authoredHit){'cache hit'}else{'converted'}), $stageTimer.Elapsed.TotalSeconds)
+    $stageTimer.Restart()
+    $documents=[ordered]@{};$aliases=[ordered]@{};$fragments=[ordered]@{}
+    foreach ($state in @($upstreamState, $authoredState)) {
+        foreach ($entry in $state.documents.GetEnumerator()) {
+            if ($documents.Contains($entry.Key)) { Fail "duplicate staged document $($entry.Key)" }
+            $documents[$entry.Key] = $entry.Value
+        }
+        foreach ($entry in $state.aliases.GetEnumerator()) {
+            foreach ($id in $entry.Value) { Add-Unique $aliases $entry.Key $id }
+        }
+        foreach ($entry in $state.fragments.GetEnumerator()) { $fragments[$entry.Key] = $entry.Value }
+    }
     # A standalone extracted reference is itself a distribution.
     $licenseSpecs=@(
         @('machteld','Apache-2.0.txt',(Join-Path $RepoRoot 'LICENSE'),'Machteld Apache License 2.0'),
@@ -1508,8 +1525,10 @@ foreach actual $encoded expected $fixture {
     if([IO.Directory]::Exists($Output) -or [IO.File]::Exists($Output)){
         Fail "output already exists; reference packs are immutable: $Output"
     }
+    Assert-ReferenceRecipes
     [IO.Directory]::Move($candidate,$Output)
     Write-Host "reference: $($documents.Count) catalog documents; Tcl 249, Tk 177; corpus $corpusHash"
+    Write-Host ('reference: assembly/validation {0:n2}s; total {1:n2}s' -f $stageTimer.Elapsed.TotalSeconds, $totalTimer.Elapsed.TotalSeconds)
 }finally{
     if(-not$KeepWork){if([IO.Directory]::Exists($work)){[IO.Directory]::Delete($work,$true)};if([IO.Directory]::Exists($candidate)){[IO.Directory]::Delete($candidate,$true)}}
 }

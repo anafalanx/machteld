@@ -111,7 +111,7 @@ char *wj_escape_arg(const char *s) {
     if (hasSpace) {
         sb_putc(&b, '"');
     }
-    int slashes = 0;
+    size_t slashes = 0;
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         if (c == '\\') {
@@ -175,6 +175,7 @@ static int ci_eq(const char *a, const char *b) {
 /* True if the last path component's extension is .bat or .cmd. Matches Go's
  * filepath.Ext (the last '.' in the final path element). */
 int wj_is_batch_target(const char *exe) {
+    if (exe == NULL) return 0;
     const char *dot = NULL;
     for (const char *c = exe; *c; c++) {
         if (*c == '/' || *c == '\\') {
@@ -246,14 +247,14 @@ static void append_batch_arg(sb_t *b, const char *arg) {
     /* '\\' '"' '%' '\r' are ASCII and never appear inside a UTF-8 multibyte
      * sequence, so this byte walk matches Rust's UTF-16 walk for the characters
      * it acts on; other bytes pass through unchanged. */
-    int backslashes = 0;
+    size_t backslashes = 0;
     for (size_t i = 0; i < len; i++) {
         char c = arg[i];
         if (c == '\\') {
             backslashes++;
         } else {
             if (c == '"') {
-                for (int k = 0; k < backslashes; k++) {
+                for (size_t k = 0; k < backslashes; k++) {
                     sb_putc(b, '\\'); /* double the preceding run to 2n... */
                 }
                 sb_putc(b, '"'); /* ...then double the quote to escape it */
@@ -265,7 +266,7 @@ static void append_batch_arg(sb_t *b, const char *arg) {
         sb_putc(b, c);
     }
     if (quote) {
-        for (int k = 0; k < backslashes; k++) {
+        for (size_t k = 0; k < backslashes; k++) {
             sb_putc(b, '\\'); /* double the trailing run before the close quote */
         }
         sb_putc(b, '"');
@@ -308,6 +309,11 @@ int wj_make_batch_cmdline(const char *script, int argc, const char *const *args,
 
     for (int i = 0; i < argc; i++) {
         const char *a = args[i];
+        if (a == NULL) {
+            free(b.p);
+            *err = "batch argument must not be NULL";
+            return -1;
+        }
         if (has_cr_or_lf(a)) {
             free(b.p);
             *err = "batch argument may not contain a carriage return or newline";
