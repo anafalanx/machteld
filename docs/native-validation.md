@@ -20,20 +20,23 @@ are different claims; see the [contract](contract.md).
 
 ## Running it
 
-Build deliberately with `tools/dev.tcl build`, then run:
+Build deliberately with `tools/dev.tcl build`, then run, on the build runtime:
 
 ```powershell
-./tools/test.ps1 -Group native-validation
+.\dist\0.21\machteld.exe tools\gate.tcl --group native-validation
 ```
 
-Use `-Machteld`, `-CacheRoot`, and `-MsysRoot` to select existing artifacts.
-The group never rebuilds the runtime or regenerates documentation. It compiles
-small isolated fixtures, tests the selected executable, and runs
-`tools/native-analysis.ps1`. The latter also works independently and retains
-its compiler invocations, exit codes, logs, source hashes and capability results
-under a fresh `out/native-analysis-*/report.json`. `fast` includes the inexpensive
-JSON and filesystem adversarial regressions. Explicit `release` includes all
-groups; public-network and visible-GUI acceptance remain separate opt-ins.
+Use `--runtime`, `--cache`, and `--msys` to select existing artifacts. The
+group never rebuilds the runtime or regenerates documentation. It compiles
+small isolated fixtures, tests the selected executable's native lifetimes, and
+compiles and runs the undefined-behavior-trapped drivers after their trap
+canary. `--native-scaling` adds the observational worker-scaling lane, and
+`--native-analysis` the full harness, `tools/native-analysis.tcl`, which also
+runs alone and retains its compiler invocations, exit codes, logs, source
+hashes and capability results under a fresh `out/native-analysis-*/report.json`.
+`fast` includes the inexpensive JSON and filesystem adversarial regressions. A
+gate run without `--group` includes all groups but neither option;
+public-network and visible-GUI acceptance remain separate opt-ins.
 
 ## Coverage and its limits
 
@@ -49,13 +52,17 @@ groups; public-network and visible-GUI acceptance remain separate opt-ins.
 | Scaling | Idle children and pools at widths 1, 8 and 32; host handles, threads, private bytes, CPU time and cycle deltas | A portable performance threshold or total child memory |
 
 In the recorded run, the pinned Windows GCC 16.1 toolchain could not link its
-ASan or UBSan runtime libraries. The runner probes these capabilities each time
-and records unavailable ones as **unsupported**. It did support
-undefined-behavior trap instrumentation: clean canaries must succeed,
-while signed-overflow and array-bounds negative canaries must trap. That
-instrumentation runs over command-line/Unicode tests, JSON plus yyjson, and
-the included hash/directory/store/HTTP boundary code. Tcl/Tk and SQLite dependencies
-are not instrumented. No address-sanitizer, leak-sanitizer, or thread-sanitizer
+ASan or UBSan runtime libraries. `tools/native-analysis.tcl` probes these
+capabilities each time it runs and records unavailable ones as
+**unsupported**. The toolchain does support undefined-behavior trap
+instrumentation: a clean canary must succeed, while signed-overflow and
+array-bounds negative canaries must trap. Every native-validation run checks
+that canary and then runs, under those traps, the command-line/Unicode tests,
+JSON plus yyjson, the included hash/directory/store/HTTP boundary code, and
+the identity primitives that stamp wrapped executables. GCC's analyzer, the
+sanitizer probes, and the Tk and Unicode-path checks below run only in the full
+analysis (`--native-analysis`). Tcl/Tk and SQLite dependencies are not
+instrumented. No address-sanitizer, leak-sanitizer, or thread-sanitizer
 coverage is claimed. Process counters and explicit ownership assertions
 complement, but do not replace, those missing tools.
 
@@ -110,14 +117,14 @@ The current monitor design remains in place. The measurements make its thread
 and capture-buffer cost explicit; a completion-port or other monitor redesign
 requires a workload that justifies the added complexity and its own tests.
 
-Two earlier toolchain observations now have direct checks. The real linked Tk
-`TkTextPrintIndex` formats positions through `INT64_MAX` correctly without
-creating a window; the earlier format-dialect warning does not demonstrate a
-runtime truncation defect. The pinned assembler and linker cannot create output
-under the tested CJK directory. ASCII build paths, including spaces, work; a
-compiled executable copied to the Unicode directory runs. Keep native build
-outputs on ASCII paths for this toolchain. Unicode runtime/deployment paths
-are a separate, tested capability.
+Two earlier toolchain observations now have direct checks in the full
+analysis. The real linked Tk `TkTextPrintIndex` formats positions through
+`INT64_MAX` correctly without creating a window; the earlier format-dialect
+warning does not demonstrate a runtime truncation defect. The pinned assembler
+and linker cannot create output under the tested CJK directory. ASCII build
+paths, including spaces, work; a compiled executable copied to the Unicode
+directory runs. Keep native build outputs on ASCII paths for this toolchain.
+Unicode runtime/deployment paths are a separate, tested capability.
 
 Release reconstruction, full target acceptance, signing, and publication gates
 remain separate work. Documentation or diagnostic completion does not publish a

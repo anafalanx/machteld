@@ -167,31 +167,36 @@ the [GUI example](examples/project-inspector/README.md), and the
 
 ## Development checks
 
-After provisioning the pinned build dependencies, invoke the incremental build
-explicitly with `dist/0.21/machteld.exe tools/dev.tcl build`: every build and
-test tool runs on that build runtime, the signed 0.21 release. Tests select an
-existing artifact:
-`./tools/test.ps1 -Group fast`, `integration`, `packaging`, or
-`native-validation`, with `-Machteld <path>` to override `out/machteld.exe`.
-These groups never rebuild the runtime or regenerate reference documentation.
+Every build and test tool is a Tcl program that runs on the build runtime,
+`dist/0.21/machteld.exe`, the signed 0.21 release, and finds MSYS2 through
+`--msys`, `MSYS2_ROOT`, or `C:\msys64`. `tools/bootstrap.tcl` provisions the
+pinned build dependencies; `tools/dev.tcl build` is the incremental build. The
+release gate, `tools/gate.tcl`, builds `out/machteld.exe` and runs every test
+group on it; `--skip-build` tests the executable as it is. `--group fast`,
+`integration`, `packaging`, `native-validation`, or `reference-generator`,
+repeatable, runs just those groups and never builds, with `--runtime <path>` to
+test another executable than `out/machteld.exe`; `fast` needs no MSYS2. A run
+that tests an executable names it by version and SHA-256 and fails if it
+changes.
 
-`reference-generator` separately checks independent cold conversions, warm-cache
-equality, and authored-page invalidation. `native-validation` adds bounded
-lifetime/scaling tests, compiler analysis, and available instrumentation with
-negative controls; [its guide](docs/native-validation.md) records coverage gaps.
-`-InteractiveGui` opens a real Tk window only when explicitly selected.
-`-Group release` performs a clean build at the selected output path and then
-every group; it does **not** sign or publish, nor automatically enable public
-TLS or interactive acceptance.
+`reference-generator` checks two independent cold conversions byte for byte.
+`native-validation` adds bounded lifetime tests and the native drivers built
+with undefined-behavior traps, after their negative controls;
+[its guide](docs/native-validation.md) records coverage gaps. Off by default,
+each behind its own option: worker-scaling measurements (`--native-scaling`),
+the compiler analysis and sanitizer probes of `tools/native-analysis.tcl`
+(`--native-analysis`), public TLS and interactive console checks
+(`--public-tls`, `--interactive-pty`), and the real Tk windows of
+`--interactive-gui`. A gate run does **not** sign or publish.
 
-Upstream Tcl/Tk reference conversion is cached separately from authored pages
-and final catalog assembly. Documentation edits reuse upstream conversion;
-Tcl implementation-only edits repackage. Unchanged builds skip these stages.
-Cache hits verify content and inventories, not timestamps. The version check
-rejects recognizable stale current-runtime claims and malformed historical
-annotations; genuine release history keeps its original numbers. It is a
-guardrail, not a substitute for reviewing prose against behavior. The fast
-and packaging groups execute the marked README examples themselves.
+Unchanged development builds reuse each reference generation by content; a
+documentation edit generates the reference again, in about a minute, and Tcl
+implementation-only edits repackage. Cache hits verify content and
+inventories, not timestamps. The version check rejects recognizable stale
+current-runtime claims and malformed historical annotations; genuine release
+history keeps its original numbers. It is a guardrail, not a substitute for
+reviewing prose against behavior. The fast and packaging groups execute the
+marked README examples themselves.
 
 The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
 [ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
