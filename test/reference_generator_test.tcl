@@ -5,19 +5,22 @@ package require machteld 0.21
 # the catalog contracts: the 249/177 core manuals, lowercase IDs, no
 # auto-discovered extension, an exact inventory partition, the manifest.
 #
-#     machteld.exe test/reference_generator_test.tcl --cache DIR --tclsh EXE
+#     machteld.exe test/reference_generator_test.tcl --cache DIR --tclsh EXE ?--keep-work?
 #
 # The Tcl port (2026-10-28) of test/reference_generator_test.ps1; the
-# generator is tools/reference.tcl, run on this same runtime.
+# generator is tools/reference.tcl, run on this same runtime. The work folder
+# is this run's own, "machteld reference determinism <pid>-<random hex>" in
+# TEMP: one that exists already is refused, and only that exact folder is
+# deleted afterwards, unless --keep-work keeps it (machteld 8bcc1ec).
 
 namespace eval ::rgt {
     namespace path ::machteld
     variable root [file dirname [file dirname [file normalize [info script]]]]
 }
 
+# A failure unwinds, so the work folder is still deleted (or kept).
 proc ::rgt::fail {message} {
-    puts stderr "reference generator test: $message"
-    exit 1
+    return -code error -errorcode {RGT fail} "reference generator test: $message"
 }
 
 proc ::rgt::readUtf8 {path} {
@@ -60,21 +63,31 @@ proc ::rgt::main {argv} {
     variable root
     set cache ""
     set tclsh ""
+    set keepWork 0
     while {[llength $argv]} {
-        set argv [lassign $argv option value]
+        set argv [lassign $argv option]
         switch -- $option {
-            --cache {set cache $value}
-            --tclsh {set tclsh $value}
+            --cache - --tclsh {
+                set argv [lassign $argv value]
+                set [string range $option 2 end] $value
+            }
+            --keep-work {set keepWork 1}
             default {fail "unknown option $option"}
         }
     }
     if {$cache eq "" || $tclsh eq ""} {
-        fail "usage: reference_generator_test.tcl --cache DIR --tclsh EXE"
+        fail "usage: reference_generator_test.tcl --cache DIR --tclsh EXE ?--keep-work?"
     }
-    set work [file join [file normalize $::env(TEMP)] "machteld reference determinism [pid]"]
+    set temp [file normalize $::env(TEMP)]
+    set leaf "machteld reference determinism [pid]-[binary encode hex [hash random 16]]"
+    set work [file join $temp $leaf]
+    if {[file exists $work]} {
+        fail "the work folder exists already: [file nativename $work]"
+    }
     set first [file join $work "first pack"]
     set second [file join $work "second pack"]
     file mkdir $work
+    puts "reference test work: [file nativename $work]"
     try {
         set header [readUtf8 [file join $root src machteld.h]]
         set prelude [readUtf8 [file join $root tcl machteld.tcl]]
@@ -200,8 +213,17 @@ proc ::rgt::main {argv} {
         }
         puts "REFERENCE GENERATOR TEST PASSED ([llength $firstFiles] byte-identical files, Tcl 249 / Tk 177)"
     } finally {
-        file delete -force $work
+        if {$keepWork} {
+            puts "reference test work kept: [file nativename $work]"
+        } elseif {[file tail $work] eq $leaf && [file dirname $work] eq $temp && [file isdirectory $work]} {
+            file delete -force $work
+        }
     }
 }
 
-::rgt::main $argv
+try {
+    ::rgt::main $argv
+} trap {RGT fail} {message} {
+    puts stderr $message
+    exit 1
+}

@@ -61,8 +61,9 @@ proc ::et::tclPath {path} {
 }
 
 # Runs the host under test (or -exe) and returns exit, out, err and text
-# (err then out). Only the four options below are taken; anything else,
-# such as --docs or -encoding, is the host's first argument.
+# (err then out), decoded leniently, and the captured bytes as outBytes and
+# errBytes. Only the four options below are taken; anything else, such as
+# --docs or -encoding, is the host's first argument.
 proc ::et::host {args} {
     variable runtime
     set exe $runtime
@@ -79,7 +80,15 @@ proc ::et::host {args} {
     set out [encoding convertfrom -profile replace utf-8 [dict get $result out]]
     set err [encoding convertfrom -profile replace utf-8 [dict get $result err]]
     dict create exit [dict get $result exit] status [dict get $result status] \
-        out $out err $err text $err$out
+        out $out err $err text $err$out outBytes [dict get $result out] errBytes [dict get $result err]
+}
+
+# Captured bytes as strict UTF-8; empty when they are not.
+proc ::et::strictText {bytes} {
+    if {[catch {encoding convertfrom -profile strict utf-8 $bytes} text]} {
+        return ""
+    }
+    return $text
 }
 
 proc ::et::waitForFile {path {milliseconds 5000}} {
@@ -267,6 +276,8 @@ proc ::et::entryTests {versionRe version} {
         {puts "ENTRY-PATH:[expr {$argv0 eq [info script]}]"}
         {puts "ENTRY-ARGC:$argc"}
         {puts "ENTRY-LAST:[lindex $argv end]"}
+        {puts "ENTRY-UTF8:\u00e9\u4e16\u754c"}
+        {puts stderr "ENTRY-UTF8:\u00e9\u4e16\u754c"}
     } \n]\n
     set result [host $accepted one "two words"]
     set out [dict get $result out]
@@ -278,6 +289,14 @@ proc ::et::entryTests {versionRe version} {
     check "direct invocation preserves a spaced argument as one item" \
         [expr {[dict get $result exit] == 0 && [string match *ENTRY-ARGC:2* $out] &&
                [string match {*ENTRY-LAST:two words*} $out]}] [dict get $result text]
+    # The program spells the text as escapes and the expectation is built from
+    # code points, so this file's own encoding cannot give both the same
+    # mojibake. The captures must be strict UTF-8.
+    set utf8 "ENTRY-UTF8:[format %c%c%c 0xe9 0x4e16 0x754c]"
+    check "captured stdout and stderr preserve UTF-8 text" \
+        [expr {[dict get $result exit] == 0 &&
+               [string first $utf8 [strictText [dict get $result outBytes]]] >= 0 &&
+               [string first $utf8 [strictText [dict get $result errBytes]]] >= 0}] [dict get $result text]
 
     set exact [file join $work exact-version.tcl]
     writeText $exact "package require -exact machteld $version\nputs \"ENTRY-EXACT:\[package require machteld\]\"\n"
