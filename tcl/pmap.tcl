@@ -40,14 +40,15 @@
 
 proc ::machteld::pmap {args} {
     if {[llength $args] < 2} {
-        Fail PMAP usage "usage: pmap requests ?-width n? ?-maxtries n? ?-timeout dur? ?-raw? -- command ?arg ...?"
+        Fail PMAP usage "usage: pmap requests ?-width n? ?-maxtries n? ?-maxframe bytes? ?-maxitems n? ?-maxbatch bytes? ?-maxresults bytes? ?-timeout dur? ?-raw? -- command ?arg ...?"
     }
     set reqs [lindex $args 0]
     set rest [lrange $args 1 end]
 
     set raw 0
     set width 4
-    set maxtries 3
+    set maxtries 1
+    set limits {}
     set timeout 300000
     set i 0
     for {} {$i < [llength $rest]} {incr i} {
@@ -58,8 +59,11 @@ proc ::machteld::pmap {args} {
         if {$i + 1 >= [llength $rest]} { Fail PMAP usage "pmap: option \"$a\" needs a value" }
         set v [lindex $rest [expr {$i + 1}]]
         switch -- $a {
-            -width    { set width $v }
-            -maxtries { set maxtries $v }
+            -width    { set width [PoolBound PMAP $a $v] }
+            -maxtries { set maxtries [PoolBound PMAP $a $v] }
+            -maxframe - -maxitems - -maxbatch - -maxresults {
+                lappend limits $a [ProtocolLimit PMAP $a $v]
+            }
             -timeout  { set timeout [_dur2ms PMAP $v] }
             default   { Fail PMAP usage "pmap: unknown option \"$a\"" }
         }
@@ -75,7 +79,7 @@ proc ::machteld::pmap {args} {
     # restated without inventing new codes.
     set p ""
     set rc [catch {
-        set p [pool create -width $width -maxtries $maxtries -- {*}$cmd]
+        set p [pool create -width $width -maxtries $maxtries {*}$limits -- {*}$cmd]
         pool submit $p $reqs
         pool wait $p -timeout ${timeout}ms
     } replies opts]
@@ -111,5 +115,7 @@ proc ::machteld::pmap {args} {
 }
 
 ::machteld::MetaDefine pmap [dict create kind tcl args args domain PMAP \
-    codes {badvalue failed launch timeout usage} options {-maxtries -raw -timeout -width} \
+    codes {badvalue failed launch limit timeout usage} \
+    options {-maxbatch -maxframe -maxitems -maxresults -maxtries -raw -timeout -width} \
+    defaults [dict create maxtries 1 maxframe 16777216 maxitems 10000 maxbatch 67108864 maxresults 67108864] \
     doc machteld/command/pmap]

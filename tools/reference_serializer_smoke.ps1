@@ -2,6 +2,7 @@
 param([Parameter(Mandatory)][string]$Tclsh)
 
 $ErrorActionPreference = 'Stop'
+if (-not ('MachteldReferenceData' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'reference-data.cs') }
 $Utf8 = [Text.UTF8Encoding]::new($false)
 $Work = Join-Path ([IO.Path]::GetTempPath()) "machteld-reference-serializer-smoke-$PID"
 
@@ -27,7 +28,18 @@ try{
     $unicode='na'+[char]0x00ef+'ve '+[char]0x03a9
     $fixture=@('',"a b","a`t b","a`n b","a`v b","a`f b","a`r b",("a"+[char]1+"b"),
         ("a"+[char]127+"b"),'00123','true',$unicode,'braces { and } brackets [ and ] dollars $ semicolon ; backslash \')
-    $list=[string]::Join(' ',@($fixture|ForEach-Object{Tcl-Word $_}))
+    # Compare the established encoder with production over every UTF-16 unit.
+    $allChars = -join ([char[]](0..65535))
+    if ((Tcl-Word $allChars) -cne [MachteldReferenceData]::Word($allChars)) {
+        throw 'fast Tcl escaping differs from the established byte encoding'
+    }
+    $nested = [ordered]@{keys=@('a b','00123'); empty=@(); truth=$true; zero=[int64]0; nil=$null}
+    $json = [MachteldReferenceData]::Json($nested)
+    if ($json -cne '{"keys":["a b","00123"],"empty":[],"truth":true,"zero":0,"nil":null}') { throw 'JSON shape/types changed' }
+    $roundTrip = [MachteldReferenceData]::Ordered(($json | ConvertFrom-Json))
+    if ([MachteldReferenceData]::Json($roundTrip) -cne $json -or
+        [MachteldReferenceData]::Tcl($roundTrip) -cne [MachteldReferenceData]::Tcl($nested)) { throw 'stage-state round trip changed bytes' }
+    $list=[MachteldReferenceData]::Tcl($fixture)
     $listPath=Join-Path $Work 'fixture.list';[IO.File]::WriteAllText($listPath,$list+"`n",$Utf8)
     $scriptPath=Join-Path $Work 'smoke.tcl'
     $script=@'

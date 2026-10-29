@@ -25,6 +25,8 @@ Returns a dict keyed by public command. Entries contain applicable fields:
 `kind` (`c` or `tcl`), `domain`, raised `codes`, protocol-data `replycodes`,
 top-level `options`, `args`, `returns`, and `subcommands`. Each subcommand entry
 can carry its own options, fixed result keys, and stable exact `doc` identifier.
+Some entries also expose `defaults` and `limits`; these fields are only present
+where explicitly authored, not a complete resource-policy model for all verbs.
 Every command carries a stable exact `doc` identifier; commands without a
 subcommand vocabulary have no subordinate identifier to publish.
 
@@ -54,6 +56,8 @@ The manifest describes structural contract facts, not prose semantics or every
 possible Tcl-level error. `codes` is the closed set of Machteld-domain failures;
 Tcl itself can still report wrong arity, lookup, or conversion errors. Consult
 the linked reference page for defaults, lifetimes, constraints, and examples.
+Query the executable actually being used: equal package versions do not imply
+equal development and signed-release manifests.
 
 ## See also
 

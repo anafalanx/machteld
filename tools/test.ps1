@@ -1,10 +1,12 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('fast','integration','packaging','native-validation','reference-generator','release')]
+    [string[]]$Group = @('fast'),
     [string]$Machteld,
     [string]$CacheRoot,
     [string]$MsysRoot,
-    [switch]$SkipBuild,
     [switch]$PublicTls,
+    [switch]$InteractiveGui,
     [switch]$InteractivePty
 )
 
@@ -12,108 +14,186 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $Machteld) { $Machteld = Join-Path $RepoRoot 'out\machteld.exe' }
 if (-not $CacheRoot) { $CacheRoot = Join-Path $RepoRoot '.cache\deps' }
-. (Join-Path $PSScriptRoot 'toolchain.ps1')
-$MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
-
-if (-not $SkipBuild) {
-    & (Join-Path $PSScriptRoot 'build.ps1') -Output $Machteld -CacheRoot $CacheRoot -MsysRoot $MsysRoot
-    if ($LASTEXITCODE) { throw "build failed with exit code $LASTEXITCODE" }
+$Machteld = [IO.Path]::GetFullPath($Machteld)
+$CacheRoot = [IO.Path]::GetFullPath($CacheRoot)
+$tclsh = Join-Path $CacheRoot 'prefix\bin\tclsh90s.exe'
+$total = [Diagnostics.Stopwatch]::StartNew()
+if (($PublicTls -or $InteractivePty) -and
+    $Group -notcontains 'integration' -and $Group -notcontains 'release') {
+    throw '-PublicTls and -InteractivePty require the integration or release group'
 }
-if (-not (Test-Path -LiteralPath $Machteld -PathType Leaf)) {
-    throw "Machteld executable not found: $Machteld"
+
+# No ordinary group rebuilds the runtime or regenerates documentation.
+# Release is deliberately explicit and reconstructs before the full gate.
+if ($Group -contains 'release') {
+    if ($Group.Count -ne 1) { throw 'release must be selected alone' }
+    & (Join-Path $PSScriptRoot 'build.ps1') -Output $Machteld -CacheRoot $CacheRoot -MsysRoot $MsysRoot
+    if ($LASTEXITCODE) { throw "release build failed: $LASTEXITCODE" }
+    $Group = @('fast','integration','packaging','native-validation','reference-generator')
+}
+$needsRuntime = $InteractiveGui -or @($Group | Where-Object { $_ -in @('fast','integration','packaging','native-validation') }).Count -gt 0
+Write-Host "Source checkout: $RepoRoot; selected groups: $($Group -join ', ')"
+if ($needsRuntime) {
+    if (-not (Test-Path -LiteralPath $Machteld -PathType Leaf)) {
+        throw "Executable missing: $Machteld. Build explicitly with tools/dev.tcl build."
+    }
+    $before = (Get-FileHash -LiteralPath $Machteld -Algorithm SHA256).Hash
+    Write-Host "Testing existing executable: $Machteld"
+    Write-Host "SHA-256: $before"
+    & $Machteld --version
+    if ($LASTEXITCODE) { throw 'cannot identify executable version' }
+}
+
+function Run-Checked([string]$Name, [string]$Program, [string[]]$Arguments) {
+    Write-Host "`n== $Name =="
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    & $Program @Arguments
+    if ($LASTEXITCODE) { throw "$Name failed with exit code $LASTEXITCODE" }
+    Write-Host ('PASS {0} ({1:n2}s)' -f $Name, $timer.Elapsed.TotalSeconds)
+}
+function Runtime-Test([string]$Name, [string[]]$Extra = @()) {
+    Run-Checked $Name $Machteld (@((Join-Path $RepoRoot "test\${Name}_test.tcl")) + $Extra)
+}
+function Tcl-Test([string]$Relative, [string[]]$Extra = @()) {
+    Run-Checked $Relative $tclsh (@((Join-Path $RepoRoot $Relative)) + $Extra)
+}
+function Script-Test([string]$Relative, [string[]]$Extra = @()) {
+    # A dedicated PS5 process also makes native exit status unambiguous.
+    $prior = $env:PSModulePath
+    try {
+        Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
+        Run-Checked $Relative powershell.exe (@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $RepoRoot $Relative)) + $Extra)
+    } finally { $env:PSModulePath = $prior }
+}
+function Set-MachteldTestEnvironment([bool]$Tls, [bool]$Pty, [bool]$Gui = $false, [string]$CompilerBin = '') {
+    $prior = @{}
+    $prior['PATH'] = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+    foreach ($name in @('MACHTELD_TEST_PUBLIC_TLS','MACHTELD_TEST_PTY_IO','MACHTELD_WRAP_GUI_INTERACTIVE',
+            'MACHTELD_TEST_WORKER_SOURCE','MACHTELD_TEST_PIDFILE')) {
+        $prior[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+    if ($Tls) { $env:MACHTELD_TEST_PUBLIC_TLS = '1' }
+    if ($Pty) { $env:MACHTELD_TEST_PTY_IO = '1' }
+    if ($Gui) { $env:MACHTELD_WRAP_GUI_INTERACTIVE = '1' }
+    if ($CompilerBin) { $env:PATH = $CompilerBin + [IO.Path]::PathSeparator + $prior['PATH'] }
+    return $prior
+}
+function Restore-MachteldTestEnvironment([hashtable]$Prior) {
+    foreach ($entry in $Prior.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
+}
+function Invoke-MachteldTestEnvironment([bool]$Tls, [bool]$Pty, [bool]$Gui, [string]$CompilerBin, [scriptblock]$Action) {
+    $prior = Set-MachteldTestEnvironment $Tls $Pty $Gui $CompilerBin
+    try { & $Action } finally { Restore-MachteldTestEnvironment $prior }
 }
 
 $OutputDir = Join-Path $RepoRoot 'out\test'
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-$gcc = Join-Path $MsysRoot 'ucrt64\bin\gcc.exe'
-$env:PATH = "$(Join-Path $MsysRoot 'ucrt64\bin');$env:PATH"
-$sqlite = Join-Path $CacheRoot 'sqlite'
-$tclsh = Join-Path $CacheRoot 'prefix\bin\tclsh90s.exe'
-
-function Compile-Fixture([string]$Source, [string]$Output, [string[]]$Extra = @()) {
-    Write-Host "fixture $([IO.Path]::GetFileName($Source))"
-    & $gcc -std=c23 -O2 -Wall -Wextra -Werror -municode $Source @Extra -o $Output
-    if ($LASTEXITCODE) { throw "fixture compile failed: $Source" }
+$compilerBin = ''
+if ($Group -contains 'integration' -or $Group -contains 'packaging' -or $Group -contains 'native-validation') {
+    . (Join-Path $PSScriptRoot 'toolchain.ps1')
+    $MsysRoot = Resolve-MachteldMsysRoot $MsysRoot $RepoRoot
+    $gcc = Join-Path $MsysRoot 'ucrt64\bin\gcc.exe'
+    $compilerBin = Join-Path $MsysRoot 'ucrt64\bin'
+    $processFixture = Join-Path $OutputDir 'process_fixture.exe'
 }
-function Run-Test([string]$Name, [string[]]$Arguments) {
-    Write-Host "`n== $Name =="
-    & $Machteld @Arguments
-    if ($LASTEXITCODE) { throw "$Name failed with exit code $LASTEXITCODE" }
-}
-
-$processFixture = Join-Path $OutputDir 'process_fixture.exe'
-Compile-Fixture (Join-Path $RepoRoot 'test\fixtures\process_fixture.c') $processFixture
-
-$httpFixture = Join-Path $OutputDir 'http_fixture.exe'
-Compile-Fixture (Join-Path $RepoRoot 'test\fixtures\http_fixture.c') $httpFixture @('-lws2_32')
-
-$lockFixture = Join-Path $OutputDir 'sqlite_lock_fixture.exe'
-$sqliteObject = Join-Path $OutputDir 'sqlite3-test.o'
-& $gcc -O2 -w -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -c `
-    (Join-Path $sqlite 'sqlite3.c') -o $sqliteObject
-if ($LASTEXITCODE) { throw 'SQLite test object compile failed' }
-Compile-Fixture (Join-Path $RepoRoot 'test\fixtures\sqlite_lock_fixture.c') $lockFixture `
-    @('-I', $sqlite, $sqliteObject)
-
-$cmdline = Join-Path $OutputDir 'cmdline_test.exe'
-& $gcc -std=c23 -O2 -Wall -Wextra -Werror `
-    '-I' (Join-Path $RepoRoot 'src') `
-    (Join-Path $RepoRoot 'test\cmdline_test.c') (Join-Path $RepoRoot 'src\winjob_cmdline.c') -o $cmdline
-if ($LASTEXITCODE) { throw 'cmdline fixture compile failed' }
-& $cmdline
-if ($LASTEXITCODE) { throw "cmdline golden vectors failed with exit code $LASTEXITCODE" }
-
-$bareLeaf = ".machteld-entry-basekit-$PID-$([Guid]::NewGuid().ToString('n')).exe"
-$bareHost = Join-Path $OutputDir $bareLeaf
-$bareOwned = $false
-try {
-    & $tclsh (Join-Path $RepoRoot 'test\extract_basekit.tcl') $Machteld $bareHost
-    if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $bareHost -PathType Leaf)) {
-        throw "console basekit extraction failed with exit code $LASTEXITCODE"
+# Interactive/network acceptance is opt-in to this invocation, not inherited
+# from the shell that happens to launch an ordinary background test group.
+# Fixture source overlays and PID-file destinations must not be inherited
+# either: the suite tests the candidate's embedded code and owns its outputs.
+# Individual tests may deliberately set their own scoped fixture variables.
+Invoke-MachteldTestEnvironment ([bool]$PublicTls) ([bool]$InteractivePty) ([bool]$InteractiveGui) $compilerBin {
+    if ($compilerBin) {
+        Run-Checked 'process fixture' $gcc @('-std=c23','-O2','-Wall','-Wextra','-Werror','-municode',
+            (Join-Path $RepoRoot 'test\fixtures\process_fixture.c'),'-o',$processFixture)
     }
-    $bareOwned = $true
-    & (Join-Path $RepoRoot 'test\entry_test.ps1') `
-        -Machteld $Machteld -ProcessFixture $processFixture -Bare $bareHost
-    if ($LASTEXITCODE) { throw "entry tests failed with exit code $LASTEXITCODE" }
-} finally {
-    if ($bareOwned -and (Split-Path -Leaf $bareHost) -ceq $bareLeaf -and
-            [StringComparer]::OrdinalIgnoreCase.Equals(
-                [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($bareHost)),
-                [IO.Path]::GetFullPath($OutputDir)) -and
-            (Test-Path -LiteralPath $bareHost -PathType Leaf)) {
-        Remove-Item -LiteralPath $bareHost -Force -ErrorAction SilentlyContinue
+    foreach ($selection in $Group) {
+        Write-Host "`nTEST GROUP: $selection"
+        switch ($selection) {
+            fast {
+                Tcl-Test 'tools\check_reference.tcl'
+                Tcl-Test 'tools\check_version.tcl'
+                Tcl-Test 'test\check_version_test.tcl'
+                Tcl-Test 'test\build_identity_test.tcl'
+                Script-Test 'tools\reference_serializer_smoke.ps1' @('-Tclsh',$tclsh)
+                Script-Test 'test\test_groups_test.ps1'
+                Runtime-Test filesystem
+                Runtime-Test runtime
+                Runtime-Test protocol
+                Runtime-Test gui_model
+                Runtime-Test reference
+                Runtime-Test documentation_examples
+                Runtime-Test json
+                Runtime-Test native_adversarial
+                Runtime-Test native_filesystem
+            }
+            integration {
+                $httpFixture = Join-Path $OutputDir 'http_fixture.exe'
+                Run-Checked 'HTTP fixture' $gcc @('-std=c23','-O2','-Wall','-Wextra','-Werror','-municode',
+                    (Join-Path $RepoRoot 'test\fixtures\http_fixture.c'),'-lws2_32','-o',$httpFixture)
+                $sqlite = Join-Path $CacheRoot 'sqlite'
+                $sqliteObject = Join-Path $OutputDir 'sqlite3-test.o'
+                Run-Checked 'SQLite fixture object' $gcc @('-O2','-w','-DSQLITE_THREADSAFE=1','-DSQLITE_OMIT_LOAD_EXTENSION','-c',
+                    (Join-Path $sqlite 'sqlite3.c'),'-o',$sqliteObject)
+                $lockFixture = Join-Path $OutputDir 'sqlite_lock_fixture.exe'
+                Run-Checked 'SQLite lock fixture' $gcc @('-std=c23','-O2','-Wall','-Wextra','-Werror','-municode',
+                    (Join-Path $RepoRoot 'test\fixtures\sqlite_lock_fixture.c'),'-I',$sqlite,$sqliteObject,'-o',$lockFixture)
+                $cmdline = Join-Path $OutputDir 'cmdline_test.exe'
+                Run-Checked 'command-line fixture' $gcc @('-std=c23','-O2','-Wall','-Wextra','-Werror','-I',(Join-Path $RepoRoot 'src'),
+                    (Join-Path $RepoRoot 'test\cmdline_test.c'),(Join-Path $RepoRoot 'src\winjob_cmdline.c'),'-o',$cmdline)
+                Run-Checked 'command-line golden vectors' $cmdline @()
+                Tcl-Test 'test\dev_cache_test.tcl'
+                Script-Test 'test\reference_cache_test.ps1'
+                Script-Test 'test\reference_recipe_test.ps1'
+                Script-Test 'test\reference_orchestration_test.ps1'
+                Runtime-Test process @($processFixture)
+                Runtime-Test store @($lockFixture)
+                Runtime-Test native @($httpFixture,$processFixture)
+                Runtime-Test streaming_bounds @($processFixture)
+            }
+            packaging {
+                Tcl-Test 'test\build_identity_test.tcl' @($Machteld)
+                $bareLeaf = '.machteld-entry-basekit-' + [Guid]::NewGuid().ToString('n') + '.exe'
+                $bareHost = Join-Path $OutputDir $bareLeaf
+                try {
+                    Tcl-Test 'test\extract_basekit.tcl' @($Machteld,$bareHost)
+                    Script-Test 'test\entry_test.ps1' @('-Machteld',$Machteld,'-ProcessFixture',$processFixture,'-Bare',$bareHost)
+                } finally {
+                    if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($bareHost)) -eq $OutputDir -and
+                        [IO.Path]::GetFileName($bareHost) -ceq $bareLeaf) { Remove-Item -LiteralPath $bareHost -Force -ErrorAction SilentlyContinue }
+                }
+                Script-Test 'test\package_test.ps1' @('-Tclsh',$tclsh)
+                Script-Test 'test\version_resource_test.ps1' @('-Machteld',$Machteld,'-CacheRoot',$CacheRoot)
+                Runtime-Test wrap
+                Runtime-Test documentation_examples @('--packaging')
+                Runtime-Test wrap_inventory
+                Script-Test 'test\app_identity_test.ps1' @('-Machteld',$Machteld)
+                Runtime-Test examples_package @($MsysRoot,(Join-Path $CacheRoot 'prefix'))
+            }
+            native-validation {
+                $nativeProbe = Join-Path $OutputDir 'native_probe.dll'
+                Run-Checked 'native telemetry fixture' $gcc @('-std=c23','-O2','-Wall','-Wextra','-Werror',
+                    '-shared','-DUSE_TCL_STUBS','-I',(Join-Path $CacheRoot 'prefix\include'),
+                    (Join-Path $RepoRoot 'test\fixtures\native_probe.c'),
+                    (Join-Path $CacheRoot 'prefix\lib\libtclstub.a'),'-lpsapi','-o',$nativeProbe)
+                Runtime-Test native_adversarial
+                Runtime-Test native_filesystem
+                Runtime-Test native_lifecycle @($nativeProbe,$processFixture)
+                Runtime-Test native_scaling @($nativeProbe,$processFixture)
+                Script-Test 'tools\native-analysis.ps1' @('-CacheRoot',$CacheRoot,'-MsysRoot',$MsysRoot)
+            }
+            reference-generator {
+                Script-Test 'test\reference_generator_test.ps1' @('-CacheRoot',$CacheRoot,'-Tclsh',$tclsh)
+            }
+        }
     }
+    if ($InteractiveGui) { Runtime-Test gui_widget }
 }
-& (Join-Path $RepoRoot 'test\package_test.ps1') -Tclsh $tclsh
-if ($LASTEXITCODE) { throw "package parser tests failed with exit code $LASTEXITCODE" }
-& $tclsh (Join-Path $RepoRoot 'test\build_identity_test.tcl')
-if ($LASTEXITCODE) { throw "build identity tests failed with exit code $LASTEXITCODE" }
-& $tclsh (Join-Path $RepoRoot 'test\dev_cache_test.tcl')
-if ($LASTEXITCODE) { throw "incremental cache tests failed with exit code $LASTEXITCODE" }
-& (Join-Path $RepoRoot 'test\version_resource_test.ps1') `
-    -Machteld $Machteld -CacheRoot $CacheRoot
-if ($LASTEXITCODE) { throw "VERSIONINFO tests failed with exit code $LASTEXITCODE" }
-& (Join-Path $RepoRoot 'test\reference_generator_test.ps1') -CacheRoot $CacheRoot -Tclsh $tclsh
-if ($LASTEXITCODE) { throw "reference generator tests failed with exit code $LASTEXITCODE" }
-& $tclsh (Join-Path $RepoRoot 'tools\check_reference.tcl')
-if ($LASTEXITCODE) { throw "reference coverage checks failed with exit code $LASTEXITCODE" }
-& $tclsh (Join-Path $RepoRoot 'tools\check_version.tcl')
-if ($LASTEXITCODE) { throw "version consistency checks failed with exit code $LASTEXITCODE" }
-
-if ($PublicTls) { $env:MACHTELD_TEST_PUBLIC_TLS = '1' }
-if ($InteractivePty) { $env:MACHTELD_TEST_PTY_IO = '1' }
-try {
-    Run-Test 'process' @((Join-Path $RepoRoot 'test\process_test.tcl'), $processFixture)
-    Run-Test 'store' @((Join-Path $RepoRoot 'test\store_test.tcl'), $lockFixture)
-    Run-Test 'native' @((Join-Path $RepoRoot 'test\native_test.tcl'), $httpFixture, $processFixture)
-    Run-Test 'filesystem' @((Join-Path $RepoRoot 'test\filesystem_test.tcl'))
-    Run-Test 'runtime services' @((Join-Path $RepoRoot 'test\runtime_test.tcl'))
-    Run-Test 'embedded reference' @((Join-Path $RepoRoot 'test\reference_test.tcl'))
-    Run-Test 'JSONTestSuite' @((Join-Path $RepoRoot 'test\json_test.tcl'))
-    Run-Test 'wrap/basekits' @((Join-Path $RepoRoot 'test\wrap_test.tcl'))
-} finally {
-    if ($PublicTls) { Remove-Item Env:MACHTELD_TEST_PUBLIC_TLS -ErrorAction SilentlyContinue }
-    if ($InteractivePty) { Remove-Item Env:MACHTELD_TEST_PTY_IO -ErrorAction SilentlyContinue }
+if ($needsRuntime) {
+    $after = (Get-FileHash -LiteralPath $Machteld -Algorithm SHA256).Hash
+    if ($before -cne $after) { throw 'tested executable changed during the test run' }
+    Write-Host "Verified tested executable remained SHA-256 $after"
 }
-
-Write-Host "`nALL TEST LANES PASSED"
+Write-Host ('ALL SELECTED TEST GROUPS PASSED ({0:n2}s)' -f $total.Elapsed.TotalSeconds)

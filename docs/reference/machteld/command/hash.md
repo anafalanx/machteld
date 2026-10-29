@@ -25,8 +25,10 @@ hash random count
 ## Arguments and options
 
 `algorithm` is one of `md5`, `sha1`, `sha256`, `sha384`, or `sha512`.
-`-binary` selects a bytearray digest instead of lowercase hexadecimal. String
-values are hashed as their Tcl bytes; bytearray values remain byte-for-byte.
+`-binary` selects a bytearray digest instead of lowercase hexadecimal. Bytearray
+values remain byte-for-byte; other values are converted to external UTF-8, as
+by `encoding convertto utf-8`, not hashed in Tcl's internal string encoding.
+This rule also applies independently to HMAC keys and data.
 `count` for random data is 1 through 1,048,576.
 
 ## Results
@@ -147,7 +149,8 @@ during that read, not an atomic snapshot.
 
 #### Arguments and options
 
-`key` and `data` are byte-preserving Tcl values. `-binary` selects output form.
+`key` and `data` each follow the bytearray/external-UTF-8 rule above.
+`-binary` selects only the digest's output form.
 
 #### Results
 

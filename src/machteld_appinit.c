@@ -29,6 +29,7 @@ extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
 extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
 #endif
 extern int Machteldpublish_Init(Tcl_Interp *interp); /* src/publish.c */
+extern int Machteldresource_Init(Tcl_Interp *interp); /* src/resource.c */
 
 static void
 payload_root_delete(void *client_data, Tcl_Interp *interp)
@@ -295,6 +296,10 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldpublish", Machteldpublish_Init, NULL);
+    if (Machteldresource_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldresource", Machteldresource_Init, NULL);
 
     /* The prelude registers `package require Tk` against the statically
      * linked Tk. It reads the library's own patch level from this variable,

@@ -54,20 +54,34 @@ terminates the tree if needed. Interpreter shutdown also closes owned children.
 ## Examples
 
 ```tcl
-set c [child start -timeout 2m -channels -- worker.exe]
-set io [child info $c]
-puts [dict get $io stdin] "request"
-close [dict get $io stdin]
-set result [child wait $c -timeout 10s]
-child close $c
+set c [child start -timeout 2m -- compiler.exe input.c]
+try {
+    set result [child wait $c]
+} finally {
+    child close $c
+}
 ```
+
+For a complete evented channel-mode example, see
+`examples/project-inspector/model.tcl` in the repository. Do not copy a pattern
+that sends a request and then blocks in `child wait` without draining its pipes.
 
 ## Constraints
 
 Channel mode transfers pipe-draining responsibility to the script. Undrained
 stdout or stderr can fill and block a child. Close stdin when an EOF-driven
-protocol has received its final request. A token is valid only in its creating
-interpreter and until `close`.
+protocol has received its final request. The exposed channels start in binary,
+blocking mode; explicitly set `-blocking 0` before evented I/O and drain both
+streams in bounded callbacks. `child wait` blocks the calling thread and does
+not pump channel events, so do not wait indefinitely for a child whose output
+still needs those callbacks. A token is valid only in its creating interpreter
+and until `close`. Channel names can be reused after a channel is closed; do
+not cache them as permanent identities or use an old name after closing it.
+
+As for `run`, the memory cap is per-process committed memory, the CPU cap is
+per-process user-mode CPU time, and neither is a total-tree budget or a
+permissions sandbox. Observation timeout does not cancel work. Kill, lifetime
+timeout, and close do not roll back side effects.
 
 ## Subcommands
 
@@ -206,7 +220,11 @@ A stale or foreign token reports `CHILD nohandle`.
 
 #### Lifetime and timeouts
 
-The query neither waits nor changes ownership.
+The query neither waits nor changes ownership. In channel mode, fields retain
+the original channel names even after the script closes one. A name can later
+be reused for an unrelated channel; it is not proof that the child still owns
+that channel. Child cleanup tracks channel identity and does not close a
+replacement merely because its name matches.
 
 #### Examples
 
@@ -289,6 +307,12 @@ teardown encounters an error.
 #### Constraints
 
 Do not use a token or its channel names after close.
+
+The owning Tcl interpreter also owns the supervised jobs. Deleting that
+interpreter terminates its remaining trees even when the host process continues
+running. Process exit provides the same cleanup backstop. Neither path proves
+that an interrupted child performed no side effects; reconcile externally
+visible state before deciding to replay work.
 
 #### See also
 

@@ -1,5 +1,7 @@
 # Machteld improvements for reusable WebSocket and CDP work
 
+<!-- machteld-version-history: begin -->
+
 - Status: historical handoff, partially completed and superseded
 - Date: 2026-08-25
 - First consumer: FlowNet KFX History
@@ -729,3 +731,5 @@ capture.
 At every phase, keep the tree locally green and stop on a failed security or
 wrapped-host parity gate. Do not compensate for a missing primitive with an
 unreviewed browser workaround.
+
+<!-- machteld-version-history: end -->

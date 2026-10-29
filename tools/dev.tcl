@@ -3,7 +3,7 @@
 # Run through the z toolchain (z.json maps `z dev*` to `tclsh90 tools/dev.tcl`):
 #     z devdocs           docs checks only, no build (seconds)
 #     z devbuild          incremental build -> out/machteld.exe
-#     z devtest LANE ...  incremental build, then the named pure-Tcl lane(s)
+#     z devtest LANE ...  named pure-Tcl lane(s) against the existing executable
 #     z devclean          delete the dev cache
 #
 # Speed comes from a PERSISTENT cache in .cache/dev that the hermetic release
@@ -108,7 +108,9 @@ proc guard_spec {{toolchainKey ""}} {
 
 proc compile_candidate {src flags label candidate} {
     puts "  cc  $label"
-    run $::GCC {*}$flags -c $src -o $candidate
+    ::machteld::devcache::with_native_environment $::MSYS2 {
+        run $::GCC {*}$flags -c $src -o $candidate
+    }
 }
 
 proc cc {obj src flags label {shared 1}} {
@@ -124,8 +126,10 @@ proc cc {obj src flags label {shared 1}} {
 
 proc resource_candidate {kind candidate} {
     puts "  rc  machteld-$kind.rc"
-    ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
-        [file join $::OBJ "machteld-$kind.rc"] $candidate
+    ::machteld::devcache::with_native_environment $::MSYS2 {
+        ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
+            [file join $::OBJ "machteld-$kind.rc"] $candidate
+    }
 }
 
 proc version_resource {kind obj} {
@@ -136,7 +140,9 @@ proc version_resource {kind obj} {
 
 proc link_candidate {kind main resource objects sqlite yyjson candidate} {
     puts "  ld  $kind host"
-    ::machteld::build::link_host $::GCC $::STRIP $kind $main $resource $objects $sqlite $yyjson $::PATHS $candidate
+    ::machteld::devcache::with_native_environment $::MSYS2 {
+        ::machteld::build::link_host $::GCC $::STRIP $kind $main $resource $objects $sqlite $yyjson $::PATHS $candidate
+    }
 }
 
 proc prelude_candidate {candidate} {
@@ -148,7 +154,7 @@ proc prelude_candidate {candidate} {
 proc reference_candidate {candidate} {
     puts "  ref generating corpus (previous generations remain untouched)"
     ::machteld::devcache::windows_powershell [list run powershell.exe -NoProfile -ExecutionPolicy Bypass -File [Rp tools generate-reference.ps1] \
-        -CacheRoot $::CACHE -Output $candidate -Tclsh $::TCLSH]
+        -CacheRoot $::CACHE -Output $candidate -Tclsh $::TCLSH -StageCache [file join $::DEV reference-stages]]
 }
 
 proc package_candidate {staged bare bareGui reference candidate} {
@@ -196,7 +202,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     set ::GUARD_SPEC [guard_spec $::TOOLCHAIN_KEY]
     set ::GUARD_KEY [::machteld::devcache::fingerprint $::GUARD_SPEC]
     verify_loaded_recipes
-    set ::BUILD_ENV [::machteld::devcache::compiler_environment]
+    set ::BUILD_ENV [::machteld::devcache::native_environment $::MSYS2]
     set ::DEPS_KEY [::machteld::devcache::fingerprint [::machteld::devcache::dependency_spec $::ROOT $::CACHE]]
     set ::HEADERS_KEY [::machteld::devcache::fingerprint [::machteld::devcache::native_shared_spec $::ROOT $::PATHS $::TOOLCHAIN_KEY]]
     set changed 0
@@ -328,18 +334,23 @@ proc dev_docs {} {
 
 # ---- targeted test lanes (the pure-Tcl ones you iterate on) ----
 
-# Lanes needing compiled C fixtures or basekit extraction (process, native,
-# store, wrap, entry, embedded-reference generator) stay with the release gate.
+# Fixture-heavy lanes use tools/test.ps1 -Group integration or packaging.
+# Full conversion/determinism is the separate reference-generator group.
 set ::LANES {
     filesystem test/filesystem_test.tcl
     runtime    test/runtime_test.tcl
+    protocol   test/protocol_test.tcl
+    gui_model  test/gui_model_test.tcl
     reference  test/reference_test.tcl
     json       test/json_test.tcl
 }
 
 proc dev_test {lanes} {
-    dev_build
     set exe [Rp out machteld.exe]
+    if {![file isfile $exe]} { error "missing $exe; run z devbuild explicitly first" }
+    puts "test: existing executable [file nativename $exe]"
+    set exeHash [::machteld::devcache::request file $exe]
+    puts "test: SHA-256 $exeHash"
     if {![llength $lanes]} {
         puts "test: name one or more lanes: [dict keys $::LANES]"; exit 2
     }
@@ -355,6 +366,7 @@ proc dev_test {lanes} {
         if {[catch {run $exe $path} err]} { puts "  FAIL $lane"; incr fail } \
         else { puts "  ok   $lane" }
     }
+    if {[::machteld::devcache::request file $exe] ne $exeHash} { error "tested executable changed during the test run" }
     if {$fail} { puts "test: $fail lane(s) failed"; exit 1 }
     puts "test: ok"
 }

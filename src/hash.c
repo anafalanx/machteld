@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <limits.h>
 
 #define HASH_CHUNK (64 * 1024)
 #define HASH_MAX_DIGEST 64
@@ -222,6 +223,11 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
 
         if (idx == START) {
             if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "algorithm"); return TCL_ERROR; }
+            /* Tokens must never wrap, collide, or invoke signed overflow after
+             * a long-lived interpreter has consumed its sequence space. */
+            if (st->seq == INT_MAX) {
+                return hash_error(interp, "oserror", "hash token sequence exhausted");
+            }
             hctx_t *c = (hctx_t *)calloc(1, sizeof(*c));
             if (c == NULL) return hash_error(interp, "oserror", "out of memory");
             if (alg_open(interp, a, NULL, 0, &c->alg_h, &c->h, &c->digest_len) != TCL_OK) {

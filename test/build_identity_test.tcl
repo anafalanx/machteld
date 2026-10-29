@@ -111,13 +111,18 @@ try {
         set runtimeExe [file normalize [lindex $argv 0]]
         zipfs mount $runtimeExe actualBuild
         try {
-            set actual [::machteld::buildidentity::read //zipfs:/actualBuild/build-info.dict]
-            check "actual build identifies development without changing runtime version" [expr {
-                [dict get $actual channel] eq "development" &&
-                [dict get $actual runtime_version] eq $runtime}]
-            set actualCorpus [dict get [slurp //zipfs:/actualBuild/reference/catalog.dict] corpus_sha256]
-            check "actual build identifies its exact reference" [expr {
-                [dict get $actual reference_sha256] eq $actualCorpus}]
+            set hasIdentity [file exists //zipfs:/actualBuild/build-info.dict]
+            if {$hasIdentity} {
+                set actual [::machteld::buildidentity::read //zipfs:/actualBuild/build-info.dict]
+                check "actual build identifies development without changing runtime version" [expr {
+                    [dict get $actual channel] eq "development" &&
+                    [dict get $actual runtime_version] eq $runtime}]
+                set actualCorpus [dict get [slurp //zipfs:/actualBuild/reference/catalog.dict] corpus_sha256]
+                check "actual build identifies its exact reference" [expr {
+                    [dict get $actual reference_sha256] eq $actualCorpus}]
+            } else {
+                puts "ok   runtime has no optional development identity (normal for release packaging)"
+            }
         } finally { zipfs unmount actualBuild }
         set app [file join $work app.tcl]
         bytes $app "package require machteld\nexit\n"
@@ -126,9 +131,14 @@ try {
             exec $runtimeExe wrap $app -o $wrapped --$kind
             zipfs mount $wrapped actualWrap
             try {
-                check "$kind wrapper inherits runtime provenance without reference" [expr {
-                    [::machteld::buildidentity::read //zipfs:/actualWrap/build-info.dict] eq $actual &&
-                    ![file exists //zipfs:/actualWrap/reference]}]
+                if {$hasIdentity} {
+                    check "$kind wrapper inherits runtime provenance without reference" [expr {
+                        [::machteld::buildidentity::read //zipfs:/actualWrap/build-info.dict] eq $actual &&
+                        ![file exists //zipfs:/actualWrap/reference]}]
+                } else {
+                    check "$kind wrapper preserves absent development identity" [expr {
+                        ![file exists //zipfs:/actualWrap/build-info.dict]}]
+                }
             } finally { zipfs unmount actualWrap }
         }
     }

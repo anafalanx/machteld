@@ -62,6 +62,12 @@ This is intentionally not an SQL escape hatch. Machteld owns a table named
 `kv(key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID`; do not treat the database
 schema as an extension API. Independent processes can share a file subject to
 normal SQLite locking.
+The API exposes no SQL execution, multi-operation transactions, pagination,
+incremental BLOB I/O, or cancellation. Values and the complete `keys` list are
+materialized in memory without a Machteld byte cap. The busy timeout bounds
+lock waiting, not total operation time; these synchronous calls do not service
+the Tcl event loop. File durability relies on SQLite and the filesystem, not
+an application-level guarantee that a sequence of separate calls is atomic.
 
 ## Subcommands
 
@@ -74,7 +80,9 @@ normal SQLite locking.
 
 #### Arguments and options
 
-No path means `:memory:`. A path must be nonempty and contain no NUL.
+No path means `:memory:`. A path must be nonempty, contain valid Unicode,
+and contain no NUL. Invalid text is rejected before replacing the current
+connection or creating a file.
 
 #### Results
 

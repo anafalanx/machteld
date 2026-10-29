@@ -266,7 +266,9 @@ if {![file isdirectory $CORPUS]} {
     # The ASSERTED i_ table (plan-machteld-015 J1: a gate, not an
     # observation). Every implementation-defined case is pinned by name;
     # a behavior change here is a failing check demanding a new ruling,
-    # never a silent drift. The 2026-08-24 ruling flipped the ten
+    # never a silent drift. The step-10 boundary audit also rejects malformed
+    # raw UTF-8: bytearrays now reach yyjson verbatim instead of being silently
+    # reinterpreted as Tcl characters. The 2026-08-24 ruling flipped the ten
     # unpaired-surrogate-escape cases from accept (as U+FFFD) to reject:
     # machteld does not manufacture replacement characters from broken
     # input. The raw-invalid-UTF-8 accepts are the corpus harness's
@@ -288,23 +290,23 @@ if {![file isdirectory $CORPUS]} {
         i_string_1st_surrogate_but_2nd_missing.json      reject
         i_string_1st_valid_surrogate_2nd_invalid.json    reject
         i_string_UTF-16LE_with_BOM.json                  reject
-        i_string_UTF-8_invalid_sequence.json             accept
-        i_string_UTF8_surrogate_U+D800.json              accept
+        i_string_UTF-8_invalid_sequence.json             reject
+        i_string_UTF8_surrogate_U+D800.json              reject
         i_string_incomplete_surrogate_and_escape_valid.json reject
         i_string_incomplete_surrogate_pair.json          reject
         i_string_incomplete_surrogates_escape_valid.json reject
         i_string_invalid_lonely_surrogate.json           reject
         i_string_invalid_surrogate.json                  reject
-        i_string_invalid_utf-8.json                      accept
+        i_string_invalid_utf-8.json                      reject
         i_string_inverted_surrogates_U+1D11E.json        reject
-        i_string_iso_latin_1.json                        accept
+        i_string_iso_latin_1.json                        reject
         i_string_lone_second_surrogate.json              reject
-        i_string_lone_utf8_continuation_byte.json        accept
-        i_string_not_in_unicode_range.json               accept
-        i_string_overlong_sequence_2_bytes.json          accept
-        i_string_overlong_sequence_6_bytes.json          accept
-        i_string_overlong_sequence_6_bytes_null.json     accept
-        i_string_truncated-utf-8.json                    accept
+        i_string_lone_utf8_continuation_byte.json        reject
+        i_string_not_in_unicode_range.json               reject
+        i_string_overlong_sequence_2_bytes.json          reject
+        i_string_overlong_sequence_6_bytes.json          reject
+        i_string_overlong_sequence_6_bytes_null.json     reject
+        i_string_truncated-utf-8.json                    reject
         i_string_utf16BE_no_BOM.json                     reject
         i_string_utf16LE_no_BOM.json                     reject
         i_structure_500_nested_arrays.json               accept

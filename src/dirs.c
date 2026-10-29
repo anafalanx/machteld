@@ -29,6 +29,23 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <stdint.h>
+
+/* Fail before arithmetic wraps; callers retain their existing partial-walk
+ * error reporting on allocation failure. Also tested with synthetic SIZE_MAX
+ * boundaries, without attempting enormous allocations. */
+static size_t dirs_capacity(size_t current, size_t used, size_t extra, size_t width) {
+    if (width == 0 || extra > SIZE_MAX - used) return 0;
+    size_t required = used + extra;
+    size_t limit = SIZE_MAX / width;
+    if (required > limit || current > limit) return 0;
+    size_t capacity = current ? current : 32;
+    if (capacity > limit) capacity = limit;
+    while (capacity < required) {
+        capacity = capacity > limit / 2 ? limit : capacity * 2;
+    }
+    return capacity;
+}
 
 /* A reparse tag with this bit set is A NAME FOR SOMETHING ELSE (junction,
  * symlink, volume mount point). Everything else is content behind a filter. */
@@ -172,6 +189,8 @@ static char *dirs_reason(DWORD e) {
  * immediately after a drive letter, which is exactly the case that made this
  * look harmless in testing. */
 static wchar_t *dirs_join(const wchar_t *parent, size_t plen, const wchar_t *name, size_t nlen) {
+    if (plen > SIZE_MAX / sizeof(wchar_t) - 2 ||
+            nlen > SIZE_MAX / sizeof(wchar_t) - plen - 2) return NULL;
     int sep = (plen > 0 && parent[plen - 1] != L'\\') ? 1 : 0;
     wchar_t *p = (wchar_t *)malloc((plen + (size_t)sep + nlen + 1) * sizeof(wchar_t));
     if (p == NULL) return NULL;
@@ -607,8 +626,8 @@ static int dirs_children(DirsWalk *w, HANDLE h, DirsItem *it,
             }
             if (!skip) {
                 if (n == cap) {
-                    size_t ncap = cap ? cap * 2 : 32;
-                    DirsChild *g = (DirsChild *)realloc(kids, ncap * sizeof(DirsChild));
+                    size_t ncap = dirs_capacity(cap, cap, 1, sizeof(DirsChild));
+                    DirsChild *g = ncap ? (DirsChild *)realloc(kids, ncap * sizeof(DirsChild)) : NULL;
                     if (g == NULL) { skip = 1; lost++; }
                     else { kids = g; cap = ncap; }
                 }
@@ -841,10 +860,9 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
             if (got) entered = 1;
             else action = "failed";
             if (got && kn > 0) {
-                if (n + kn > cap) {
-                    size_t ncap = cap;
-                    while (ncap < n + kn) ncap *= 2;
-                    DirsItem *g = (DirsItem *)realloc(stack, ncap * sizeof(DirsItem));
+                if (kn > cap - n) {
+                    size_t ncap = dirs_capacity(cap, n, kn, sizeof(DirsItem));
+                    DirsItem *g = ncap ? (DirsItem *)realloc(stack, ncap * sizeof(DirsItem)) : NULL;
                     if (g != NULL) { stack = g; cap = ncap; }
                 }
                 /* Pushed in REVERSE so they pop ascending, which is what makes
@@ -1388,7 +1406,7 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         free(pathw);
         return dirs_error(interp, "oserror", "the path could not be canonicalised");
     }
-    wchar_t *finalw = (wchar_t *)malloc((size_t)(need + 1) * sizeof(wchar_t));
+    wchar_t *finalw = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
     if (finalw == NULL) {
         CloseHandle(h);
         free(pathw);
@@ -1397,7 +1415,10 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     DWORD wrote = GetFinalPathNameByHandleW(h, finalw, need, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
     CloseHandle(h);
     free(pathw);
-    if (wrote == 0 || wrote >= need + 1) {
+    /* On insufficient space Windows returns the required capacity including
+     * NUL, not a string length. A rename between the two calls can cause this
+     * even though the initial size query succeeded. Never read that buffer. */
+    if (wrote == 0 || wrote >= need) {
         free(finalw);
         return dirs_error(interp, "oserror", "the path could not be canonicalised");
     }

@@ -222,13 +222,14 @@ typedef struct child_s {
     HANDLE          monitor;     /* enforces deadline without Tcl observation */
     int             stream;      /* callbacks pump output on interpreter thread */
     volatile LONG   monitor_failed;
-    /* Channel names are stable lookup keys; scripts may close the corresponding
-     * Tcl channels, so retaining Tcl_Channel pointers would be unsafe. */
+    /* Names alone are not identities: Tcl can recycle a closed channel's name.
+     * Close handlers clear the corresponding pointer before Tcl frees it. */
     int             channels;    /* -channels was given */
     int             inherit;     /* -inherit: stdio is the parent's, not pipes */
     HANDLE          inherit_in, inherit_out, inherit_err;  /* BORROWED: ours, never closed here */
     HANDLE          inW;         /* stdin write end, kept open (channel mode) */
     char            chIn[24], chOut[24], chErr[24];
+    Tcl_Channel     owned_channels[3]; /* live only until its close handler fires */
     ULONGLONG       deadline;    /* GetTickCount64() by which it must be done */
     int             reaped;      /* wait/reap already collected the exit + output */
     volatile LONG   killed;      /* was tree-killed by machteld (child kill) */
@@ -809,10 +810,11 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     c->inherit = o->inherit;
     c->channels = o->channels;
     c->stream = stream;
+    const int owns_argv = o->arg0 != NULL;
     const char **largv = argv_with_arg0(o, cargc, cargv, err);
     if (largv == NULL) goto fail;
     int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err);
-    if (largv != cargv) free((void *)largv);
+    if (owns_argv) free((void *)largv);
     if (lrc != 0) goto fail;
     if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
 
@@ -908,20 +910,31 @@ fail:
  * the handles are nulled here the moment Tcl owns them, and every later cleanup
  * path skips what it no longer holds.
  *
- * Registered in the interp so a script can `close` them itself; cleanup looks
- * the names up again rather than keeping pointers, because a name that no longer
- * resolves is a fact while a stale pointer is a crash. */
+ * Registered in the interp so a script can `close` them itself. A close handler
+ * invalidates each borrowed pointer: a subsequently reused channel name must
+ * never authorize closing some other child's pipe. */
+static void child_channel_closed(void *data) {
+    *(Tcl_Channel *)data = NULL;
+}
+
+static void child_channel_track(child_t *c, int index, Tcl_Channel channel) {
+    c->owned_channels[index] = channel;
+    Tcl_CreateCloseHandler(channel, child_channel_closed, &c->owned_channels[index]);
+}
+
 static int child_channels(Tcl_Interp *interp, child_t *c) {
     Tcl_Channel ci = Tcl_MakeFileChannel((void *)c->inW,  TCL_WRITABLE);
     if (ci == NULL) return -1;
     c->inW = NULL;
     Tcl_RegisterChannel(interp, ci);
+    child_channel_track(c, 0, ci);
     snprintf(c->chIn, sizeof c->chIn, "%s", Tcl_GetChannelName(ci));
 
     Tcl_Channel co = Tcl_MakeFileChannel((void *)c->outR, TCL_READABLE);
     if (co == NULL) { Tcl_UnregisterChannel(interp, ci); c->chIn[0] = '\0'; return -1; }
     c->outR = NULL;
     Tcl_RegisterChannel(interp, co);
+    child_channel_track(c, 1, co);
     snprintf(c->chOut, sizeof c->chOut, "%s", Tcl_GetChannelName(co));
 
     Tcl_Channel ce = Tcl_MakeFileChannel((void *)c->errR, TCL_READABLE);
@@ -933,6 +946,7 @@ static int child_channels(Tcl_Interp *interp, child_t *c) {
     }
     c->errR = NULL;
     Tcl_RegisterChannel(interp, ce);
+    child_channel_track(c, 2, ce);
     snprintf(c->chErr, sizeof c->chErr, "%s", Tcl_GetChannelName(ce));
     /* Tcl 9 folds byte-oriented encoding into `-translation binary`; its old
      * `-encoding binary` spelling is explicitly unsupported. Line buffering on
@@ -955,9 +969,9 @@ static void child_channels_free(Tcl_Interp *interp, child_t *c) {
     if (!c->channels) return;
     const char *names[3] = { c->chIn, c->chOut, c->chErr };
     for (int k = 0; k < 3; k++) {
-        if (names[k][0] == '\0') continue;
+        if (names[k][0] == '\0' || c->owned_channels[k] == NULL) continue;
         Tcl_Channel ch = Tcl_GetChannel(interp, names[k], NULL);
-        if (ch != NULL) Tcl_UnregisterChannel(interp, ch);
+        if (ch == c->owned_channels[k]) Tcl_UnregisterChannel(interp, ch);
     }
     c->chIn[0] = c->chOut[0] = c->chErr[0] = '\0';
 }
@@ -1025,6 +1039,15 @@ static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
 
 static void child_free(child_t *c) {
     if (c == NULL) return;
+    /* Interpreter deletion/process exit may reach us before Tcl closes its
+     * channels. Leave those channels with Tcl, but remove callbacks into c. */
+    for (int k = 0; k < 3; k++) {
+        if (c->owned_channels[k] != NULL) {
+            Tcl_DeleteCloseHandler(c->owned_channels[k], child_channel_closed,
+                                   &c->owned_channels[k]);
+            c->owned_channels[k] = NULL;
+        }
+    }
     if (!c->reaped) {
         if (c->job && wj_job_terminate(c->job, 1) != 0) wj_job_close(c->job);
         const char *e = NULL;
@@ -1049,7 +1072,7 @@ static const char **build_argv(Tcl_Interp *interp, const char *dom, int objc,
                                Tcl_Obj *const objv[], int cmd_index, int *cargc) {
     int n = objc - cmd_index;
     if (n <= 0) return NULL;
-    const char **cargv = (const char **)malloc((size_t)n * sizeof(char *));
+    const char **cargv = (const char **)calloc((size_t)n, sizeof(char *));
     if (cargv == NULL) {
         mt_error(interp, dom, "oserror", "out of memory");
         return NULL;
@@ -1083,6 +1106,11 @@ typedef struct {
     size_t    len, cap;
     int       eof;
 } pump_t;
+
+/* Byte bound before UTF-8 decoding or callback allocation. LF is the record
+ * separator; an optional CR still counts toward retained bytes. Keep this in
+ * sync with run's explicit manifest limits and boundary regressions. */
+#define RUN_LINE_BYTES (16u * 1024u * 1024u)
 
 static int valid_utf8(const unsigned char *s, size_t n) {
     size_t i = 0;
@@ -1132,8 +1160,13 @@ static int pump_feed(Tcl_Interp *interp, pump_t *p, const char *data, size_t n) 
             p->len = 0;
             if (rc != TCL_OK) return rc;
         } else {
+            if (p->len >= RUN_LINE_BYTES) {
+                return mt_error(interp, "RUN", "limit",
+                                "callback line exceeds 16777216 bytes; use child -channels for custom framing");
+            }
             if (p->len + 1 > p->cap) {
                 size_t cap = p->cap ? p->cap * 2 : 256;
+                if (cap > RUN_LINE_BYTES) cap = RUN_LINE_BYTES;
                 char *line = (char *)realloc(p->line, cap);
                 if (line == NULL) {
                     return mt_error(interp, "RUN", "oserror", "out of memory while buffering callback line");
@@ -1418,12 +1451,14 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     }
     case CLOSE:
         if (objc != 3) return mt_error(interp, "CHILD", "usage", "child close token");
+        /* Tcl channel transforms can evaluate script while unregistering. A
+         * reentrant close must not find and free this same child a second time. */
+        registry_remove(ctx, c);
         /* Channels first: closing the stdin channel is what gives the worker its
          * EOF, so a well-behaved worker exits on its own and child_free has
          * nothing to kill. Doing it the other way round would terminate every
          * worker by force and call that normal. */
         child_channels_free(interp, c);
-        registry_remove(ctx, c);
         child_free(c); /* kills first if still running */
         return TCL_OK;
     }
@@ -1545,11 +1580,12 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
                       NULL, OPEN_EXISTING, 0, NULL);
     if (nul == INVALID_HANDLE_VALUE) { nul = NULL; mt_error(interp, "DETACH", "oserror", "open NUL failed"); goto cleanup; }
     wj_stdio io = { nul, nul, nul };
+    const int owns_argv = o.arg0 != NULL;
     const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
     if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
                         1 /* strict breakaway */, o.env_block, &pid, &proch, &err);
-    if (dargv != cargv) free((void *)dargv);
+    if (owns_argv) free((void *)dargv);
     if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);
         goto cleanup;
@@ -1745,6 +1781,7 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
                         int cols, int rows, const char **err, const char **code) {
     char *exe = resolve_exe(cargv[0]);
     if (exe == NULL) { *err = "command not found on PATH"; *code = "notfound"; return NULL; }
+    const int owns_argv = o->arg0 != NULL;
     const char **pargv = argv_with_arg0(o, cargc, cargv, err);
     if (pargv == NULL) { free(exe); return NULL; }
 
@@ -1795,7 +1832,7 @@ static pty_t *pty_spawn(proc_ctx *ctx, run_opts *o, int cargc, const char **carg
     hpc = NULL; job = NULL; inW = NULL; outR = NULL; /* ownership moved to result */
 
 done:
-    if (pargv != cargv) free((void *)pargv);
+    if (owns_argv) free((void *)pargv);
     free(exe);
     if (inR) CloseHandle(inR);
     if (outW) CloseHandle(outW);
@@ -2465,8 +2502,9 @@ static int WatchCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
 
 /* ---- registration ------------------------------------------------------ */
 
-/* Tear down any open pseudo-consoles and watches at exit, so a REPL user who
- * spawns one and just quits leaves no wedged console host or reader thread. */
+/* Shared by interpreter deletion and process exit. Channel ownership remains
+ * with Tcl (its own deletion hook may already have closed them). Terminate and
+ * reap owned jobs without evaluating Tcl callbacks during cleanup. */
 static void proc_cleanup(void *cd) {
     proc_ctx *ctx = (proc_ctx *)cd;
     while (ctx->children) {
@@ -2475,19 +2513,36 @@ static void proc_cleanup(void *cd) {
         child_free(c);
     }
     while (ctx->ptys) {
-        if (pty_free(ctx, ctx->ptys) != 0) break;
+        pty_t *p = ctx->ptys;
+        ctx->ptys = p->next;
+        /* Failure may deliberately retain one structure owned by a drain
+         * thread. It must not strand unrelated resources in this interpreter.
+         * Unlink first: failure to create that drain thread leaves p linked. */
+        (void)pty_free(ctx, p);
     }
     while (ctx->watches) {
-        if (watch_free(ctx, ctx->watches) != 0) break;
+        watch_t *w = ctx->watches;
+        ctx->watches = w->next;
+        (void)watch_free(ctx, w);
     }
-    if (ctx->root) wj_job_free(ctx->root);
+    if (ctx->root) { wj_job_free(ctx->root); ctx->root = NULL; }
 }
 
 static void proc_atexit(void *cd) {
     proc_cleanup(cd);
 }
 
+static void proc_interp_delete(void *cd, Tcl_Interp *interp) {
+    (void)interp;
+    /* An interpreter may disappear while its host keeps running. Remove the
+     * exit hook before releasing client data, avoiding a later double cleanup. */
+    Tcl_DeleteExitHandler(proc_atexit, cd);
+    proc_cleanup(cd);
+    free(cd);
+}
+
 int Machteldproc_Init(Tcl_Interp *interp) {
+    if (Tcl_GetAssocData(interp, "machteld::proc", NULL) != NULL) return TCL_OK;
     const char *err = NULL;
     wj_job *root = wj_job_new(1, &err); /* closing the root kills every supervised tree */
     if (root == NULL) {
@@ -2515,5 +2570,6 @@ int Machteldproc_Init(Tcl_Interp *interp) {
     Tcl_CreateObjCommand(interp, "::machteld::pty", PtyCmd, ctx, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::watch", WatchCmd, ctx, NULL);
     Tcl_CreateExitHandler(proc_atexit, ctx);
+    Tcl_SetAssocData(interp, "machteld::proc", proc_interp_delete, ctx);
     return TCL_OK;
 }

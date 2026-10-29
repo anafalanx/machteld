@@ -29,8 +29,9 @@ default and accepts `-timeout`. `expect` defaults to `10s` and accepts
 
 ## Results
 
-`spawn` returns a `pty#...` token. `read` returns up to 8192 raw VT/ANSI bytes,
-or empty on timeout/EOF. `expect` returns the selected body's result. `strip`
+`spawn` returns a `pty#...` token. `read` takes up to 8192 bytes from the terminal
+stream and exposes them as a Tcl string, not a bytearray, or returns empty on
+timeout/EOF. `expect` returns the selected body's result. `strip`
 returns text with common CSI, OSC, and escape sequences removed. `info` returns
 `token`, `pid`, `running`, and the total pending-byte count `pending`; `list`
 returns tokens. Mutating operations return empty.
@@ -65,9 +66,12 @@ try {
 
 ## Constraints
 
-ConPTY requires Windows 10 version 1809 or newer. It is a terminal byte stream,
-not a line protocol; screen-control output can arrive split across reads. `strip`
-is a pragmatic escape remover, not a full terminal emulator.
+ConPTY's API minimum is Windows 10 version 1809; Machteld's supported platform
+policy is narrower (see the runtime contract). This is a terminal interface,
+not a binary-safe transport or a line protocol. Screen controls and UTF-8
+characters can be split across reads, and this API has no incremental UTF-8
+decoder. `strip` is a pragmatic escape remover, not a full terminal emulator.
+Use `child start -channels` for binary data or a strictly decoded protocol.
 
 ## Subcommands
 
@@ -116,7 +120,10 @@ The terminal dimensions cannot currently be configured or resized.
 
 #### Arguments and options
 
-Writes the exact Tcl byte/string representation to the terminal input pipe.
+Writes Tcl's internal string representation to the terminal input pipe. Unlike
+`run -stdin`, this does not implement the bytearray/external-UTF-8 rule:
+bytearrays are coerced to strings and embedded NUL uses Tcl's modified UTF-8.
+Use ordinary terminal text; do not use this call to transfer arbitrary bytes.
 
 #### Results
 
@@ -164,9 +171,11 @@ Without `-timeout`, performs an immediate poll. A zero duration is also a poll.
 
 #### Results
 
-Returns currently available raw terminal bytes, at most 8192 per call; empty
-means no bytes arrived before the bound or the output pipe reached EOF. Bytes
-retained during `send` are returned before newer bytes in the output pipe.
+Returns a Tcl string built from at most 8192 currently available terminal bytes;
+empty means no bytes arrived before the bound or the output pipe reached EOF.
+Bytes retained during `send` are returned before newer bytes in the output pipe.
+The limit counts incoming bytes, not Tcl characters; no decoder preserves a
+partial UTF-8 character across calls.
 
 #### Errors
 
@@ -221,6 +230,11 @@ It reads in bounded slices until a match or the deadline and leaves the PTY live
 #### Constraints
 
 Matching sees stripped accumulated output, not a terminal screen model.
+The transcript accumulated during one `expect` call has no byte or character
+cap. A time limit is not a memory limit under sustained output. Keep exchanges
+short or implement a bounded matching buffer over `pty read`; use channel-mode
+children where strict framing or arbitrary binary output matters. Reads block
+the calling thread rather than servicing unrelated Tcl events.
 
 #### See also
 

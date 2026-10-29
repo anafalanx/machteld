@@ -32,6 +32,11 @@ container interpretation and they are mutually exclusive; `-plain` refuses
 typed values by name - it is the wire paths' guard. `--` ends option parsing
 so an option-shaped scalar can be encoded.
 
+Decode treats bytearrays as exact UTF-8 wire bytes and Tcl strings as Unicode
+text to encode as UTF-8. Invalid UTF-8 bytearrays are refused, not repaired by
+interpreting each byte as a character. NUL is supported inside string values
+and object names through JSON escaping; a literal NUL in JSON input is invalid.
+
 ## Results
 
 Plain decode maps JSON objects to dicts, arrays to lists, booleans to
@@ -49,7 +54,8 @@ occur when a forced dict/list value is malformed.
 ## Lifetime and timeouts
 
 All operations are synchronous and have no timeout. A typed value holds its
-document alive for the handle's lifetime.
+document alive while its typed representation is retained; it is a Tcl value,
+not a command token with an explicit `close` operation.
 
 ## Examples
 
@@ -73,10 +79,20 @@ typed mode exists for programs that need more. An escaped unpaired UTF-16
 surrogate is a parse error in both modes. Typed constructors accept typed
 values and nested plain dict/list containers, and refuse plain scalar leaves
 by name; `json value number` validates the exact JSON number grammar
-fail-closed. A typed handle that has been through a string operation is a
-plain string again and refuses at its next construction - build wire-bound
-trees as typed containers, construct late, hold the handle. Stringification,
-`store`, and worker/pool/pmap JSON-lines transport do not preserve the type.
+fail-closed. Tcl operations can replace a value's typed internal representation
+with another representation (shimmering). Merely obtaining its string form
+need not erase the original type, but constructing a new value from that text
+does not restore it. Build wire-bound trees as typed containers, construct late,
+and retain the typed values rather than relying on string operations to keep
+their identity. `store` does not preserve typed identity; worker/pool/pmap
+plain-only encoding refuses typed values instead of transporting their type.
+The depth limit also applies when composing previously built typed subtrees.
+Encoding strings or object names containing unpaired surrogates reports
+`JSON type`; typed path lookup rejects malformed Unicode the same way.
+The typed decode byte cap bounds input only. Plain decode and encode have no
+byte-limit option, and all modes materialize values in memory. JSON escaping,
+decoded Tcl objects, copied typed containers, and a retained subtree's whole
+backing document can cost more memory than the wire input.
 
 ## Subcommands
 
@@ -342,7 +358,8 @@ Pure synchronous traversal.
 
 #### Constraints
 
-Probing never raises for absence; only a non-typed VALUE argument raises.
+Probing never raises for absence. A non-typed VALUE or malformed Unicode path
+component reports `JSON type`.
 
 #### See also
 

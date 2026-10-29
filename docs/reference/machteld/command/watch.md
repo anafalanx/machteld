@@ -59,9 +59,12 @@ try {
 
 ## Constraints
 
-The queue is bounded. OS-buffer or queue overflow is disclosed, after which the
-consumer must rescan if it needs a complete view. Paths are relative to the
-watched directory. Filesystem changes can be reordered or coalesced by Windows;
+Each watch retains at most 8192 queued events and uses a 64 KiB OS read buffer.
+OS-buffer or queue overflow is disclosed, after which the consumer must rescan
+if it needs a complete view. The overflow `count` is a loss indication, not an
+exact count of filesystem changes: one OS-buffer overflow can hide many events.
+There is no shared aggregate budget across all watch handles. Paths are relative
+to the watched directory. Filesystem changes can be reordered or coalesced by Windows;
 the stream is notification, not a transaction log.
 
 ## Subcommands
@@ -138,6 +141,9 @@ Timeout returns an empty list and leaves the handle live.
 #### Constraints
 
 An overflow row means the batch is incomplete.
+Rescan the watched tree and reconcile current state; replaying the surviving
+notifications alone cannot reconstruct the missing changes. A timed read blocks
+the calling thread and does not pump Tcl's event loop.
 
 #### See also
 

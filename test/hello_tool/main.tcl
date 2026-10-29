@@ -56,7 +56,12 @@ if {![catch {
     puts $f "store:error:$store_error"
 }
 
-if {[info exists env(MACHTELD_WRAP_GUI_SELFTEST)] && $env(MACHTELD_WRAP_GUI_SELFTEST) eq "1"} {
+# Packaging checks must not take over the desktop. Actual widget/interaction
+# coverage now lives in gui_widget_test.tcl; this optional fixture window is
+# opened only when explicitly requested, never by routine wrapping tests.
+if {![info exists env(MACHTELD_WRAP_GUI_INTERACTIVE)] ||
+        $env(MACHTELD_WRAP_GUI_INTERACTIVE) ne "1" ||
+        ([info exists env(MACHTELD_WRAP_GUI_SELFTEST)] && $env(MACHTELD_WRAP_GUI_SELFTEST) eq "1")} {
     set gui_result "not-requested"
 } elseif {[catch {
     package require Tk

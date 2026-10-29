@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$CacheRoot,
-    [Parameter(Mandatory)][string]$Tclsh
+    [Parameter(Mandatory)][string]$Tclsh,
+    [string]$PrimeStageCache,
+    [switch]$KeepWork
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,7 +11,8 @@ $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Generator = Join-Path $RepoRoot 'tools\generate-reference.ps1'
 $PowerShell51 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $StrictUtf8 = New-Object Text.UTF8Encoding($false, $true)
-$Work = Join-Path ([IO.Path]::GetTempPath()) "machteld reference determinism $PID"
+$WorkLeaf = "machteld reference determinism $PID-$([Guid]::NewGuid().ToString('n'))"
+$Work = Join-Path ([IO.Path]::GetTempPath()) $WorkLeaf
 $First = Join-Path $Work 'first pack'
 $Second = Join-Path $Work 'second pack'
 
@@ -22,13 +25,31 @@ function Relative-Files([string]$Root) {
     [Array]::Sort($paths, [StringComparer]::Ordinal)
     return $paths
 }
-function Generate([string]$Output) {
+function Generate([string]$Output, [string]$Stages = '') {
+    $extra = @()
+    if ($Stages) { $extra = @('-StageCache',$Stages) }
     & $PowerShell51 -NoProfile -ExecutionPolicy Bypass -File $Generator `
-        -CacheRoot $CacheRoot -Output $Output -Tclsh $Tclsh
+        -CacheRoot $CacheRoot -Output $Output -Tclsh $Tclsh @extra
     if ($LASTEXITCODE) { Fail "generator failed with exit code $LASTEXITCODE" }
 }
+function Select-StageCache([string]$Requested, [string]$Work) {
+    $stages = if ($Requested) { [IO.Path]::GetFullPath($Requested) } else { Join-Path $Work 'stage cache' }
+    if (Test-Path -LiteralPath $stages) {
+        Fail 'first-pass stage-cache priming requires an absent path, never an existing cache'
+    }
+    return $stages
+}
+function Check-ReferenceStages([string]$First, [string]$Stages) {
+    $extra = @()
+    if ($KeepWork) { $extra = @('-KeepWork') }
+    & $PowerShell51 -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'test\reference_stage_integration_test.ps1') `
+        -First $First -StageCache $Stages -CacheRoot $CacheRoot -Tclsh $Tclsh @extra
+    if ($LASTEXITCODE) { Fail "reference stage integration failed with exit code $LASTEXITCODE" }
+}
 
-New-Item -ItemType Directory -Force -Path $Work | Out-Null
+$StageCache = Select-StageCache $PrimeStageCache $Work
+New-Item -ItemType Directory -Path $Work | Out-Null
+Write-Host "Reference test work: $Work"
 try {
     $header = [IO.File]::ReadAllText((Join-Path $RepoRoot 'src\machteld.h'))
     $prelude = [IO.File]::ReadAllText((Join-Path $RepoRoot 'tcl\machteld.tcl'))
@@ -45,7 +66,12 @@ try {
     }
     # The space-bearing parent exercises converter argv handling as well as
     # same-parent immutable publication under Windows PowerShell 5.1.
-    Generate $First
+    # An initially absent private cache records the first fully cold pass.
+    # PrimeStageCache may instead preserve it at an explicit external path.
+    # The second pass never reads it. This permits a build to reuse verified
+    # conversions while independent reconstruction checks continue separately.
+    Generate $First $StageCache
+    Write-Host "REFERENCE FIRST COLD PASS READY: $First"
     Generate $Second
 
     $firstFiles = @(Relative-Files $First)
@@ -147,9 +173,10 @@ try {
         }
     }
 
-    Write-Host "REFERENCE GENERATOR TEST PASSED ($($firstFiles.Count) byte-identical files, Tcl 249 / Tk 177)"
+    Check-ReferenceStages $First $StageCache
+    Write-Host "REFERENCE GENERATOR TEST PASSED ($($firstFiles.Count) byte-identical files, Tcl 249 / Tk 177; warm and authored-edit cache integration)"
 } finally {
-    if ([IO.Path]::GetFileName($Work) -eq "machteld reference determinism $PID" -and
+    if (-not $KeepWork -and [IO.Path]::GetFileName($Work) -ceq $WorkLeaf -and
             [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Work)) -eq
                 [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')) {
         Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue

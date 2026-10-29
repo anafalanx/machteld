@@ -58,7 +58,11 @@ if {[dict get $options help]} { puts [cli usage $spec mytool]; exit }
 
 Options use double hyphens because they belong to the generated program, while
 Machteld palette options use one. There is no option abbreviation, bundling, or
-repeat/variadic positional declaration. `--` ends option parsing.
+repeat/variadic positional declaration. `--` ends option parsing. Repeated
+options use the last supplied value; they do not accumulate a list. An option
+value beginning with `--` (except the literal `--`) is treated as a missing
+value, not arbitrary string data. Use a positional after `--` when that input
+shape is needed.
 
 ## Subcommands
 
@@ -75,6 +79,8 @@ repeat/variadic positional declaration. `--` ends option parsing.
 Positionals bind in spec insertion order. `required` may apply to options or
 positionals. `--help` waives missing required values but not malformed supplied
 values or unexpected extras.
+An absent required option is satisfied by a declared default; a required
+positional must be supplied even if it has a default.
 
 #### Results
 

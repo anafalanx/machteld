@@ -1,101 +1,110 @@
 # machteld
 
-machteld is a compact Windows machine-control runtime: Tcl/Tk 9.0.4 plus a small,
-structured command palette currently implemented in Tcl and native C. It ships as
-one executable, starts no service, needs no installed Tcl, and keeps Windows
-process, ConPTY, filesystem, HTTP, hashing, JSON, and SQLite machinery behind
-Tcl-shaped commands.
+machteld is Vincent Vercauteren's Windows machine-control platform: Tcl/Tk
+9.0.4 plus a small command palette implemented in Tcl and native C, with C/C++
+as the admitted native languages. It ships as one executable, starts no
+service, and needs no installed Tcl. Other people's adoption is welcome, but
+is not the design target. There are no compute engines, `macht`, or Lua.
 
-## 0.21 — consolidation
+## 0.22 candidate — unsigned, release gate in progress
 
-This checkout includes unreleased changes beyond the signed release below,
-including optional documentation in wrapped applications. The published 0.21
-executable does not have that opt-in behavior. Incremental development builds
-carry an embedded `build-info.dict` identifying their build inputs and reference
-corpus separately from the runtime version; they are not replacement releases.
+The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21)
+is preserved in `dist/0.21`; its [release notes](dist/0.21/RELEASE_NOTES.md)
+describe that artifact, not everything now in this checkout. The current
+candidate reports runtime version **0.22** and includes later stabilization:
 
-**[machteld 0.21](https://github.com/anafalanx/machteld/releases/tag/v0.21)**
-(the executable is Authenticode-signed, with its SHA-256 checksum beside it)
-has exactly the capabilities of the previous release and corrects what a
-complete read of its tree found:
+| Behavior | Signed 0.21 release | Unsigned 0.22 candidate |
+| --- | --- | --- |
+| Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
+| Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, metadata and icons |
+| Default pool attempts per job | Three | One; retries require explicit opt-in |
+| Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-- `http post` sends a string body as UTF-8 and a bytearray byte-for-byte;
-  before, it sent U+0080–U+00FF as Latin-1 and could not post text beyond it
-  at all.
-- `run -stdin` and `child start -stdin` are binary-safe under the same rule,
-  which the [contract](docs/contract.md) now states once for every byte-consuming
-  command. The rule means real UTF-8: a string containing NUL now hashes and
-  stores as its UTF-8 bytes, not as Tcl's internal two-byte spelling of NUL.
-- The `pool`/`pmap` wire is strict UTF-8 text, so non-ASCII requests and
-  replies cross intact; a worker reply that is not UTF-8 is a protocol death,
-  and an item that cannot encode is refused at `submit`.
-- A worker whose reply cannot be encoded answers with a `WORKER failed` reply
-  instead of leaving the director waiting for its batch timeout.
-- Strict typed JSON decoding detects duplicate members in near-linear time; a
-  large object can no longer turn it into quadratic work, and the duplicate-key
-  error no longer reads freed memory. `lseq` values encode as arrays, and
-  `json exists` requires a path step, as documented.
-- The wrap launcher derives its `package require machteld` pin from the running
-  runtime, the Tk registration takes its version from the linked library, and a
-  version gate makes every prose claim agree with the header.
-- One Win32 text-conversion boundary, one build description shared by the
-  release build and the development loop, `-Werror` on by default, and the
-  SQLite embed compiled with upstream's hardening options.
-- The embedded SQLite is 3.53.4, up from 3.51.0 and pinned by hash. The span
-  carries the WAL-reset corruption fix and the 3.53.x fix rounds.
+Step 12 is in progress: the candidate must pass clean reconstruction, artifact
+comparison, and the acceptance matrix before it is considered ready. It is
+**not a released or signed artifact**; signing and publication are not authorized
+by this candidate gate, and the signed release remains untouched.
 
-The previous release established the baseline this one cleans: Machteld is a Tcl/Tk
-platform with C and C++ as its only admitted native implementation languages.
-The compute-engine architecture, the `macht` command, Lua, LPeg, lua-cjson, and
-the engine-bound column library were removed together, with no compatibility
-layer or migration path. The palette is unchanged since.
+The rest of this README and the current guides describe the **0.22 candidate**,
+unless explicitly marked as history. Different candidate builds can share that
+version: incremental builds embed `build-info.dict` with source/input and
+reference identities; clean reconstruction omits that development-only record.
+Compare artifact hashes and verification receipts, and query `manifest` and the
+documentation in the executable you actually use. See the [roadmap](docs/roadmap.md)
+for history and the remaining release gate.
 
-The machine-control palette's JSON reader stands on a vendored yyjson 0.12.0
-core with a byte-faithful plain mode and a typed mode that preserves JSON
-identity through `json value/type/unwrap/get/exists`. `http -redirect none`
-stops an authenticated request at the first 3xx, and a pty child's stdio
-remains bound to the ConPTY even when the parent's own stdio is redirected. The
-commands and their intended composition live in
-[the palette page](docs/palette.md).
+## Scope and trust
 
-The bundled Tcl core is 9.0.4 plus the exact upstream correction for
-[Tcl ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb), which
-preserves executable paths below ACL-restricted directories. The backport,
-source hashes, and upstream check-in identity are locked into the local build.
-The executable's Windows properties carry exact `0.21` file/product versions
-and identify Vincent Vercauteren as author, publisher, and copyright holder;
-local build paths are scrubbed from the packaged runtime.
+Programs and extensions are **trusted local code**, with the launching user's
+permissions. Job Objects supervise process lifetime and resource limits; they
+are not a security sandbox. `-dir` is a working directory, not filesystem
+confinement. An environment overlay does not isolate credentials. Wrapped
+applications retain full runtime authority. Entry opt-in is a dependency
+declaration, not an authorization boundary.
 
-Machteld 0.21 supports 64-bit Windows 11 25H2 (build 26200) and Windows
-Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
-the contracted floor; ARM64 is not a target. ConPTY sets the technical floor
-and has existed since Windows 10 1809, so the binary may start below the
-contract — but the shipped artifact is x64 and supported only on the releases
-named here.
+The support contract is x64 Windows 11 25H2 (build 26200) and Windows Server
+2025 (build 26100), or newer. Windows 10, Server 2022/2019, and ARM64 are not
+targets. Current stabilization checks ran on Windows 11 Pro build 26200; that
+is not a fresh Server acceptance result. Lower-level ConPTY availability on
+older Windows does not extend the support contract.
 
-Version 0.21 deliberately has one entry route: a readable UTF-8 program file.
-The conventional extension is `.tcl`, but the runtime does not require it. The
-file must begin with a literal opt-in command:
+Machteld deliberately retains a narrow key/value `store`, synchronous commands,
+and manually provisioned external extensions. It is not a general database or
+an automatic dependency manager. See [execution](docs/execution-model.md),
+[the contract](docs/contract.md), and [external libraries](docs/extensions.md).
 
+## A first program
+
+Save this UTF-8 file as `app.tcl`. Its first executable command explicitly
+opts into Machteld; the `.tcl` extension is conventional, not required.
+
+<!-- machteld-example: app -->
 ```tcl
-package require machteld 0.21
-
-set result [run -timeout 30s -- git status --short]
-puts [dict get $result out]
+package require machteld 0.22
+puts "Hello, [lindex $argv 0]!"
 ```
 
-Run it directly:
-
+<!-- machteld-example: direct -->
 ```text
-machteld.exe app.tcl argument ...
+machteld.exe app.tcl world
 ```
 
-The entry check is parsed before the file is evaluated. `package require
-machteld`, an optional literal version, and `package require -exact machteld
-<version>` are accepted. A generic Tcl script is refused: using this runtime is
-an explicit dependency, not an inference from a filename.
+This prints `Hello, world!`. The entry parser accepts `package require
+machteld`, an optional literal version, or `package require -exact machteld
+<version>`. Generic Tcl scripts without that declaration are refused.
 
-## The palette
+For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
+and run it with the distribution executable. This is a direct-script example:
+a wrapped application's own executable enters its application, so a wrapped
+controller needs explicit worker-role dispatch, as demonstrated by the
+[project inspector](examples/project-inspector/README.md).
+
+<!-- machteld-example: supervise -->
+```tcl
+package require machteld 0.22
+set result [run -timeout 5s -- [info nameofexecutable] \
+    [file join [file dirname [info script]] app.tcl] world]
+if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
+    error "child did not succeed: $result"
+}
+# This particular child emits UTF-8. Other programs may use another encoding.
+puts -nonewline [encoding convertfrom -profile strict utf-8 [dict get $result out]]
+```
+
+<!-- machteld-example: supervised -->
+```text
+machteld.exe supervise.tcl
+```
+
+`run` returns captured **bytes**, not already-decoded text. A deadline expiring
+is a normal `status timeout` result; launch/option errors raise structured
+Tcl error codes. Check both status and exit code. Durations carry units, such
+as `500ms`, `30s`, `5m`, or `2h`. Captured output is bounded and reports drops;
+use explicitly drained channels or files for larger transfers, not an
+ever-growing Tcl result. `run` and other synchronous calls block Tk callbacks;
+use event-driven `child -channels` composition for responsive tools.
+
+## The palette and its reference
 
 - Process control: supervised `run`, `child`, `wait`, and `scope`; independent
   `detach`.
@@ -105,65 +114,99 @@ an explicit dependency, not an inference from a filename.
 - Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
 - Runtime support: `version`, `manifest`, `docs`, `help`, and `wrap`.
 
-Commands live in `::machteld`; the prelude adds that namespace to the global
-command path, so small programs can use the bare names shown above. `manifest`
-returns the exact verbs, options, subcommands, declared fixed result shapes, and
-raised/protocol error codes in the running executable. `docs` searches and reads
-the exact Machteld, Tcl 9, and Tk 9 references embedded in the Machteld
-distribution:
+Commands live in `::machteld`; the prelude adds it to the global command path.
+`manifest` describes the running executable's verbs, options, fixed result
+shapes, and errors. `docs` reads its embedded Machteld, Tcl, and Tk corpus:
 
+<!-- machteld-example: docs -->
 ```text
 machteld.exe --docs status --json
 machteld.exe --docs get tcl/command/dict --json
 machteld.exe --docs search "channel binary encoding" --limit 10 --json
 ```
 
-Agents should query this corpus instead of relying on web memory from a
-different runtime version. `docs extract` publishes the complete corpus to a
-directory for ordinary filesystem search; `help` is a concise human shorthand.
-
-Machteld failures use Tcl's structured error code, while a supervised program's
-timeout is a normal result state:
-
-```tcl
-set result [run -timeout 2s -- slow.exe]
-if {[dict get $result status] eq "timeout"} {
-    puts stderr "slow.exe exceeded its deadline"
-}
-```
-
-Durations always carry units: `500ms`, `30s`, `5m`, or `2h`.
+Use these references instead of assuming another runtime's API. `docs extract`
+publishes the corpus for filesystem search; `help` is a concise shorthand.
+Plain JSON uses Tcl representations and cannot preserve every JSON distinction;
+use typed JSON when string/number, boolean, null, and container identity matter.
+The [palette](docs/palette.md) and [exact reference](docs/reference/machteld/index.md)
+describe composition and limits, including retries and cancellation.
 
 ## Standalone tools
 
-`wrap` turns an opted-in program file, or a directory containing one, into a
-standalone console or GUI executable without a compiler:
+From the directory containing the first program:
 
+<!-- machteld-example: wrap -->
 ```text
 machteld.exe wrap app.tcl -o app.exe
-machteld.exe wrap appdir -o app.exe --entry src/start.tcl --gui
+app.exe world
 machteld.exe wrap app.tcl -o documented-app.exe --with-docs
+documented-app.exe world
 ```
 
-A directory defaults to `main.tcl`. Hidden assets are included under an `app/`
-subtree, the staged entry is validated, and the output is published atomically.
-Every wrapped console or GUI tool exposes the same programmatic Machteld 0.21
-machine-control API, including the statically linked, binary-safe SQLite
-`store`, runtime libraries, and required license notices. The built-in reference
-corpus is omitted by default; `--with-docs` includes the complete verified
-offline Machteld/Tcl/Tk reference. Application assets and documentation are
-unaffected. Without the corpus, `docs schema` remains available, corpus queries
-report `DOCS unsupported`, and bare `help` explains the omission. Wrapping
-basekits are not embedded recursively.
+Both tools expose the same machine-control/data API and required license notices.
+Candidate wrapping omits the built-in reference by default; `--with-docs`
+includes the complete verified Machteld/Tcl/Tk corpus. Application assets are
+unaffected. Without the corpus, `docs schema` and `manifest` remain available,
+corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
+Wrapping basekits are not embedded recursively.
 
-Start with [the documentation index](docs/index.md), the concise
-[agent bootstrap](docs/reference/machteld/agent.md), and the
-[complete Machteld reference](docs/reference/machteld/index.md).
+For larger applications, use a dedicated stage and an explicit UTF-8 dictionary
+manifest. `--plan` previews selected paths, sizes, and hashes without writing
+an executable. Without a manifest, directory wrapping includes all files,
+**including hidden files**: do not wrap a repository root. The stage and
+completed archive are checked before atomic publication, but sources must
+remain stable; this is not a hostile-filesystem snapshot or sandbox.
+
+Optional metadata sets the application's name, version, description,
+authorship, and icon without a compiler. Application identity is separate from
+Machteld's runtime identity; a publisher string is not an Authenticode
+signature, and signing is never automatic. See [packaging](docs/packaging.md),
+the [GUI example](examples/project-inspector/README.md), and the
+[adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
+
+## Development checks
+
+After provisioning the pinned build dependencies, invoke the incremental build
+explicitly with `.cache/deps/prefix/bin/tclsh90s.exe tools/dev.tcl build`.
+The owner's `z devbuild` is a convenience alias, not an additional dependency
+for running the delivered executable. Tests select an existing artifact:
+`./tools/test.ps1 -Group fast`, `integration`, `packaging`, or
+`native-validation`, with `-Machteld <path>` to override `out/machteld.exe`.
+These groups never rebuild the runtime or regenerate reference documentation.
+
+`reference-generator` separately checks independent cold conversions, warm-cache
+equality, and authored-page invalidation. `native-validation` adds bounded
+lifetime/scaling tests, compiler analysis, and available instrumentation with
+negative controls; [its guide](docs/native-validation.md) records coverage gaps.
+`-InteractiveGui` opens a real Tk window only when explicitly selected.
+`-Group release` performs a clean build at the selected output path and then
+every group; it does **not** sign or publish, nor automatically enable public
+TLS or interactive acceptance.
+
+Upstream Tcl/Tk reference conversion is cached separately from authored pages
+and final catalog assembly. Documentation edits reuse upstream conversion;
+Tcl implementation-only edits repackage. Unchanged builds skip these stages.
+Cache hits verify content and inventories, not timestamps. The version check
+rejects recognizable stale current-runtime claims and malformed historical
+annotations; genuine release history keeps its original numbers. It is a
+guardrail, not a substitute for reviewing prose against behavior. The fast
+and packaging groups execute the marked README examples themselves.
+
+The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
+[ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
+versions, source hashes, and the backport identity are recorded in
+[the lock](tools/dependencies.lock.json). Machteld's Windows file/product
+version is exactly `0.22`; its author, publisher, and copyright holder are
+Vincent Vercauteren. Build paths are scrubbed from the packaged runtime.
+
+Start with [the documentation index](docs/index.md) or the
+[agent bootstrap](docs/reference/machteld/agent.md).
 
 Machteld's own code is licensed under the [Apache License 2.0](LICENSE).
 Bundled material retains its own terms, including the verbatim
 [Tcl](licenses/Tcl-9.0.4.txt), [Tk](licenses/Tk-9.0.4.txt),
 [zlib](licenses/zlib-1.3.2.txt), [LibTomMath](licenses/LibTomMath-1.3.0.txt), and
 [yyjson](licenses/yyjson-0.12.0.txt) notices. The statically linked SQLite
-amalgamation is public domain. JSONTestSuite is a test-only dependency and
-retains [its own license](test/jsontestsuite/LICENSE).
+amalgamation is public domain. JSONTestSuite is test-only and retains
+[its own license](test/jsontestsuite/LICENSE).

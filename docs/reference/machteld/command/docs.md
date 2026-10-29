@@ -151,6 +151,12 @@ upstream Tcl/Tk manpage syntax and may be roff. Search ranks the packaged
 corpus, not external tutorials or later language releases. Query the executable
 first instead of relying on web memory: it knows the exact API and Tcl/Tk
 versions it actually runs.
+Package-version equality alone is insufficient when comparing artifacts:
+different candidate builds can share one version. Record artifact and corpus
+hashes, plus the development build identity when present, not only `version`,
+when comparing references. A corpus hash identifies documentation bytes, not a
+signature or proof that two native executables are identical. The older signed
+release's own reference describes that release, not this candidate.
 
 ## Subcommands
 
