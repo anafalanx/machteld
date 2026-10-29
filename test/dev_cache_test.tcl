@@ -841,12 +841,72 @@ try {
                 [expr {$rejected && [string match "*unset $name*" $message]}] $message
             unset ::env($name)
         }
+        # The actual bootstrap refuses the same variables before any work on
+        # its cache, in every mode: this one is never read or written.
+        set rejectedCache [file join $work environment-rejected-cache]
+        write_bytes [file join $rejectedCache sentinel] must-remain-unchanged
+        foreach name {CPATH CFLAGS MAKEFLAGS MAKEFILES BASH_ENV ENV CONFIG_SITE BASH_FUNC_cache_fixture%% TCL9.0_TM_PATH} {
+            set result [run -timeout 5m -env [list $name [file join $work external-search]] -- \
+                [info nameofexecutable] [file join $repo tools bootstrap.tcl] \
+                --cache $rejectedCache --msys $realMsys --verify-only]
+            set message [encoding convertfrom utf-8 [dict get $result err]][encoding convertfrom utf-8 [dict get $result out]]
+            check "actual bootstrap rejects untracked $name before cache work" \
+                [expr {[dict get $result exit] != 0 &&
+                    [string match "*unset $name for a tracked Machteld bootstrap*" $message]}] $message
+        }
+        check {bootstrap environment refusal preserves every cache input} \
+            [expr {[fixture_entries $rejectedCache] eq {sentinel must-remain-unchanged}}]
     } finally {
         foreach name $compilerNames {
             if {[dict exists $savedCompilerEnv $name]} { set ::env($name) [dict get $savedCompilerEnv $name] } \
             else { unset -nocomplain ::env($name) }
         }
     }
+
+    # The production bash launch (::boot::msysCommand), run on a tiny script
+    # that starts through its own `#!/usr/bin/env bash` line, while the caller's
+    # PATH is System32 alone: the launch names its own PATH, and its step
+    # travels in the environment, so every word arrives whole.
+    set shellDir [file join $work "bootstrap source Ω"]
+    set shellFixture [file join $shellDir {fixture with spaces.sh}]
+    write_bytes $shellFixture [encoding convertto utf-8 "#!/usr/bin/env bash\nset -euo pipefail\nprintf '<%s>\\n' \"\$@\"\n"]
+    set shellUnix [::boot::unixPath $realMsys $shellFixture]
+    set shellHome [file join $work {bootstrap home}]
+    file mkdir $shellHome
+    set sourceArgument "/source path/Ω"
+    set prefixArgument "/prefix with 'apostrophe'/α"
+    set probe {printf '%s\n' "$MSYSTEM" "$CHERE_INVOKING" "$CONFIG_SITE" "$LC_ALL" "$LANG" "$TZ" "$CC" "$HOME" "$PWD" "${MACHTELD_BOOTSTRAP_STEP-unset}" "$PATH"}
+    set pathPresent [info exists ::env(PATH)]
+    if {$pathPresent} { set savedPath $::env(PATH) }
+    try {
+        set ::env(PATH) [file nativename [file join $::env(SystemRoot) System32]]
+        set launch [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir \
+            "[::boot::shq $shellUnix] [::boot::shq $sourceArgument] [::boot::shq $prefixArgument] 3"]]
+        set seen [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir $probe]]
+        # Red/green: the launch that failed, the script started by name from a
+        # -c line. Its words carry no apostrophe, so what fails is the #! line.
+        set old [run -timeout 2m -- [file join $realMsys usr bin bash.exe] --noprofile --norc -c \
+            "[::boot::shq $shellUnix] [::boot::shq /plain-source] [::boot::shq /plain-prefix] 3"]
+    } finally {
+        if {$pathPresent} { set ::env(PATH) $savedPath } else { unset -nocomplain ::env(PATH) }
+    }
+    set launchText [encoding convertfrom utf-8 [dict get $launch err]][encoding convertfrom utf-8 [dict get $launch out]]
+    check {production bootstrap bash launch works with a System32-only caller PATH} \
+        [expr {[dict get $launch status] eq "ok" && [dict get $launch exit] == 0}] $launchText
+    check {bootstrap bash launch preserves spaces, Unicode, apostrophes and the job count} \
+        [expr {[encoding convertfrom utf-8 [dict get $launch out]] eq "<$sourceArgument>\n<$prefixArgument>\n<3>\n"}] $launchText
+    set seenLines [split [string trimright [encoding convertfrom utf-8 [dict get $seen out]] \n] \n]
+    check {bootstrap bash step runs in the named environment, its own text not exported} \
+        [expr {[dict get $seen exit] == 0 &&
+            [lrange $seenLines 0 6] eq {UCRT64 1 /dev/null C C UTC gcc} &&
+            [lindex $seenLines 7] eq [::boot::unixPath $realMsys $shellHome] &&
+            [lindex $seenLines 8] eq [::boot::unixPath $realMsys $shellDir] &&
+            [lindex $seenLines 9] eq "unset" &&
+            [string match /ucrt64/bin:/usr/bin:/* [lindex $seenLines 10]] &&
+            [llength [split [lindex $seenLines 10] :]] == 4}] $seenLines
+    set oldText [encoding convertfrom utf-8 [dict get $old err]][encoding convertfrom utf-8 [dict get $old out]]
+    check {former indirect bash launch fails at its env shebang under a System32-only PATH} \
+        [expr {[dict get $old exit] != 0 && [string match {*env*bash*} $oldText]}] $oldText
 
     # Exercise the actual bootstrap verifier in its read-only mode. A stale
     # dependency state must fail, never bootstrap or consume an unverified prefix.

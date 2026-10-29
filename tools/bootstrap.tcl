@@ -16,6 +16,13 @@ package require machteld 0.21
 # patched, SQLite and yyjson staged. The Tcl port (2026-10-28) of
 # tools/bootstrap.ps1 and tools/bootstrap-deps.sh. Upstream's configure is a
 # shell script, so its steps run in MSYS2's bash; everything around them is Tcl.
+#
+# What is tracked, the candidate's hardening (machteld bc6a4a3): a bootstrap
+# refuses to start while a variable that steers a compiler, make, bash or Tcl
+# from outside the recipe is set; bash runs without profile or rc files in an
+# environment this file names; the state records the effective toolchain's
+# fingerprint and SOURCE_DATE_EPOCH beside the recipe's files, and is computed
+# again after the build, which is not recorded if any of it changed meanwhile.
 
 namespace eval ::boot {
     namespace path ::machteld
@@ -23,6 +30,13 @@ namespace eval ::boot {
     variable script [file normalize [info script]]
     # Rename attempts, 500 ms apart: 20 s outlasts the virus scanner's hold.
     variable renameAttempts 40
+}
+
+# The effective toolchain's fingerprint and the list of steering variables are
+# the development loop's own (tools/devcache.tcl), so the two cannot disagree.
+# tools/dev.tcl loads that file before this one, from the bytes it verifies.
+if {[info commands ::machteld::devcache::toolchain_digest] eq ""} {
+    source -encoding utf-8 [file join [file dirname $::boot::script] devcache.tcl]
 }
 
 proc ::boot::fail {message} {
@@ -339,18 +353,74 @@ proc ::boot::checkToolchain {msys lock} {
     }
 }
 
+# Refuses a tracked bootstrap while a steering variable is set. It comes before
+# any work on the cache, so a refusal changes nothing.
+proc ::boot::refuseSteering {} {
+    foreach name [::machteld::devcache::steering] {
+        fail "unset $name for a tracked Machteld bootstrap"
+    }
+}
+
+# What the cache is made from, as one SHA-256: the recipe's files by name and
+# content, the effective toolchain's fingerprint, and SOURCE_DATE_EPOCH (empty
+# when unset). The fingerprint's value is recorded, not the routine that makes
+# it, so a change to tools/devcache.tcl does not rebuild Tcl/Tk unless it
+# changes what the toolchain is found to be.
+proc ::boot::stateHash {inputs msys} {
+    set material {}
+    foreach path $inputs {
+        if {![file isfile $path]} {
+            fail "missing bootstrap input: [file nativename $path]"
+        }
+        lappend material "[file tail $path] [hash file sha256 $path]"
+    }
+    lappend material "effective-toolchain [::machteld::devcache::toolchain_digest $msys]"
+    set epoch [expr {[info exists ::env(SOURCE_DATE_EPOCH)] ? $::env(SOURCE_DATE_EPOCH) : ""}]
+    lappend material "source-date-epoch $epoch"
+    hash sum sha256 [encoding convertto utf-8 [join $material \n]]
+}
+
 # A word for bash: single quotes, each single quote spelled '\''.
 proc ::boot::shq {word} {
     return "'[string map {' '\\''} $word]'"
 }
 
-# Runs one command line in MSYS2's bash as tools/bootstrap-deps.sh ran its
-# steps: a login shell, the UCRT64 compiler and MSYS2's utilities first on
-# PATH, the GNU names for the compiler tools. Output goes to this console.
-proc ::boot::msysRun {msys dir command} {
-    set bash [file join $msys usr bin bash.exe]
-    set line "cd [shq [unixPath $msys $dir]] && export PATH=\"/ucrt64/bin:/usr/bin:\$PATH\" CC=gcc AR=ar RANLIB=ranlib RC=windres && $command"
-    set result [run -inherit -- $bash -lc $line]
+# The whole environment that decides how bash and the upstream build behave,
+# named rather than inherited: the UCRT64 system with the invoking directory
+# kept, a PATH of the pinned toolchain, MSYS2's utilities and Windows only,
+# HOME in the cache, no site script for configure, the C locale and UTC, and
+# the GNU names for the compiler tools. Everything else is inherited, and the
+# steering variables are refused before bash is reached.
+proc ::boot::msysEnvironment {msys home} {
+    if {![info exists ::env(SystemRoot)] || [file pathtype $::env(SystemRoot)] ne "absolute"} {
+        fail "the MSYS2 build needs an absolute SystemRoot"
+    }
+    set windows [file normalize $::env(SystemRoot)]
+    set path {}
+    foreach directory [list [file join $msys ucrt64 bin] [file join $msys usr bin] [file join $windows System32] $windows] {
+        lappend path [file nativename [file normalize $directory]]
+    }
+    list MSYSTEM UCRT64 CHERE_INVOKING 1 PATH [join $path {;}] HOME [file nativename [file normalize $home]] \
+        CONFIG_SITE /dev/null LC_ALL C LANG C TZ UTC CC gcc AR ar RANLIB ranlib RC windres
+}
+
+# The `run` arguments for one build step in MSYS2's bash: no profile and no rc
+# file, the environment above, and the step evaluated by bash itself. The step
+# travels in the environment, which MSYS2 hands bash as it is, not on the
+# command line, which MSYS2 parses again with quote rules of its own (a quoted
+# apostrophe is lost). Nothing is started by its #! line through PATH:
+# machteld's first bootstrap without a login shell failed when a script's
+# `#!/usr/bin/env bash` looked for bash on the inherited PATH.
+proc ::boot::msysCommand {msys home dir command} {
+    set step "cd [shq [file normalize $dir]] && $command"
+    list -env [concat [msysEnvironment $msys $home] [list MACHTELD_BOOTSTRAP_STEP $step]] -- \
+        [file join $msys usr bin bash.exe] --noprofile --norc \
+        -c {step=$MACHTELD_BOOTSTRAP_STEP; unset MACHTELD_BOOTSTRAP_STEP; eval "$step"}
+}
+
+# Runs one build step; its output goes to this console.
+proc ::boot::msysRun {msys home dir command} {
+    set result [run -inherit {*}[msysCommand $msys $home $dir $command]]
     if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
         fail "Tcl/Tk build step failed with exit code [dict get $result exit]: $command"
     }
@@ -365,7 +435,7 @@ proc ::boot::mixedPath {msys path} {
 }
 
 # Static Tcl and Tk into the prefix, as tools/bootstrap-deps.sh built them.
-proc ::boot::buildTclTk {msys sourceRoot prefix jobs} {
+proc ::boot::buildTclTk {msys home sourceRoot prefix jobs} {
     set tclWin [file join $sourceRoot tcl9.0.4 win]
     set tkWin [file join $sourceRoot tk9.0.4 win]
     if {![file isfile [file join $tclWin configure]] || ![file isfile [file join $tkWin configure]]} {
@@ -391,23 +461,23 @@ proc ::boot::buildTclTk {msys sourceRoot prefix jobs} {
     }
     # Tcl 9 is always threaded; its configure no longer knows --enable-threads.
     if {![file isfile [file join $tclWin Makefile]]} {
-        msysRun $msys $tclWin "./configure --enable-64bit --disable-shared --prefix=[shq $prefixUnix]"
+        msysRun $msys $home $tclWin "./configure --enable-64bit --disable-shared --prefix=[shq $prefixUnix]"
     }
     # Only the core static runtime, headers, stubs and script libraries are
     # build inputs; upstream's all/install also build bundled extensions and
     # install manuals, neither of which is linked or packaged.
-    msysRun $msys $tclWin "mingw32-make -j $jobs binaries $optimize [join $pkgconfig { }]"
+    msysRun $msys $home $tclWin "mingw32-make -j $jobs binaries $optimize [join $pkgconfig { }]"
     # The virtual runtime paths are not passed to installation: these targets
     # stage the files already built into the real dependency cache.
     foreach target {install-binaries install-libraries install-headers} {
-        msysRun $msys $tclWin "mingw32-make $target"
+        msysRun $msys $home $tclWin "mingw32-make $target"
     }
     if {![file isfile [file join $tkWin Makefile]]} {
-        msysRun $msys $tkWin "./configure --enable-64bit --disable-shared --with-tcl=[shq [unixPath $msys $tclWin]] --prefix=[shq $prefixUnix]"
+        msysRun $msys $home $tkWin "./configure --enable-64bit --disable-shared --with-tcl=[shq [unixPath $msys $tclWin]] --prefix=[shq $prefixUnix]"
     }
-    msysRun $msys $tkWin "mingw32-make -j $jobs binaries $optimize"
+    msysRun $msys $home $tkWin "mingw32-make -j $jobs binaries $optimize"
     foreach target {install-binaries install-libraries} {
-        msysRun $msys $tkWin "mingw32-make $target"
+        msysRun $msys $home $tkWin "mingw32-make $target"
     }
     # A stable layout, whatever upstream's install names.
     foreach {plain static} {tclsh90.exe tclsh90s.exe wish90.exe wish90s.exe} {
@@ -436,6 +506,7 @@ proc ::boot::main {argv} {
             default {fail "unknown option $option"}
         }
     }
+    refuseSteering
     set cache [file normalize $cache]
     set lockPath [file join $root tools dependencies.lock.json]
     set lock [json decode [readText $lockPath]]
@@ -468,16 +539,10 @@ proc ::boot::main {argv} {
         }
         lappend patchPaths [file join $root tools {*}[split $file /]]
     }
-    # What the cache was made from: the lock, this program, the patches and
-    # the notices. Any change rebuilds it.
-    set material {}
-    foreach path [concat [list $lockPath $script] $patchPaths $noticePaths] {
-        if {![file isfile $path]} {
-            fail "missing bootstrap input: [file nativename $path]"
-        }
-        lappend material "[file tail $path] [hash file sha256 $path]"
-    }
-    set stateHash [hash sum sha256 [encoding convertto utf-8 [join $material \n]]]
+    # What the cache is made from: the lock, this program, the patches and the
+    # notices, with the toolchain and SOURCE_DATE_EPOCH (stateHash). Any change
+    # rebuilds it.
+    set inputs [concat [list $lockPath $script] $patchPaths $noticePaths]
     variable prefix [file join $cache prefix]
     set sourceRoot [file join $cache src]
     variable downloads [file join $cache downloads]
@@ -490,6 +555,7 @@ proc ::boot::main {argv} {
     if {!$sourcesOnly} {
         set msys [msysRoot $msysRequested]
         checkToolchain $msys $lock
+        set stateHash [stateHash $inputs $msys]
         set stateMatches [expr {[file isfile $statePath] && [string trim [readText $statePath]] eq $stateHash}]
         if {$verifyOnly} {
             if {!$stateMatches} {
@@ -561,7 +627,10 @@ proc ::boot::main {argv} {
     assertHash $patchTarget [dict get $patch afterSha256] "[dict get $patch id] output"
 
     if {!$sourcesOnly} {
-        buildTclTk $msys $extract $prefix $jobs
+        # bash's HOME: an empty folder of this build, deleted with src.
+        set home [file join $sourceRoot .home]
+        file mkdir $home
+        buildTclTk $msys $home $extract $prefix $jobs
     }
 
     set sqlite [dict get $archives sqlite]
@@ -601,6 +670,11 @@ proc ::boot::main {argv} {
     if {$sourcesOnly} {
         say "dependency sources ready in [file nativename $cache] (Tcl/Tk not built; no state written)"
         return
+    }
+    # A cache made while the recipe or the toolchain changed is a mixture:
+    # it is left unrecorded, so the next bootstrap makes it again.
+    if {[stateHash $inputs $msys] ne $stateHash} {
+        fail "bootstrap recipe/toolchain changed during generation; cache not recorded"
     }
     writeArtifactManifest
     writeText $statePath "$stateHash\n"

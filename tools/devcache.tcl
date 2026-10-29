@@ -15,6 +15,41 @@ namespace eval ::machteld::devcache {
     # Publication attempts, 500 ms apart: 20 s outlasts the virus scanner's
     # hold on a file just written, as tools/bootstrap.tcl's renames do.
     variable publishAttempts 40
+    # The variables that steer a compiler, make, bash or Tcl from outside a
+    # recipe, and the patterns of the others. Their strings cannot stand for
+    # the files they make a tool read, so a tracked build (here) and a tracked
+    # bootstrap (tools/bootstrap.tcl) refuse them rather than hash them.
+    variable steering {
+        CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH
+        CFLAGS CPP CPPFLAGS CXXFLAGS LDFLAGS LIBS ARFLAGS RCFLAGS
+        MAKEFLAGS MAKEFILES MAKEOVERRIDES MFLAGS GNUMAKEFLAGS
+        BASH_ENV ENV BASHOPTS SHELLOPTS CONFIG_SITE
+        TCL_LIBRARY TCLLIBPATH TK_LIBRARY
+    }
+    variable steeringPatterns {TCL*_TM_PATH BASH_FUNC_*}
+}
+
+# The steering variables this process has with a value, as the environment
+# spells them. Windows compares environment names without regard to case, and
+# so does this.
+proc ::machteld::devcache::steering {} {
+    variable steering
+    variable steeringPatterns
+    set found {}
+    foreach name [lsort [array names ::env]] {
+        if {$::env($name) eq ""} continue
+        if {[string toupper $name] in $steering} {
+            lappend found $name
+            continue
+        }
+        foreach pattern $steeringPatterns {
+            if {[string match -nocase $pattern $name]} {
+                lappend found $name
+                break
+            }
+        }
+    }
+    return $found
 }
 
 # ---- content digests: SHA-256 of bytes, never of times ----
@@ -411,23 +446,13 @@ proc ::machteld::devcache::dependency_spec {root cache} {
     return [dict create files $files trees [list [file join $root tools patches]]]
 }
 
-# These variables can introduce files outside the known dependency graph. Do
-# not pretend hashing the directory names tracks their contents. Development
-# builds use the pinned toolchain and explicit include/library arguments.
+# The steering variables can introduce files outside the known dependency
+# graph. Do not pretend hashing the directory names tracks their contents.
+# Development builds use the pinned toolchain and explicit include/library
+# arguments.
 proc ::machteld::devcache::compiler_environment {} {
-    foreach name {CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH GCC_EXEC_PREFIX COMPILER_PATH
-            TCL_LIBRARY TCLLIBPATH TK_LIBRARY CFLAGS CPP CPPFLAGS CXXFLAGS LDFLAGS LIBS ARFLAGS RCFLAGS
-            MAKEFLAGS MAKEFILES MAKEOVERRIDES MFLAGS GNUMAKEFLAGS
-            BASH_ENV ENV BASHOPTS SHELLOPTS CONFIG_SITE} {
-        if {[info exists ::env($name)] && $::env($name) ne ""} {
-            error "unset $name for a tracked Machteld build (external compiler/Tcl search paths are not supported)"
-        }
-    }
-    foreach name [array names ::env TCL*_TM_PATH] {
-        if {$::env($name) ne ""} { error "unset $name for a tracked Machteld build (external Tcl module paths are not supported)" }
-    }
-    foreach name [array names ::env BASH_FUNC_*] {
-        if {$::env($name) ne ""} { error "unset $name for a tracked Machteld build (exported Bash functions are not supported)" }
+    foreach name [steering] {
+        error "unset $name for a tracked Machteld build (it steers the compiler, make, bash or Tcl from outside the recipe)"
     }
     set values {}
     foreach name {PATH SOURCE_DATE_EPOCH MACHTELD_WERROR} {
