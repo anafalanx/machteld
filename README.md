@@ -7,7 +7,9 @@ is Tcl/Tk 9.0.4 plus a small command palette implemented in Tcl and native C,
 with C/C++ as the admitted native languages; it starts no service and needs no
 installed Tcl. machteld is Vincent Vercauteren's own runtime and serves tools
 first; other people's adoption is welcome, but is not the design target. There
-are no compute engines, `macht`, or Lua.
+are no compute engines, `macht`, or Lua. Development environments built with
+machteld live in their own repositories on the machines that use them; this
+repository holds the runtime only.
 
 ## 22 — in preparation
 
@@ -38,6 +40,16 @@ identities; clean reconstruction omits that development-only record. Compare
 artifact hashes and verification receipts, and query `manifest` and the
 documentation in the executable you actually use. See the [roadmap](docs/roadmap.md)
 for what 22 contains, its history, and the remaining release gate.
+
+## The plan and the commentary
+
+The plan for 22 is [plan-machteld22.md](plan-machteld22.md): the owner's
+rulings, what 22 contains, the bug ledger, the phases that remain and the
+decisions that wait on the owner.
+
+Agents: what you find in the runtime while you use it or work on it, good or
+bad, goes in [commentary.md](commentary.md), as an entry of your own at its
+end. The owner reads it when the next machteld is planned.
 
 ## Scope and trust
 
@@ -177,14 +189,19 @@ signature, and signing is never automatic. See [packaging](docs/packaging.md),
 the [GUI example](examples/project-inspector/README.md), and the
 [adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
 
-## Development checks
+## Building and testing
+
+[BUILDING.md](BUILDING.md) says how `machteld.exe` is built, tested and
+signed, and where: on the build PC, where unsigned builds run only for
+building and testing; every other machine runs signed releases only. In short:
 
 Every build and test tool is a Tcl program that runs on the build runtime,
 `dist/0.21/machteld.exe`, the signed 0.21 release, and finds MSYS2 through
-`--msys`, `MSYS2_ROOT`, or `C:\msys64`. `tools/bootstrap.tcl` provisions the
-pinned build dependencies; `tools/dev.tcl build` is the incremental build. The
-release gate, `tools/gate.tcl`, builds `out/machteld.exe` and runs every test
-group on it; `--skip-build` tests the executable as it is. `--group fast`,
+`--msys` (which the development loop does not take), `MSYS2_ROOT`, or
+`C:\msys64`. `tools/bootstrap.tcl` provisions the pinned build dependencies;
+`tools/dev.tcl build` is the incremental build. The release gate,
+`tools/gate.tcl`, builds `out/machteld.exe` and runs every test group on it;
+`--skip-build` tests the executable as it is. `--group fast`,
 `integration`, `packaging`, `native-validation`, or `reference-generator`,
 repeatable, runs just those groups and never builds, with `--runtime <path>` to
 test another executable than `out/machteld.exe`; `fast` needs no MSYS2. A run
