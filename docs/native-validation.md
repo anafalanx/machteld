@@ -8,8 +8,8 @@ description: Native safety regressions, analysis coverage, instrumentation limit
 
 Step 10 of stabilization adds repeatable, headless checks at the native
 boundaries. These are development checks, not a claim of memory safety or
-a release approval. The unsigned candidate reports runtime version 0.22;
-its release gate must establish fresh candidate acceptance. The signed
+a release approval. This checkout reports runtime version 22, in
+preparation; its release gate must establish fresh acceptance. The signed
 release is untouched, and the measurements below remain their recorded
 pre-candidate stabilization evidence.
 

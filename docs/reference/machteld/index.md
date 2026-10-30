@@ -14,11 +14,11 @@ errors, resource lifetime, constraints, and examples. Use `manifest` for a
 structured inventory of the running API and the documentation interface for
 exact lookup and search.
 
-The unsigned candidate reports runtime version 0.22; its release gate is still
-in progress. Match these pages to the executable's corpus and artifact identity,
-not merely its package version: candidate builds can change without a new
-version string. Conceptual guides state design intent and history separately
-from the implemented command pages.
+This tree reports runtime version 22, in preparation and not yet released.
+Match these pages to the executable's corpus and artifact identity, not merely
+its package version: builds can change without a new version number.
+Conceptual guides state design intent and history separately from the
+implemented command pages.
 
 Every command lives in `::machteld` and is available unqualified at top level.
 Nested namespaces should use the qualified name or add `::machteld` to their

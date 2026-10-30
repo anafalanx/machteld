@@ -26,7 +26,7 @@ dependencies. The verified example loads an exact DLL **from disk**, beside the
 executable and independently of the current directory:
 
 ```tcl
-package require machteld 0.22
+package require machteld 22-
 set bundle [file dirname [info nameofexecutable]]
 load [file join $bundle examplemath.dll] Examplemath
 puts [::examplemath::add 20 22]

@@ -1,19 +1,27 @@
 ---
 type: roadmap
 title: Roadmap
-description: Unsigned Machteld 0.22 candidate, release-gate progress, and preserved release history.
+description: What machteld 22 contains while it is in preparation, its release gate, and preserved release history.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 0.22 candidate — unsigned, release gate in progress
+## 22 — in preparation
 
-The checkout reports runtime version 0.22, selected for the next candidate.
-It is **not released or signed**. The historical signed release remains
-preserved; candidate artifacts must be identified by their hashes, verification
-receipts, `manifest`, and embedded reference. Completed stabilization steps
-1 through 11 include:
+**machteld 22 is the next release; it is not released or signed.** From 22 on
+the version is one natural number, and only a change to the runtime makes a
+new one: the header says `"22"`, the prelude `22`, the Windows fixed version
+22.0.0.0. Programs ask for `package require machteld 22-`; a program that must
+be read again before it runs on a newer runtime names an upper bound, which Tcl
+excludes, as in `package require machteld 22-24`. The build tools keep running
+on the signed 0.21 until a signed 22 exists. The historical signed release
+remains preserved; artifacts of 22 must be identified by their hashes,
+verification receipts, `manifest`, and embedded reference.
+
+22 begins as the 0.22 candidate (commit 8bcc1ec), the stabilization of
+2026-09-30 to 2026-10-02, which was never released. Its completed steps 1
+through 11 include:
 
 - Explicit build/input identities, content-checked incremental caches, and
   independent reference conversion caches and test groups.
@@ -30,21 +38,28 @@ receipts, `manifest`, and embedded reference. Completed stabilization steps
 - Reconciled guides and command contracts, runnable README checks, and a
   context-aware version gate that allows explicitly marked history.
 
-Evidence and remaining limits are recorded in `tools/stabilization.json` in
-the source checkout; exact artifact receipts live in ignored `out/` files.
-Local stabilization ran on Windows 11 Pro x64 build 26200, not every contracted
-Windows target. Tests do not establish a sandbox, full sanitizer coverage, or
-unbounded concurrency. The store remains narrow, several APIs remain
-synchronous, and native extensions still need manual deployment.
+To these, 22 adds the build in Tcl: the release build, the dependency
+bootstrap, the reference generator, the development loop, the release gate and
+every test driver are Tcl programs that run on the build runtime, and no
+PowerShell remains.
 
-Step 12, the **release gate**, is now in progress, not complete: freeze the
-candidate, reconstruct cleanly, compare with the matching incremental artifact,
-run the acceptance matrix including the approved brief GUI check, and prepare
-accurate candidate notes. Fresh evidence must distinguish verified targets from
-unavailable acceptance; earlier stabilization receipts do not automatically
-certify a new artifact. The candidate remains unsigned. Signing and publication
-require a separate decision, the repository remains private, and the signed
-release must not be replaced. Kuu integration is not current work.
+Evidence and remaining limits of the stabilization are recorded in
+`tools/stabilization.json` in the source checkout; exact artifact receipts live
+in ignored `out/` files. Local stabilization ran on Windows 11 Pro x64 build
+26200, not every contracted Windows target. Tests do not establish a sandbox,
+full sanitizer coverage, or unbounded concurrency. The store remains narrow,
+several APIs remain synchronous, and native extensions still need manual
+deployment.
+
+The candidate's step 12, the **release gate**, carries over to 22 and is not
+complete: freeze 22, reconstruct cleanly, compare with the matching incremental
+artifact, run the acceptance matrix including the approved brief GUI check, and
+prepare accurate release notes. Fresh evidence must distinguish verified
+targets from unavailable acceptance; earlier stabilization receipts do not
+automatically certify a new artifact. 22 remains unsigned until then. Signing
+and publication require a separate decision, the repository remains private,
+and the signed release must not be replaced. Kuu integration is not current
+work.
 
 ## Historical record
 
@@ -427,6 +442,6 @@ and the `examples/external-extension` demonstration. No automatic resolver or
 dependency discovery is provided; future machinery needs its own admission
 decision.
 
-The route to 1.0 is a smaller surface whose invariants have survived use, not a
-longer list of verbs. New policy layers and bundled applications are out of
+The route forward is a smaller surface whose invariants have survived use, not
+a longer list of verbs. New policy layers and bundled applications are out of
 scope for the runtime itself.

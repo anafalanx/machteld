@@ -7,24 +7,26 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-machteld 0.22 is a candidate single-executable Windows runtime for small machine-control
-programs. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY, filesystem
-observation, WinHTTP, cryptography, JSON, and SQLite. The surface stays Tcl-like:
-commands return values, options are explicit, and failures have trap-able codes.
+machteld 22, in preparation, is a single-executable Windows runtime for small
+machine-control programs. It combines Tcl/Tk 9.0.4 with native supervision,
+ConPTY, filesystem observation, WinHTTP, cryptography, JSON, and SQLite. The
+surface stays Tcl-like: commands return values, options are explicit, and
+failures have trap-able codes.
 
 It is Vincent Vercauteren's personal platform. Use by others is welcome, but
 adoption, a plugin marketplace, and integration with another agent platform are
-not current product goals. This checkout contains the unsigned candidate and
-its stabilization work, not a completed release. The historical signed release
-is preserved separately. Build identities, artifact hashes, and verification
-receipts distinguish candidate artifacts while the release gate is in progress.
+not current product goals. This checkout contains 22 in preparation, with the
+0.22 candidate's stabilization work, not a completed release. The historical
+signed release is preserved separately. Build identities, artifact hashes, and
+verification receipts distinguish artifacts that share a version while the
+release gate is in progress.
 
 It is not an environment-specific resolver, package manager, command catalogue,
 activity recorder, or replacement shell. It does not guess that an arbitrary Tcl file wants Machteld.
 The program declares that dependency as its first executable command:
 
 ```tcl
-package require machteld 0.22
+package require machteld 22-
 
 set tree [dirs C:/work -depth 2 -prune {.git node_modules}]
 puts "[dict get $tree dirs] directories"

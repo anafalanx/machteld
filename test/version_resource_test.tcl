@@ -110,15 +110,12 @@ proc ::vr::main {argv} {
     set header [open [file join $root src machteld.h] r]
     set text [read $header]
     close $header
-    if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?"\s*$} $text -> major minor patch]} {
+    # machteld's version is one natural number; Windows' fixed version pads it
+    # with three zeros (22 is 22.0.0.0), and the string versions are exact.
+    if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"\s*$} $text -> version]} {
         error "src/machteld.h has no canonical MACHTELD_VERSION"
     }
-    set version $major.$minor
-    set numeric [list $major $minor 0 0]
-    if {$patch ne ""} {
-        append version .$patch
-        lset numeric 2 $patch
-    }
+    set numeric [list $version 0 0 0]
 
     set work [file join [file normalize $::env(TEMP)] machteld-version-resource-test-[pid]-[binary encode hex [hash random 8]]]
     file mkdir $work

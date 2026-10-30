@@ -17,8 +17,8 @@ proc ::machteld::buildidentity::validate {record} {
     if {[dict get $seen schema] ne "1" || [dict get $seen channel] ne "development"} {
         error "unsupported build identity schema or channel"
     }
-    if {![regexp {^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$} \
-            [dict get $seen runtime_version]]} {
+    # The runtime version is one natural number, as src/machteld.h declares it.
+    if {![regexp {^[1-9][0-9]*$} [dict get $seen runtime_version]]} {
         error "invalid runtime version in build identity"
     }
     set revision [dict get $seen source_revision]

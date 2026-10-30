@@ -14,7 +14,7 @@ The product has three layers:
    WinHTTP, BCrypt, JSON, and statically linked SQLite.
 2. **Tcl runtime.** The prelude adds `version`, `manifest`, `scope`,
    `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs`, `help`,
-   and `wrap`, then provides package `machteld 0.22`.
+   and `wrap`, then provides package `machteld 22`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
    `argv` and resolves palette commands through `::machteld` on the global
    namespace path.
@@ -41,7 +41,7 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 0.22
+SQLite, so a wrapped entry sees the same programmatic Machteld 22
 machine-control API. Runtime libraries and license notices are always included.
 The complete versioned reference corpus is verified and copied only when
 `--with-docs` is requested; it is omitted by default. Application assets are

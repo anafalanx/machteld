@@ -463,8 +463,8 @@ try {
     } {
         write_bytes [file join $::fixtureRoot {*}[split $relative /]] "fixture:$relative"
     }
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.21"}
-    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.21}
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "22"}
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 22}
     foreach relative {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
         prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
@@ -542,16 +542,26 @@ try {
     write_bytes [file join $::fixtureRoot tcl pool.tcl] changed-implementation-only
     check {implementation-only Tcl edit does not regenerate the reference} \
         [expr {$before eq [production_key reference]}]
-    write_bytes [file join $::fixtureRoot tcl machteld.tcl] "variable version 0.21\n# implementation edit"
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] "variable version 22\n# implementation edit"
     check {main Tcl implementation edit does not regenerate the reference} \
         [expr {$before eq [production_key reference]}]
     set capturedReferenceSpec [production_spec reference]
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.22"}
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "23"}
     check {reference rejects inconsistent runtime versions} [catch {production_key reference}]
-    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.22}
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 23}
     check {reference rechecks semantic version at publication time} \
         [catch {::machteld::devcache::fingerprint $capturedReferenceSpec}]
     check {runtime version change regenerates the reference} [expr {$before ne [production_key reference]}]
+    # The version is one natural number; the dotted form of 0.21 and before is
+    # no canonical version any more, even when both declarations agree.
+    set naturalKey [production_key reference]
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.23"}
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.23}
+    check {reference refuses a dotted runtime version} [catch {production_key reference}]
+    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "23"}
+    write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 23}
+    check {restored natural version keys the reference as before} \
+        [expr {$naturalKey eq [production_key reference]}]
 
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl

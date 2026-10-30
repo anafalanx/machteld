@@ -28,8 +28,9 @@ intent does not add an API.
 5. **Errors are contract.** Machteld-defined public failures carry
    `{MACHTELD DOMAIN code}`; Tcl language errors keep Tcl's own codes.
 6. **Orthogonal and small.** Prefer one composable primitive over a policy stack.
-   The pre-1.0 surface may still change when a concrete need justifies it. A
-   future compatibility freeze is a decision to make, not a scheduled release.
+   A later runtime number may still change the surface when a concrete need
+   justifies it; a program that must be read again first names an upper bound.
+   A future compatibility freeze is a decision to make, not a scheduled release.
 7. **Vanilla Tcl, extended.** Add commands and packages; do not mutate Tcl syntax.
 8. **One language boundary.** Tcl owns program control and Tk owns graphical
    interfaces. Native C/C++ facilities appear only as Tcl-shaped commands;

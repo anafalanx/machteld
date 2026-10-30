@@ -507,9 +507,10 @@ proc ::machteld::devcache::native_shared_spec {root paths toolchainKey} {
 proc ::machteld::devcache::reference_version {root} {
     # Runtime implementation bytes belong to the package, not conversion.
     # Validate the two version declarations on every call, but key references
-    # on the version value and authored interface documentation only.
+    # on the version value and authored interface documentation only. The
+    # version is one natural number.
     foreach path [list [file join $root src machteld.h] [file join $root tcl machteld.tcl]] \
-            pattern {{(?m)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$} {(?m)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$}} {
+            pattern {{(?m)^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"\s*$} {(?m)^\s*variable\s+version\s+([1-9][0-9]*)\s*$}} {
         set ch [open $path r]
         try { set text [read $ch] } finally { close $ch }
         if {![regexp $pattern $text -> version]} { error "missing canonical runtime version: $path" }

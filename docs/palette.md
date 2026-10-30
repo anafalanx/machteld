@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public Machteld 0.22 candidate commands and their intended composition.
+description: The public machteld 22 commands and their intended composition.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -13,9 +13,9 @@ has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
 tools wrapped with `--with-docs`.
 
-This describes the unsigned candidate with runtime version 0.22, not the older
-signed release. Candidate acceptance is in progress; check the selected
-executable's live `manifest`, artifact identity, and embedded reference.
+This describes machteld 22, in preparation, not the older signed release. Its
+acceptance is in progress; check the selected executable's live `manifest`,
+artifact identity, and embedded reference.
 
 ## Process control
 
@@ -344,7 +344,7 @@ wrap app-stage -o app.exe --manifest app.dict --plan
 wrap app-stage -o app.exe --manifest app.dict
 ```
 
-`version` and `package require machteld` return `0.22`. `manifest` describes the
+`version` and `package require machteld` return `22`. `manifest` describes the
 live public commands as structured data. Its `codes` are raised failures;
 `replycodes` are fixed protocol failures carried as data. `docs` provides exact,
 bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9

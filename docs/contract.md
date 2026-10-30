@@ -10,11 +10,11 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-Repository documentation describes the unsigned runtime candidate `0.22`, whose
-release gate is still in progress. The previously signed `dist/0.21` release
-retains its original behavior. Consult the selected executable's own embedded
-reference and artifact identity rather than applying candidate documentation
-retroactively to that release.
+Repository documentation describes machteld 22, in preparation and not yet
+released or signed. The previously signed `dist/0.21` release retains its
+original behavior. Consult the selected executable's own embedded reference and
+artifact identity rather than applying this documentation retroactively to that
+release.
 
 ## Platform
 
@@ -33,9 +33,16 @@ of these literal forms. `.tcl` is conventional, not required:
 
 ```tcl
 package require machteld
-package require machteld 0.22
-package require -exact machteld 0.22
+package require machteld 22-
+package require machteld 22-24
+package require -exact machteld 22
 ```
+
+machteld's version is one natural number, and Tcl reads every whole number as a
+major version: `22` alone accepts 22 only, `22-` accepts 22 and every later
+runtime, and `22-24` accepts 22 and 23 but refuses 24. A program that must be
+read again before it runs on a newer runtime names such an upper bound. Only a
+change to the runtime makes a new number.
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
 is accepted. The host parses this boundary before evaluating the file. A missing
@@ -44,7 +51,7 @@ with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
 `{MACHTELD ENTRY payload}`. These startup failures exit before the program can
 be evaluated. Programs from stdin are not accepted.
 
-Once loaded, `package require machteld` returns `0.22`. Palette commands are in
+Once loaded, `package require machteld` returns `22`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add
 `namespace path ::machteld` or use qualified names.
 
@@ -250,7 +257,7 @@ is synchronous and `run` line callbacks execute on the calling Tcl thread.
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-0.22 and the same machine-control, data, process, and Tcl composition commands,
+22 and the same machine-control, data, process, and Tcl composition commands,
 including `package require Tk` and static `store`. The distribution includes the
 complete exact-version reference corpus. Wrapped tools omit it by default;
 `wrap --with-docs` includes the verified complete corpus. Runtime libraries,
@@ -262,6 +269,7 @@ unavailable replies for corpus queries. Nested wrapping is intentionally
 nonrecursive: `wrap` reports `WRAP unsupported` because tools carry no nested
 basekits, even when they include the reference.
 
-The API remains pre-1.0: 0.x releases may remove a mistaken surface. Within a
-release, `version`, `manifest`, package version, docs, and both wrapper hosts must
-agree.
+A later runtime number may still remove a mistaken surface; a program that must
+be read again before it runs on one names an upper bound (see Entry and
+package). Within a release, `version`, `manifest`, package version, docs, and
+both wrapper hosts must agree.

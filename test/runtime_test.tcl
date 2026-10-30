@@ -28,12 +28,22 @@ proc result_of {reply} {
 set header [open [file join [file dirname [info script]] .. src machteld.h] r]
 set headerText [read $header]
 close $header
-if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion]} {
+if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -> expectedVersion]} {
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
 set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
 check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
+# The version is one natural number, which Tcl reads as a major version: a
+# floor accepts this runtime and every later one, and an upper bound, which
+# Tcl excludes, refuses the runtime it names (the contract's entry rules).
+set nextVersion [expr {$expectedVersion + 1}]
+check "package floor and bounded range accept this runtime" [expr {
+    [package require machteld $expectedVersion-] eq $expectedVersion &&
+    [package require machteld $expectedVersion-$nextVersion] eq $expectedVersion}]
+check "package upper bound and later floor refuse this runtime" [expr {
+    [catch {package require machteld [expr {$expectedVersion - 1}]-$expectedVersion}] &&
+    [catch {package require machteld $nextVersion-}]}]
 check "manifest exposes the compact runtime surface" [expr {
     [lsort [dict keys [manifest]]] eq $expected}]
 check "retired macht command is absent" [expr {

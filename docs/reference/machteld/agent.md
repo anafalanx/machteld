@@ -9,15 +9,15 @@ commands: docs, help
 # Agent documentation bootstrap
 
 The Machteld distribution contains the complete, exact-version offline
-references for Machteld 0.22, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl
+references for Machteld 22, Tcl 9.0.4, and Tk 9.0.4. That includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not
 merely a short Machteld guide. Wrapped tools include this corpus only when
 created with `--with-docs`.
 
 Use the matching embedded corpus to ground Machteld API claims and code changes;
-recalled or online documentation may describe a different release. During
-unreleased stabilization, different artifacts can report the same runtime
-version. Check the corpus/build identity and live `manifest`, not version alone.
+recalled or online documentation may describe a different release. While 22
+is in preparation, different artifacts can report the same runtime version.
+Check the corpus/build identity and live `manifest`, not version alone.
 Design guides and historical notes are context, not additional command options.
 
 ```tcl

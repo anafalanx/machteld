@@ -91,10 +91,10 @@ proc ::rgt::main {argv} {
     try {
         set header [readUtf8 [file join $root src machteld.h]]
         set prelude [readUtf8 [file join $root tcl machteld.tcl]]
-        if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$} $header -> runtimeVersion]} {
+        if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"\s*$} $header -> runtimeVersion]} {
             fail "native canonical version is absent"
         }
-        if {![regexp {(?n)^\s*variable\s+version\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$} $prelude -> preludeVersion] ||
+        if {![regexp {(?n)^\s*variable\s+version\s+([1-9][0-9]*)\s*$} $prelude -> preludeVersion] ||
                 $preludeVersion ne $runtimeVersion} {
             fail "C and Tcl package versions disagree"
         }
