@@ -14,12 +14,13 @@ repository holds the runtime only.
 ## 22 — in preparation
 
 The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21)
-is preserved in `dist/0.21`; its [release notes](dist/0.21/RELEASE_NOTES.md)
-describe that artifact, not everything now in this checkout. This checkout is
-machteld **22**, the next release, in preparation. From 22 on the version is
-one natural number, and only a change to the runtime makes a new one. 22
-begins as the 0.22 candidate, the stabilization that was never released, and
-includes its changes:
+is preserved, and its release notes describe that artifact, not everything now
+in this checkout; on the build PC its executable is the build runtime,
+`dist/0.21/machteld.exe`, which git ignores ([BUILDING.md](BUILDING.md)). This
+checkout is machteld **22**, the next release, in preparation. From 22 on the
+version is one natural number, and only a change to the runtime makes a new
+one. 22 begins as the 0.22 candidate, the stabilization that was never
+released, and includes its changes:
 
 | Behavior | Signed 0.21 release | 22, in preparation |
 | --- | --- | --- |

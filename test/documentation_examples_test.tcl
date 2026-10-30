@@ -105,6 +105,23 @@ check {all six README code blocks are covered} [expr {[dict size $examples] == 6
 
 # File links are checked in authored sources, not the immutable release corpus.
 # The present authored inline links have no local fragments or escaped targets.
+# A link must name a file every clone has: one inside the repository and
+# outside the root folders .gitignore ignores (/dist/, /out/ and the like),
+# which only the machine that filled them has. Existence alone is not enough:
+# on the build PC the ignored dist/0.21 holds the signed runtime's notes.
+set IGNORED {}
+foreach row [split [string map [list \r\n \n] [read_text [file join $ROOT .gitignore]]] \n] {
+    if {[regexp {^/([^/*?\[\]!#]+)/$} [string trim $row] -> folder]} { lappend IGNORED $folder }
+}
+check "the root folders git ignores are read from .gitignore: $IGNORED" [expr {[llength $IGNORED] > 0}]
+proc clone_problem {page target} {
+    set path [file normalize [file join [file dirname $page] $target]]
+    if {![file exists $path]} { return "missing" }
+    if {![string equal -length [string length $::ROOT/] $::ROOT/ $path]} { return "outside the repository" }
+    set folder [lindex [file split [string range $path [string length $::ROOT/] end]] 0]
+    if {$folder in $::IGNORED} { return "in $folder/, which git ignores" }
+    return ""
+}
 set pages [concat [glob -directory $ROOT *.md] \
     [documentation_pages [file join $ROOT docs]] \
     [documentation_pages [file join $ROOT examples] 1]]
@@ -114,8 +131,9 @@ foreach page $pages {
         if {[string first # $target] >= 0 || [string first % $target] >= 0} {
             error "extend link checker for fragment/escaped target in $page: $target"
         }
-        check "local link in [file tail $page]: $target" \
-            [file exists [file join [file dirname $page] $target]]
+        set problem [clone_problem $page $target]
+        if {$problem ne {}} { puts "     $target: $problem" }
+        check "local link in [file tail $page]: $target" [expr {$problem eq {}}]
         # Embedded guides cannot link to checkout-only files. Match the
         # generator's supported authored-link shapes before a slow refresh.
         set relative [string range $page [expr {[string length $ROOT] + 1}] end]

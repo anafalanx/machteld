@@ -427,10 +427,13 @@ them is in `machteld-22`.
 - 2026-10-30 · 502896b · the gate refuses `--runtime` when it would build over
   it (B10, in part), and the docs say what a gate run publishes (the
   consolidation's review): gate green, 58 steps, 2,150 ok checks, 1,208 s.
-- 2026-10-30 · the commit that adds this line · native validation runs its
-  scaling lane and the full native analysis in every run again, as the
-  candidate's group did, and every undefined-behavior-trapped step has a
-  deadline (the consolidation's review): gate green, with its figures in the
-  commit message.
+- 2026-10-30 · fc1b4af · native validation runs its scaling lane and the full
+  native analysis in every run again, as the candidate's group did, and every
+  undefined-behavior-trapped step has a deadline (the consolidation's review):
+  gate green, 60 steps, 2,190 ok checks, 1,407 s.
+- 2026-10-30 · the commit that adds this line · the README links the 0.21
+  release instead of a file git ignores, and a local link must name a file
+  every clone has (the consolidation's review): gate green, with its figures
+  in the commit message.
 
 <!-- machteld-version-history: end -->
