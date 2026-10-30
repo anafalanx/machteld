@@ -62,10 +62,13 @@ PowerShell.
    with `ALL TEST LANES PASSED` and exit code 0. It names the tested executable
    by version and SHA-256, and fails if the file changes during the run. A
    full run takes about twenty minutes on the build PC.
-   - `--skip-build` tests `out\machteld.exe` as it is; `--runtime FILE` tests
-     another executable.
-   - `--group NAME`, repeatable, runs just those groups and builds nothing;
-     the fast group needs no MSYS2.
+   - `--skip-build` tests `out\machteld.exe` as it is, and `--skip-build
+     --runtime FILE` another executable as it is. The gate's build goes to
+     `out\machteld.exe` only: it refuses `--runtime` when it would build,
+     because the build would replace that file.
+   - `--group NAME`, repeatable, runs just those groups and builds nothing,
+     on `out\machteld.exe` or on `--runtime FILE`; the fast group needs no
+     MSYS2.
    - Off by default, and the owner's to run: `--public-tls` (it reaches public
      hosts), `--interactive-pty` (console input and output) and
      `--interactive-gui` (it opens windows). `--native-scaling` measures
@@ -97,8 +100,10 @@ Vercauteren. The exact recipe is written at release. Its shape: sign a copy at
 a release path, never `out\machteld.exe`, which the gate and the development
 loop rewrite; the signature follows the appended payload, and the signed 0.21
 shows that the runtime still finds its payload then; and run the gate on the
-signed bytes without rebuilding them (`--skip-build --runtime FILE`). No gate
-run signs or publishes anything.
+signed bytes without rebuilding them (`--skip-build --runtime FILE`; without
+`--skip-build` the gate refuses `--runtime`). No gate run signs anything or
+publishes a release: the one file it publishes is its own build,
+`out\machteld.exe`.
 
 ## What this is not
 

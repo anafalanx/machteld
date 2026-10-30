@@ -203,10 +203,11 @@ Every build and test tool is a Tcl program that runs on the build runtime,
 `tools/gate.tcl`, builds `out/machteld.exe` and runs every test group on it;
 `--skip-build` tests the executable as it is. `--group fast`,
 `integration`, `packaging`, `native-validation`, or `reference-generator`,
-repeatable, runs just those groups and never builds, with `--runtime <path>` to
-test another executable than `out/machteld.exe`; `fast` needs no MSYS2. A run
-that tests an executable names it by version and SHA-256 and fails if it
-changes.
+repeatable, runs just those groups and never builds; `fast` needs no MSYS2.
+With `--skip-build` or `--group`, `--runtime <path>` tests another executable
+than `out/machteld.exe`, as it is; the gate refuses `--runtime` when it would
+build, because its build would replace that file. A run that tests an
+executable names it by version and SHA-256 and fails if it changes.
 
 `reference-generator` checks two independent cold conversions byte for byte.
 `native-validation` adds bounded lifetime tests and the native drivers built
@@ -216,7 +217,8 @@ each behind its own option: worker-scaling measurements (`--native-scaling`),
 the compiler analysis and sanitizer probes of `tools/native-analysis.tcl`
 (`--native-analysis`), public TLS and interactive console checks
 (`--public-tls`, `--interactive-pty`), and the real Tk windows of
-`--interactive-gui`. A gate run does **not** sign or publish.
+`--interactive-gui`. A gate run signs nothing and publishes no release; its
+build goes to `out/machteld.exe` only.
 
 Unchanged development builds reuse each reference generation by content; a
 documentation edit generates the reference again, in about a minute, and Tcl

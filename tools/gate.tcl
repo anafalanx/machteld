@@ -3,6 +3,9 @@ package require machteld 0.21
 # tools/gate.tcl -- the release gate. With no --group it builds the runtime
 # (unless --skip-build) and runs every group on it; with --group it runs the
 # named groups, in that order, on the runtime as it is, and builds nothing.
+# --runtime names an executable to test as it is, so the gate refuses it when
+# it would build: the build would publish over that file, a signed copy
+# included. The gate's build goes to out/machteld.exe only.
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
 #         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty?
@@ -86,6 +89,7 @@ proc ::gate::parse {argv} {
         cache [file join $root .cache deps] msys "" skipBuild 0 \
         tls 0 pty 0 gui 0 scaling 0 analysis 0]
     set requested {}
+    set given {}
     while {[llength $argv]} {
         set argv [lassign $argv option]
         switch -- $option {
@@ -98,6 +102,7 @@ proc ::gate::parse {argv} {
                     lappend requested $value
                 } else {
                     dict set settings [string range $option 2 end] $value
+                    lappend given $option
                 }
             }
             --skip-build {dict set settings skipBuild 1}
@@ -125,6 +130,11 @@ proc ::gate::parse {argv} {
     dict set settings release $release
     dict set settings groups [expr {$release ? $groups : $selected}]
     dict set settings build [expr {$release && ![dict get $settings skipBuild]}]
+    # The build publishes the runtime it then tests (tools/release.tcl
+    # --output), so a --runtime given with it would be replaced.
+    if {[dict get $settings build] && "--runtime" in $given} {
+        fail "--runtime names an executable to test as it is, and the build would publish over it: add --skip-build, or select groups with --group"
+    }
     set chosen [dict get $settings groups]
     if {([dict get $settings tls] || [dict get $settings pty]) && "integration" ni $chosen} {
         fail "--public-tls and --interactive-pty need the integration or release group"

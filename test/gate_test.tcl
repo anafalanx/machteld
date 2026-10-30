@@ -96,6 +96,20 @@ set optins [::gate::parse {--group integration --public-tls --interactive-gui}]
 check {each option records only itself} \
     [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui] &&
         ![dict get $optins scaling] && ![dict get $optins analysis]}]
+# The build publishes the runtime it tests, so a file named with --runtime is
+# tested only as it is; a signed copy must never be built over.
+set signed C:/release/signed/machteld.exe
+check {the build goes to out/machteld.exe} \
+    [expr {[dict get $default runtime] eq [file join $root out machteld.exe]}]
+check {--runtime is refused when the gate would build over it} \
+    [expr {[refused [list --runtime $signed] {*--runtime*would publish over it*--skip-build*}] &&
+        [refused [list --group release --runtime $signed] {*--runtime*would publish over it*}] &&
+        [refused [list --runtime $signed --interactive-gui] {*--runtime*would publish over it*}]}]
+set asIs [::gate::parse [list --skip-build --runtime $signed]]
+set grouped [::gate::parse [list --group fast --runtime $signed]]
+check {--runtime with --skip-build or --group tests that executable as it is} \
+    [expr {![dict get $asIs build] && [dict get $asIs runtime] eq $signed && [dict get $asIs groups] eq $all &&
+        ![dict get $grouped build] && [dict get $grouped runtime] eq $signed}]
 
 # ---- what each group needs and plans ----
 
