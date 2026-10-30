@@ -120,7 +120,7 @@ proc ::vr::main {argv} {
     set work [file join [file normalize $::env(TEMP)] machteld-version-resource-test-[pid]-[binary encode hex [hash random 8]]]
     file mkdir $work
     try {
-        checkResource "full executable" $runtime "Machteld machine-control runtime" machteld machteld.exe $version $numeric
+        checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric
         set paths [embeddedBuildPaths $runtime $cache]
         check "full executable carries no repository or dependency-cache path" [expr {[llength $paths] == 0}] [join $paths {, }]
         if {$wrap} {
@@ -129,7 +129,7 @@ proc ::vr::main {argv} {
             puts -nonewline $channel "package require machteld\nexit 0\n"
             close $channel
             foreach {kind exe description internal original} {
-                console wrapped-console.exe "Machteld machine-control runtime" machteld machteld.exe
+                console wrapped-console.exe "machteld runtime" machteld machteld.exe
                 gui wrapped-gui.exe "Machteld GUI application host" machteld-gui machteld-gui.exe
             } {
                 set out [file join $work $exe]

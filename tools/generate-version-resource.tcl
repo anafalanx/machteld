@@ -44,7 +44,7 @@ foreach component [list $version 0 0 0] {
 set fixed [join $numeric ,]
 
 if {$kind eq "console"} {
-    set description "Machteld machine-control runtime"
+    set description "machteld runtime"
     set internalName "machteld"
     set originalFilename "machteld.exe"
 } else {

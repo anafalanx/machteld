@@ -41,8 +41,8 @@ windowed host.
 
 `wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
 the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 22
-machine-control API. Runtime libraries and license notices are always included.
+SQLite, so a wrapped entry sees the same programmatic Machteld 22 API.
+Runtime libraries and license notices are always included.
 The complete versioned reference corpus is verified and copied only when
 `--with-docs` is requested; it is omitted by default. Application assets are
 unaffected. Nested wrapping basekits remain distribution-only and are not copied

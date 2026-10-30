@@ -906,7 +906,7 @@ package provide machteld $::machteld::version
 # (tcl_prompt1 is never invoked in non-interactive/script mode, so scripts stay
 # silent.)
 set ::tcl_prompt1 {
-    puts "machteld [::machteld::version] - compact Windows machine-control runtime (Tcl [info patchlevel])"
+    puts "machteld [::machteld::version] - compact Windows runtime for Tcl/Tk 9 (Tcl [info patchlevel])"
     set ::tcl_prompt1 {puts -nonewline "machteld % "; flush stdout}
     puts -nonewline "machteld % "
     flush stdout

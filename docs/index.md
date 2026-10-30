@@ -13,9 +13,12 @@ describe its behavior. Use the selected executable's
 `manifest`, `docs status`, and (for incremental development builds)
 `build-info.dict` to identify its capabilities; see [release history](roadmap.md).
 
-machteld is a compact Windows machine-control runtime. A program is ordinary
-Tcl 9 whose first executable command explicitly requires `machteld`; the runtime
-adds a self-describing command palette and can package that program as one exe.
+machteld is a compact Windows runtime for Tcl/Tk 9 programs. It is strongest
+at what tools do: supervised processes and terminals, files, HTTP, JSON,
+hashing and SQLite, in one executable that installs nothing. A program is
+ordinary Tcl 9 whose first executable command explicitly requires `machteld`;
+the runtime adds a self-describing command palette and can package that
+program as one exe.
 The Machteld distribution embeds the complete Tcl/Tk 9.0.4 reference alongside
 Machteld's own exact command reference.
 

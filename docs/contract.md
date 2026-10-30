@@ -257,11 +257,12 @@ is synchronous and `run` line callbacks execute on the calling Tcl thread.
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-22 and the same machine-control, data, process, and Tcl composition commands,
-including `package require Tk` and static `store`. The distribution includes the
-complete exact-version reference corpus. Wrapped tools omit it by default;
-`wrap --with-docs` includes the verified complete corpus. Runtime libraries,
-license notices, and application assets are retained either way. Without the
+22 and the same process, terminal, filesystem, network, data, and Tcl
+composition commands, including `package require Tk` and static `store`. The
+distribution includes the complete exact-version reference corpus. Wrapped
+tools omit it by default; `wrap --with-docs` includes the verified complete
+corpus. Runtime libraries, license notices, and application assets are
+retained either way. Without the
 corpus, `docs schema` remains available, corpus queries report `DOCS unsupported`,
 and `help` queries report `HELP unsupported`; bare `help` explains the omission.
 The reserved `--machteld-docs` host route remains available with structured

@@ -162,10 +162,10 @@ A wrapped executable contains:
 - the same native Windows core, statically linked public-domain SQLite store,
   Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
-There is no prelude-free or reduced machine-control runtime option. `package
-require machteld` inside a wrapped tool returns 22, `manifest` describes the
-same API, and binary-safe `store` has the same behavior and five-second busy
-timeout. Wrapping does not change the programmatic machine-control API.
+There is no prelude-free or reduced runtime option. `package require
+machteld` inside a wrapped tool returns 22, `manifest` describes the same API,
+and binary-safe `store` has the same behavior and five-second busy timeout.
+Wrapping does not change the programmatic API.
 
 The built-in reference corpus is omitted from wrapped tools by default. The
 `--with-docs` flag includes the complete indexed Machteld, Tcl 9, and Tk 9

@@ -1,10 +1,13 @@
 # machteld
 
-machteld is Vincent Vercauteren's Windows machine-control platform: Tcl/Tk
-9.0.4 plus a small command palette implemented in Tcl and native C, with C/C++
-as the admitted native languages. It ships as one executable, starts no
-service, and needs no installed Tcl. Other people's adoption is welcome, but
-is not the design target. There are no compute engines, `macht`, or Lua.
+machteld is a compact Windows runtime for Tcl/Tk 9 programs. It is strongest
+at what tools do: supervised processes and terminals, files, HTTP, JSON,
+hashing and SQLite, in one executable that installs nothing. That executable
+is Tcl/Tk 9.0.4 plus a small command palette implemented in Tcl and native C,
+with C/C++ as the admitted native languages; it starts no service and needs no
+installed Tcl. machteld is Vincent Vercauteren's own runtime and serves tools
+first; other people's adoption is welcome, but is not the design target. There
+are no compute engines, `macht`, or Lua.
 
 ## 22 — in preparation
 
@@ -153,7 +156,7 @@ machteld.exe wrap app.tcl -o documented-app.exe --with-docs
 documented-app.exe world
 ```
 
-Both tools expose the same machine-control/data API and required license notices.
+Both tools expose the same runtime API and required license notices.
 Wrapping omits the built-in reference by default; `--with-docs` includes the
 complete verified Machteld/Tcl/Tk corpus. Application assets are
 unaffected. Without the corpus, `docs schema` and `manifest` remain available,

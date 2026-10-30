@@ -7,8 +7,8 @@ tags: [machteld, principles, design]
 
 # The creed
 
-These are design rules for Vincent Vercauteren's personal platform, not a claim
-that every current primitive is asynchronous, time-bounded, or a security
+These are design rules for machteld, Vincent Vercauteren's own runtime, not a
+claim that every current primitive is asynchronous, time-bounded, or a security
 boundary. The command reference states implemented behavior; future design
 intent does not add an API.
 
