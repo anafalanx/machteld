@@ -196,8 +196,8 @@ before it.
 | New fixes in 22 | R1 scope -level; R5 -stdin broken pipe; R6 kill after exit; R7 canon on a locked file; R8 detach console and process group; R11 capture race; R12 strict text from -onout and store keys; R13 -env block size; R14 pty_free; R15 dead code; R16 breakaway (merged with the limits write); R17 one size grammar; R19 comments; R22 PATH from -env; R24 cli parse name; R25 bytearray docs; S3 watch overflow; S4 worker non-error codes; S7 creed wording (its rewording done in c9cbff2); -onout read errors; long resolved paths; crash containment (no error dialogs from children) |
 | Deferred to 23 | R9 the polling monitor (a completion-port supervisor is a redesign; the `-onout` pump polls the same way, `src\proc.c:1243`, and read 16 MiB in 3 to 11 s on the build PC); R20 limit status; S1 incremental UTF-8 for pty; S5 GUI fatal message; S6 bounded reap; R21 rename pairing across reads; R23 narrowing the global path |
 | Build, done | B12 BUILDING.md's interpreters (BUILDING.md); B13 toolchain fingerprint (d29c268); B16 the streaming-bounds overflow check raced its fixture's descendant, whose newline split the overflowing line when the pump was slow (found and fixed in f6393df) |
-| Build, partly | B3 retried renames (the development cache's publications in 306b38f, the release build's in 2a39777; `tools\reference.tcl`, `tools\package.tcl` and `tcl\docs.tcl` still rename once); B4 bash profiles (d29c268; the bash steps have no timeout yet); B7 publish semantics (2a39777: one operation, and debris checked; not write-through, retried on any error) |
-| Build, open | B1 detach coverage (with R16); B2 tolerant cleanup; B5 curl timeouts and tar checks; B6 MSYS2 discovery (BUILDING.md names `--msys` and `MSYS2_ROOT`; `tools\dev.tcl` takes no `--msys`); B8 attribute checks; B9 cache-path match; B10 a development build must not overwrite a signed exe (D4); B11 publish only after every lane passed (D3); B14 a signing recipe (at release, BUILDING.md); B15 the entry test runs `whoami.exe` by bare name (`test\entry_test.tcl:145`), so a caller's PATH with Git's tools first gives its ACL fixture no SID (found in c9cbff2's first gate run, from Git Bash) |
+| Build, partly | B3 retried renames (the development cache's publications in 306b38f, the release build's in 2a39777; `tools\reference.tcl`, `tools\package.tcl` and `tcl\docs.tcl` still rename once); B4 bash profiles (d29c268; the bash steps have no timeout yet); B7 publish semantics (2a39777: one operation, and debris checked; not write-through, retried on any error); B10 a development build must not overwrite a signed exe (the gate's build goes to `out\machteld.exe` only, since it refuses `--runtime` when it builds; where the development loop publishes is D4) |
+| Build, open | B1 detach coverage (with R16); B2 tolerant cleanup; B5 curl timeouts and tar checks; B6 MSYS2 discovery (BUILDING.md names `--msys` and `MSYS2_ROOT`; `tools\dev.tcl` takes no `--msys`); B8 attribute checks; B9 cache-path match; B11 publish only after every lane passed (D3); B14 a signing recipe (at release, BUILDING.md); B15 the entry test runs `whoami.exe` by bare name (`test\entry_test.tcl:145`), so a caller's PATH with Git's tools first gives its ACL fixture no SID (found in c9cbff2's first gate run, from Git Bash) |
 
 ### 4.3. What development tools asked of the runtime
 
@@ -422,7 +422,11 @@ them is in `machteld-22`.
   two entries of 2026-10-30: gate green, 58 steps, 2,141 ok checks, 1,215 s.
 - 2026-10-30 · 4e0a6db · BUILDING.md: the build PC, its three interpreters and
   the two-machine policy: gate green, 58 steps, 2,141 ok checks, 1,326 s.
-- 2026-10-30 · the commit that adds this plan · this plan, and the README for
-  22 in preparation: gate green, with its figures in the commit message.
+- 2026-10-30 · e9e5d2f · this plan, and the README for 22 in preparation:
+  gate green, 58 steps, 2,147 ok checks, 1,222 s.
+- 2026-10-30 · the commit that adds this line · the gate refuses `--runtime`
+  when it would build over it (B10, in part), and the docs say what a gate run
+  publishes (the consolidation's review): gate green, with its figures in the
+  commit message.
 
 <!-- machteld-version-history: end -->
