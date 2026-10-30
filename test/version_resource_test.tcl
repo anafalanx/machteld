@@ -37,7 +37,8 @@ proc ::vr::checkResource {label path description internalName originalFilename v
         return
     }
     # Not checked: whether the file is marked FILE_ATTRIBUTE_TEMPORARY. Neither
-    # Tcl nor the runtime can read that attribute (zef-commentary.md).
+    # Tcl nor the runtime can read that attribute (commentary.md, its entry of
+    # 2026-10-28 on porting the runtime's tests).
     if {[catch {parse [versionBlock $path]} info]} {
         check "$label carries a VERSIONINFO resource" 0 $info
         return
