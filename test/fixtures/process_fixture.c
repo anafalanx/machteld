@@ -434,7 +434,13 @@ int wmain(int argc, wchar_t **argv) {
     if (wcscmp(argv[1], L"stream-overflow-tree") == 0 && argc == 3) {
         /* Keep the root marker distinct from the descendant's explicit path. */
         SetEnvironmentVariableW(L"MACHTELD_TEST_PIDFILE", NULL);
-        int result = descendant_parent(10000, argv[2]);
+        /* The descendant holds past the caller's 20 s deadline, so the lines
+         * it writes when its hold ends never land inside the overflowing
+         * line. A callback pump took from 3 to 11 s to read 16 MiB on the
+         * build PC, and with a 10 s hold the descendant's lines split the line
+         * in about half of the runs, which then ended in a timeout instead of
+         * the limit. */
+        int result = descendant_parent(60000, argv[2]);
         if (result != 0) return result;
         result = stream_line(16u * 1024u * 1024u + 1u, 0, 0);
         Sleep(10000);
