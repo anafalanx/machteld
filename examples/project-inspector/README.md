@@ -5,11 +5,11 @@ progress, bounded diagnostics, cancellation, and recovery after an error. It
 inspects one directory, not a recursive project database, and never executes
 commands found in the selected directory or changes its files.
 
-Use the current unsigned candidate executable in `out/`, not the older signed
-`dist/0.21` artifact. The candidate reports runtime version `0.22`; the manifest-
+Use the current executable in `out/`, machteld 22 in preparation, not the older
+signed `dist/0.21` artifact. It reports runtime version `22`; the manifest-
 selected packaging and application metadata shown here are unavailable in the
-older release. Build the candidate using the repository README before running
-this example; candidate acceptance is still in progress.
+older release. Build it using the repository README before running this
+example; acceptance of 22 is still in progress.
 
 From the repository root in PowerShell:
 

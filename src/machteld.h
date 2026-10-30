@@ -5,7 +5,7 @@
 #include <string.h>
 #include "tcl.h"
 
-#define MACHTELD_VERSION "0.22"
+#define MACHTELD_VERSION "22"
 
 /* The byte rule shared by every value-consuming native verb -- hash, store put,
  * http post, run/child -stdin: a byte array is its bytes exactly; any other

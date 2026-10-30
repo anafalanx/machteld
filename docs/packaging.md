@@ -9,10 +9,9 @@ tags: [machteld, wrap, zipfs, deployment]
 
 Machteld has one program boundary and two deployment forms.
 
-The workflow below describes the unsigned candidate with runtime version 0.22.
-Its release gate is in progress. The historical signed release is unchanged and
-does not provide the newer `--manifest`, `--plan`, or application-identity
-features. Inspect the selected executable's `manifest` and artifact identity
+The workflow below describes machteld 22, in preparation and not yet released.
+The historical signed release is unchanged and does not provide the newer
+`--manifest`, `--plan`, or application-identity features. Inspect the selected executable's `manifest` and artifact identity
 before selecting packaging options.
 
 ## Direct entry
@@ -155,7 +154,7 @@ assets; `app-info.dict` is beside it at the runtime archive root.
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 0.22 prelude and public palette;
+- the full Machteld 22 prelude and public palette;
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl, Tk, zlib, LibTomMath, and
   yyjson distribution notices under `licenses/`;
@@ -164,7 +163,7 @@ A wrapped executable contains:
   Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
 There is no prelude-free or reduced machine-control runtime option. `package
-require machteld` inside a wrapped tool returns 0.22, `manifest` describes the
+require machteld` inside a wrapped tool returns 22, `manifest` describes the
 same API, and binary-safe `store` has the same behavior and five-second busy
 timeout. Wrapping does not change the programmatic machine-control API.
 
@@ -189,10 +188,10 @@ Basekits are distribution-only: a wrapped tool cannot run `wrap` again, with or
 without the reference pack.
 
 The main Machteld host carries Windows VERSIONINFO derived from its canonical
-version: product and file version `0.22`, the Machteld product identity, and
-Vincent Vercauteren as author, publisher, and copyright holder. Wrapped programs
-inherit that basekit metadata unless they explicitly supply application metadata
-as described below. Tcl's embedded configuration points to the self-mounted
+version: product and file version `22` (22.0.0.0 as Windows' fixed version),
+the Machteld product identity, and Vincent Vercauteren as author, publisher,
+and copyright holder. Wrapped programs inherit that basekit metadata unless
+they explicitly supply application metadata as described below. Tcl's embedded configuration points to the self-mounted
 payload; build-machine paths are absent from the artifact.
 
 `--console` is the default and provides standard channels. `--gui` selects the
@@ -202,7 +201,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 0.22
+package require machteld 22-
 package require Tk
 ```
 

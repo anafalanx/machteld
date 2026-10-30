@@ -1,14 +1,14 @@
 ---
 type: index
 title: machteld documentation
-description: The documentation map for the unsigned Machteld 0.22 candidate.
+description: The documentation map for machteld 22, in preparation.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld 0.22 candidate
+# machteld 22
 
-These pages describe the unsigned candidate while its release gate is in
-progress. The older signed release's own embedded reference and release notes
+These pages describe machteld 22, in preparation: not yet released or signed.
+The older signed release's own embedded reference and release notes
 describe its behavior. Use the selected executable's
 `manifest`, `docs status`, and (for incremental development builds)
 `build-info.dict` to identify its capabilities; see [release history](roadmap.md).

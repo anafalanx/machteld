@@ -3,8 +3,9 @@
 # Usage:
 #   tclsh generate-version-resource.tcl HEADER console|gui OUTPUT.rc
 #
-# The string version remains exactly as authored in the header. Windows' fixed
-# numeric version has four fields, so absent fields are padded with zero.
+# machteld's version is one natural number, and the string version is exactly
+# as authored in the header. Windows' fixed numeric version has four fields,
+# so the other three are zero: 22 is 22.0.0.0.
 
 if {[llength $argv] != 3} {
     puts stderr "usage: generate-version-resource.tcl HEADER console|gui OUTPUT.rc"
@@ -25,20 +26,14 @@ try {
     close $channel
 }
 
-set pattern {(?m)^#define[ \t]+MACHTELD_VERSION[ \t]+"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?"[ \t]*$}
-if {![regexp $pattern $text -> major minor patch]} {
+set pattern {(?m)^#define[ \t]+MACHTELD_VERSION[ \t]+"([1-9][0-9]*)"[ \t]*$}
+if {![regexp $pattern $text -> version]} {
     puts stderr "generate-version-resource.tcl: canonical MACHTELD_VERSION is absent"
     exit 1
 }
-set version "$major.$minor"
-if {$patch ne ""} {
-    append version ".$patch"
-} else {
-    set patch 0
-}
 
 set numeric {}
-foreach component [list $major $minor $patch 0] {
+foreach component [list $version 0 0 0] {
     scan $component %d number
     if {$number < 0 || $number > 65535} {
         puts stderr "generate-version-resource.tcl: version component is outside 0..65535"

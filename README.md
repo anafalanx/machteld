@@ -6,32 +6,35 @@ as the admitted native languages. It ships as one executable, starts no
 service, and needs no installed Tcl. Other people's adoption is welcome, but
 is not the design target. There are no compute engines, `macht`, or Lua.
 
-## 0.22 candidate — unsigned, release gate in progress
+## 22 — in preparation
 
 The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21)
 is preserved in `dist/0.21`; its [release notes](dist/0.21/RELEASE_NOTES.md)
-describe that artifact, not everything now in this checkout. The current
-candidate reports runtime version **0.22** and includes later stabilization:
+describe that artifact, not everything now in this checkout. This checkout is
+machteld **22**, the next release, in preparation. From 22 on the version is
+one natural number, and only a change to the runtime makes a new one. 22
+begins as the 0.22 candidate, the stabilization that was never released, and
+includes its changes:
 
-| Behavior | Signed 0.21 release | Unsigned 0.22 candidate |
+| Behavior | Signed 0.21 release | 22, in preparation |
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
 | Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, metadata and icons |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-Step 12 is in progress: the candidate must pass clean reconstruction, artifact
-comparison, and the acceptance matrix before it is considered ready. It is
-**not a released or signed artifact**; signing and publication are not authorized
-by this candidate gate, and the signed release remains untouched.
+22 is **not a released or signed artifact**. Before it is released it must pass
+clean reconstruction, artifact comparison, and the acceptance matrix; signing
+and publication are a separate decision, and the signed release remains
+untouched.
 
-The rest of this README and the current guides describe the **0.22 candidate**,
-unless explicitly marked as history. Different candidate builds can share that
-version: incremental builds embed `build-info.dict` with source/input and
-reference identities; clean reconstruction omits that development-only record.
-Compare artifact hashes and verification receipts, and query `manifest` and the
+The rest of this README and the current guides describe **22**, unless
+explicitly marked as history. Different builds can share that version:
+incremental builds embed `build-info.dict` with source/input and reference
+identities; clean reconstruction omits that development-only record. Compare
+artifact hashes and verification receipts, and query `manifest` and the
 documentation in the executable you actually use. See the [roadmap](docs/roadmap.md)
-for history and the remaining release gate.
+for what 22 contains, its history, and the remaining release gate.
 
 ## Scope and trust
 
@@ -60,7 +63,7 @@ opts into Machteld; the `.tcl` extension is conventional, not required.
 
 <!-- machteld-example: app -->
 ```tcl
-package require machteld 0.22
+package require machteld 22-
 puts "Hello, [lindex $argv 0]!"
 ```
 
@@ -73,6 +76,12 @@ This prints `Hello, world!`. The entry parser accepts `package require
 machteld`, an optional literal version, or `package require -exact machteld
 <version>`. Generic Tcl scripts without that declaration are refused.
 
+machteld's version is one natural number, and Tcl reads every whole number as
+a major version: `22-` accepts 22 and every later runtime. A program that must
+be read again before it runs on a newer runtime names an upper bound, which Tcl
+excludes: `package require machteld 22-24` runs on 22 and 23 and refuses 24
+until someone has checked it and widened the range.
+
 For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
 and run it with the distribution executable. This is a direct-script example:
 a wrapped application's own executable enters its application, so a wrapped
@@ -81,7 +90,7 @@ controller needs explicit worker-role dispatch, as demonstrated by the
 
 <!-- machteld-example: supervise -->
 ```tcl
-package require machteld 0.22
+package require machteld 22-
 set result [run -timeout 5s -- [info nameofexecutable] \
     [file join [file dirname [info script]] app.tcl] world]
 if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
@@ -145,8 +154,8 @@ documented-app.exe world
 ```
 
 Both tools expose the same machine-control/data API and required license notices.
-Candidate wrapping omits the built-in reference by default; `--with-docs`
-includes the complete verified Machteld/Tcl/Tk corpus. Application assets are
+Wrapping omits the built-in reference by default; `--with-docs` includes the
+complete verified Machteld/Tcl/Tk corpus. Application assets are
 unaffected. Without the corpus, `docs schema` and `manifest` remain available,
 corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
 Wrapping basekits are not embedded recursively.
@@ -202,8 +211,9 @@ The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
 [ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
 versions, source hashes, and the backport identity are recorded in
 [the lock](tools/dependencies.lock.json). Machteld's Windows file/product
-version is exactly `0.22`; its author, publisher, and copyright holder are
-Vincent Vercauteren. Build paths are scrubbed from the packaged runtime.
+version is exactly `22`, and 22.0.0.0 as Windows' fixed version; its author,
+publisher, and copyright holder are Vincent Vercauteren. Build paths are
+scrubbed from the packaged runtime.
 
 Start with [the documentation index](docs/index.md) or the
 [agent bootstrap](docs/reference/machteld/agent.md).

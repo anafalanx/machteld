@@ -169,7 +169,7 @@ proc package_candidate {staged bare bareGui reference candidate} {
     source [Rp tools build_identity.tcl]
     set ch [open [Rp src machteld.h] r]
     try { set header [read $ch] } finally { close $ch }
-    if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $header -> version]} {
+    if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $header -> version]} {
         error "missing canonical runtime version"
     }
     set ch [open [file join $reference catalog.dict] r]

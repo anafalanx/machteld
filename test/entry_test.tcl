@@ -526,11 +526,13 @@ proc ::et::main {argv} {
     # here: the 0.15.0 sweep found five hardcoded 0.14.0 expectations in this
     # file. The pattern matches the reference generator's canonical check.
     set header [readText [file join $root src machteld.h]]
-    if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"\s*$} $header -> version]} {
+    if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"\s*$} $header -> version]} {
         puts stderr "entry test: src/machteld.h has no canonical MACHTELD_VERSION"
         exit 1
     }
-    set versionRe [string map {. \\.} $version]
+    # The version is one natural number, matched as a whole word: 22 does not
+    # match inside 220 or 122.
+    set versionRe "\\m$version\\M"
 
     set work [file join [file normalize $::env(TEMP)] machteld-entry-test-[pid]]
     file mkdir $work

@@ -1,5 +1,9 @@
 # Check explicit current-runtime claims, not arbitrary version-shaped numbers.
 # Root Markdown, docs/**/*.md and examples/**/README.md are strict UTF-8.
+# machteld's version is one natural number, 22 the first; the releases before
+# it were dotted, 0.21 the last. A claim names either form: "machteld 22",
+# "package require machteld 22-" (a floor, or the floor of a range such as
+# 22-24), "Machteld 0.21". A number joined to a word ("22x", "x64") is none.
 # Named Machteld/runtime claims and version-first root/docs headings are current
 # unless enclosed in balanced, standalone history markers:
 #   <!-- machteld-version-history: begin -->
@@ -52,7 +56,7 @@ proc authored_pages {directory examples} {
 
 set header [slurp [file join $ROOT src machteld.h]]
 set declarations [regexp -all -inline -line \
-    {^#define[ \t]+MACHTELD_VERSION[ \t]+"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"[ \t]*\r?$} $header]
+    {^#define[ \t]+MACHTELD_VERSION[ \t]+"([1-9][0-9]*)"[ \t]*\r?$} $header]
 if {[llength $declarations] != 2} {
     fail "src/machteld.h must have one canonical MACHTELD_VERSION"
 }
@@ -62,7 +66,7 @@ set current [lindex $declarations 1]
 # pin from that value and must not carry an independent one.
 set prelude [slurp [file join $ROOT tcl machteld.tcl]]
 set declarations [regexp -all -inline -line \
-    {^[ \t]*variable version ([0-9]+\.[0-9]+(?:\.[0-9]+)?)[ \t]*\r?$} $prelude]
+    {^[ \t]*variable version ([1-9][0-9]*)[ \t]*\r?$} $prelude]
 if {[llength $declarations] != 2} {
     fail "tcl/machteld.tcl must have one canonical version variable"
 }
@@ -81,14 +85,19 @@ lappend pages {*}[authored_pages [file join $ROOT examples] 1]
 
 # Capture only the version in each expression. Positions are deduplicated when
 # a line has more than one matching form. In particular a dependency/app number
-# never exempts a separate Machteld claim on the same line.
-set namedPatterns {
-    {\mmachteld[ \t]+(?:version[ \t]+)?[*`]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])}
-    {\mruntime[ \t]+version[ \t]+[*`]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])}
+# never exempts a separate Machteld claim on the same line. VERSION is a natural
+# number or a dotted one of up to three parts, ending where a word would not.
+set versionToken {([0-9]+(?:\.[0-9]+){0,2})(?![[:alnum:]_]|\.[0-9])}
+proc claimPattern {template} {
+    string map [list VERSION $::versionToken] $template
 }
-set prosePattern {(?:^[ \t]*(?:[-*>][ \t]+)?|[.!?][ \t]+)version[ \t]+[*`]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])}
-set headingPattern {^[ \t]*#{1,6}[ \t]+(?:v(?:ersion[ \t]+)?)?[*`]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])}
-set allVersions {(?:^|[^0-9.])([0-9]+\.[0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])}
+set namedPatterns [list \
+    [claimPattern {\mmachteld[ \t]+(?:version[ \t]+)?[*`]*VERSION}] \
+    [claimPattern {\mruntime[ \t]+version[ \t]+[*`]*VERSION}]]
+set prosePattern [claimPattern {(?:^[ \t]*(?:[-*>][ \t]+)?|[.!?][ \t]+)version[ \t]+[*`]*VERSION}]
+# A heading number followed by "." or ")" ("### 1. Typed JSON") enumerates.
+set headingPattern [claimPattern {^[ \t]*#{1,6}[ \t]+(?:v(?:ersion[ \t]+)?)?[*`]*VERSION(?![.)])}]
+set allVersions [claimPattern {(?:^|[^[:alnum:]_.])VERSION}]
 set problems {}
 set claims 0
 set historicalClaims 0

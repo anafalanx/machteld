@@ -195,7 +195,7 @@ if {$opt(--build-info) ne ""} {
     set identity [::machteld::buildidentity::read $opt(--build-info)]
     set f [open $PREL r]
     try { set preludeText [read $f] } finally { close $f }
-    if {![regexp -line {^\s*variable version ([0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$} \
+    if {![regexp -line {^\s*variable version ([1-9][0-9]*)\s*$} \
             $preludeText -> runtimeVersion] ||
             $runtimeVersion ne [dict get $identity runtime_version]} {
         error "build identity runtime version disagrees with the staged prelude"

@@ -15,7 +15,9 @@ proc errorcode {script} {
 set header [open [file join [file dirname [info script]] .. src machteld.h] r]
 set headerText [read $header]
 close $header
-regexp -line {^#define\s+MACHTELD_VERSION\s+"([0-9.]+)"} $headerText -> expectedVersion
+if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -> expectedVersion]} {
+    error "src/machteld.h has no canonical MACHTELD_VERSION"
+}
 
 set status [docs status]
 check {status identifies schema and runtime} [expr {

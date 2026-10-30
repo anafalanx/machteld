@@ -40,7 +40,9 @@ try {
             unknown [dict replace $good unexpected value] \
             schema [dict replace $good schema 2] \
             channel [dict replace $good channel release] \
-            version [dict replace $good runtime_version 01.2] \
+            "dotted version" [dict replace $good runtime_version 0.22] \
+            "zero-padded version" [dict replace $good runtime_version 022] \
+            "zero version" [dict replace $good runtime_version 0] \
             revision [dict replace $good source_revision {C:/private/source}] \
             input [dict replace $good input_sha256 BAD] \
             reference [dict replace $good reference_sha256 {}]] {
@@ -81,7 +83,8 @@ try {
         if {$mode ne "absent"} {
             set infoPath [file join $work $mode.dict]
             set record $good
-            if {$mode eq "version-mismatch"} { dict set record runtime_version 99.99 }
+            # A valid runtime version, but not the staged prelude's.
+            if {$mode eq "version-mismatch"} { dict set record runtime_version [expr {$runtime + 1}] }
             if {$mode eq "reference-mismatch"} { dict set record reference_sha256 [string repeat d 64] }
             if {$mode eq "invalid"} { dict set record source_revision wrong }
             bytes $infoPath $record

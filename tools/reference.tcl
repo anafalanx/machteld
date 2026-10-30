@@ -1079,7 +1079,7 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
     return $markdown
 }
 
-# A product's version; expr would read 0.21 as a number.
+# A product's version, as text: machteld's natural number, Tcl's and Tk's 9.0.4.
 proc ::ref::productVersion {product version} {
     if {$product eq "machteld"} {
         return $version
@@ -1561,11 +1561,11 @@ proc ::ref::main {argv} {
     }
 
     set headerText [readUtf8Strict [file join $root src machteld.h]]
-    if {![regexp -nocase "(?n)^#define${S}+MACHTELD_VERSION${S}+\"(\[0-9\]+\\.\[0-9\]+(?:\\.\[0-9\]+)?)\"${S}*\$" $headerText -> version]} {
+    if {![regexp -nocase "(?n)^#define${S}+MACHTELD_VERSION${S}+\"(\[1-9\]\[0-9\]*)\"${S}*\$" $headerText -> version]} {
         fail "src/machteld.h has no canonical MACHTELD_VERSION"
     }
     set preludeText [readUtf8Strict [file join $root tcl machteld.tcl]]
-    if {![regexp -nocase "(?n)^${S}*variable${S}+version${S}+(\[0-9\]+\\.\[0-9\]+(?:\\.\[0-9\]+)?)${S}*\$" $preludeText -> preludeVersion]} {
+    if {![regexp -nocase "(?n)^${S}*variable${S}+version${S}+(\[1-9\]\[0-9\]*)${S}*\$" $preludeText -> preludeVersion]} {
         fail "tcl/machteld.tcl has no canonical version variable"
     }
     if {$preludeVersion ne $version} {

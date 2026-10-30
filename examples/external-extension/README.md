@@ -5,11 +5,11 @@ Windows x64 Tcl 9 extension. `examplemath.dll` provides one checked native comma
 `examplemath::add signed32 signed32`. Its exact 64-bit result illustrates the
 loading boundary, not a claim that ordinary arithmetic needs a native extension.
 
-These commands target the current unsigned candidate executable in `out/`, not
-the older signed `dist/0.21` artifact. The candidate's runtime version `0.22`
+These commands target the current executable in `out/`, machteld 22 in
+preparation, not the older signed `dist/0.21` artifact. Runtime version `22`
 and its inventory and application-metadata packaging differ from that release.
-Build the candidate using the repository README first; candidate
-acceptance is still in progress.
+Build it using the repository README first; acceptance of 22 is still in
+progress.
 
 The application loads an absolute DLL filename beside its executable. It does
 not resolve dependencies, use `auto_path`, search the current directory or PATH

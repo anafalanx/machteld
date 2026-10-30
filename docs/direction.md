@@ -1,7 +1,7 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for the Machteld 0.22 candidate.
+description: Current product boundary and decision rules for machteld 22.
 tags: [machteld, direction, scope]
 ---
 
@@ -45,11 +45,13 @@ Current decisions:
 
 The compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and
 the engine-bound column library were removed. They leave no compatibility
-command or migration layer. The current candidate is Machteld 0.22, containing
-the stabilization work but not yet released or signed. Explicit wrapper
-inventories, application identity, and native hardening must not be attributed
-retroactively to the historical signed artifact. Candidate acceptance is current
-work; signing and publication require a separate decision.
+command or migration layer. The current work is machteld 22, which contains the
+0.22 candidate's stabilization and is not yet released or signed; from 22 on the
+version is one natural number, and only a change to the runtime makes a new
+one. Explicit wrapper inventories, application identity, and native hardening
+must not be attributed retroactively to the historical signed artifact.
+Acceptance of 22 is current work; signing and publication require a separate
+decision.
 
 Standing architectural decisions:
 
