@@ -210,15 +210,14 @@ build, because its build would replace that file. A run that tests an
 executable names it by version and SHA-256 and fails if it changes.
 
 `reference-generator` checks two independent cold conversions byte for byte.
-`native-validation` adds bounded lifetime tests and the native drivers built
-with undefined-behavior traps, after their negative controls;
-[its guide](docs/native-validation.md) records coverage gaps. Off by default,
-each behind its own option: worker-scaling measurements (`--native-scaling`),
-the compiler analysis and sanitizer probes of `tools/native-analysis.tcl`
-(`--native-analysis`), public TLS and interactive console checks
-(`--public-tls`, `--interactive-pty`), and the real Tk windows of
-`--interactive-gui`. A gate run signs nothing and publishes no release; its
-build goes to `out/machteld.exe` only.
+`native-validation` adds bounded lifetime and worker-scaling tests, the native
+drivers built with undefined-behavior traps, after their negative controls,
+and the full analysis of `tools/native-analysis.tcl`, GCC's analyzer and the
+sanitizer probes among it; [its guide](docs/native-validation.md) records
+coverage gaps. Off by default, each behind its own option: public TLS and
+interactive console checks (`--public-tls`, `--interactive-pty`), and the real
+Tk windows of `--interactive-gui`. A gate run signs nothing and publishes no
+release; its build goes to `out/machteld.exe` only.
 
 Unchanged development builds reuse each reference generation by content; a
 documentation edit generates the reference again, in about a minute, and Tcl

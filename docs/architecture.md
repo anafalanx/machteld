@@ -119,10 +119,9 @@ compiler; `integration` adds native fixtures, native stream limits, and
 build-cache tests; `packaging` checks entry points, wrapping, publication, and
 Windows metadata. A run that tests an executable identifies it by version and
 SHA-256 and refuses one that changes during the run. `native-validation` adds
-headless lifetime stress and the undefined-behavior-trapped native drivers;
-worker-scaling measurements (`--native-scaling`) and static analysis with
-capability-probed instrumentation (`--native-analysis`) are explicit options.
-Negative controls must fail as expected; unavailable sanitizer runtimes are
+headless lifetime stress, bounded worker scaling, the
+undefined-behavior-trapped native drivers, and static analysis with
+capability-probed instrumentation. Negative controls must fail as expected; unavailable sanitizer runtimes are
 reported, never counted as passing instrumentation. See
 [native validation](native-validation.md) for coverage and limitations.
 `reference-generator` is the separate, expensive determinism group: two cold

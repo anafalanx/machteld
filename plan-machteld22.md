@@ -424,9 +424,13 @@ them is in `machteld-22`.
   the two-machine policy: gate green, 58 steps, 2,141 ok checks, 1,326 s.
 - 2026-10-30 · e9e5d2f · this plan, and the README for 22 in preparation:
   gate green, 58 steps, 2,147 ok checks, 1,222 s.
-- 2026-10-30 · the commit that adds this line · the gate refuses `--runtime`
-  when it would build over it (B10, in part), and the docs say what a gate run
-  publishes (the consolidation's review): gate green, with its figures in the
+- 2026-10-30 · 502896b · the gate refuses `--runtime` when it would build over
+  it (B10, in part), and the docs say what a gate run publishes (the
+  consolidation's review): gate green, 58 steps, 2,150 ok checks, 1,208 s.
+- 2026-10-30 · the commit that adds this line · native validation runs its
+  scaling lane and the full native analysis in every run again, as the
+  candidate's group did, and every undefined-behavior-trapped step has a
+  deadline (the consolidation's review): gate green, with its figures in the
   commit message.
 
 <!-- machteld-version-history: end -->

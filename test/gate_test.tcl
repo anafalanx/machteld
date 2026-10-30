@@ -86,16 +86,12 @@ foreach option {--public-tls --interactive-pty} {
             ![catch {::gate::parse [list --group integration $option]}] &&
             ![catch {::gate::parse [list $option]}]}]
 }
-foreach option {--native-scaling --native-analysis} {
-    check "$option needs the native-validation or release group" \
-        [expr {[refused [list --group integration $option] "*$option needs the native-validation or release group*"] &&
-            ![catch {::gate::parse [list --group native-validation $option]}] &&
-            ![catch {::gate::parse [list $option]}]}]
-}
+check {the scaling lane and the full native analysis need no option: they are native validation's own} \
+    [expr {[refused {--native-scaling} {*unknown option --native-scaling*}] &&
+        [refused {--native-analysis} {*unknown option --native-analysis*}]}]
 set optins [::gate::parse {--group integration --public-tls --interactive-gui}]
 check {each option records only itself} \
-    [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui] &&
-        ![dict get $optins scaling] && ![dict get $optins analysis]}]
+    [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui]}]
 # The build publishes the runtime it tests, so a file named with --runtime is
 # tested only as it is; a signed copy must never be built over.
 set signed C:/release/signed/machteld.exe
@@ -152,12 +148,22 @@ check {a step two groups share runs once} \
         [dict get [lindex $releasePlan [lsearch -exact $releaseLabels {native adversarial inputs}]] group] eq "fast"}]
 check {native validation plans the lifecycle lane with the probe and the process fixture} \
     [expr {"native_lifecycle_test.tcl" in [scripts [::gate::plan [settings {--group native-validation}]]]}]
-check {the observational scaling lane runs only behind --native-scaling} \
-    [expr {"native_scaling_test.tcl" ni [scripts $releasePlan] &&
-        "native_scaling_test.tcl" in [scripts [::gate::plan [settings {--native-scaling}]]]}]
-check {the full native analysis runs only behind --native-analysis} \
-    [expr {"native-analysis.tcl" ni [scripts $releasePlan] &&
-        "native-analysis.tcl" in [scripts [::gate::plan [settings {--native-analysis}]]]}]
+# Native validation as the candidate's tools/test.ps1 defined it: the scaling
+# lane after the lifecycle lane and the full analysis last, in every run of the
+# group, the release's included.
+set nvOrder [labels $nvPlan]
+set at [lsearch -exact $nvOrder {native scaling}]
+check {native validation runs the bounded scaling lane after the lifecycle lane, with the probe and the process fixture} \
+    [expr {$at > 0 && $at == [lsearch -exact $nvOrder {native lifecycle}] + 1 &&
+        [lmap word [lrange [dict get [lindex $nvPlan $at] argv] 1 end] {file tail $word}] eq
+            {native_scaling_test.tcl native_probe.dll process_fixture.exe}}]
+set analysis [lindex $nvPlan end]
+check {native validation ends with the full native analysis, on the gate's cache and MSYS2} \
+    [expr {[dict get $analysis label] eq "native analysis (full harness)" &&
+        [lrange [dict get $analysis argv] 1 end] eq [list [file join $root tools native-analysis.tcl] \
+            --cache [file normalize [file join $root .cache deps]] --msys C:/fake-msys]}]
+check {release runs the scaling lane and the full native analysis, as the candidate's release did} \
+    [expr {"native_scaling_test.tcl" in [scripts $releasePlan] && "native-analysis.tcl" in [scripts $releasePlan]}]
 
 # The trapped drivers: the canary first, its two faults ending in
 # STATUS_ILLEGAL_INSTRUCTION under a deadline, every driver compiled with the
@@ -171,6 +177,25 @@ check {native validation shows the traps fire before any trapped driver runs} \
         [lsearch -exact $nvLabels {UB-trap canary traps bounds}] < [lsearch -glob $nvLabels {trapped *}] &&
         [llength [lmap step $faults {
             if {[dict get $step expect] != 0xC000001D || ![dict exists $step timeout]} continue; set step}]] == 2}]
+# Every trapped step runs under a deadline, as every invocation of the
+# candidate's harness did (tools/native-analysis.ps1: 180 s, and 15 s for its
+# negative canaries), and the gate's plan carries each one to run -timeout.
+set trapped [::na::trappedSteps [::na::layout [file join $root .cache deps]] \
+    C:/fake-msys/ucrt64/bin/gcc.exe [file join $root out test] [file join $root out machteld.exe]]
+set wrongDeadlines {}
+foreach step $trapped {
+    set want [expr {[string match {UB-trap canary traps *} [dict get $step label]] ? "30s" : "180s"}]
+    if {![dict exists $step timeout] || [dict get $step timeout] ne $want} {
+        lappend wrongDeadlines [dict get $step label]
+    }
+}
+foreach step $nvPlan {
+    if {[dict get $step label] in [labels $trapped] && ![dict exists $step timeout]} {
+        lappend wrongDeadlines "planned without one: [dict get $step label]"
+    }
+}
+check {every trapped step runs under a deadline, 180 s and 30 s for a fault the canary must trap, in the gate's plan too} \
+    [expr {[llength $trapped] && ![llength $wrongDeadlines]}] $wrongDeadlines
 set untrapped {}
 foreach step $nvPlan {
     if {![string match {trapped *: compile} [dict get $step label]]} continue
@@ -203,7 +228,7 @@ check {the entry test gets the process fixture and a bare host of its own, delet
         [dict get $entry cleanup] eq [list $bareHost] &&
         [string match .machteld-entry-basekit-*.exe [file tail $bareHost]]}]
 set missing {}
-foreach step [concat $releasePlan [::gate::plan [settings {--native-scaling --interactive-gui}]]] {
+foreach step [concat $releasePlan [::gate::plan [settings {--interactive-gui}]]] {
     foreach word [dict get $step argv] {
         if {[string match [file join $root test]/* $word] || [string match [file join $root tools]/* $word]} {
             if {![file isfile $word]} {
@@ -217,7 +242,7 @@ check {every program and source the plan names exists} [expr {![llength $missing
 # Every test program and C source under test/ is something the gate runs or
 # compiles, behind an option or not, or is run by another test (named here
 # with that test, which must name it).
-set everything [concat $releasePlan [::gate::plan [settings {--native-scaling --native-analysis --interactive-gui}]]]
+set everything [concat $releasePlan [::gate::plan [settings {--interactive-gui}]]]
 set named {}
 foreach step $everything {
     foreach word [dict get $step argv] {
@@ -370,6 +395,15 @@ try {
     check {a step that cannot start fails the gate} \
         [expr {[catch {::gate::execute [dict create label "gate_test step that cannot start" argv [list [file join $work absent.exe]]] $tested {}} message options] &&
             [dict get $options -errorcode] eq {GATE fail}}] $message
+    set sleeps [file join $work sleeps.tcl]
+    writeText $sleeps "package require machteld\nafter 60000\nexit 0\n"
+    set started [clock milliseconds]
+    set failed [catch {::gate::execute [dict create label "gate_test step past its deadline" \
+        argv [list $driver $sleeps] timeout 1s] $tested $testedIdentity} message options]
+    set took [expr {[clock milliseconds] - $started}]
+    check {a step past its deadline is ended and fails the gate} \
+        [expr {$failed && [dict get $options -errorcode] eq {GATE fail} &&
+            [string match {*past its deadline failed (timeout,*} $message] && $took < 30000}] "$message ($took ms)"
 } finally {
     file delete -force $work
 }
