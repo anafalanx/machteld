@@ -36,6 +36,8 @@ Machteld's own exact command reference.
 - [Architecture](architecture.md) - hosts, prelude, native core, and metadata.
 - [Native validation](native-validation.md) - analysis, stress/scaling evidence,
   and instrumentation gaps.
+- [The els method](els-method.md) - one-exe Windows applications in C and
+  Tcl/Tk 9, the method els and machteld were built with.
 - [Creed](creed.md) - the design tests.
 - [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.
 - [Direction](direction.md) - current product decisions and non-goals.
