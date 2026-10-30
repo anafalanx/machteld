@@ -3,8 +3,9 @@ type: plan
 title: machteld 22
 status: DRAFT, 2026-10-30. zef's plan for zef 22 (plan-zef22.md on zef's
   zef-22 branch, f741ffe), revised for a runtime-only machteld 22 after the
-  owner's rulings of 2026-10-29. Section 6 holds the re-cut decisions D1-D8
-  and the topics under research: FFI, the Thread package and Tcl packages.
+  owner's rulings of 2026-10-29, then with the owner's rulings of 2026-10-30
+  on the decisions poll. Section 6 holds the rulings, section 8 what they put
+  in 23.
 relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
   docs/direction.md, docs/creed.md, tools/stabilization.json
 ---
@@ -13,16 +14,17 @@ relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
 
 ## 0. How to read this
 
-Five kinds of statement appear here:
+Four kinds of statement appear here:
 
-- **Rulings**: what the owner decided (section 1) and the rulings in force
-  before (section 3). They are constraints, not reopened.
+- **Rulings**: what the owner decided on 2026-10-29 (section 1) and on
+  2026-10-30 (section 6, with each ruling's reason and how it is applied),
+  and the rulings in force before (section 3). They are constraints, not
+  reopened.
 - **Proposals**: the plan's substance, each grounded in what was read or
   measured, with its date.
-- **Decisions D1-D8** (section 6.1): questions for the owner, each with its
-  options and a recommendation. The recommendation is not the ruling.
-- **Under research** (section 6.2): FFI, the Thread package and Tcl packages.
-  Their decisions follow.
+- **Open decisions** (section 6.3): the two questions of the consolidation's
+  re-cut that no ruling settles, D4 and D5, each with its options and a
+  recommendation. The recommendation is not the ruling.
 - **The log** (section 7): a dated line per commit on `machteld-22`, with its
   gate result.
 
@@ -78,8 +80,12 @@ release."
    carried zef's Tcl build to the repository root and the candidate's own
    tooling into it, so that the build and its tests are Tcl only; moved the
    version to 22 and the wording to the owner's; and brought in from zef what
-   is the runtime's own: the agents' commentary, the els method, BUILDING.md
-   and this plan. On the way it fixed a test race the gate met (B16).
+   is the runtime's own: the console-control proposal (machteld's own text,
+   documentation only: machteld 287702b, which zef imported in 346948c), the
+   agents' commentary, the els method, BUILDING.md and this plan. On the way
+   it fixed a test race the gate met (B16). Then the owner's rulings of
+   2026-10-30 (section 6) took application identity's stamping out to 23
+   (0f62438).
 2. **machteld 22 builds and passes its gate on the build PC**, every commit
    of the consolidation included: from PowerShell, `dist\0.21\machteld.exe
    tools\gate.tcl --msys C:\dev\.z\r\msys2` builds `out\machteld.exe` with
@@ -147,10 +153,11 @@ release."
    testing; other machines run signed releases only. Signing is the owner's
    step.
 
-## 4. What machteld 22 is (proposal)
+## 4. What machteld 22 is
 
 machteld 22 is a runtime release: the candidate's stabilization, the build in
-Tcl and the ledger's remaining fixes, in one signed `machteld.exe`.
+Tcl and the ledger's remaining fixes, in one signed `machteld.exe`. It adds no
+runtime feature (ruling 2).
 
 ### 4.1. What it contains
 
@@ -163,9 +170,9 @@ Tcl and the ledger's remaining fixes, in one signed `machteld.exe`.
   drivers. Tcl: the help truncation fix (bfe307d); the worker protocol, pool
   and pmap limits and their one-attempt default; pool close during wait; the
   strict JSON table. wrap: the reference corpus only with `--with-docs`
-  (7a15542), explicit inventories (`--manifest`, `--plan`) and application
-  identity (metadata and icons, `src\resource.c`; D1). The documentation's
-  corrections of documented behavior (the stabilization's step 11).
+  (7a15542) and explicit inventories (`--manifest`, `--plan`). The
+  documentation's corrections of documented behavior (the stabilization's
+  step 11).
 - **The consolidation.** The release build, bootstrap, reference generator,
   gate, development loop, native analysis and every driver test in Tcl
   (b0c4edc, 306b38f, 2be5c9e, 75a600b), with the candidate's hardening
@@ -174,69 +181,131 @@ Tcl and the ledger's remaining fixes, in one signed `machteld.exe`.
   test groups run in a clean lane environment (c64ec38); the release build
   publishes in one operation (2a39777). Version 22 and the owner's wording
   (c9cbff2, 735b738). The console-control proposal, as documentation only
-  (c8e1173). The els method as a guide, the streaming-bounds test's race
-  fixed, the commentary, BUILDING.md and this plan (section 7).
+  (c8e1173: machteld's own text at 287702b, as zef imported it in 346948c),
+  the design input for console control in 23 (4.3, section 8). The els
+  method as a guide, the streaming-bounds test's race fixed, the commentary,
+  BUILDING.md and this plan (section 7).
 - **Not carried from zef:** its rename (840fbc2) and everything of the
   environment (`zef.tcl`, `verbs\`, `lib\`, pins, settings, the Go ignition,
   the TypeScript, `DESIGN.md`), with zef's phases and decisions for its
   editor, the agents' homes, backup, the work PC, its verbs and its namespace.
 - **Not ported from the candidate:** the reference stage cache, with its
   PowerShell and C# serializers (D5).
+- **Not in 22, by the owner's rulings** (section 6): the candidate's
+  application identity, a wrapped tool's own metadata and icons
+  (`src\resource.c`), removed in 0f62438 and kept on the branch
+  `app-identity` (ruling 1); every new runtime feature (ruling 2, 4.3); the
+  FFI (ruling 3). Section 8 holds what goes to 23.
 
 ### 4.2. The bug ledger
 
 The mapping pass of 2026-10-28 (`result.bugs` in the mapping) checked every
-item against zef's core and against the candidate. The consolidation
-re-checked R16 on 2026-10-30; the other items stand as mapped until each is
-fixed or checked again. Each new fix lands with a regression test that fails
-before it.
+item against zef's core and against the candidate. The research of
+2026-10-29 added R26-R29 and checked them in this branch's source that day.
+The consolidation re-checked R16 on 2026-10-30, and its gate runs and review
+added B15-B17 and the GUI host's wording. The other items stand as mapped
+until each is fixed or checked again. Each new fix lands with a regression
+test that fails before it.
 
 | Fixed in the candidate (8bcc1ec), carried | R2 help, R3 json NUL, R4 typed null, R10 key leaks, R18 interp cleanup, S2 pool stderr eof; json bytearray as Latin-1; typed depth; recycled channel names; reentrant child close; pool close in callback; store leaks; NUL paths; hash counter |
 |---|---|
-| New fixes in 22 | R1 scope -level; R5 -stdin broken pipe; R6 kill after exit; R7 canon on a locked file; R8 detach console and process group; R11 capture race; R12 strict text from -onout and store keys; R13 -env block size; R14 pty_free; R15 dead code; R16 breakaway (merged with the limits write); R17 one size grammar; R19 comments; R22 PATH from -env; R24 cli parse name; R25 bytearray docs; S3 watch overflow; S4 worker non-error codes; S7 creed wording (its rewording done in c9cbff2); -onout read errors; long resolved paths; crash containment (no error dialogs from children) |
+| New fixes in 22 | R1 scope -level; R5 -stdin broken pipe; R6 kill after exit; R7 canon on a locked file; R8 detach console and process group; R11 capture race; R12 strict text from -onout and store keys; R13 -env block size; R14 pty_free; R15 dead code; R16 breakaway (merged with the limits write); R17 one size grammar; R19 comments; R22 PATH from -env; R24 cli parse name; R25 bytearray docs; S3 watch overflow; S4 worker non-error codes; S7 creed wording (its rewording done in c9cbff2); -onout read errors; long resolved paths; crash containment (no error dialogs from children); R26 one package search in every interpreter; R27 registry and dde registered; R28 handle tokens unique across the process; R29 panic containment; the GUI host's file description and product name in the owner's wording |
 | Deferred to 23 | R9 the polling monitor (a completion-port supervisor is a redesign; the `-onout` pump polls the same way, `src\proc.c:1243`, and read 16 MiB in 3 to 11 s on the build PC); R20 limit status; S1 incremental UTF-8 for pty; S5 GUI fatal message; S6 bounded reap; R21 rename pairing across reads; R23 narrowing the global path |
 | Build, done | B12 BUILDING.md's interpreters (BUILDING.md); B13 toolchain fingerprint (d29c268); B16 the streaming-bounds overflow check raced its fixture's descendant, whose newline split the overflowing line when the pump was slow (found and fixed in f6393df) |
 | Build, partly | B3 retried renames (the development cache's publications in 306b38f, the release build's in 2a39777; `tools\reference.tcl`, `tools\package.tcl` and `tcl\docs.tcl` still rename once); B4 bash profiles (d29c268; the bash steps have no timeout yet); B7 publish semantics (2a39777: one operation, and debris checked; not write-through, retried on any error); B10 a development build must not overwrite a signed exe (the gate's build goes to `out\machteld.exe` only, since it refuses `--runtime` when it builds; where the development loop publishes is D4) |
-| Build, open | B1 detach coverage (with R16); B2 tolerant cleanup; B5 curl timeouts and tar checks; B6 MSYS2 discovery (BUILDING.md names `--msys` and `MSYS2_ROOT`; `tools\dev.tcl` takes no `--msys`); B8 attribute checks; B9 cache-path match; B11 publish only after every lane passed (D3); B14 a signing recipe (at release, BUILDING.md); B15 the entry test runs `whoami.exe` by bare name (`test\entry_test.tcl:145`), so a caller's PATH with Git's tools first gives its ACL fixture no SID (found in c9cbff2's first gate run, from Git Bash) |
+| Build, open | B1 detach coverage (with R16); B2 tolerant cleanup; B5 curl timeouts and tar checks; B6 MSYS2 discovery (BUILDING.md names `--msys` and `MSYS2_ROOT`; `tools\dev.tcl` takes no `--msys`); B8 attribute checks; B9 cache-path match; B11 publish only after every lane passed (ruling 10); B14 a signing recipe (at release, BUILDING.md); B15 the entry test runs `whoami.exe` by bare name (`test\entry_test.tcl:145`), so a caller's PATH with Git's tools first gives its ACL fixture no SID (found in c9cbff2's first gate run, from Git Bash); the fix names System32's `whoami.exe`, and until then the gate runs from PowerShell; B17 the development build lock's stale-lock race (below) |
 
-### 4.3. What development tools asked of the runtime
+The newer items, in full:
 
-zef's verbs asked for these (zef's plan, its section 4.3; the commentary's
-entries of 2026-10-28). machteld builds no development environment, so none
-is admitted for that reason: each is now judged by direction.md's first
+- **R26, one package search in every interpreter** (ruling 6). TCL_LIBRARY,
+  TCLLIBPATH, TCL9_0_TM_PATH, TCL9.0_TM_PATH and `<exe>\..\lib` steer every
+  interpreter today: TCL_LIBRARY sends `interp create` children to a decoy
+  `init.tcl`, and a planted msgcat 1.7.99 replaced the embedded 1.7.1 and
+  broke `clock format` (the research's probes). Fix: one process-wide
+  `Tcl_SetPreInitScript` in both hosts, decoy tests first; programs add their
+  folders explicitly (`lappend auto_path`, `tcl::tm::path add`). `src` has no
+  `Tcl_SetPreInitScript`.
+- **R27, Tcl's own registry 1.3.7 and dde 1.4.6** (ruling 7): linked in
+  `libtcl90.a` and announced by `Tcl_Init`, never registered, while their
+  reference pages ship. Fix: two `Tcl_StaticLibrary` lines, about +48 KB
+  across the three copies in `machteld.exe`. `src` has no `Registry_Init`
+  or `Dde_Init`.
+- **R28, handle tokens unique across the process.** A `hash#1` minted in one
+  interpreter consumed another interpreter's `hash#1`: the counters are per
+  interpreter (`src\proc.c:872`, `1830` and `2340`, `src\hash.c:238`,
+  `tcl\pool.tcl:116`). Fix: one counter for child, pty, watch, hash and pool
+  tokens; a foreign token raises `{MACHTELD X nohandle}`.
+- **R29, panic containment.** There is no panic proc and no error mode, so a
+  `Tcl_Panic` in the GUI host opens a task-modal, foreground "Fatal Error"
+  box (`tclWinFile.c:825-856`), and both hosts then trap into Windows Error
+  Reporting; the candidate's json port makes out-of-memory a deliberate
+  panic. Fix: a panic proc that writes to stderr when there is one and exits
+  with a fixed code, installed after Tcl_Main's own, and
+  `SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX)` at host start.
+  `src` has no `Tcl_SetPanicProc` or `SetErrorMode`.
+- **The GUI host's wording.** The GUI host's FileDescription and ProductName
+  still read "Machteld GUI application host" and "Machteld"
+  (`tools\generate-version-resource.tcl:51` and `:81`; the product name is
+  the console host's too), where the owner's wording gave the console host
+  the file description "machteld runtime" (735b738); the wording step left it
+  for the ledger.
+- **B17, the development build lock's stale-lock race.** `tools\devcache.tcl`
+  takes over a stale lock in three separate steps (`:192-193`: the
+  staleness check, the delete, then the next exclusive create), so two
+  development builds that both see the same stale lock can both run in
+  `.cache\dev`. It affects only the development loop. Fix: an atomic
+  takeover, with a test of two processes.
+
+### 4.3. Candidates for 23 and later
+
+None of these is in 22: asked twice, the owner ruled "None in 22" (ruling 2).
+They came from zef's verbs (zef's plan, its section 4.3; the commentary's
+entries of 2026-10-28), and machteld builds no development environment, so
+none is admitted for that reason: each must still pass direction.md's first
 admission question, whether it strengthens what machteld is strongest at, for
-many programs, beyond what they can do in Tcl (D2).
+many programs, beyond what they can do in Tcl. The ledger's defect fixes stay
+in 22 even where they touch the same code: R8 (detach shares the host's
+console and process group), R16 (no job of the runtime's allows breakaway;
+merged with the limits write) and the crash containment for children.
 
-1. **Hidden-desktop launches:** `run`, `child start` and `pty spawn` on a
-   desktop of the host's own, so that what a tool starts never takes the
-   user's keyboard focus.
-2. **Console-less launches:** captured children without a console window of
+1. **Console-less launches:** captured children without a console window of
    their own, so a host without a console (a `wrap --gui` tool) opens none per
    child; `detach` without the host's console, in a process group of its own
    (the defect half is R8).
-3. **Console control:** `console ctrl default|catch` and `console
-   interrupts`, so a host decides what Ctrl-C means
-   (`docs\proposals\console-ctrl`).
-4. **Detach from jobs:** `detach -breakaway required|preferred`, where
+2. **detach -breakaway:** `detach -breakaway required|preferred`, where
    `preferred` starts the program inside an enclosing job that forbids
    breakaway (the defect half, the runtime's own jobs, is R16).
-5. **A lock:** `lock take path ?-timeout d?` and `lock release`, a
+3. **Console control,** in the proposal's own surface
+   (`docs\proposals\console-ctrl\README.md:35-37`): `console ctrl ignore`,
+   `console ctrl default`, and a bare `console ctrl` that returns the mode in
+   force, so that a program that hands its console to a child can let the
+   child decide what Ctrl-C means. The proposal, with its working code, is
+   the design input (section 8). zef's later design, `console ctrl
+   default|catch` with `console interrupts` and no `ignore` (children inherit
+   it), is recorded in the zef-22 plan (`plan-zef22.md`, its 4.3 item 4 and
+   D7), preserved in `C:\dev\.preserve\2026-10-29-zef-22-branch`.
+4. **A lock:** `lock take path ?-timeout d?` and `lock release`, a
    `LockFileEx` lock that Windows releases when its holder ends; Tcl can only
    create a file exclusively, which a crashed holder leaves behind.
-6. **Publish:** the atomic replacement behind `wrap` and the release build,
-   `::machteld::Publish`, as a documented command, perhaps with `-wait`.
-7. **dirs with file rows:** files too, each with its kind, size, modification
-   time in 100-ns units and attribute word, from the one enumeration `dirs`
+5. **Publish as a command:** the atomic replacement behind `wrap` and the
+   release build, `::machteld::Publish`, documented, perhaps with `-wait`.
+6. **dirs -entries:** files too, each with its kind, size, modification time
+   in 100-ns units and attribute word, from the one enumeration `dirs`
    already does: what a backup, a sync or "what changed since" needs. The
    attribute word would also bring back B8's checks.
-8. **A shortcut:** `shortcut write|read`, through `IShellLink`.
+7. **The hidden desktop:** `run`, `child start` and `pty spawn` on a desktop
+   of the host's own, so that what a tool starts never takes the user's
+   keyboard focus.
+8. **The small options:** an exact environment for children (`-clearenv`),
+   `http get -to FILE`, `-encoding` on capture, `canon` attributes and times,
+   `-priority` and `-stderr stdout`.
+9. **A shortcut:** `shortcut write|read`, through `IShellLink`.
 
-Smaller wishes from the same work: an exact environment for children
-(`-clearenv`), `http get -to FILE`, `-encoding` on capture, `canon`
-attributes and times, `-priority` and `-stderr stdout`. `cli parse` naming
-the program is a fix (R24).
+`cli parse` naming the program is a fix, not a feature (R24).
 
 ## 5. Phases
+
+22 has no feature phase (ruling 2).
 
 0. **Preserve** - done: the candidate's read-only snapshot,
    `C:\dev\.preserve\2026-10-28-machteld-0.22-candidate` (verified when made);
@@ -245,20 +314,30 @@ the program is a fix (R24).
 1. **Baseline** - done: 8bcc1ec.
 2. **Consolidate** - done (section 7): the build in Tcl, the candidate's
    tooling carried into it, version 22, the owner's wording, and the
-   runtime's own knowledge from zef. Every commit gated green.
-3. **Fix the remaining ledger** (4.2), test first: each fix with a
-   regression test that fails before it; grouped by severity; each group gated
-   green and committed, then reviewed adversarially.
-4. **Runtime features**, only those the owner admits (D2), each designed
-   once: native or Tcl by direction.md's placement questions, a manifest
-   entry, a reference page, tests.
-5. **Release**, on the build PC: the roadmap's release gate, the candidate's
-   step 12. Freeze 22; gate from a fresh clone and a fresh dependency cache;
-   compare the clean build with the matching incremental one; the owner signs
-   a copy at a release path, never `out\machteld.exe` (BUILDING.md); the gate
-   on the signed bytes (`--skip-build --runtime FILE`); the acceptance that
-   needs the owner (D7); release notes, with the signed file's SHA-256;
-   publication on the owner's word (D8).
+   runtime's own knowledge from zef. Every commit gated green. Then the
+   rulings of 2026-10-30 (0f62438 and this plan).
+
+What remains:
+
+3. **The ledger** (4.2), test first: each fix with a regression test that
+   fails before it, grouped by severity. A group is integrated with the tests
+   of what it touches, then checked once by the full gate and reviewed
+   adversarially (the owner, 2026-10-30: integrate well first, then check).
+4. **The docs:** each fix's guides and pages change with it (R26's package
+   search and R27's registry and dde among them); then the README, the guides
+   and the reference are read against 22 as built, and the release notes are
+   written.
+5. **The release, on the build PC:** the roadmap's release gate, the
+   candidate's step 12. Freeze 22; gate from a fresh clone and a fresh
+   dependency cache; compare the clean build with the matching incremental
+   one; the owner's tests run before the release, each on the owner's word
+   (ruling 12): `--public-tls`, `--interactive-pty`, `--interactive-gui`, and
+   the detach success path from a shell outside any job that forbids
+   breakaway; the owner signs a copy at a release path, never
+   `out\machteld.exe` (BUILDING.md); the gate on the signed bytes
+   (`--skip-build --runtime FILE`); release notes, with the signed file's
+   SHA-256. A GitHub release like 0.21 follows on the owner's word (ruling
+   15).
 6. **After the release:** the build tools move from the signed 0.21 to the
    signed 22 (`package require machteld 22-`), in a commit of their own,
    gated on the signed 22.
@@ -267,63 +346,164 @@ zef's phases for its verbs (its phase 5), zef on the build PC (7), the work
 PC's swap (8) and its projects standing alone (9) are the environment's, and
 are dropped.
 
-## 6. Decisions
+## 6. Rulings
 
-This section is the consolidation's re-cut of zef's decisions. The owner has
-ruled on several of them (application identity, features in 22, the ledger,
-the owner's acceptance, publishing) and on the topics of 6.2 (Thread on
-2026-10-29, the others in a poll of 2026-10-30); those rulings, with their
-reasons, take this section's place when the plan is next revised.
+The owner's rulings, each with its reason, drawn from the research's draft of
+2026-10-29 and the consolidation's re-cut proposals, and how it is applied.
+They replace the re-cut decisions they settle (D1, D2, D3, D6, D7 and D8) and
+the three topics that were under research (FFI, the Thread package and Tcl
+packages), whose studies are
+`C:\dev\.preserve\2026-10-29-ffi-thread-packages-research.json` and, for
+Thread, `C:\dev\.preserve\2026-10-29-thread-studies-journal.jsonl`. Elsewhere
+in this plan, "ruling N" is the poll's ruling N (6.2).
 
-### 6.1. For the owner
+### 6.1. 2026-10-29
 
-These re-cut zef's D1-D15 to the questions that still concern the runtime,
-numbered afresh, and add what the consolidation left open. Re-cut: zef's
-scope (D3) becomes D1 and D2, and one API per feature (D7) waits for a
-feature to be admitted; the gate (D9) becomes D3; the release ledger (D12)
-D6; the owner's acceptance (D13) D7; the signed runtime's way to the work PC
-(D15) D8, publishing the release. Settled: the two machines (D1) are section
-3.5; the candidate is committed (D2b, 8bcc1ec); wrap's reference opt-in (D4)
-is in since 7a15542; the version checks (D10) keep the candidate's markers,
-extended to natural numbers (c9cbff2); the development loop (D11) decides by
-content (306b38f), and where it publishes is D4. Dropped as the
-environment's: a plain copy of `C:\dev` (D2a), the front door for zef's verbs
-(D5), zef's own namespace (D6), the runtime range in `zef.tcl` (D8) and zef
-on the build PC (D14). New: D5, the reference stage cache that 6799d2b left
-open.
+- **The name and the version** (section 1, item 1): machteld again, and one
+  natural number from 22 on. *Why:* only a change to the runtime makes a new
+  number. *Applied:* c9cbff2.
+- **The repository holds the runtime only** (section 1, item 2). *Why:* "We go
+  back to just building machteld"; the development environments built with it
+  get local-only repositories and are not machteld's business. *Applied:* the
+  consolidation (section 7); nothing of the environment comes in.
+- **The wording** (section 1, item 3). *Why:* the product sentence is also
+  direction.md's admission filter. *Applied:* 735b738.
+- **Tcl's Thread package is not admitted** ("We won't include it"). *Why:* no
+  program in `C:\dev` needs it, a warm worker process answers nearly as fast
+  (0.29 ms against 0.15-0.24 ms), and measured on 0.21 it defeats supervision
+  (`thread::cancel` cannot stop a native call, async errors reach `bgerror` or
+  only the worker's stderr, `exit` in a worker ends the process, bytearrays
+  change across a send, synchronous errorCodes arrive wrapped), while upstream
+  it has no maintainer and no Windows CI. *Applied:* warm pool workers and
+  evented natives in its place, for 23 (section 8). The study's run was
+  stopped on the owner's word before its skeptics ran.
 
-**D1 - Application identity in 22.** The candidate added wrap's application
-metadata and icons: `src\resource.c` validates an ICO file and the host's PE
-resources and stamps them before the payload is appended. zef's plan left it
-out of zef 22 (its D3), because it parses untrusted bytes and had never run
-under undefined-behavior traps. Since 75a600b its primitives run under those
-traps in every gate (71 native checks, malformed, oversized and overlapping
-icons and refused hosts among them), beside the application identity test's
-65 checks. (a) Keep it in 22, as the candidate has it. (b) Move it to 23: one
-commit removes it from `machteld-22`, a branch keeps it, and 23 reverts the
-removal. *Rec: (a). It is built, documented and gated, its inputs are the
-user's own files inside the trusted-local-code boundary, and a removal is a
-change of its own to test. (b) is the smaller release.*
+### 6.2. 2026-10-30: the decisions poll
 
-**D2 - Runtime features in 22** (4.3). (a) None: the list becomes the
-candidates for 23 and later, each still to pass the admission question; the
-ledger's fixes stay in 22 even where they touch the same code (R8, R16). (b)
-Only what the ledger's fixes nearly are: `detach -console new` beside R8, and
-`detach -breakaway preferred` beside R16. (c) zef's must list, 4.3's eight.
-*Rec: (a). 22 is the stabilization's release and its release gate is not
-done; each feature needs a design, a manifest entry, a page, tests and
-acceptance; and the needs came from one environment's verbs, not yet from
-many programs.*
+Numbered as in the poll, which the owner answered on 2026-10-30. Ruling 2 was
+asked again, because the multi-select had not come through, and ruling 1 was
+completed in the morning, after the owner asked what application identity
+is.
 
-**D3 - The gate's default and its publication** (c64ec38 left the default
-open; B11). (a) As now: without `--group` the gate is the release, the build
-and every group, and it publishes `out\machteld.exe` before the first lane.
-(b) As (a), but the build goes to a candidate the run owns, published as
-`out\machteld.exe` only after every lane passed. (c) The candidate's default:
-without `--group`, the fast group and no build; the release only with `--group
-release`. *Rec: (b). BUILDING.md stays true, and a failing run can no longer
-leave an untested build where the development loop and the docs expect the
-runtime.*
+1. **Application identity: its stamping moves to 23, and "Keep the file
+   list".** *Why:* without it 22 is the smaller release, and its native parser
+   of ICO and PE bytes, which zef's plan had also left out of zef 22, goes with
+   it; the explicit file list is what keeps unrelated and secret files out of
+   a wrapped tool. *Applied:* 0f62438
+   removes the manifest's `metadata` key (name, version, description, author,
+   publisher, copyright, icon), the icon reading, `src\resource.c` and its
+   registration, the metadata facts in `--plan`, and their docs and tests; a
+   manifest with `metadata` is refused as not part of this version.
+   `--manifest` with `schema 1` and `files`, `--plan` and the whole-directory
+   default stay. The branch `app-identity` keeps bec1289; 23 reverts 0f62438
+   and adds tests with broken files (section 8). The poll had called
+   `--manifest` a Windows manifest; it is machteld's own inventory file.
+2. **Runtime features: "None in 22".** *Why:* 22 is the stabilization's
+   release and its release gate is not done; each feature needs a design, a
+   manifest entry, a page, tests and acceptance; and the needs came from one
+   environment's verbs, not yet from many programs. *Applied:* the nine are
+   candidates for 23 and later (4.3), each still to pass the admission
+   question; the ledger's defect fixes stay in 22 even where they touch the
+   same code (R8, R16, the crash containment for children); the owner's
+   window tests run at release, without a hidden desktop.
+3. **The FFI: in 23.** *Why:* cffi 2.0.3 (BSD-2, the only maintained Tcl 9
+   FFI, about 1,400 tests) is the widest step beyond what programs can do in
+   Tcl, about 10-13 agent-days, and the study had recommended 23. *Applied:*
+   23's first bundle (section 8); nothing of it in 22.
+4. **The FFI's DLLs: Windows' own and the program's own, no callbacks.**
+   *Why:* libffi closures are read-write-execute memory on Windows, and
+   cffi's callbacks have no thread or lifetime guard (its issue #122), so
+   callbacks wait for a named need. *Applied:* Windows' DLLs by bare name from
+   System32 only, a program's own by absolute path, never the current folder
+   or PATH; no callbacks; the contract's "Foreign calls" lands with the FFI in
+   23.
+5. **Patches to vendored sources: yes, recorded and tested.** *Why:* without
+   machteld's four patches cffi would ship with its defects documented (lossy
+   text, a DLL search through the current folder and PATH), and the bootstrap
+   applies only the exact upstream correction the lock names. *Applied:* lock
+   entries get a kind (upstream, backport, machteld) with their reasons,
+   before and after hashes and a regression test; machteld's own are offered
+   upstream only on the owner's word; the bootstrap's one-patch assertion
+   becomes a list when the first such patch arrives.
+6. **Package search: only from machteld.exe, in every interpreter.** *Why:*
+   TCL_LIBRARY, TCLLIBPATH, the module path variables and `<exe>\..\lib` steer
+   every interpreter today, and the research's probes sent `interp create`
+   children to a decoy `init.tcl` and broke `clock format` with a planted
+   msgcat. *Applied:* R26 in 22, one process-wide `Tcl_SetPreInitScript`,
+   decoy tests first; programs add their folders explicitly. Tcl 9.1's TIP 732
+   removes that hook, so a Tcl move redoes it.
+7. **registry and dde: both.** *Why:* Tcl's own packages are linked and
+   announced but never registered while their reference pages ship, and
+   registering both costs two `Tcl_StaticLibrary` lines and about 48 KB.
+   *Applied:* R27 in 22; the runtime itself never writes the registry.
+8. **Libraries: machteld's own commands, plus ones admitted one at a time.**
+   *Why:* a curated tcllib subset would add about 1 MB and make its
+   vocabulary de facto contract, and all of tcllib about 7.6 MB with its
+   docs. *Applied:* no tcllib or other library is built in; tcllib, twapi,
+   tklib, TDBC, the sqlite3 binding, Itcl and image or drag-and-drop
+   extensions belong to the programs, pinned in their own folders under the
+   extensions covenant; a third-party organ comes in only by the admission
+   questions and a ruling (cffi in 23).
+9. **The Tcl version: stay on 9.0.4.** *Why:* Tcl 9.1 (2026-09-30) would put
+   registry in the core, but TIP 732 reworks init (R26 redone), cffi needs
+   2.0.4 or later (unreleased), and the corpus and the Tcl patch would be
+   redone; a Tcl move is its own release decision. *Applied:* 9.0.4 through
+   22 and 23.
+10. **The build tools: as the consolidation builds them.** *Why:* in the
+    poll's words, the gate runs every release lane and publishes only when
+    all pass, with one Tcl version checker and a development loop without
+    PowerShell. *Applied:* the tools of section 7; publishing
+    `out\machteld.exe` only after every lane passed, the re-cut's D3 (b), is
+    B11 in the ledger.
+11. **The ledger: a dated log in the plan.** *Why:* a line per commit with its
+    gate result keeps 22's evidence beside the plan it carries out.
+    *Applied:* section 7; `tools\stabilization.json` stays the candidate's
+    record.
+12. **Tests that need the owner: before the release, each on the owner's
+    word.** *Why:* `--public-tls` contacts public hosts, `--interactive-pty`
+    and `--interactive-gui` need the console and open windows, and no gate
+    run reaches the detach success path, because the gate's own jobs forbid
+    breakaway (R16). *Applied:* phase 5; the window tests without a hidden
+    desktop (ruling 2).
+13. **Unsigned builds: only on this build PC.** *Why:* the build PC builds and
+    tests, signing is the owner's step, and other machines run signed
+    releases only (3.5). *Applied:* BUILDING.md.
+14. **An off-disk copy: push the work branch to GitHub.** *Why:* one disk held
+    every copy. *Applied:* `machteld-22` pushed to origin at 2a39777, and
+    again after each green stage (section 7); origin's `main` stays at the
+    0.21 release.
+15. **Publishing 22: a GitHub release like 0.21.** *Why:* 0.21 was published
+    so: tag v0.21, with its signed executable, release notes and
+    `SHA256SUMS.txt`. *Applied:* at release, on the owner's word (phase 5).
+16. **`C:\dev\_zef`: delete once the consolidation is done.** *Why:* what 22
+    needs of it is carried over (4.1), the rest is preserved, and its design
+    is the one these rulings reverse. *Applied:* moved to the Recycle Bin on
+    2026-10-30, once the consolidation's result was verified; it can be
+    restored exactly from `C:\dev\.preserve\2026-10-29-zef-22-branch`
+    (bundle and patch).
+17. **The name route: in 23.** A renamed copy of `machteld.exe` runs the
+    same-named script beside it. *Why:* "a signed front door for any
+    environment" (the poll), and 22 is full. *Applied:* section 8.
+18. **A GUI twin of `machteld.exe`: no.** *Why:* Tk tools wrap with `--gui`.
+    *Applied:* rejected (section 8).
+
+### 6.3. Still open
+
+The consolidation re-cut zef's decisions D1-D15 to eight that concern the
+runtime: zef's scope (D3) became D1 and D2; the gate (D9) D3; where the
+development loop publishes (from D11) D4; the release ledger (D12) D6; the
+owner's acceptance (D13) D7; the signed runtime's way to the work PC (D15) D8,
+publishing the release; and D5, the reference stage cache, was new. Of zef's
+others, the two machines (D1) are section 3.5, the candidate is committed
+(D2b, 8bcc1ec), wrap's reference opt-in (D4) is in since 7a15542, the version
+checks (D10) keep the candidate's markers, extended to natural numbers
+(c9cbff2), and the development loop (D11) decides by content (306b38f); one
+API per feature (D7) waits for a feature to be admitted; and the
+environment's were dropped: a plain copy of `C:\dev` (D2a), the front door
+for zef's verbs (D5), zef's own namespace (D6), the runtime range in
+`zef.tcl` (D8) and zef on the build PC (D14). The rulings settle six of the
+eight: D1 by ruling 1, D2 by 2, D3 by 10, D6 by 11, D7 by 12 and D8 by 15.
+Two remain for the owner:
 
 **D4 - Where development builds land** (B10). (a) As now: the development
 loop and the gate both publish `out\machteld.exe`. (b) The development loop
@@ -338,41 +518,6 @@ reference conversion's stages with PowerShell and C# serializers; they were
 not ported. (a) Leave it out: unchanged builds reuse a reference generation by
 content, and a documentation edit generates the reference again, in about a
 minute. (b) Port it to Tcl. *Rec: (a).*
-
-**D6 - The release ledger** (zef's D12). (a) This plan's section 7: a dated
-line per commit, with its gate result; `tools\stabilization.json` stays the
-candidate's record. (b) A record for 22 in the form of stabilization.json.
-*Rec: (a).*
-
-**D7 - Acceptance that needs the owner** (zef's D13): `--public-tls` (it
-contacts public hosts), `--interactive-pty`, the detach success path (from a
-shell outside any job that forbids breakaway), `--interactive-gui`, and any
-test that opens a window beyond the wrap lane's brief one. No gate run
-reaches the detach success path today: the gate runs its lanes inside its
-own jobs, which forbid breakaway (R16). (a) All at release, each on the
-owner's word. (b) Each as soon as the code it checks changes, on the owner's
-word. *Rec: (a), with (b) for a change to detach or the console.*
-
-**D8 - Publishing the signed release** (zef's D15, re-cut for the runtime).
-(a) A release of the GitHub repository anafalanx/machteld, as 0.21 was (its
-tag v0.21; `dist\0.21` keeps that release's executable, release notes and
-`SHA256SUMS.txt`), on the owner's word. (b) No published release: the owner
-keeps the signed file and copies it to the machines that use it. *Rec:
-(a).*
-
-### 6.2. Under research (decisions to follow)
-
-FFI, the Thread package and Tcl packages beyond Tcl/Tk's own were studied on
-2026-10-29: `C:\dev\.preserve\2026-10-29-ffi-thread-packages-research.json`,
-and for Thread also `C:\dev\.preserve\2026-10-29-thread-studies-journal.jsonl`.
-Their decisions, with the studies' reasons, follow in this plan. Nothing of
-them is in `machteld-22`.
-
-- **FFI:** calls from Tcl into Windows' DLLs and a program's own, through a
-  foreign function interface in the runtime.
-- **The Thread package:** Tcl's Thread extension inside `machteld.exe`.
-- **Tcl packages:** which packages beyond Tcl/Tk's own the executable
-  carries, and how its interpreters find the others.
 
 ## 7. Log
 
@@ -431,9 +576,77 @@ them is in `machteld-22`.
   native analysis in every run again, as the candidate's group did, and every
   undefined-behavior-trapped step has a deadline (the consolidation's review):
   gate green, 60 steps, 2,190 ok checks, 1,407 s.
-- 2026-10-30 · the commit that adds this line · the README links the 0.21
-  release instead of a file git ignores, and a local link must name a file
-  every clone has (the consolidation's review): gate green, with its figures
-  in the commit message.
+- 2026-10-30 · bec1289 · the README links the 0.21 release instead of a file
+  git ignores, and a local link must name a file every clone has (the
+  consolidation's review): gate green, 60 steps, 2,192 ok checks, 1,288 s.
+- 2026-10-30 · the pushes (ruling 14): `machteld-22` to origin
+  (github.com/anafalanx/machteld) at 2a39777 (00:53), 6799d2b (01:21),
+  db7a2f5 (03:19), e9e5d2f (05:19) and bec1289 (07:19), each after a green
+  gate; origin's `main` stays at the 0.21 release (8ad9507).
+- 2026-10-30 · `C:\dev\_zef` moved to the Recycle Bin once the consolidation's
+  result was verified (ruling 16); it can be restored exactly from
+  `C:\dev\.preserve\2026-10-29-zef-22-branch` (bundle and patch).
+- 2026-10-30 · 0f62438 · application identity's stamping out to 23, the file
+  list kept (ruling 1); the branch `app-identity` keeps bec1289, and a first
+  attempt that also removed the file list was stopped before it committed:
+  the fast and packaging groups green on a development build, 24 steps, 1,260
+  ok checks, 531 s; the full gate once, after the next commit.
+- 2026-10-30 · the commit that adds this line · the plan takes the owner's
+  rulings with their reasons (section 6), R26-R29, B17 and the GUI host's
+  wording in the ledger, the candidates for 23 and later, the phases that
+  remain, the console-control proposal in the account of what came from zef,
+  and a section for 23; the roadmap's console-control paragraph is a
+  candidate for 23 without the environment, and its 22 section no longer
+  credits 22 with the candidate's reference conversion caches: the docs
+  checks and the fast group green on a development build; the full gate runs
+  once on this tree, and the next entry records it.
 
 <!-- machteld-version-history: end -->
+
+## 8. For 23
+
+What the rulings put in 23; nothing of it is in 22. Each is designed then,
+and a new command still passes the admission question. The candidates of 4.3
+and the ledger's items deferred to 23 (4.2) are the rest of its input.
+
+1. **The FFI, 23's first bundle** (rulings 3-5). cffi 2.0.3 (BSD-2, Ashok
+   Nadkarni) on libffi 3.5.2 (MIT), static in both hosts and loaded only on
+   `package require cffi`, built without callbacks, so no executable memory.
+   Four machteld patches, recorded and tested: no callbacks; a loader that
+   searches only System32 or the given absolute path; strict UTF-16 text; no
+   debug sandbox command. The DLL rule: Windows' own by bare name from
+   System32 only; a program's own by absolute path, with its dependencies
+   from its folder and System32. cffi keeps its own commands, pages and error
+   codes, and the palette gains no command. With it, `docs\contract.md` gains
+   "Foreign calls" (no safe interpreters; a declaration is an unchecked
+   promise and a wrong one is undefined behaviour; cffi's error codes; the
+   loader rule; strict UTF-16 through W functions; no callbacks; who frees
+   memory and handles; blocking and crashes, with calls that may crash
+   belonging in a pool worker; no application manifest), creed 8 gains one
+   sentence, and direction.md's placement list gains "one synchronous call
+   into a Windows DLL with no lifetime beyond the call: declare it through
+   cffi in the program". Its prerequisites, R26 and R29, land in 22.
+2. **Warm pool workers** (in place of Thread): a pool takes successive
+   batches and single calls and announces completion through the event loop,
+   with an opaque token; Job Object kill, deadlines and memory caps stay. A
+   change to `tcl\pool.tcl` only.
+3. **Evented natives** (in place of Thread): evented variants of the commands
+   that block for long, whose native threads do the work and deliver
+   completion with `Tcl_ThreadQueueEvent`, never evaluating Tcl off the main
+   thread, with cancellation points. `http` first (HTTPS has no non-blocking
+   path today: no tls package, and Tcl's http refuses https), then `hash
+   file` and `dirs`/`links`; readiness events for `child`, `watch` and `pty`
+   may follow, replacing polling.
+4. **The name route** (ruling 17): a renamed copy of `machteld.exe` runs the
+   same-named script beside it.
+5. **Application metadata and icons, restored** (ruling 1): `git revert
+   0f62438` brings back the manifest's `metadata`, the icon reading,
+   `src\resource.c` and its registration, the metadata facts in `--plan`, and
+   their docs, tests and gate steps; then tests that feed the icon and PE
+   readers deliberately broken files. The branch `app-identity` keeps the
+   state before the removal (bec1289).
+6. **Console control** (4.3, item 3), with the console-control proposal,
+   `docs\proposals\console-ctrl`, as its design input.
+
+Rejected: Tcl's Thread package (2026-10-29) and a GUI twin of `machteld.exe`
+(ruling 18). Tcl stays 9.0.4 through 23 (ruling 9).

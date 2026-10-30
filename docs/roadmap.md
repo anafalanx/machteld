@@ -24,7 +24,8 @@ verification receipts, `manifest`, and embedded reference.
 through 11 include:
 
 - Explicit build/input identities, content-checked incremental caches, and
-  independent reference conversion caches and test groups.
+  test groups. The candidate's separate reference conversion caches are not
+  in 22, whose Tcl build reuses a whole reference generation by content.
 - Bounded worker frames, batches, and callbacks; one pool attempt by default;
   explicit replay-safe retries, cancellation/cleanup, and timeout contracts.
 - A responsive project-inspector example with application-owned worker roles,
@@ -353,15 +354,17 @@ formats numbers, so nothing observable changes.
 
 ## Candidate studies
 
-- **Console control ownership** (written up, with working code, in
-  `docs/proposals/console-ctrl/`). Two gaps about the
+- **Console control ownership**, a candidate for 23 (written up, with
+  working code, in `docs/proposals/console-ctrl/`). Two gaps about the
   console a launch gets: an inherited child cannot own Ctrl-C, because the
   host's default handler exits the host and the root job takes the child
   tree with it; and a captured launch from a host that has no console pops
   a visible empty console window per child. The first wants a `console
-  ctrl ignore|default` verb, the second `CREATE_NO_WINDOW` on the
-  pipe-and-NUL launch paths only. Raised by the `x` front door, which
-  needs a dispatched tool to decide what Ctrl-C means.
+  ctrl ignore|default` verb, with a bare `console ctrl` that reports the
+  mode in force, the second `CREATE_NO_WINDOW` on the pipe-and-NUL launch
+  paths only. A program that hands its console to another needs the first,
+  so that the child decides what Ctrl-C means. Nothing of it is in 22, and
+  like every candidate it must still pass the admission question.
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
 
