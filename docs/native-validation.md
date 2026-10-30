@@ -28,14 +28,16 @@ Build deliberately with `tools/dev.tcl build`, then run, on the build runtime:
 
 Use `--runtime`, `--cache`, and `--msys` to select existing artifacts. The
 group never rebuilds the runtime or regenerates documentation. It compiles
-small isolated fixtures, tests the selected executable's native lifetimes, and
-compiles and runs the undefined-behavior-trapped drivers after their trap
-canary. `--native-scaling` adds the observational worker-scaling lane, and
-`--native-analysis` the full harness, `tools/native-analysis.tcl`, which also
-runs alone and retains its compiler invocations, exit codes, logs, source
-hashes and capability results under a fresh `out/native-analysis-*/report.json`.
-`fast` includes the inexpensive JSON and filesystem adversarial regressions. A
-gate run without `--group` includes all groups but neither option;
+small isolated fixtures, tests the selected executable's native lifetimes and
+bounded worker scaling, compiles and runs the undefined-behavior-trapped
+drivers after their trap canary, and ends with the full harness,
+`tools/native-analysis.tcl`, which also runs alone and retains its compiler
+invocations, exit codes, logs, source hashes and capability results under a
+fresh `out/native-analysis-*/report.json`. The scaling lane's checks gate:
+every child stays live and closes, each pool width delivers 128 ordered
+replies, and the host's handle count returns near its baseline; its timings
+are recorded, not gated. `fast` includes the inexpensive JSON and filesystem
+adversarial regressions. A gate run without `--group` includes all groups;
 public-network and visible-GUI acceptance remain separate opt-ins.
 
 ## Coverage and its limits
@@ -60,8 +62,8 @@ array-bounds negative canaries must trap. Every native-validation run checks
 that canary and then runs, under those traps, the command-line/Unicode tests,
 JSON plus yyjson, the included hash/directory/store/HTTP boundary code, and
 the identity primitives that stamp wrapped executables. GCC's analyzer, the
-sanitizer probes, and the Tk and Unicode-path checks below run only in the full
-analysis (`--native-analysis`). Tcl/Tk and SQLite dependencies are not
+sanitizer probes, and the Tk and Unicode-path checks below run in the full
+analysis, the group's last step. Tcl/Tk and SQLite dependencies are not
 instrumented. No address-sanitizer, leak-sanitizer, or thread-sanitizer
 coverage is claimed. Process counters and explicit ownership assertions
 complement, but do not replace, those missing tools.

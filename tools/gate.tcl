@@ -9,7 +9,7 @@ package require machteld 0.21
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
 #         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty?
-#         ?--interactive-gui? ?--native-scaling? ?--native-analysis?
+#         ?--interactive-gui?
 #
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
 #
@@ -27,13 +27,22 @@ package require machteld 0.21
 #                        publication, VERSIONINFO, wrap and basekits, the README
 #                        examples wrapped, wrap inventory, application identity,
 #                        the examples packaged
-#   native-validation    native lifetime with the telemetry probe, and the
-#                        undefined-behavior-trapped drivers of
-#                        tools/native-analysis.tcl after their trap canary:
-#                        command line and its allocation failures, Unicode,
-#                        the JSON corpus and adversarial inputs, the native
-#                        filesystem and SQLite boundaries, the hash boundary,
-#                        and the identity primitives on the runtime's basekits
+#   native-validation    the candidate's group: native lifetime with the
+#                        telemetry probe; bounded worker scaling (every child
+#                        live and closed, 128 ordered pool replies and the
+#                        handle bound at widths 1, 8 and 32; its timings are
+#                        printed, not gated); the undefined-behavior-trapped
+#                        drivers of tools/native-analysis.tcl after their trap
+#                        canary, each under a deadline: command line and its
+#                        allocation failures, Unicode, the JSON corpus and
+#                        adversarial inputs, the native filesystem and SQLite
+#                        boundaries, the hash boundary, and the identity
+#                        primitives on the runtime's basekits; and last the
+#                        full harness of tools/native-analysis.tcl: GCC's
+#                        analyzer over src/*.c, the sanitizer probes, the
+#                        trapped drivers again, the Tk index formatter and
+#                        Unicode output paths, with a report under
+#                        out/native-analysis-<id>/
 #   reference-generator  two cold reference generations, byte for byte
 #   release              alone: the build, then every group above (the default)
 #
@@ -44,12 +53,6 @@ package require machteld 0.21
 #   --interactive-pty    (integration or release) the process lane's console I/O
 #   --interactive-gui    gui_widget_test, and the wrapped fixture's own window:
 #                        both open windows, so this is the owner's check only
-#   --native-scaling     (native-validation or release) the observational
-#                        worker-scaling lane, whose timings are not a gate
-#   --native-analysis    (native-validation or release) the full harness of
-#                        tools/native-analysis.tcl: GCC's analyzer, sanitizer
-#                        probes, the Tk formatter, Unicode output paths, and
-#                        a report under out/native-analysis-<id>/
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
 # under test, the Tcl-only checks on the dependency cache's static tclsh. The
@@ -87,7 +90,7 @@ proc ::gate::parse {argv} {
     variable groups
     set settings [dict create runtime [file join $root out machteld.exe] \
         cache [file join $root .cache deps] msys "" skipBuild 0 \
-        tls 0 pty 0 gui 0 scaling 0 analysis 0]
+        tls 0 pty 0 gui 0]
     set requested {}
     set given {}
     while {[llength $argv]} {
@@ -109,8 +112,6 @@ proc ::gate::parse {argv} {
             --public-tls {dict set settings tls 1}
             --interactive-pty {dict set settings pty 1}
             --interactive-gui {dict set settings gui 1}
-            --native-scaling {dict set settings scaling 1}
-            --native-analysis {dict set settings analysis 1}
             default {fail "unknown option $option"}
         }
     }
@@ -138,11 +139,6 @@ proc ::gate::parse {argv} {
     set chosen [dict get $settings groups]
     if {([dict get $settings tls] || [dict get $settings pty]) && "integration" ni $chosen} {
         fail "--public-tls and --interactive-pty need the integration or release group"
-    }
-    foreach option {scaling analysis} {
-        if {[dict get $settings $option] && "native-validation" ni $chosen} {
-            fail "--native-$option needs the native-validation or release group"
-        }
     }
     return $settings
 }
@@ -277,16 +273,16 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native adversarial inputs" native_adversarial_test.tcl
                 addLane steps $runtime native-validation "native filesystem boundaries" native_filesystem_test.tcl
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
-                if {[dict get $settings scaling]} {
-                    addLane steps $runtime native-validation "native scaling (observational)" native_scaling_test.tcl $probe $processFixture
-                }
+                # Its checks gate; only its timings are observations.
+                addLane steps $runtime native-validation "native scaling" native_scaling_test.tcl $probe $processFixture
                 foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
                     addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
                 }
-                if {[dict get $settings analysis]} {
-                    addStep steps native-validation "native analysis (full harness)" [list $driver \
-                        [file join $root tools native-analysis.tcl] --cache $cache --msys $msys]
-                }
+                # The whole harness, as the candidate's group ran it: it runs
+                # the trapped drivers once more, under its own source-drift
+                # check and into its own report.
+                addStep steps native-validation "native analysis (full harness)" [list $driver \
+                    [file join $root tools native-analysis.tcl] --cache $cache --msys $msys]
             }
             reference-generator {
                 addStep steps reference-generator "reference generator" [list $driver \

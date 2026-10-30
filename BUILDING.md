@@ -58,10 +58,12 @@ PowerShell.
    (`tools\release.tcl`, which runs `tools\build.tcl` on the cache's Tcl), and
    publishes `out\machteld.exe`. It then runs every test group (fast,
    integration, packaging, native-validation and reference-generator), the
-   lanes on that executable. The first failure stops it, and a green run ends
-   with `ALL TEST LANES PASSED` and exit code 0. It names the tested executable
-   by version and SHA-256, and fails if the file changes during the run. A
-   full run takes about twenty minutes on the build PC.
+   lanes on that executable; native-validation ends with the full native
+   analysis, `tools\native-analysis.tcl`, which writes its report to a fresh
+   `out\native-analysis-<id>\`. The first failure stops it, and a green run
+   ends with `ALL TEST LANES PASSED` and exit code 0. It names the tested
+   executable by version and SHA-256, and fails if the file changes during
+   the run. A full run takes about twenty-five minutes on the build PC.
    - `--skip-build` tests `out\machteld.exe` as it is, and `--skip-build
      --runtime FILE` another executable as it is. The gate's build goes to
      `out\machteld.exe` only: it refuses `--runtime` when it would build,
@@ -71,9 +73,7 @@ PowerShell.
      MSYS2.
    - Off by default, and the owner's to run: `--public-tls` (it reaches public
      hosts), `--interactive-pty` (console input and output) and
-     `--interactive-gui` (it opens windows). `--native-scaling` measures
-     without gating; `--native-analysis` adds the full native harness and
-     writes its report under `out\`.
+     `--interactive-gui` (it opens windows).
 2. When the dependency cache is cold or invalidated, build it alone first; Tcl
    and Tk are configured and built in MSYS2's bash, which takes several
    minutes:

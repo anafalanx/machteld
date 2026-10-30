@@ -16,8 +16,8 @@ package require machteld 0.21
 # and PE bytes wrap stamps (test/fixtures/identity_driver.c, which nothing ran
 # in the candidate). Tcl/Tk and SQLite are linked as built, not instrumented.
 #
-# The full harness is diagnostic rather than a gate: the gate's
-# --native-analysis option runs it, or it runs alone,
+# The full harness is the last step of the gate's native-validation group, as
+# tools/native-analysis.ps1 was of the candidate's, and it also runs alone,
 #
 #     machteld.exe tools/native-analysis.tcl ?--cache DIR? ?--msys DIR? ?--output DIR?
 #
@@ -72,12 +72,15 @@ proc ::na::layout {cache} {
         tclstub [file join $prefix lib libtclstub.a]
 }
 
-# The UB-trapped drivers as steps (label, argv, and expect and timeout where
-# they differ from exit 0 and no deadline), their products in out. Given the
-# runtime under test, the identity primitives come too: identity_driver.c
-# with src/resource.c, which parses the ICO and PE bytes wrap stamps, over
-# test/identity_native_test.tcl and that runtime's packaged basekits (the
-# step's extract, put in place before it and deleted after with its work).
+# The UB-trapped drivers as steps (label, argv, timeout, and expect where it
+# differs from exit 0), their products in out. Every step has a deadline, as
+# every invocation of the candidate's harness had: 180 s, and 30 s for a fault
+# the canary must trap; a hung driver or compiler fails its step instead of
+# hanging the gate. Given the runtime under test, the identity primitives come
+# too: identity_driver.c with src/resource.c, which parses the ICO and PE bytes
+# wrap stamps, over test/identity_native_test.tcl and that runtime's packaged
+# basekits (the step's extract, put in place before it and deleted after with
+# its work).
 proc ::na::trappedSteps {layout gcc out {runtime ""}} {
     variable root
     variable trapped
@@ -143,7 +146,12 @@ proc ::na::trappedSteps {layout gcc out {runtime ""}} {
             argv [list $identity [file join $test identity_native_test.tcl] $console $gui $work] \
             extract [list basekit/console.exe $console basekit/gui.exe $gui] cleanup [list $console $gui $work]]
     }
-    return $steps
+    lmap step $steps {
+        if {![dict exists $step timeout]} {
+            dict set step timeout 180s
+        }
+        set step
+    }
 }
 
 # ---- the full harness ----
@@ -344,8 +352,7 @@ proc ::na::main {argv} {
         # The trapped drivers, the gate's own steps, each after the canary.
         foreach step [trappedSteps [layout $cache] $gcc $output] {
             set expect [expr {[dict exists $step expect] ? [dict get $step expect] : 0}]
-            set timeout [expr {[dict exists $step timeout] ? [dict get $step timeout] : "180s"}]
-            runOk [regsub -all { } [dict get $step label] -] [dict get $step argv] $expect $timeout
+            runOk [regsub -all { } [dict get $step label] -] [dict get $step argv] $expect [dict get $step timeout]
         }
         dict set capabilities undefined_trap {S {supported; signed-overflow and array-bounds negative canaries trapped}}
 
