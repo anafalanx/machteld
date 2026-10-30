@@ -359,9 +359,9 @@ previews that inventory without writing an executable. Without a manifest,
 directory wrapping includes every file, hidden assets and unrelated secrets
 alike: do not wrap a repository root. It stores selected assets
 under an application subtree, validates the staged entry, publishes atomically,
-and produces a console or GUI host with the same machine-control/data API,
-static SQLite, Tcl/Tk libraries, license notices, and version. The built-in
-reference is omitted by default; `--with-docs` includes the full verified corpus.
+and produces a console or GUI host with the same palette, static SQLite,
+Tcl/Tk libraries, license notices, and version. The built-in reference is
+omitted by default; `--with-docs` includes the full verified corpus.
 Application documentation and assets are unaffected. Basekits are not copied
 recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).

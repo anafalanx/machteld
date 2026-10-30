@@ -9,11 +9,14 @@ tags: [machteld, direction, scope]
 
 The product sentence remains the decision filter:
 
-> machteld is a compact Windows machine-control runtime.
+> machteld is a compact Windows runtime for Tcl/Tk 9 programs. It is strongest
+> at what tools do: supervised processes and terminals, files, HTTP, JSON,
+> hashing and SQLite, in one executable that installs nothing.
 
-It is Vincent Vercauteren's personal platform. Other users are welcome, but
-growth in adoption is not the acceptance criterion for a feature. The repository
-remains private; integration with kuu is not current work.
+It is Vincent Vercauteren's own runtime, and it serves tools first. Other users
+are welcome, but growth in adoption is not the acceptance criterion for a
+feature. The repository remains private; integration with kuu is not current
+work.
 
 It runs explicitly opted-in Tcl programs, exposes a small native/Tcl palette,
 and packages those programs without changing their API. A proposed feature must
@@ -25,11 +28,11 @@ Current decisions:
 - A direct program file beginning with parsed `package require machteld` is the
   only general program entry; `.tcl` is conventional, not required.
 - `wrap` is subordinate deployment machinery and accepts the same opt-in.
-- Every full or wrapped host exposes one Machteld version and the same
-  machine-control/data API, including static SQLite `store`. The distribution
-  includes the complete exact-version reference corpus; wrapped tools omit it
-  unless `--with-docs` is requested. Runtime libraries and license notices remain
-  included. Nested wrapping remains distribution-only.
+- Every full or wrapped host exposes one Machteld version and the same palette,
+  including static SQLite `store`. The distribution includes the complete
+  exact-version reference corpus; wrapped tools omit it unless `--with-docs` is
+  requested. Runtime libraries and license notices remain included. Nested
+  wrapping remains distribution-only.
 - Documentation is a runtime interface: offline, versioned, machine-readable,
   provenance-bearing, and equally discoverable by people and agents.
 - Native and Tcl manifest facts are explicit metadata, never inferred from
@@ -75,8 +78,8 @@ Standing architectural decisions:
 
 Admission questions, in order:
 
-1. Is this a Windows machine-control primitive or a composition needed by many
-   Machteld programs?
+1. Does this strengthen what machteld is strongest at, for many programs,
+   beyond what they can do in Tcl?
 2. Can ordinary Tcl already express it clearly and safely?
 3. Does it preserve deterministic values, structured errors, and bounded life?
 4. Can its runtime behavior be included identically in direct, console-wrapped,

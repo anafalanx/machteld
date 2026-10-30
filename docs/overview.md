@@ -7,19 +7,21 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-machteld 22, in preparation, is a single-executable Windows runtime for small
-machine-control programs. It combines Tcl/Tk 9.0.4 with native supervision,
-ConPTY, filesystem observation, WinHTTP, cryptography, JSON, and SQLite. The
-surface stays Tcl-like: commands return values, options are explicit, and
-failures have trap-able codes.
+machteld 22, in preparation, is a compact Windows runtime for Tcl/Tk 9
+programs. It is strongest at what tools do: supervised processes and
+terminals, files, HTTP, JSON, hashing and SQLite, in one executable that
+installs nothing. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY,
+filesystem observation, WinHTTP, cryptography, JSON, and SQLite. The surface
+stays Tcl-like: commands return values, options are explicit, and failures have
+trap-able codes.
 
-It is Vincent Vercauteren's personal platform. Use by others is welcome, but
-adoption, a plugin marketplace, and integration with another agent platform are
-not current product goals. This checkout contains 22 in preparation, with the
-0.22 candidate's stabilization work, not a completed release. The historical
-signed release is preserved separately. Build identities, artifact hashes, and
-verification receipts distinguish artifacts that share a version while the
-release gate is in progress.
+It is Vincent Vercauteren's own runtime, and it serves tools first. Use by
+others is welcome, but adoption, a plugin marketplace, and integration with
+another agent platform are not current product goals. This checkout contains
+22 in preparation, with the 0.22 candidate's stabilization work, not a
+completed release. The historical signed release is preserved separately.
+Build identities, artifact hashes, and verification receipts distinguish
+artifacts that share a version while the release gate is in progress.
 
 It is not an environment-specific resolver, package manager, command catalogue,
 activity recorder, or replacement shell. It does not guess that an arbitrary Tcl file wants Machteld.
@@ -46,13 +48,12 @@ The palette has four layers:
    explain, and ship them.
 
 `wrap` is subordinate to this runtime boundary. It accepts only an opted-in
-Machteld entry and produces a console or GUI exe with the same machine-control
-and data API and version, including static SQLite, runtime libraries, and license
-notices. The complete offline Machteld/Tcl/Tk reference corpus stays in the
-distribution and is omitted from wrapped tools by default; `--with-docs` embeds
-it when wanted. Application documentation and assets are unaffected. Nested
-wrapping remains in the distribution host. It is a deployment form, not a second
-language.
+Machteld entry and produces a console or GUI exe with the same API and version,
+including static SQLite, runtime libraries, and license notices. The complete
+offline Machteld/Tcl/Tk reference corpus stays in the distribution and is
+omitted from wrapped tools by default; `--with-docs` embeds it when wanted.
+Application documentation and assets are unaffected. Nested wrapping remains in
+the distribution host. It is a deployment form, not a second language.
 
 The default model is linear and explicitly owned: operations use visible
 deadlines where their command offers one, supervised children and PTYs

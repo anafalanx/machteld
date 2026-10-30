@@ -90,9 +90,11 @@ the Machteld command and packaging references.
 
 ## When the palette is not enough
 
-Machteld is a personal platform with a deliberately small palette. When a
-concrete, authorized task needs more, an application may use ordinary Tcl,
-explicitly deployed extensions, or an external program beside its executable.
+Machteld is a compact runtime with a deliberately small palette, strongest at
+what tools do: supervised processes and terminals, files, HTTP, JSON, hashing
+and SQLite. When a concrete, authorized task needs more, an application may use
+ordinary Tcl, explicitly deployed extensions, or an external program beside its
+executable.
 This is a manual extension pattern, not a built-in resolver or a reason to
 install software or broaden the user's task without asking. Apply two rules:
 
