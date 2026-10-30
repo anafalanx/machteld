@@ -51,10 +51,10 @@ the engine-bound column library were removed. They leave no compatibility
 command or migration layer. The current work is machteld 22, which contains the
 0.22 candidate's stabilization and is not yet released or signed; from 22 on the
 version is one natural number, and only a change to the runtime makes a new
-one. Explicit wrapper inventories, application identity, and native hardening
-must not be attributed retroactively to the historical signed artifact.
-Acceptance of 22 is current work; signing and publication require a separate
-decision.
+one. Explicit wrapper inventories and native hardening must not be attributed
+retroactively to the historical signed artifact; application identity for
+wrapped tools is not in 22, and comes in 23. Acceptance of 22 is current work;
+signing and publication require a separate decision.
 
 Standing architectural decisions:
 

@@ -128,7 +128,7 @@ check {the packaging group compiles only the process fixture} \
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 7}]
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 6}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
 
@@ -167,8 +167,7 @@ check {release runs the scaling lane and the full native analysis, as the candid
 
 # The trapped drivers: the canary first, its two faults ending in
 # STATUS_ILLEGAL_INSTRUCTION under a deadline, every driver compiled with the
-# traps and -Werror, every boundary the candidate's analysis drove, and the
-# identity primitives on basekits of the runtime under test.
+# traps and -Werror, and every boundary the candidate's analysis drove.
 set nvLabels [labels $nvPlan]
 set faults [lmap step $nvPlan {if {![string match {UB-trap canary traps *} [dict get $step label]]} continue; set step}]
 check {native validation shows the traps fire before any trapped driver runs} \
@@ -181,7 +180,7 @@ check {native validation shows the traps fire before any trapped driver runs} \
 # candidate's harness did (tools/native-analysis.ps1: 180 s, and 15 s for its
 # negative canaries), and the gate's plan carries each one to run -timeout.
 set trapped [::na::trappedSteps [::na::layout [file join $root .cache deps]] \
-    C:/fake-msys/ucrt64/bin/gcc.exe [file join $root out test] [file join $root out machteld.exe]]
+    C:/fake-msys/ucrt64/bin/gcc.exe [file join $root out test]]
 set wrongDeadlines {}
 foreach step $trapped {
     set want [expr {[string match {UB-trap canary traps *} [dict get $step label]] ? "30s" : "180s"}]
@@ -209,14 +208,10 @@ foreach step $nvPlan {
     if {![string match {trapped *} [dict get $step label]] || [string match {*: compile} [dict get $step label]]} continue
     lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
 }
-check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, hash and identity boundaries} \
+check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native and hash boundaries} \
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
-        native-boundary-trap.exe hash-boundary-trap.exe {identity-trap.exe identity_native_test.tcl}]}] $driven
-set identityRun [lindex $nvPlan [lsearch -exact $nvLabels {trapped identity}]]
-check {the trapped identity driver gets both basekits and a work folder, all deleted after it} \
-    [expr {[dict keys [dict get $identityRun extract]] eq {basekit/console.exe basekit/gui.exe} &&
-        [dict get $identityRun cleanup] eq [lrange [dict get $identityRun argv] 2 4]}]
+        native-boundary-trap.exe hash-boundary-trap.exe]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 check {the window-opening GUI lane runs only behind --interactive-gui, last} \
     [expr {"gui_widget_test.tcl" ni [scripts $releasePlan] &&
@@ -254,8 +249,7 @@ proc mentions {path name} {
     try { expr {[string first $name [read $channel]] >= 0} } finally { close $channel }
 }
 set inner [dict create gui_model_fairness_test.tcl test/gui_model_test.tcl \
-    protocol_fairness_test.tcl test/protocol_test.tcl identity_native_test.tcl test/app_identity_test.tcl \
-    tk_index_format_test.c tools/native-analysis.tcl]
+    protocol_fairness_test.tcl test/protocol_test.tcl tk_index_format_test.c tools/native-analysis.tcl]
 set unwired {}
 foreach path [lsort [concat [glob -directory [file join $root test] *_test.tcl *.c] \
         [glob -directory [file join $root test fixtures] *.c]]] {

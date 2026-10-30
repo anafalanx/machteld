@@ -7,9 +7,9 @@ commands found in the selected directory or changes its files.
 
 Use the current executable in `out/`, machteld 22 in preparation, not the older
 signed `dist/0.21` artifact. It reports runtime version `22`; the manifest-
-selected packaging and application metadata shown here are unavailable in the
-older release. Build it using the repository README before running this
-example; acceptance of 22 is still in progress.
+selected packaging shown here is unavailable in the older release. Build it
+using the repository README before running this example; acceptance of 22 is
+still in progress.
 
 From the repository root in PowerShell:
 
@@ -63,8 +63,7 @@ rollback mechanism; this particular worker is deliberately read-only.
 ## Package deliberately
 
 Use a new dedicated stage containing only the five listed payload files. The
-manifest is inert data outside that stage; it selects those files and declares
-the application's Windows identity independently from the Machteld runtime.
+manifest is inert data outside that stage; it selects exactly those files.
 The README, test scripts, and manifest itself are not executable payloads.
 
 ```powershell
@@ -81,7 +80,8 @@ if it already exists; do not blindly delete or wrap the whole repository. Use
 `--console` instead for a console-subsystem executable. Reference documentation
 is omitted by default; explicitly add `--with-docs` to both commands if wanted.
 The executable is the complete Inspector deployment: no adjacent worker scripts
-or DLLs are required. Application metadata is not an Authenticode signature.
+or DLLs are required. It keeps the GUI host's Windows identity; an
+application's own name, version and icon come in 23.
 
 For automation without opening any window:
 

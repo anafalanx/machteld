@@ -25,9 +25,13 @@ released, and includes its changes:
 | Behavior | Signed 0.21 release | 22, in preparation |
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
-| Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, metadata and icons |
+| Explicit wrap inventory | Not available | `--manifest` and `--plan` |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
+
+One part of the candidate is not in 22: application identity, the metadata and
+icons it let `wrap` give a wrapped tool, which the owner moved to 23 on
+2026-10-30.
 
 22 is **not a released or signed artifact**. Before it is released it must pass
 clean reconstruction, artifact comparison, and the acceptance matrix; signing
@@ -183,10 +187,9 @@ an executable. Without a manifest, directory wrapping includes all files,
 completed archive are checked before atomic publication, but sources must
 remain stable; this is not a hostile-filesystem snapshot or sandbox.
 
-Optional metadata sets the application's name, version, description,
-authorship, and icon without a compiler. Application identity is separate from
-Machteld's runtime identity; a publisher string is not an Authenticode
-signature, and signing is never automatic. See [packaging](docs/packaging.md),
+A wrapped tool keeps its basekit's Windows identity, the version information
+of machteld's console or GUI host; a tool's own name, version, authorship and
+icon come in 23. Signing is never automatic. See [packaging](docs/packaging.md),
 the [GUI example](examples/project-inspector/README.md), and the
 [adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
 

@@ -30,8 +30,8 @@ through 11 include:
 - A responsive project-inspector example with application-owned worker roles,
   model tests, and separately recorded earlier GUI acceptance.
 - Optional wrapped documentation, explicit application payload manifests and
-  no-write previews, compiler-free application metadata/icons, and an adjacent
-  DLL deployment example with a license/hash inventory.
+  no-write previews, and an adjacent DLL deployment example with a
+  license/hash inventory.
 - Native ownership, strict UTF-8/JSON, path-rejection, and boundary fixes;
   repeatable analyzer, adversarial, lifecycle, and scaling checks with stated
   instrumentation gaps. See [native validation](native-validation.md).
@@ -42,6 +42,10 @@ To these, 22 adds the build in Tcl: the release build, the dependency
 bootstrap, the reference generator, the development loop, the release gate and
 every test driver are Tcl programs that run on the build runtime, and no
 PowerShell remains.
+
+Not in 22: application metadata and icons for wrapped tools, moved to 23 by
+the owner on 2026-10-30; the explicit file list (`--manifest`) and `--plan`
+stay.
 
 Evidence and remaining limits of the stabilization are recorded in
 `tools/stabilization.json` in the source checkout; exact artifact receipts live

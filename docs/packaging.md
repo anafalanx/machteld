@@ -11,8 +11,10 @@ Machteld has one program boundary and two deployment forms.
 
 The workflow below describes machteld 22, in preparation and not yet released.
 The historical signed release is unchanged and does not provide the newer
-`--manifest`, `--plan`, or application-identity features. Inspect the selected executable's `manifest` and artifact identity
-before selecting packaging options.
+`--manifest` and `--plan` features. Application identity, a wrapped tool's own
+Windows name, version, authorship and icon, is not part of 22 (see Application
+identity below). Inspect the selected executable's `manifest` and artifact
+identity before selecting packaging options.
 
 ## Direct entry
 
@@ -91,11 +93,6 @@ The `--manifest` input is UTF-8 Tcl dictionary **data**, not sourced Tcl code:
 ```tcl
 schema 1
 files {main.tcl lib/jobs.tcl assets/.theme}
-metadata {
-    name {My Project Tool}
-    version 1.0
-    description {Local project administration}
-}
 ```
 
 `files` names 1–10000 regular files relative to the input directory. It does not
@@ -103,7 +100,8 @@ expand globs, recursively select directories, discover `source`/`package require
 dependencies, or automatically add the entry. List the selected entry yourself.
 Paths cannot escape the input. Unknown or duplicate manifest keys, colliding
 names, and missing assets fail before publication. The file is limited to 1 MiB.
-An omitted or empty metadata dict keeps the existing basekit Windows resources.
+The keys are `schema` and `files`; a `metadata` key is refused like any unknown
+key, since application metadata is not part of 22.
 
 For example, from this checkout in PowerShell, prepare a fresh Inspector stage:
 
@@ -121,16 +119,15 @@ later runs, use another fresh stage or deliberately review the existing one.
 `--plan` writes neither a work directory nor an executable. It returns the exact
 application record that a wrap of unchanged inputs will embed as archive-root
 `app-info.dict`: selected file paths, byte counts, SHA-256 hashes, entry, host,
-documentation choice, application metadata, and separate runtime identity.
-It still requires `-o`, whose basename supplies the application's internal and
-original filenames. The actual wrap revalidates the selection; preview does not
-reserve or lock files.
+documentation choice, and separate runtime identity. It still requires `-o`,
+and checks the output as the wrap would. The actual wrap revalidates the
+selection; preview does not reserve or lock files.
 
-Selected file identities and hashes, manifest bytes, and icon bytes are checked
-again before publishing. Staged content and the completed ZIP inventory are
-verified too. Whole-tree wrapping additionally checks for additions/removals.
-Detected source changes, interrupted candidate creation, malformed resources,
-or destination contention do not replace the previous good executable. No
+Selected file identities and hashes and the manifest bytes are checked again
+before publishing. Staged content and the completed ZIP inventory are verified
+too. Whole-tree wrapping additionally checks for additions/removals. Detected
+source changes, interrupted candidate creation, or destination contention do
+not replace the previous good executable. No
 claim is made of a transactionally locked snapshot of a hostile mutable source
 tree: keep build inputs stable while wrapping.
 
@@ -190,9 +187,9 @@ without the reference pack.
 The main Machteld host carries Windows VERSIONINFO derived from its canonical
 version: product and file version `22` (22.0.0.0 as Windows' fixed version),
 the Machteld product identity, and Vincent Vercauteren as author, publisher,
-and copyright holder. Wrapped programs inherit that basekit metadata unless
-they explicitly supply application metadata as described below. Tcl's embedded configuration points to the self-mounted
-payload; build-machine paths are absent from the artifact.
+and copyright holder. Wrapped programs inherit their basekit's metadata, the
+console or GUI host's VERSIONINFO. Tcl's embedded configuration points to the
+self-mounted payload; build-machine paths are absent from the artifact.
 
 `--console` is the default and provides standard channels. `--gui` selects the
 Windows GUI subsystem and does not create a console; use `log -file` or a Tk
@@ -214,47 +211,16 @@ assets; do not perform a large wrap inside a responsive Tk callback.
 
 ## Application identity
 
-An explicit manifest metadata dict must provide `name` and `version`.
-`description` defaults to the name. `author`, `publisher`, and `copyright` are
-optional and default to empty, never inferred from Machteld, the source folder,
-Git settings, or the current account. `icon` optionally names a Windows `.ico`
-file relative to the manifest's directory (or an absolute path). It is not
-automatically copied into `app/`; list it as an asset too if the application
-needs to read it at runtime.
-
-```tcl
-metadata {
-    name {Project Inspector}
-    description {Read-only directory inspection}
-    version 1.0
-    author {Vincent Vercauteren}
-    publisher {Vincent Vercauteren}
-    copyright {Copyright 2026 Vincent Vercauteren}
-    icon assets/inspector.ico
-}
-```
-
-This fragment belongs inside a complete manifest, and its icon must exist.
-Ordinary wrapping requires no compiler, PowerShell resource helper, or external
-resource editor. A small built-in native stamper validates the supplied Unicode,
-numeric version, and icon before changing the disposable bare-host copy. It
-preserves other host resources, then the ZIP payload is attached and verified.
-It does not modify the running host or patch an already signed executable.
-
-Versions have one to four decimal components, each in 0–65535, at most 23
-characters. Windows' fixed version is padded to four components, while the
-authored string is preserved (for example, `1.0` is not rewritten as `1.0.0.0`).
-Text fields are bounded to 1024 UTF-16 code units and reject NUL, control
-characters, and malformed Unicode. Icons are limited to 16 MiB, 1–256 images,
-and valid supported image data with dimensions in 1–256 pixels.
-
-Application resources and `app-info.dict` describe the application. `version`
-and `package require machteld` still describe the unchanged runtime API.
-Machteld-specific resource fields identify the runtime, and its existing
-`build-info.dict` is copied unchanged when available. These descriptive records
-do not authenticate the publisher. There is no automatic signing: any signing
-must happen separately, after packaging has finished, and hashes must then be
-computed from the signed bytes.
+Application identity is not part of 22: the 0.22 candidate's manifest
+`metadata`, which gave a wrapped tool its own Windows name, version,
+description, authorship and icon, moved to 23 by the owner's ruling of
+2026-10-30. The explicit file list (`--manifest`) and `--plan` stay. A wrapped
+tool keeps its basekit's Windows resources, and its `app-info.dict` records no
+application metadata. `version` and `package require machteld` describe the
+runtime API, and the runtime's `build-info.dict` is copied unchanged when
+available. These descriptive records do not authenticate the publisher. There
+is no automatic signing: any signing must happen separately, after packaging
+has finished, and hashes must then be computed from the signed bytes.
 
 ## External DLLs
 

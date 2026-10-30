@@ -480,7 +480,10 @@ proc ::machteld::_wrap_manifest {path} {
     if {[string index $text 0] eq "\ufeff"} { set text [string range $text 1 end] }
     set data [_wrap_data_dict $text manifest]
     foreach key [dict keys $data] {
-        if {$key ni {schema files metadata}} { Fail WRAP badvalue "wrap: unknown manifest key $key" }
+        if {$key eq "metadata"} {
+            Fail WRAP badvalue "wrap: unknown manifest key metadata: application metadata is not part of this version of machteld"
+        }
+        if {$key ni {schema files}} { Fail WRAP badvalue "wrap: unknown manifest key $key" }
     }
     if {![dict exists $data schema] || [dict get $data schema] ne "1" || ![dict exists $data files]} {
         Fail WRAP badvalue "wrap: manifest requires schema 1 and an explicit files list"
@@ -488,14 +491,7 @@ proc ::machteld::_wrap_manifest {path} {
     if {[catch {llength [dict get $data files]} count] || $count < 1 || $count > 10000} {
         Fail WRAP badvalue "wrap: manifest files must list between 1 and 10000 files"
     }
-    set metadata {}
-    if {[dict exists $data metadata]} { set metadata [_wrap_data_dict [dict get $data metadata] metadata] }
-    foreach key [dict keys $metadata] {
-        if {$key ni {name version description author publisher copyright icon}} {
-            Fail WRAP badvalue "wrap: unknown application metadata key $key"
-        }
-    }
-    return [dict create files [dict get $data files] metadata $metadata snapshot $snapshot]
+    return [dict create files [dict get $data files] snapshot $snapshot]
 }
 
 proc ::machteld::_wrap_tree_files {root {relative ""} {cacheName ""}} {
@@ -565,7 +561,7 @@ proc ::machteld::_wrap_copy_assets {records destination} {
     }
 }
 
-proc ::machteld::_wrap_verify_inputs {sourceRoot sourceIdentity selected records wholeTree manifestSnapshot iconSnapshot} {
+proc ::machteld::_wrap_verify_inputs {sourceRoot sourceIdentity selected records wholeTree manifestSnapshot} {
     _wrap_no_links $sourceRoot
     if {[_canon_key [canon $sourceRoot]] ne $sourceIdentity} {
         Fail WRAP badvalue "wrap: input directory was replaced while packaging"
@@ -578,10 +574,8 @@ proc ::machteld::_wrap_verify_inputs {sourceRoot sourceIdentity selected records
             Fail WRAP badvalue "wrap: selected asset changed while packaging: $name"
         }
     }
-    foreach snapshot [list $manifestSnapshot $iconSnapshot] {
-        if {$snapshot ne "" && ![_wrap_same_snapshot $snapshot [_wrap_snapshot [dict get $snapshot path]]]} {
-            Fail WRAP badvalue "wrap: manifest or icon changed while packaging"
-        }
+    if {$manifestSnapshot ne "" && ![_wrap_same_snapshot $manifestSnapshot [_wrap_snapshot [dict get $manifestSnapshot path]]]} {
+        Fail WRAP badvalue "wrap: manifest changed while packaging"
     }
 }
 
@@ -678,7 +672,7 @@ proc ::machteld::wrap {args} {
         }
     }
     set sourceCanon [canon $sourceRoot]
-    set manifestSnapshot {}; set iconSnapshot {}; set nativeMetadata {}; set metadata {}
+    set manifestSnapshot {}
     if {$manifestSet} {
         if {$manifest eq ""} { Fail WRAP badvalue "wrap: --manifest requires a file path" }
         _wrap_no_links $manifest
@@ -686,7 +680,6 @@ proc ::machteld::wrap {args} {
         set specification [_wrap_manifest $manifest]
         set manifestSnapshot [dict get $specification snapshot]
         set selected [dict get $specification files]
-        set metadata [dict get $specification metadata]
     } elseif {$single} { set selected [list [file tail $entryPath]]
     } else { set selected [_wrap_tree_files $sourceRoot] }
     set records [_wrap_inventory $sourceRoot $selected [dict get $sourceCanon path]]
@@ -722,45 +715,16 @@ proc ::machteld::wrap {args} {
         }
     }
 
-    if {$metadata ne ""} {
-        foreach key {name version} {
-            if {![dict exists $metadata $key] || [dict get $metadata $key] eq ""} {
-                Fail WRAP badvalue "wrap: application metadata requires name and version"
-            }
-        }
-        if {[info commands ::machteld::ValidateIdentity] eq "" || [info commands ::machteld::StampIdentity] eq ""} {
-            Fail WRAP unsupported "wrap: this host lacks application identity support"
-        }
-        set nativeMetadata $metadata
-        dict set nativeMetadata internal_name [file rootname [file tail $out]]
-        dict set nativeMetadata original_filename [file tail $out]
-        if {[dict exists $metadata icon] && [dict get $metadata icon] ne ""} {
-            set icon [dict get $metadata icon]
-            if {[file pathtype $icon] eq "relative"} { set icon [file join [file dirname $manifest] $icon] }
-            _wrap_no_links $icon
-            set icon [file normalize $icon]
-            if {[file isfile $icon] && [file size $icon] > 16777216} { Fail WRAP badvalue "wrap: icon exceeds 16 MiB" }
-            set iconSnapshot [_wrap_snapshot $icon]
-            dict set nativeMetadata icon $icon
-        }
-        set nativeMetadata [::machteld::ValidateIdentity $nativeMetadata]
-        set metadata $nativeMetadata
-        dict set metadata icon [expr {$iconSnapshot eq "" ? {} : [dict create \
-            bytes [dict get $iconSnapshot bytes] sha256 [dict get $iconSnapshot sha256]]}]
-    }
-    if {[info exists outCanon]} {
-        foreach snapshot [list $manifestSnapshot $iconSnapshot] {
-            if {$snapshot ne "" && [_canon_key $outCanon] eq [dict get $snapshot identity]} {
-                Fail WRAP badvalue "wrap: output cannot overwrite its manifest or icon input"
-            }
-        }
+    if {[info exists outCanon] && $manifestSnapshot ne "" &&
+            [_canon_key $outCanon] eq [dict get $manifestSnapshot identity]} {
+        Fail WRAP badvalue "wrap: output cannot overwrite its manifest input"
     }
     set files {}
     dict for {name snapshot} $records {
         dict set files $name [dict create bytes [dict get $snapshot bytes] sha256 [dict get $snapshot sha256]]
     }
     set appInfo [dict create schema 1 entry $archiveEntry host [expr {$gui ? "gui" : "console"}] \
-        with_docs $withDocs metadata $metadata runtime [dict create name Machteld version [version] \
+        with_docs $withDocs runtime [dict create name Machteld version [version] \
         author {Vincent Vercauteren}] files $files]
 
     if {[info commands ::machteld::EntryCheck] eq "" ||
@@ -797,7 +761,7 @@ proc ::machteld::wrap {args} {
     }
     if {$plan} {
         _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records \
-            [expr {!$single && !$manifestSet}] $manifestSnapshot $iconSnapshot
+            [expr {!$single && !$manifestSet}] $manifestSnapshot
         return $appInfo
     }
 
@@ -837,18 +801,6 @@ proc ::machteld::wrap {args} {
 
         set tmpbare [file join $work bare.exe]
         file copy $bare $tmpbare
-        if {$nativeMetadata ne ""} {
-            if {$iconSnapshot ne ""} {
-                set stagedIcon [file join $work identity.ico]
-                file copy [dict get $iconSnapshot path] $stagedIcon
-                if {[file size $stagedIcon] != [dict get $iconSnapshot bytes] ||
-                        [hash file sha256 $stagedIcon] ne [dict get $iconSnapshot sha256]} {
-                    Fail WRAP badvalue "wrap: icon changed while being staged"
-                }
-                dict set nativeMetadata icon $stagedIcon
-            }
-            ::machteld::StampIdentity $tmpbare $nativeMetadata
-        }
         set candidate [file join $work candidate.exe]
         set stagedApp [_wrap_archive_inventory $app]
         if {[lsort [dict keys $stagedApp]] ne [lsort [dict keys $files]]} {
@@ -863,7 +815,7 @@ proc ::machteld::wrap {args} {
         zipfs lmkimg $candidate [::machteld::_zip_entries $stage] {} $tmpbare
         _wrap_verify_candidate $candidate $stagedInventory
         _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records \
-            [expr {!$single && !$manifestSet}] $manifestSnapshot $iconSnapshot
+            [expr {!$single && !$manifestSet}] $manifestSnapshot
         ::machteld::Publish $candidate $out
     } on error {msg opts} {
         set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]

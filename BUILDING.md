@@ -19,8 +19,8 @@ PowerShell.
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
      `dev.tcl`, `reference.tcl` (the reference generator) and
      `native-analysis.tcl`, and the driver tests: entry, package and
-     publication, VERSIONINFO, reference generator and serializer, application
-     identity, the development cache and the gate's own;
+     publication, VERSIONINFO, reference generator and serializer, the
+     development cache and the gate's own;
    - the dependency cache's static Tcl, `.cache\deps\prefix\bin\tclsh90s.exe`,
      runs `tools\build.tcl`, which compiles, links and packages both hosts
      (with `buildlib.tcl`, `package.tcl`, `genmanifest.tcl` and

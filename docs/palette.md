@@ -366,11 +366,11 @@ Application documentation and assets are unaffected. Basekits are not copied
 recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).
 
-Manifest metadata can set the application's Windows name, version, description,
-authorship fields, and icon without a compiler. It stays separate from the
-runtime version and Vincent Vercauteren's Machteld identity. No automatic signing
-or dependency resolution is performed; inventories and VERSIONINFO are
-descriptive, not proof of a trusted publisher.
+A wrapped tool keeps its basekit's VERSIONINFO, with Vincent Vercauteren's
+Machteld identity; a tool's own Windows name, version, authorship and icon
+(application identity) come in 23. No automatic signing or dependency
+resolution is performed; inventories and VERSIONINFO are descriptive, not
+proof of a trusted publisher.
 
 ## Complete verb list
 

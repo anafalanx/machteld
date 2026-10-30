@@ -8,10 +8,11 @@ package require machteld 0.21
 #
 # The Tcl port (2026-10-28) of test/version_resource_test.ps1. Neither Tcl nor
 # the runtime offers Windows' version API, so the resource is read from the PE
-# file itself (test/pe_resources.tcl, which test/app_identity_test.tcl shares):
-# the resource directory to RT_VERSION, then VS_VERSIONINFO's fixed part and
-# its 040904B0 string table. --no-wrap skips the checks that write wrapped
-# executables (for a machine that must not build any).
+# file itself (test/pe_resources.tcl): the resource directory to RT_VERSION,
+# then VS_VERSIONINFO's fixed part and its 040904B0 string table. A wrapped
+# tool keeps its basekit's VERSIONINFO, so the wrapped console and GUI tools
+# are checked too. --no-wrap skips the checks that write wrapped executables
+# (for a machine that must not build any).
 
 source -encoding utf-8 [file join [file dirname [file normalize [info script]]] pe_resources.tcl]
 

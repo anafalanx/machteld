@@ -73,11 +73,11 @@ and signature separately. `version` continues to report the runtime API version.
 
 Wrapped applications additionally carry an inert `app-info.dict`. It describes
 the selected application files and their hashes, host kind, reference choice,
-and explicit application metadata, separately from the runtime identity.
-`wrap --plan` returns that record before packaging. Optional Windows resources
-are stamped on a disposable bare-host copy before the ZIP payload is attached;
-the completed payload is checked before atomic publication. Neither this record
-nor VERSIONINFO is a signature or an authority boundary.
+and the runtime that wrapped them. `wrap --plan` returns that record before
+packaging. A wrapped tool keeps its basekit's Windows resources (application
+identity is not part of 22); the completed payload is checked before atomic
+publication. Neither this record nor VERSIONINFO is a signature or an
+authority boundary.
 
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`

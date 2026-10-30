@@ -25,8 +25,7 @@ package require machteld 0.21
 #                        streaming-bounds lanes
 #   packaging            the runtime's build identity, entry, package and
 #                        publication, VERSIONINFO, wrap and basekits, the README
-#                        examples wrapped, wrap inventory, application identity,
-#                        the examples packaged
+#                        examples wrapped, wrap inventory, the examples packaged
 #   native-validation    the candidate's group: native lifetime with the
 #                        telemetry probe; bounded worker scaling (every child
 #                        live and closed, 128 ordered pool replies and the
@@ -36,8 +35,7 @@ package require machteld 0.21
 #                        canary, each under a deadline: command line and its
 #                        allocation failures, Unicode, the JSON corpus and
 #                        adversarial inputs, the native filesystem and SQLite
-#                        boundaries, the hash boundary, and the identity
-#                        primitives on the runtime's basekits; and last the
+#                        boundaries, and the hash boundary; and last the
 #                        full harness of tools/native-analysis.tcl: GCC's
 #                        analyzer over src/*.c, the sanitizer probes, the
 #                        trapped drivers again, the Tk index formatter and
@@ -262,7 +260,6 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging wrap/basekits wrap_test.tcl
                 addLane steps $runtime packaging "README examples wrapped" documentation_examples_test.tcl --packaging
                 addLane steps $runtime packaging "wrap inventory" wrap_inventory_test.tcl
-                addStep steps packaging "application identity" [list $driver [file join $test app_identity_test.tcl] $runtime]
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
             }
             native-validation {
@@ -275,7 +272,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
                 # Its checks gate; only its timings are observations.
                 addLane steps $runtime native-validation "native scaling" native_scaling_test.tcl $probe $processFixture
-                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
+                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out] {
                     addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
                 }
                 # The whole harness, as the candidate's group ran it: it runs
@@ -402,8 +399,8 @@ proc ::gate::execute {step runtime identity} {
     puts "PASS $label ([seconds $started]s)"
 }
 
-# Copies files out of the runtime's own payload: the packaged basekits, which
-# the entry test's payload refusal and the trapped identity driver use bare.
+# Copies files out of the runtime's own payload: the packaged console basekit,
+# which the entry test's payload refusal uses bare.
 proc ::gate::extract {runtime pairs} {
     set mount gate-payload-[pid]
     zipfs mount $runtime $mount
