@@ -69,6 +69,22 @@ namespace eval ::guiTest {
     }
     proc exercise {path} {
         package require sqlite3
+        if {$path eq {}} {
+            until "first page of the generated demo" {
+                $::lookup::phase eq "ready" && [winfo ismapped .results]}
+            set demo $::lookup::temporary
+            check "generated catalogue exists" [file isfile $demo]
+            sqlite3 [namespace current]::reference $demo -readonly 1
+            try {
+                check "generated demo has 125,000 items" [expr {
+                    [reference onecolumn {SELECT count(*) FROM items}] == 125000}]
+                page All 0
+            } finally { reference close }
+            uplevel #0 [wm protocol . WM_DELETE_WINDOW]
+            check "close removes the temporary catalogue and journal" [expr {
+                ![file exists $demo] && ![file exists ${demo}-journal]}]
+            return
+        }
         sqlite3 [namespace current]::reference $path
         try {
             until "first visible page" {$::lookup::phase eq "ready" && [winfo ismapped .results]}

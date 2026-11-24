@@ -33,19 +33,23 @@ try {
         }
     } finally { catalogue close }
     set original [hash file sha256 $database]
-    set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $work] -- $app $database]
-    set report [file join $work result.txt]
-    if {[file exists $report]} {
-        set f [open $report]
-        try { set detail [read $f] } finally { close $f }
-    } else { set detail "missing test report" }
-    if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || [string trim $detail] ne "PASS"} {
-        error "wrapped SQLite lookup failed: $detail ($result)"
+    foreach arguments [list [list $database] {}] {
+        set report [file join $work result.txt]
+        file delete -force -- $report
+        set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $work] -- $app {*}$arguments]
+        if {[file exists $report]} {
+            set f [open $report]
+            try { set detail [read $f] } finally { close $f }
+        } else { set detail "missing test report" }
+        if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || [string trim $detail] ne "PASS"} {
+            error "wrapped SQLite lookup failed for arguments [list $arguments]: $detail ($result)"
+        }
     }
     if {[hash file sha256 $database] ne $original} { error "lookup changed the catalogue" }
     # On Windows a lingering connection/file lock can prevent this rename.
     file rename $database [file join $work closed.db]
     puts "PASS relocated GUI: two pages, UI event during query, cancellation, replacement, active window close and worker cleanup"
+    puts "PASS first launch: generated demo, first visible page, temporary catalogue cleanup"
 } finally {
     file delete -force -- $work
 }
