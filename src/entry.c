@@ -516,19 +516,33 @@ startup_path_is_regular_file(Tcl_Obj *path)
     return Tcl_FSStat(path, &info) == 0 && S_ISREG(info.st_mode);
 }
 
-/* Keep the physical archive in argv0 so the app can launch another worker.
- * info script and relative assets belong to the separately mounted app. */
+/* argv0 continues to identify the public archive even when this launch
+ * attached to an older generation after the published path was replaced. */
 static int
-select_archive_entry(Tcl_Interp *interp, Tcl_Obj *archive)
+select_archive_entry(Tcl_Interp *interp, Tcl_Obj *archive, Tcl_Obj *prefix)
 {
-    Tcl_Obj *path = Tcl_FSGetNormalizedPath(interp, archive);
-    if (path == NULL || Tcl_FSGetNativePath(path) == NULL ||
-            !startup_path_is_regular_file(path)) {
-        return Machteld_EntryError(interp, "notfound",
-            "the .machteld archive must be a file on disk");
-    }
-    if (TclZipfs_Mount(interp, Tcl_GetString(path), "machteld-app", NULL) != TCL_OK) {
-        return entry_detail_error(interp, "badvalue", "cannot mount .machteld archive");
+    Tcl_Obj *path;
+    if (host_mode == MACHTELD_HOST_GENERATION) {
+        Tcl_Obj *args = Tcl_GetVar2Ex(interp, "argv", NULL, TCL_GLOBAL_ONLY);
+        Tcl_Obj **words;
+        Tcl_Size count;
+        if (args == NULL || Tcl_ListObjGetElements(interp, args, &count, &words) != TCL_OK ||
+                count < 2 || Tcl_FSGetPathType(words[0]) != TCL_PATH_ABSOLUTE) {
+            return Machteld_EntryError(interp, "usage", "invalid application generation arguments");
+        }
+        path = words[0];
+        if (Machteld_MountApp(interp, path, words[1], prefix) != TCL_OK) return TCL_ERROR;
+        /* prefix now retains path independently of the old argv list. */
+        Tcl_Obj *tail = Tcl_NewListObj(count - 2, words + 2);
+        if (!Tcl_SetVar2Ex(interp, "argv", NULL, tail, TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) ||
+                !Tcl_SetVar2Ex(interp, "argc", NULL, Tcl_NewWideIntObj(count - 2),
+                    TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) return TCL_ERROR;
+    } else {
+        path = Tcl_FSGetNormalizedPath(interp, archive);
+        if (path == NULL || Tcl_FSGetNativePath(path) == NULL || !startup_path_is_regular_file(path)) {
+            return Machteld_EntryError(interp, "notfound", "the .machteld archive must be a file on disk");
+        }
+        if (Machteld_MountApp(interp, path, NULL, prefix) != TCL_OK) return TCL_ERROR;
     }
     if (Tcl_SetVar2Ex(interp, "argv0", NULL, path,
                 TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL ||
@@ -645,8 +659,12 @@ Machteld_EntryGate(Tcl_Interp *interp)
 
     Tcl_Obj *captured = NULL;
     const char *extension = strrchr(selected, '.');
-    if (extension != NULL && _stricmp(extension, ".machteld") == 0) {
-        if (select_archive_entry(interp, startup) != TCL_OK) {
+    Tcl_Obj *exe = Tcl_NewStringObj(Tcl_GetNameOfExecutable(), -1);
+    Tcl_Obj *prefix = Tcl_NewListObj(1, &exe);
+    Tcl_IncrRefCount(prefix);
+    if (host_mode == MACHTELD_HOST_GENERATION ||
+            (extension != NULL && _stricmp(extension, ".machteld") == 0)) {
+        if (select_archive_entry(interp, startup, prefix) != TCL_OK) {
             Machteld_Fatal(interp);
         }
         startup = Tcl_GetStartupScript(NULL);
@@ -656,6 +674,17 @@ Machteld_EntryGate(Tcl_Interp *interp)
     } else if (capture_native_startup(interp, startup, &captured) != TCL_OK) {
         Machteld_Fatal(interp);
     }
+    if (captured != NULL && Tcl_FSGetNativePath(startup) != NULL) {
+        Tcl_Obj *absolute = Tcl_FSGetNormalizedPath(interp, startup);
+        if (absolute == NULL || Tcl_ListObjAppendElement(interp, prefix, absolute) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+    }
+    if (!Tcl_SetVar2Ex(interp, "::machteld::launchPrefix", NULL, prefix,
+            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) {
+        Machteld_Fatal(interp);
+    }
+    Tcl_DecrRefCount(prefix);
     if (captured != NULL) {
         if (has_opt_in(interp, captured) != TCL_OK) {
             Tcl_DecrRefCount(captured);

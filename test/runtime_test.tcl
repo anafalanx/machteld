@@ -32,7 +32,7 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
-set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+set expected {app canon child cli detach dirs docs hash help http json links lock log manifest mtps pmap pool pty publish run scope store version wait watch worker wrap}
 check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
 # The version is one natural number, which Tcl reads as a major version: a
 # floor accepts this runtime and every later one, and an upper bound, which

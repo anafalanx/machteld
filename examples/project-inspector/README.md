@@ -53,10 +53,10 @@ the error and retained log tail, independently of text selection.
   the child and leaves an error in the model snapshot, without recursively
   calling the failed observer.
 
-`launch.tcl` owns the entry roles. A source launch starts
-`machteld.exe main.tcl --worker ...`. An archive launch starts
-`machteld.exe inspector.machteld --worker ...`. A wrapped launch starts its own
-executable with `--worker ...`. Each child enters the same headless controller. Supervision is lifetime
+`launch.tcl` owns the entry roles. It appends `--worker` to the command prefix
+from `app launch` in all three deployment forms. An archive worker uses the
+version already open in the controller, even after an update. Each child
+enters the same headless controller. Supervision is lifetime
 ownership, not an authority sandbox: the trusted child retains the user's
 filesystem permissions. Cancellation stops its work but is not a general
 rollback mechanism; this particular worker is deliberately read-only.

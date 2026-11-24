@@ -112,10 +112,10 @@ proc ::lookup::startPage {selection cursor} {
             ::close $channel
             set file $temporary
             set status "Preparing the 125,000-item demo…"
-            $job start [list {*}$worker seed $file]
+            $job start [list {*}$worker seed $file] -console none
         } else {
             set status "Opening catalogue…"
-            $job start [list {*}$worker page $file $filter $cursor]
+            $job start [list {*}$worker page $file $filter $cursor] -console none
         }
     } on error {message options} {
         fail $message

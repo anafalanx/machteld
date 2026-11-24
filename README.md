@@ -140,6 +140,7 @@ use event-driven `child -channels` composition for responsive tools.
 - Machine observation: `watch`, `mtps`, `dirs`, `links`, and `canon`.
 - Data and network: `store`, `json`, `hash`, and `http`.
 - Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
+- Application support: `app launch` for workers, `publish` for atomic file replacement, and `lock` for exclusive use of a resource across processes.
 - Runtime support: `version`, `manifest`, `docs`, `help`, and `wrap`.
 
 Commands live in `::machteld`; the prelude adds it to the global command path.

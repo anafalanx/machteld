@@ -25,8 +25,8 @@ child close token
 ## Arguments and options
 
 Launch options are `-timeout`, `-mem`, `-cpu`, `-dir`, `-env`, `-arg0`,
-`-stdin`, and `-channels`. They follow `run` except that `-timeout` is an
-autonomous lifetime deadline and `-channels` exposes all three pipes. `-channels`
+`-stdin`, `-channels`, and `-console default|none`. The start-time `-timeout` is an
+autonomous lifetime deadline. `-channels` exposes all three pipes. `-channels`
 and `-stdin` are mutually exclusive. Observation timeout belongs only to
 `child wait`.
 
@@ -91,7 +91,7 @@ timeout, and close do not roll back side effects.
 #### Synopsis
 
 `child start ?-timeout d? ?-mem size? ?-cpu d? ?-dir path? ?-env dict?
-?-arg0 word? ?-stdin bytes? ?-channels? ?--? command ?arg ...?`
+?-arg0 word? ?-stdin bytes? ?-channels? ?-console default|none? ?--? command ?arg ...?`
 
 #### Arguments and options
 
@@ -99,6 +99,13 @@ The process options match `run`; defaults are inherited directory/environment,
 no deadline or resource cap, captured output, and stdin connected to `NUL`.
 `-channels` creates binary Tcl channels; otherwise output capture is bounded to
 1 MiB per stream.
+
+`-console default` (the default) uses ordinary Windows console attachment.
+`-console none` starts the target without attaching or allocating a console.
+Windows calls this creation mode `DETACHED_PROCESS`. Use it for a console
+helper started by a GUI. Input, captured output, channel
+mode, and ownership of the process tree work as usual. A program can still
+create its own windows or console and choose how it launches descendants.
 
 #### Results
 

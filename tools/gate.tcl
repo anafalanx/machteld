@@ -226,6 +226,9 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast protocol protocol_test.tcl
                 addLane steps $runtime fast "background jobs" job_test.tcl
                 addLane steps $runtime fast "Tcl scripts and app archives" archive_test.tcl
+                addLane steps $runtime fast "same-application workers and archive replacement" app_launch_test.tcl
+                addLane steps $runtime fast "atomic file publication" publish_test.tcl
+                addLane steps $runtime fast "cross-process file locks" lock_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl

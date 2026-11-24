@@ -66,6 +66,7 @@ int Machteld_RegisterLibs(Tcl_Interp *interp);
  * a user entry file.  It is the opt-in boundary for direct script execution.
  */
 int Machteld_EntryGate(Tcl_Interp *interp);
+int Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj *prefix);
 int Machteld_EntryError(Tcl_Interp *interp, const char *code,
                         const char *message);
 TCL_NORETURN void Machteld_Fatal(Tcl_Interp *interp);
@@ -77,7 +78,8 @@ enum {
     MACHTELD_HOST_DOCS,
     MACHTELD_HOST_DOCS_GUI,
     MACHTELD_HOST_STDIN,
-    MACHTELD_HOST_ENCODING
+    MACHTELD_HOST_ENCODING,
+    MACHTELD_HOST_GENERATION
 };
 void Machteld_SetHostMode(int mode);
 int Machteld_GetHostMode(void);

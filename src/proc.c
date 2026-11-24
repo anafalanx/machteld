@@ -294,6 +294,7 @@ typedef struct {
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
+    int                no_console; /* -console none: start without a Windows console */
     int                channels;   /* -channels: hand the pipes over as Tcl channels */
     int                inherit;    /* -inherit: the child gets OUR stdio, not pipes */
     const char        *arg0;       /* -arg0: what the child reads as argv[0], if not its own path */
@@ -311,7 +312,8 @@ enum {
     OPT_ONOUT    = 1u << 7,
     OPT_ONERR    = 1u << 8,
     OPT_CHANNELS = 1u << 9,
-    OPT_INHERIT  = 1u << 10
+    OPT_INHERIT  = 1u << 10,
+    OPT_CONSOLE  = 1u << 11
 };
 
 /* The domain names the public command, not the internal helper. */
@@ -538,6 +540,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
     o->onout = NULL;
     o->onerr = NULL;
     o->channels = 0;
+    o->no_console = 0;
     /* Initialize every field because this structure lives on the stack. */
     o->inherit = 0;
     o->arg0 = NULL;
@@ -593,7 +596,12 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
         Tcl_Size vlen = 0;
         const char *v = Tcl_GetStringFromObj(value, &vlen);
         int has_nul = memchr(v, '\0', (size_t)vlen) != NULL;
-        if (strcmp(a, "-timeout") == 0) {
+        if (strcmp(a, "-console") == 0) {
+            if (!(allowed & OPT_CONSOLE)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul || (strcmp(v, "default") != 0 && strcmp(v, "none") != 0))
+                return mt_error(interp, dom, "badvalue", "-console expects default or none");
+            o->no_console = strcmp(v, "none") == 0;
+        } else if (strcmp(a, "-timeout") == 0) {
             if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
             o->timeout_ms = parse_duration_ms(v);
@@ -813,7 +821,9 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     const int owns_argv = o->arg0 != NULL;
     const char **largv = argv_with_arg0(o, cargc, cargv, err);
     if (largv == NULL) goto fail;
-    int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io, 0, o->env_block, &c->pid, &c->proc, err);
+    wj_launch_mode mode = o->no_console ? WJ_NO_CONSOLE : WJ_SUPERVISED;
+    int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io,
+                        mode, o->env_block, &c->pid, &c->proc, err);
     if (owns_argv) free((void *)largv);
     if (lrc != 0) goto fail;
     if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
@@ -1329,7 +1339,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (idx == START) {
         run_opts o;
         unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
-                           OPT_STDIN | OPT_ENV | OPT_CHANNELS;
+                           OPT_STDIN | OPT_ENV | OPT_CHANNELS | OPT_CONSOLE;
         if (parse_opts(interp, "CHILD", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
         if (o.channels && o.stdin_obj != NULL) {
             return mt_error(interp, "CHILD", "usage",
@@ -1584,7 +1594,7 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
     if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
-                        1 /* strict breakaway */, o.env_block, &pid, &proch, &err);
+                        WJ_BREAKAWAY, o.env_block, &pid, &proch, &err);
     if (owns_argv) free((void *)dargv);
     if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);

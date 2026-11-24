@@ -28,10 +28,10 @@ namespace path.
 
 - Process control: `run`, `child`, `wait`, `scope`, and `detach`.
 - Interactive processes: `pty`.
-- Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, and `mtps`.
+- Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
-- Runtime and distribution: `version`, `manifest`, `docs`, `help`, and `wrap`.
+- Runtime and distribution: `app`, `version`, `manifest`, `docs`, `help`, and `wrap`.
 
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when

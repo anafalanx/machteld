@@ -52,7 +52,7 @@ oo::class create ::inspector::Job {
         set complete 0
         set state [dict create phase running root $directory mode $mode rows {} \
             progress 0 message "Starting $mode inspection..." error {} log {}]
-        return [$transport start [list {*}$worker $directory $mode]]
+        return [$transport start [list {*}$worker $directory $mode] -console none]
     }
 
     method cancel {} { return [$transport cancel] }

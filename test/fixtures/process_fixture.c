@@ -415,6 +415,17 @@ int wmain(int argc, wchar_t **argv) {
         return delay == UINT32_MAX ? EXIT_USAGE
                                    : descendant_parent(delay, argv[3]);
     }
+    if (wcscmp(argv[1], L"console-state") == 0 && argc == 2) {
+        BOOL in_job = FALSE;
+        if (!IsProcessInJob(GetCurrentProcess(), NULL, &in_job)) return EXIT_LAUNCH;
+        char state[96];
+        int n = snprintf(state, sizeof(state), "codepage %u window %d job %d\n",
+                         (unsigned)GetConsoleCP(), GetConsoleWindow() != NULL, !!in_job);
+        return n > 0 && (size_t)n < sizeof(state) &&
+               write_text(GetStdHandle(STD_OUTPUT_HANDLE), state) &&
+               write_text(GetStdHandle(STD_ERROR_HANDLE), "console probe\n")
+               ? 0 : EXIT_OUTPUT;
+    }
     if (wcscmp(argv[1], L"stdin-echo") == 0 && argc == 2) {
         return stdin_echo();
     }

@@ -1,6 +1,6 @@
 /* Atomic publication of a completed file into a Windows namespace. */
 #undef USE_TCL_STUBS
-#include <tcl.h>
+#include "machteld.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -736,6 +736,36 @@ done:
     return result;
 }
 
+/* Write to the public command's private, blocking binary staging channel.
+ * Use the same byte/text distinction as hash, the store and child stdin. */
+static int
+PublishWriteCmd(void *client_data, Tcl_Interp *interp, int objc,
+                Tcl_Obj *const objv[])
+{
+    (void)client_data;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "channel value");
+        return TCL_ERROR;
+    }
+    int mode;
+    Tcl_Channel channel = Tcl_GetChannel(interp, Tcl_GetString(objv[1]), &mode);
+    if (channel == NULL || !(mode & TCL_WRITABLE)) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("cannot write to the publication channel", -1));
+        return TCL_ERROR;
+    }
+    Tcl_Size size;
+    Tcl_DString converted;
+    const unsigned char *data = Machteld_ValueBytes(objv[2], &size, &converted);
+    Tcl_Size written = Tcl_Write(channel, (const char *)data, size);
+    Tcl_DStringFree(&converted);
+    if (written != size) {
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf("cannot write the publication candidate: %s",
+                                              Tcl_PosixError(interp)));
+        return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
 int
 Machteldpublish_Init(Tcl_Interp *interp)
 {
@@ -745,6 +775,8 @@ Machteldpublish_Init(Tcl_Interp *interp)
             "cannot create the machteld command namespace");
     }
     if (Tcl_CreateObjCommand(interp, "::machteld::Publish", PublishCmd,
+            NULL, NULL) == NULL ||
+            Tcl_CreateObjCommand(interp, "::machteld::PublishWrite", PublishWriteCmd,
             NULL, NULL) == NULL) {
         return publish_error(interp, "oserror",
             "cannot register the atomic publication primitive");

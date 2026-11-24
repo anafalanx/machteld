@@ -8,7 +8,7 @@ namespace eval ::machteld::manifest {}
 
 # Internal commands are registered for cooperation with the Tcl prelude, but
 # are intentionally absent from the public manifest.
-set ::machteld::manifest::private {EntryCheck PayloadRoot Publish StampIdentity ValidateIdentity}
+set ::machteld::manifest::private {EntryCheck PayloadRoot Publish PublishWrite StampIdentity ValidateIdentity}
 
 set ::machteld::manifest::native {
     canon {
@@ -20,9 +20,9 @@ set ::machteld::manifest::native {
         kind c domain CHILD
         doc machteld/command/child
         codes {badvalue launch nohandle notfound oserror usage}
-        options {-arg0 -channels -cpu -dir -env -mem -stdin -timeout}
+        options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout}
         subcommands {
-            start {options {-arg0 -channels -cpu -dir -env -mem -stdin -timeout} doc machteld/command/child#start}
+            start {options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout} doc machteld/command/child#start}
             wait  {options -timeout returns {err exit out pid status truncated} doc machteld/command/child#wait}
             kill  {options {} doc machteld/command/child#kill}
             info  {options {} doc machteld/command/child#info}
@@ -87,6 +87,14 @@ set ::machteld::manifest::native {
         doc machteld/command/links
         options {-depth -hardlinks -prune}
         returns {depthlimited dirs entered errors files links maxdepth multilinked pruned root}
+    }
+    lock {
+        kind c domain LOCK codes {badvalue nohandle oserror usage} options {}
+        doc machteld/command/lock
+        subcommands {
+            try {options {} doc machteld/command/lock#try}
+            release {options {} doc machteld/command/lock#release}
+        }
     }
     mtps {
         kind c domain MTPS codes {badvalue denied notfound oserror usage}
