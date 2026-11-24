@@ -48,3 +48,10 @@ jobs:
         run: |
           & "$env:RUNNER_TEMP\machteld.exe" test\gui_widget_test.tcl
           exit $LASTEXITCODE
+
+      - name: Verify background job discovery in a packaged image
+        if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld.exe" test\package_test.tcl --build-runtime
+          exit $LASTEXITCODE

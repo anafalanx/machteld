@@ -7,6 +7,7 @@ package require machteld 0.21
 # beside it and nowhere else.
 #
 #     machteld.exe test/package_test.tcl --tclsh EXE
+#     machteld.exe test/package_test.tcl --build-runtime
 #
 # EXE is the static tclsh90s package.tcl runs on. The Tcl port (2026-10-28)
 # of test/package_test.ps1 and test/build_publication_test.ps1. Not checked:
@@ -17,7 +18,13 @@ namespace eval ::pt {
     variable root [file dirname [file dirname [file normalize [info script]]]]
     variable failures 0
     variable work ""
-    variable tclsh ""
+    variable packager {}
+    variable wrapper ""
+}
+if {[lindex $argv 0] eq "--run-packager"} {
+    set argv [lrange $argv 1 end]
+    source -encoding utf-8 [file join $::pt::root tools package.tcl]
+    exit 0
 }
 source -encoding utf-8 [file join $::pt::root tools release.tcl]
 
@@ -52,9 +59,8 @@ proc ::pt::uniqueName {prefix} {
 }
 
 proc ::pt::runPackage {args} {
-    variable root
-    variable tclsh
-    set result [run -timeout 5m -- $tclsh [file join $root tools package.tcl] {*}$args]
+    variable packager
+    set result [run -timeout 5m -- {*}$packager {*}$args]
     dict create exit [dict get $result exit] text \
         [encoding convertfrom -profile replace utf-8 [dict get $result out][dict get $result err]]
 }
@@ -74,7 +80,7 @@ proc ::pt::noWorkPaths {} {
 proc ::pt::packageTests {} {
     variable root
     variable work
-    variable tclsh
+    variable wrapper
     set licenseHashes {
         Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
         Tk-9.0.4.txt 2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
@@ -113,7 +119,7 @@ proc ::pt::packageTests {} {
     }
     writeText [file join $reference markdown machteld agent.md] "# Fixture agent reference\n"
     set apache [file join $root LICENSE]
-    set common [list --prefix $prefix --prelude $prelude --wrapper $tclsh]
+    set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper]
 
     set existing [file join $work [uniqueName .machteld-build-].exe]
     writeText $existing prior-release
@@ -123,7 +129,7 @@ proc ::pt::packageTests {} {
     check "existing-output refusal creates no work paths" [noWorkPaths]
 
     set out [file join $work [uniqueName .machteld-build-].exe]
-    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $tclsh \
+    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $wrapper \
         --licenses $licenses --apache-license $apache --reference $reference --out $out]
     check "failed packaging does not publish a partial output" \
         [expr {[dict get $result exit] != 0 && ![file exists $out]}] [dict get $result text]
@@ -243,6 +249,21 @@ proc ::pt::validatePackage {image apache licenses reference} {
                 return "packaging changed reference bytes: $relative"
             }
         }
+        set savedPath $::auto_path
+        try {
+            set ::auto_path [list $base/tcl_library [info library]]
+            set version [package require -exact machteld::job 1.0]
+            set script [lindex [package ifneeded machteld::job $version] end]
+            if {$script ne "$base/tcl_library/machteld-job/job.tcl"} {
+                return "background job loaded from outside the packaged image: $script"
+            }
+            set job [::machteld::job::Job new]
+            try {
+                if {[dict get [$job snapshot] phase] ne "idle"} {
+                    return "packaged background job did not start idle"
+                }
+            } finally { $job destroy }
+        } finally { set ::auto_path $savedPath }
         return ""
     } finally {
         zipfs unmount $mount
@@ -347,14 +368,23 @@ proc ::pt::publicationTests {} {
 }
 
 proc ::pt::main {argv} {
+    variable root
     variable work
-    variable tclsh
+    variable wrapper
+    variable packager
     variable failures
-    if {[llength $argv] != 2 || [lindex $argv 0] ne "--tclsh"} {
-        puts stderr "usage: package_test.tcl --tclsh EXE"
+    if {$argv eq "--build-runtime"} {
+        # The signed runtime supplies Tcl/zipfs and a bare console PE for the
+        # fixture image. Its entry gate requires the opted-in test as driver.
+        set wrapper [file join [::machteld::PayloadRoot] basekit console.exe]
+        set packager [list [info nameofexecutable] [file normalize [info script]] --run-packager]
+    } elseif {[llength $argv] == 2 && [lindex $argv 0] eq "--tclsh"} {
+        set wrapper [file normalize [lindex $argv 1]]
+        set packager [list $wrapper [file join $root tools package.tcl]]
+    } else {
+        puts stderr "usage: package_test.tcl --tclsh EXE | --build-runtime"
         exit 2
     }
-    set tclsh [file normalize [lindex $argv 1]]
     set work [file join [file normalize $::env(TEMP)] [uniqueName machteld-package-test-[pid]-]]
     file mkdir $work
     try {

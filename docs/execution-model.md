@@ -61,20 +61,39 @@ loop. The worker command is a Tcl list with one element per argument.
 package require machteld
 package require machteld::job 1.0
 
+# Run this example in a console host, from source or as a wrapped tool.
+if {$argv eq {--worker}} {
+    fconfigure stdout -encoding utf-8 -translation lf
+    puts {worker ready}
+    exit 0
+}
+
 proc receive {job event data} {
     switch -- $event {
         lines    { foreach line $data { puts $line } }
-        finished { puts [dict get $data phase] }
+        finished { set ::outcome [dict get $data phase] }
     }
 }
+set command [list [info nameofexecutable]]
+if {[lindex [file system [info script]] 0] ne "zipfs"} {
+    lappend command [file normalize [info script]]
+}
+lappend command --worker
 set job [::machteld::job::Job new receive]
-# In a wrapped program with its own --worker entry role:
-$job start [list [info nameofexecutable] --worker] -timeout 30s -mem 128M
+try {
+    $job start $command -timeout 30s -mem 128M
+    # The outer console loop. A Tk application already has an event loop.
+    if {![info exists ::outcome]} { vwait ::outcome }
+    puts $::outcome
+} finally {
+    $job destroy
+}
 ```
 
 Call `$job cancel` to stop the current run. The object can start again after
-completion, failure, or cancellation. Call `$job destroy` when its owner
-closes. The child receives EOF on stdin. It writes LF-terminated UTF-8
+completion, failure, or cancellation. `start` returns 1 when the run is
+accepted and 0 while running or after `$job close`. Call `$job destroy` when
+its owner closes. The child receives EOF on stdin. It writes LF-terminated UTF-8
 records to stdout and diagnostics to stderr. The caller chooses the record
 format. An unterminated or invalid record fails the job.
 
@@ -83,7 +102,9 @@ The callback receives the job, an event, and its data. The events are
 chunk of diagnostic text), and `finished` (the terminal snapshot).
 `$job snapshot` reports the phase, error text, recent diagnostic log, and
 the native wait result when available. A nonzero exit or a child deadline
-fails the run. A callback can cancel or destroy the job. Closing or
+fails the run. A callback error fails the run and delivers `finished` once.
+If `finished` itself raises an error, the snapshot records it. A callback
+can cancel or destroy the job. Closing or
 destroying it stops further callbacks.
 
 The reader accepts at most 65,536 bytes per stdout record and delivers at
@@ -106,12 +127,9 @@ close remove handlers, cancel timers, and close the owned child. Errors remain
 selectable/copyable, and a new inspection can recover after cancellation or
 failure. Long logs and large directories cannot grow widget state indefinitely.
 
-The example makes its own limits visible: 500 rows, 65536-byte protocol records,
-32 records per parsing turn, an 8192-character log tail, a 30-second child
-deadline, and a 128 MiB per-process child memory limit. These are example policy,
-not promises that all Machteld commands share those bounds. The child is trusted
-read-only application code, not a permissions sandbox. The example currently
-supports both the source-file entry route and a wrapped executable. Its entry
+The inspector keeps at most 500 rows and uses the package defaults of a
+30-second child deadline and a 128 MiB per-process memory limit. The child
+runs trusted read-only application code. The example supports both the source-file entry route and a wrapped executable. Its entry
 dispatches an application-owned `--worker` role before opening the view, so the
 same executable can launch supervised work without recursively opening another
 application window. A `--headless` role exercises the same controller without

@@ -1,5 +1,8 @@
 # One supervised child. stdout is an LF-delimited UTF-8 record stream;
 # stderr is diagnostic text. The application interprets the records.
+package require Tcl 9
+package require machteld
+
 namespace eval ::machteld::job {}
 
 oo::class create ::machteld::job::Job {

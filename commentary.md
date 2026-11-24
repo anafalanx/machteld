@@ -249,4 +249,13 @@ thirteen trials until the descendant held past the deadline (f6393df). The
 plan's ledger defers the polling monitor (R9) to 23; this pump polls the same
 way.
 
+### 2026-11-24 · machteld 22 candidate (3fb3367), signed 0.21 host · comment · Codex, background jobs
+
+Project Inspector already handled sustained child output, cancellation and
+window closure. Its reusable part was the code that owns the child, drains
+both streams and gives Tk time to paint. Testing the extracted package on
+Windows Server 2025 exercised 3,000 UTF-8 records and a cancel-and-restart
+inside the output callback. The application's record validator could stay
+in its own model.
+
 <!-- machteld-version-history: end -->

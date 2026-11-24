@@ -28,7 +28,7 @@ namespace eval ::job_test {
     proc reset {} {
         variable s
         array unset s
-        array set s {rows {} ends {} events {} maxBatch 0 switched 0 sawTimer 0
+        array set s {rows {} ends {} maxBatch 0 switched 0 sawTimer 0
             sawIdle 0 timer {} idle {} expired 0}
     }
 
@@ -42,7 +42,6 @@ namespace eval ::job_test {
 
     proc observe {mode job event data} {
         variable s
-        lappend s(events) $event
         switch -- $event {
             lines {
                 if {$mode eq "restart" && !$s(switched)} {
