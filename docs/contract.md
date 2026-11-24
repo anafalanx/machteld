@@ -191,10 +191,42 @@ its workers and any descendants; neither cap bounds the director's Tcl heap.
 Only the explicit process-tree lifetime timeout is reported as `status timeout`.
 Cancellation and resource-limit termination do not roll back side effects.
 
+## SQLite
+
+`package require sqlite3` loads SQLite’s upstream Tcl binding in the full
+runtime and in wrapped console and GUI programs. The package and `store` use the
+same statically linked engine. Each `sqlite3` connection has its own Tcl command,
+transaction state and busy timeout. Programs can open an existing SQLite file or
+create one without deploying a driver or DLL.
+
+```tcl
+package require machteld 22-
+package require sqlite3
+sqlite3 db :memory:
+try {
+    db eval {CREATE TABLE station(code TEXT PRIMARY KEY, name TEXT)}
+    set code {007}
+    set name {Gare du Nord}
+    db transaction {
+        db eval {INSERT INTO station(code, name) VALUES ($code, $name)}
+    }
+    puts [db onecolumn {SELECT name FROM station WHERE code = $code}]
+} finally {
+    db close
+}
+```
+
+Braces leave `$code` and `$name` for the binding to pass to SQLite as values.
+Use `sqlite3 db $path -readonly 1` for read-only lookups. A query runs on its
+calling thread. For a long lookup from Tk, use `machteld::job` to run a worker
+process, open the connection there, and return results in bounded pages.
+The embedded build disables run-time loading of SQLite extensions.
+See [background jobs](execution-model.md#one-background-job) and the
+[SQLite Tcl API](https://www.sqlite.org/tclsqlite.html).
+
 ## Store
 
-`store` is a narrow key/value API over statically linked SQLite, not an SQL
-escape hatch. Keys are text. Values are binary-safe: `put` stores the exact Tcl
+`store` provides key/value operations. Keys are text. Values are binary-safe: `put` stores the exact Tcl
 bytes of a bytearray; other Tcl values are stored using their UTF-8 string
 representation. `get` always returns a bytearray. A missing key raises
 `{MACHTELD STORE notfound}`. `del` returns `1` when it removed a key and `0` when
@@ -205,8 +237,8 @@ key/value table when needed in a durable database. Both configure a five-second
 SQLite busy timeout, allowing independent Machteld processes to wait through
 ordinary writer contention. SQLite failures use `STORE sqlite`.
 Every full, console-wrapped, and GUI-wrapped host built from this tree includes
-this same static implementation. It exposes no SQL or multi-operation
-transaction API; individual calls do not make an application workflow atomic.
+this same static implementation. Each write stands alone. For an atomic group
+of SQL statements, use a transaction on a `sqlite3` connection.
 
 ## Manifest
 

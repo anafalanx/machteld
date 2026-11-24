@@ -57,6 +57,24 @@ if {![catch {
     puts $f "store:error:$store_error"
 }
 
+set sql_ok 0
+if {[catch {
+    set binding [package require sqlite3]
+    sqlite3 db :memory:
+    set label {007 雪 O'Brien}
+    try {
+        db eval {CREATE TABLE note(value TEXT)}
+        db eval {INSERT INTO note VALUES($label)}
+        set sql_ok [expr {[list {} Sqlite3] in [info loaded {}] &&
+            $binding eq [store version] && [db onecolumn {SELECT sqlite_version()}] eq $binding &&
+            [db onecolumn {SELECT value FROM note}] eq $label}]
+    } finally { db close }
+} sql_error]} {
+    puts $f "sqlite3:error:$sql_error"
+} else {
+    puts $f "sqlite3:[expr {$sql_ok ? {yes} : {no}}]"
+}
+
 # Packaging checks must not take over the desktop. Actual widget/interaction
 # coverage now lives in gui_widget_test.tcl; this optional fixture window is
 # opened only when explicitly requested, never by routine wrapping tests.
@@ -77,4 +95,4 @@ if {![info exists env(MACHTELD_WRAP_GUI_INTERACTIVE)] ||
 }
 puts $f "gui:$gui_result"
 close $f
-exit [expr {$store_ok ? 0 : 1}]
+exit [expr {$store_ok && $sql_ok ? 0 : 1}]

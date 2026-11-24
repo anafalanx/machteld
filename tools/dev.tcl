@@ -212,15 +212,18 @@ proc dev_build_unlocked {{forceRef 0}} {
     # Pinned third-party sources: SQLite and yyjson, cached across builds with
     # their own flags from buildlib.tcl, never the authored -Werror set.
     set sqliteObj [file join $::OBJ sqlite3.o]
+    set bindingObj [file join $::OBJ tclsqlite.o]
     set yyjsonObj [file join $::OBJ yyjson.o]
     incr changed [cc $sqliteObj [file join [dict get $::PATHS sqlite] sqlite3.c] \
         $::machteld::build::SQLITE_FLAGS sqlite3.c 0]
+    incr changed [cc $bindingObj [file join [dict get $::PATHS sqlite] tclsqlite.c] \
+        [::machteld::build::sqlite_binding_flags $::PATHS] tclsqlite.c]
     incr changed [cc $yyjsonObj [file join [dict get $::PATHS yyjson] yyjson.c] \
         $::machteld::build::YYJSON_FLAGS yyjson.c 0]
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
     set guiMain     [Rp src machteld_gui_main.c]
-    set objects {}
+    set objects [list $bindingObj]
     foreach s [lsort [glob -directory [Rp src] *.c]] {
         if {$s eq $consoleMain || $s eq $guiMain} continue
         set o [file join $::OBJ [file rootname [file tail $s]].o]

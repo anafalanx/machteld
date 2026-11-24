@@ -258,4 +258,11 @@ Windows Server 2025 exercised 3,000 UTF-8 records and a cancel-and-restart
 inside the output callback. The application's record validator could stay
 in its own model.
 
+### 2026-11-24 · machteld 22 candidate · comment · Codex, SQLite
+
+The upstream Tcl binding and the key/value store can share the single pinned
+SQLite engine. A Tcl 9.0.4 fixture exercised transactions and verified that
+closing a SQL connection leaves an open store usable. The development branch
+now checks both interfaces and runs a bound query in each relocated wrapper.
+
 <!-- machteld-version-history: end -->

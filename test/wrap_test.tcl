@@ -25,6 +25,21 @@ proc wait_for_file {path {milliseconds 10000}} {
     }
     return 0
 }
+proc relocated_sqlite {image} {
+    # Use only a copy of the image and a clean working directory.
+    set folder [file tempdir]
+    try {
+        set moved [file join $folder moved.exe]
+        file copy $image $moved
+        set child [child start -dir $folder -env {MACHTELD_WRAP_GUI_SELFTEST 1 TCLLIBPATH {}} -- $moved]
+        try {
+            set result [child wait $child -timeout 15s]
+        } finally { child close $child }
+        set marker [file join $folder _hello_ran.txt]
+        return [expr {[dict get $result status] eq "ok" && [dict get $result exit] == 0 &&
+            [file isfile $marker] && "sqlite3:yes" in [split [slurp $marker] \n]}]
+    } finally { file delete -force -- $folder }
+}
 proc carries_runtime_notices {image} {
     set mount "notice-[pid]-[clock clicks]"
     if {[catch {zipfs mount $image $mount}]} { return 0 }
@@ -137,6 +152,7 @@ try {
     rename ::machteld::DocsPackFilesLive ::machteld::DocsPackFiles
 }
 check "wrap produces a console executable" [file executable $console]
+check "relocated console wrapper runs static SQLite" [relocated_sqlite $console]
 check "wrapped console needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped console carries exact runtime license notices" \
@@ -269,6 +285,7 @@ check "wrap revalidates an entry before packaging" [expr {
 set gui [file join $WORK wrapped-gui.exe]
 wrap $TOOL -o $gui --gui
 check "wrap produces a GUI executable" [file executable $gui]
+check "relocated GUI wrapper runs static SQLite" [relocated_sqlite $gui]
 check "wrapped GUI needs no adjacent DLL" [expr {
     ![llength [glob -nocomplain -directory $WORK *.dll]]}]
 check "wrapped GUI carries exact runtime license notices" \

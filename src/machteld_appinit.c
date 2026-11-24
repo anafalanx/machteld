@@ -8,7 +8,9 @@
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
 
 #ifdef MACHTELD_STATIC_SQLITE
+#include "sqlite3.h"
 extern int Machteldstore_Init(Tcl_Interp *interp); /* src/store.c */
+extern int Sqlite3_Init(Tcl_Interp *interp);      /* SQLite's Tcl binding */
 #endif
 #ifdef MACHTELD_PROC
 extern int Machteldproc_Init(Tcl_Interp *interp); /* src/proc.c */
@@ -239,11 +241,17 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     }
 
 #ifdef MACHTELD_STATIC_SQLITE
-    /* Purpose-built SQLite bridge; no generic sqlite command or loadable DLL. */
     if (Machteldstore_Init(interp) == TCL_ERROR) {
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldstore", Machteldstore_Init, NULL);
+    /* A NULL interpreter registers the binding without marking it loaded.
+     * Its sqlite3 command is created when the program requires the package. */
+    Tcl_StaticLibrary(NULL, "Sqlite3", Sqlite3_Init, NULL);
+    if (Tcl_EvalEx(interp, "package ifneeded sqlite3 " SQLITE_VERSION
+                            " {load {} Sqlite3}", -1, TCL_EVAL_GLOBAL) != TCL_OK) {
+        return TCL_ERROR;
+    }
 #endif
 
 #ifdef MACHTELD_PROC

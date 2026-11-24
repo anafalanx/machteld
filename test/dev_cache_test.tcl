@@ -470,7 +470,7 @@ try {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
         prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
         prefix/lib/tcl9.0/init.tcl prefix/lib/tcl9/9.0/msgcat.tm
-        prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h yyjson/yyjson.h
+        prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h sqlite/tclsqlite.c yyjson/yyjson.h
     } {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"
     }
@@ -487,6 +487,7 @@ try {
     }
     spec_tracks native [file join $prefix include tcl.h]
     spec_tracks native [file join $::fixtureCache sqlite sqlite3.h]
+    spec_tracks native [file join $::fixtureCache sqlite tclsqlite.c]
     spec_tracks native [file join $::fixtureCache yyjson yyjson.h]
     set before [production_key native]
     set additionalHeader [file join $::fixtureRoot src added.h]
