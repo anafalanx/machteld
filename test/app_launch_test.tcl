@@ -16,7 +16,7 @@ proc invoke {args} {
     if {[dict get $r status] ne "ok" || [dict get $r exit] != 0} {
         error "application failed: $r"
     }
-    return [string trim [dict get $r out]]
+    return [string trim [encoding convertfrom -profile strict utf-8 [dict get $r out]]]
 }
 if {[llength $argv] > 1} {error "usage: app_launch_test.tcl ?publication-directory?"}
 if {[llength $argv]} {
@@ -30,11 +30,12 @@ try {
     set source [file join $base {source app}]
     file mkdir $source
     set main [file join $source main.tcl]
-    set archive [file join $base {shared app.machteld}]
+    set archive [file join $base {répertoire partagé.machteld}]
     set asset [file join $source value.txt]
     set signal [file join $base go]
     set ready [file join $base ready]
     set fixture {package require machteld
+fconfigure stdout -encoding utf-8 -translation lf
 set root [file dirname [info script]]
 proc versionText {} {
     set f [open [file join $::root value.txt] r]
@@ -51,7 +52,7 @@ switch -- [lindex $argv 0] {
         if {![file exists $go]} {error "timed out waiting for publication"}
         set r [run -timeout 10s -- {*}[app launch] child {two words} {-option}]
         if {[dict get $r exit] != 0} {error $r}
-        puts [list [versionText] [string trim [dict get $r out]]]
+        puts [list [versionText] [string trim [encoding convertfrom -profile strict utf-8 [dict get $r out]]]]
     }
     child {puts [list [versionText] $argv0 [lrange $argv 1 end]]}
     prefix {
@@ -85,7 +86,7 @@ switch -- [lindex $argv 0] {
         [invoke $exe $archive child] eq [list B $origin {}]}]
     writeText $signal go
     set result [child wait $child -timeout 15s]
-    set reply [string trim [dict get $result out]]
+    set reply [string trim [encoding convertfrom -profile strict utf-8 [dict get $result out]]]
     check "the old parent and its new worker read their original assets and arguments" [expr {
         [dict get $result exit] == 0 && $reply eq [list A [list A $origin {{two words} -option}]]}]
     child close $child
