@@ -13,6 +13,13 @@ to fetch the next page. The worker reads one extra row to tell the window
 whether to enable Next. Tk displays at most 50 items and inserts them in small
 batches so input and repaint events can run during delivery.
 
+To run the same window and its workers from an application archive, run these commands.
+
+```powershell
+.\out\machteld.exe pack .\examples\sqlite-lookup -o .\out\catalogue.machteld
+.\out\machteld.exe .\out\catalogue.machteld
+```
+
 To keep a catalogue and run the wrapped example from another directory:
 
 ```powershell

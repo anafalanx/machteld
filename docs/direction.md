@@ -25,8 +25,8 @@ policy, or command names is not runtime work.
 
 Current decisions:
 
-- A direct program file beginning with parsed `package require machteld` is the
-  only general program entry; `.tcl` is conventional, not required.
+- Programs begin with a parsed `package require machteld`. The full host runs
+  direct Tcl files and the root `main.tcl` of a `.machteld` application archive.
 - `wrap` is subordinate deployment machinery and accepts the same opt-in.
 - Every full or wrapped host exposes one Machteld version and the same palette,
   including static SQLite `store`. The distribution includes the complete

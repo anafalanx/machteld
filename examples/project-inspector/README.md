@@ -54,12 +54,22 @@ the error and retained log tail, independently of text selection.
   calling the failed observer.
 
 `launch.tcl` owns the entry roles. A source launch starts
-`machteld.exe main.tcl --worker ...`; a wrapped launch starts its own executable
-with `--worker ...`. The child never opens the view or recursively launches the
-GUI. Both routes use the same controller and protocol. Supervision is lifetime
+`machteld.exe main.tcl --worker ...`. An archive launch starts
+`machteld.exe inspector.machteld --worker ...`. A wrapped launch starts its own
+executable with `--worker ...`. Each child enters the same headless controller. Supervision is lifetime
 ownership, not an authority sandbox: the trusted child retains the user's
 filesystem permissions. Cancellation stops its work but is not a general
 rollback mechanism; this particular worker is deliberately read-only.
+
+## Run as an application archive
+
+From the repository root, pack the example and run its headless inspection
+against a local directory.
+
+```powershell
+.\out\machteld.exe pack .\examples\project-inspector -o .\out\inspector.machteld
+.\out\machteld.exe .\out\inspector.machteld --headless .\examples
+```
 
 ## Package deliberately
 
