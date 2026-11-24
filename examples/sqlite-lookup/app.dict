@@ -1,0 +1,7 @@
+schema 1
+files {main.tcl lookup.tcl view.tcl}
+metadata {
+    name {Catalogue Lookup}
+    version 1.0
+    description {Search and page through a synthetic SQLite catalogue}
+}

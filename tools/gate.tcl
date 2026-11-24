@@ -17,7 +17,7 @@ package require machteld 0.21
 #                        claims and their regressions, build identity, the
 #                        reference serializer, this gate's own test, and the
 #                        runtime lanes that need no fixture (filesystem,
-#                        runtime services, protocol, GUI model, embedded
+#                        runtime services, protocol, background jobs, GUI model, embedded
 #                        reference, README examples, JSONTestSuite, native
 #                        adversarial inputs and filesystem boundaries)
 #   integration          the C fixtures, the command-line golden vectors, the
@@ -51,7 +51,7 @@ package require machteld 0.21
 #   --public-tls         (integration or release) the native lane's public TLS
 #                        checks, which reach the network
 #   --interactive-pty    (integration or release) the process lane's console I/O
-#   --interactive-gui    gui_widget_test, and the wrapped fixture's own window:
+#   --interactive-gui    GUI widgets, the SQLite lookup and the wrapped fixture:
 #                        both open windows, so this is the owner's check only
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
@@ -224,6 +224,8 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast filesystem filesystem_test.tcl
                 addLane steps $runtime fast "runtime services" runtime_test.tcl
                 addLane steps $runtime fast protocol protocol_test.tcl
+                addLane steps $runtime fast "background jobs" job_test.tcl
+                addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl
@@ -291,6 +293,7 @@ proc ::gate::plan {settings} {
         }
     }
     if {[dict get $settings gui]} {
+        addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
     }
     return $steps

@@ -24,9 +24,8 @@ set ::machteld::build::DEFINES {
 
 # Vendor translation units are pinned third-party source and compile with their
 # own minimal flags, never the authored warning gate. SQLite is serialized,
-# cannot load extensions at run time, and takes the upstream hardening
-# recommended for an embed that issues only fixed queries: no double-quoted
-# string literals, no deprecated interfaces, no shared cache.
+# omits run-time extension loading, double-quoted string literals, deprecated
+# interfaces and shared cache. Both the store and the Tcl binding use this core.
 set ::machteld::build::SQLITE_FLAGS {
     -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION
     -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE
@@ -59,6 +58,17 @@ proc ::machteld::build::common_flags {paths} {
     lappend flags {*}$DEFINES -ffunction-sections -fdata-sections \
         -I[dict get $paths include] -I[dict get $paths sqlite] -I[dict get $paths yyjson]
     return $flags
+}
+
+# The binding is a separate upstream translation unit, linked against the same
+# sqlite3.o and static Tcl as the rest of the host.
+proc ::machteld::build::sqlite_binding_flags {paths} {
+    variable SQLITE_FLAGS
+    # Upstream assertions include __FILE__. Keep the diagnostic filename in
+    # both hosts independent of the dependency cache's location.
+    set sqlite [dict get $paths sqlite]
+    return [list {*}$SQLITE_FLAGS -DSTATIC_BUILD=1 -DSQLITE_3_SUFFIX_ONLY \
+        "-ffile-prefix-map=$sqlite=sqlite" -I[dict get $paths include] -I$sqlite]
 }
 
 # Run a tool, streaming its output, and turn a nonzero exit into an error that
@@ -112,6 +122,7 @@ proc ::machteld::build::paths {cache} {
         tcl.h include tcl.h
         sqlite3.c sqlite sqlite3.c
         sqlite3.h sqlite sqlite3.h
+        tclsqlite.c sqlite tclsqlite.c
         yyjson.c yyjson yyjson.c
     } {
         set path [file join [dict get $paths $directory] $name]

@@ -1,10 +1,11 @@
 # Building machteld
 
-`machteld.exe` is built and signed on the build PC, the owner's machine with
-this repository at `C:\dev\machteld`. Unsigned builds run there only, and only
-for building and testing; every other machine runs signed releases only.
-Signing is the owner's step. Everything below runs from the repository root in
-PowerShell.
+The owner builds and signs releases on the build PC with the repository at
+`C:\dev\machteld`. The SQLite development workflow also builds an unsigned
+candidate on a standard GitHub-hosted Windows Server 2025 runner. It exercises
+that executable and its console and GUI wraps within the job. Distributed
+releases come from the owner's signing process. Run the commands below from
+the repository root in PowerShell.
 
 ## What the build stands on
 
@@ -39,11 +40,10 @@ PowerShell.
    set `MSYS2_ROOT` for `tools\dev.tcl`. bash runs only inside MSYS2, for
    Tcl/Tk's configure and make.
 3. **The pinned sources:** Tcl/Tk 9.0.4, SQLite 3.53.4 and yyjson 0.12.0. The
-   bootstrap fetches a missing archive into `.cache\deps\downloads` with
-   Windows' own `curl.exe` and checks each by SHA-256; an archive already
-   there with the right hash is used as it is, so the build PC, whose
-   downloads folder holds all four, needs no network. Later builds reuse
-   `.cache\deps`.
+   bootstrap fetches the four source archives and the matching upstream
+   SQLite Tcl binding into `.cache\deps\downloads` with Windows' own
+   `curl.exe`. It verifies each file by SHA-256 and reuses matching cached
+   downloads. Later builds reuse `.cache\deps`.
 
 ## Build and test
 

@@ -1,0 +1,101 @@
+name: SQLite in the Windows runtime
+
+on:
+  push:
+    branches:
+      - dev/22-sqlite3
+      - dev/22-sqlite-gui
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up MSYS2
+        id: msys
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: UCRT64
+          update: true
+          cache: false
+
+      - name: Install the locked UCRT64 build tools
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $lock = (Get-Content tools/dependencies.lock.json -Raw | ConvertFrom-Json).toolchain
+          $mirror = 'https://repo.msys2.org'
+          $ucrt = "$mirror/mingw/ucrt64"
+          $prefix = 'mingw-w64-ucrt-x86_64'
+          $packages = @(
+            "$ucrt/$($lock.gccPackage)-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$prefix-gcc-libs-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.binutilsPackage)-$($lock.binutilsPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.makePackage)-$($lock.makePackageVersion)-any.pkg.tar.zst"
+            "$mirror/msys/x86_64/$($lock.zipPackage)-$($lock.zipPackageVersion)-x86_64.pkg.tar.zst"
+          )
+          # Match the GCC package's .BUILDINFO for the runtime, headers and ISL ABI.
+          foreach ($component in 'crt','headers','libwinpthread','winpthreads') {
+            $packages += "$ucrt/$prefix-$component-14.0.0.r37.g2bfe61fba-1-any.pkg.tar.zst"
+          }
+          $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
+          & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
+          exit $LASTEXITCODE
+
+      - name: Build both hosts and package the full development runtime
+        id: build
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $driver = Join-Path $env:RUNNER_TEMP 'machteld-0.21.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $driver
+          $expected = '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7'
+          $actual = (Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Build runtime SHA-256 mismatch: $actual" }
+          & $driver tools/release.tcl --msys $env:MSYS2_ROOT
+          exit $LASTEXITCODE
+
+      - name: Run the fast gate, including SQLite and background jobs
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld-0.21.exe" tools/gate.tcl --group fast --runtime out/machteld.exe
+          exit $LASTEXITCODE
+
+      - name: Exercise the SQLite API on the built host
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/sqlite3_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Exercise relocated console and GUI wraps
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/wrap_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Exercise the wrapped SQLite lookup GUI
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_name == 'dev/22-sqlite-gui' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/sqlite_lookup_gui_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Check development cache invalidation
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          & "$env:RUNNER_TEMP\machteld-0.21.exe" test/dev_cache_test.tcl --msys $env:MSYS2_ROOT
+          exit $LASTEXITCODE

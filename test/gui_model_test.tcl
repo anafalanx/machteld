@@ -62,11 +62,9 @@ try {
     check "cancel settles immediately" [expr {[dict get $state phase] eq "canceled"}]
     check "repeat cancel is harmless" [expr {![$job cancel]}]
     check "cancel releases owned child" [expr {[child list] eq $baseline}]
-    # An old queued callback cannot touch the new generation's streams.
+    # The same view can start a fresh inspection after cancellation.
     $job start $WORK
-    $job readable -1 stdout
-    $job poll -1
-    check "stale callbacks cannot disrupt recovery" [expr {[dict get [inspect_wait $job] phase] eq "done"}]
+    check "inspection can restart after cancellation" [expr {[dict get [inspect_wait $job] phase] eq "done"}]
     $job start $WORK slow
     $job close
     check "close stops active work" [expr {[dict get [$job snapshot] phase] eq "closed" && [child list] eq $baseline}]

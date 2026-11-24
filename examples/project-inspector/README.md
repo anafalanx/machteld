@@ -30,8 +30,9 @@ the error and retained log tail, independently of text selection.
 
 ## Pattern and limits
 
-- `model.tcl` has no Tk dependency. Its `Job` owns one supervised child and all
-  its channels/timers. A repeated start while running is rejected, never queued.
+- `model.tcl` interprets progress, rows and completion records. It uses the
+  `machteld::job` Tcl package to own the child, drain its channels and cancel
+  its timers. Both run headlessly. A repeated start while running returns 0.
 - `inspect.tcl` performs filesystem work in that child. stdout carries strict
   UTF-8 JSON lines; stderr carries diagnostics. The GUI drains both streams.
 - `view.tcl` contains widgets and bindings. It coalesces model notifications into
@@ -45,8 +46,8 @@ the error and retained log tail, independently of text selection.
   memory limit (`-mem 128M`), not a cap on the GUI's heap or total process-tree
   RSS. Directory enumeration itself occurs there and can fail on
   inaccessible, disappearing, very large, or slow directories. The GUI reports
-  that failure and remains usable. These limits are application choices, not
-  new runtime defaults.
+  that failure and remains usable. The inspector uses the job package's
+  defaults for both child limits.
 - Generation checks reject stale callbacks. Cancel/close remove channel
   handlers, cancel timers, and release the child token. A failed observer stops
   the child and leaves an error in the model snapshot, without recursively

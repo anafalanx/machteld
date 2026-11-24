@@ -26,6 +26,7 @@ released, and includes its changes:
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
 | Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, metadata and icons |
+| Database access | Key/value `store` | `store` and the built-in Tcl `sqlite3` package |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
@@ -67,10 +68,11 @@ targets. Current stabilization checks ran on Windows 11 Pro build 26200; that
 is not a fresh Server acceptance result. Lower-level ConPTY availability on
 older Windows does not extend the support contract.
 
-Machteld deliberately retains a narrow key/value `store`, synchronous commands,
-and manually provisioned external extensions. It is not a general database or
-an automatic dependency manager. See [execution](docs/execution-model.md),
-[the contract](docs/contract.md), and [external libraries](docs/extensions.md).
+Use `store` for key/value data and `package require sqlite3` for SQL queries,
+transactions and backups. Both use the same embedded SQLite engine, including
+in wrapped programs. Database calls are synchronous. External extensions are
+provisioned manually. See [database access](docs/contract.md),
+[execution](docs/execution-model.md), and [external libraries](docs/extensions.md).
 
 ## A first program
 

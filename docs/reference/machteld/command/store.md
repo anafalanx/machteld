@@ -58,7 +58,8 @@ try {
 
 ## Constraints
 
-This is intentionally not an SQL escape hatch. Machteld owns a table named
+For SQL queries and transactions, use `package require sqlite3` and open a
+separate connection. Machteld owns a table named
 `kv(key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID`; do not treat the database
 schema as an extension API. Independent processes can share a file subject to
 normal SQLite locking.

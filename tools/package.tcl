@@ -106,6 +106,15 @@ foreach candidate [list [file join $TC lib tcl9.0] [file join $TC tcl_library]] 
 if {$tclLib eq ""} { error "tcl_library not found under dependency prefix: $TC" }
 copy_tree $tclLib [file join $stage tcl_library]
 
+# Tcl looks for package indexes in the children of its library directory.
+# Both wrapped hosts copy this tree, including these opt-in script packages.
+set packageSource [file join [file dirname [file dirname [file normalize [info script]]]] packages machteld-job]
+set packageTarget [file join $stage tcl_library machteld-job]
+file mkdir $packageTarget
+foreach name {pkgIndex.tcl job.tcl} {
+    file copy [file join $packageSource $name] [file join $packageTarget $name]
+}
+
 # Tcl 9 installs script modules separately from the core script library. Core
 # services such as clock require msgcat from this sibling tree; keeping its
 # canonical `tcl9/9.0/*.tm` layout also lets tm.tcl discover the modules from

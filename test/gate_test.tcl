@@ -218,9 +218,10 @@ check {the trapped identity driver gets both basekits and a work folder, all del
     [expr {[dict keys [dict get $identityRun extract]] eq {basekit/console.exe basekit/gui.exe} &&
         [dict get $identityRun cleanup] eq [lrange [dict get $identityRun argv] 2 4]}]
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
-check {the window-opening GUI lane runs only behind --interactive-gui, last} \
+check {the window-opening lanes run only behind --interactive-gui, last} \
     [expr {"gui_widget_test.tcl" ni [scripts $releasePlan] &&
-        [file tail [lindex [dict get [lindex $guiPlan end] argv] 1]] eq "gui_widget_test.tcl"}]
+        "sqlite_lookup_gui_test.tcl" ni [scripts $releasePlan] &&
+        [lrange [scripts $guiPlan] end-1 end] eq {sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]
 set entry [lindex $releasePlan [lsearch -exact $releaseLabels entry]]
 set bareHost [lindex [dict get $entry argv] end]
 check {the entry test gets the process fixture and a bare host of its own, deleted after it} \
