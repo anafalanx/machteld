@@ -18,10 +18,27 @@ namespace eval ::guiTest {
         after 5 [list set [namespace current]::wake 1]
         vwait [namespace current]::wake
     }
+    proc state {} {
+        set result {}
+        foreach name {phase status received sealed workerDone renderTimer} {
+            if {[info exists ::lookup::$name]} { dict set result $name [set ::lookup::$name] }
+        }
+        foreach {key script} {
+            root {wm state .} rootMapped {winfo ismapped .} tableMapped {winfo ismapped .results}
+            visibleRows {llength [.results children {}]} job {$::lookup::job snapshot}
+            children {lmap token [::machteld::child list] {::machteld::child info $token}}
+        } {
+            if {![catch $script value]} { dict set result $key $value }
+        }
+        return $result
+    }
     proc until {description condition} {
         set limit [expr {[clock milliseconds] + 15000}]
         while {![uplevel 1 [list expr $condition]]} {
-            if {[clock milliseconds] >= $limit} { error "timed out: $description" }
+            if {[info exists ::lookup::phase] && $::lookup::phase eq "error"} {
+                error "$description: lookup failed: [state]"
+            }
+            if {[clock milliseconds] >= $limit} { error "timed out: $description: [state]" }
             turn
         }
     }

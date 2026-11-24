@@ -133,8 +133,8 @@ proc ::lookup::onJob {source event data} {
     switch -- $event {
         lines {
             foreach line $data {
-                set record [::machteld::json decode -maxbytes 4096 $line]
-                accept $record
+                set record [::machteld::json decode -typed -maxbytes 4096 $line]
+                accept [::machteld::json unwrap $record]
             }
             scheduleRender
         }
