@@ -69,6 +69,13 @@ jobs:
           & "$env:RUNNER_TEMP\machteld-0.21.exe" tools/gate.tcl --group fast --runtime out/machteld.exe
           exit $LASTEXITCODE
 
+      - name: Exercise the SQLite API on the built host
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/sqlite3_test.tcl
+          exit $LASTEXITCODE
+
       - name: Exercise relocated console and GUI wraps
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh

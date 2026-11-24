@@ -896,8 +896,11 @@ try {
         set launch [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir \
             "[::boot::shq $shellUnix] [::boot::shq $sourceArgument] [::boot::shq $prefixArgument] 3"]]
         set seen [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir $probe]]
-        # Red/green: the launch that failed, the script started by name from a
-        # -c line. Its words carry no apostrophe, so what fails is the #! line.
+        # The old launcher lets /usr/bin/env choose bash from the caller's PATH.
+        # System32 may itself contain a WSL bash.exe. Put our exit-97 fixture
+        # first so this check proves which interpreter the shebang selected.
+        file copy $fakeExe [file join $fakeDir bash.exe]
+        set ::env(PATH) "[file nativename $fakeDir];$::env(PATH)"
         set old [run -timeout 2m -- [file join $realMsys usr bin bash.exe] --noprofile --norc -c \
             "[::boot::shq $shellUnix] [::boot::shq /plain-source] [::boot::shq /plain-prefix] 3"]
     } finally {
@@ -918,8 +921,8 @@ try {
             [string match /ucrt64/bin:/usr/bin:/* [lindex $seenLines 10]] &&
             [llength [split [lindex $seenLines 10] :]] == 4}] $seenLines
     set oldText [encoding convertfrom utf-8 [dict get $old err]][encoding convertfrom utf-8 [dict get $old out]]
-    check {former indirect bash launch fails at its env shebang under a System32-only PATH} \
-        [expr {[dict get $old exit] != 0 && [string match {*env*bash*} $oldText]}] $oldText
+    check {former indirect bash launch selects the caller's bash at the env shebang} \
+        [expr {[dict get $old status] eq "error" && [dict get $old exit] == 97}] $oldText
 
     # Exercise the actual bootstrap verifier in its read-only mode. A stale
     # dependency state must fail, never bootstrap or consume an unverified prefix.

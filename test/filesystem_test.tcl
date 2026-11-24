@@ -158,10 +158,14 @@ try {
 
     if {"junction" in $junctions} {
         set canonical [canon [file join $ROOT junction]]
-        set canonical_path [string map {\\ /} [dict get $canonical path]]
-        set target_path [string map {\\ /} [file join $ROOT target]]
-        check "canon resolves a junction target" \
-            [string equal -nocase $canonical_path $target_path]
+        # TEMP itself may contain a short name or a junction. Open the target
+        # directly for its final path and its identity on this filesystem.
+        set target [canon [file join $ROOT target]]
+        check "canon resolves a junction target" [expr {
+            [file tail [dict get $canonical path]] eq "target" &&
+            [string equal -nocase [dict get $canonical path] [dict get $target path]] &&
+            [dict get $canonical volume] eq [dict get $target volume] &&
+            [dict get $canonical file] eq [dict get $target file]}]
         check "canon reports the target's filesystem link count" [expr {
             [dict exists $canonical links] &&
             [string is integer -strict [dict get $canonical links]] &&
