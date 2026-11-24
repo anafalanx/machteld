@@ -1,9 +1,9 @@
-name: Verify Windows Tcl archives
+name: Verify application services on Windows
 
 on:
   push:
     branches:
-      - verify/22-tcl-archives
+      - verify/22-app-services
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 120
     env:
-      CANDIDATE_SHA: 040751d9537be22c3ab69f135ff399734466be76
+      CANDIDATE_SHA: b3cf65cd959d5f410553c18b304ab46d067927db
     defaults:
       run:
         working-directory: candidate
@@ -92,19 +92,32 @@ jobs:
           & $driver tools/release.tcl --msys $env:MSYS2_ROOT
           exit $LASTEXITCODE
 
-      - name: Run archive and ordinary Tcl entry contracts
+      - name: Verify atomic file publication
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
-          & .\out\machteld.exe test/archive_test.tcl
+          & .\out\machteld.exe test/publish_test.tcl
           exit $LASTEXITCODE
 
-      - name: Run Tk archive contracts on the Windows desktop
+      - name: Verify process lock ownership and contention
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
-          & .\out\machteld.exe test/archive_test.tcl --tk
+          & .\out\machteld.exe test/lock_test.tcl
           exit $LASTEXITCODE
+
+      - name: Verify archive replacement and generation ownership on local storage
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/app_launch_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Verify archive replacement and generation ownership over loopback SMB
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & (Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/test-loopback-share.ps1')
 
       - name: Pack and use SQLite Lookup and Project Inspector archives
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
@@ -114,12 +127,35 @@ jobs:
           & .\out\machteld.exe $probe (Get-Location).Path
           exit $LASTEXITCODE
 
-      - name: Run all five gate groups on this build
+      - name: Retain a disk-backed generation through parent and child exits
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/generation-stress.tcl'
+          & .\out\machteld.exe $probe
+          exit $LASTEXITCODE
+
+      - name: Inspect console attachment of real archive and wrapped GUI workers
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $probes = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification'
+          $compilerBin = Join-Path $env:MSYS2_ROOT 'ucrt64/bin'
+          $env:Path = "$compilerBin;$env:Path"
+          $dll = Join-Path $env:RUNNER_TEMP 'consoleprobe.dll'
+          & "$compilerBin/gcc.exe" -shared -static-libgcc -std=c17 -O2 -Wall -Wextra -Werror -DUSE_TCL_STUBS -I.cache/deps/prefix/include "$probes/consoleprobe.c" .cache/deps/prefix/lib/libtclstub.a -o $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\out\machteld.exe "$probes/gui-console-probe.tcl" (Get-Location).Path $dll
+          exit $LASTEXITCODE
+
+      - name: Run all five gate groups and the Windows desktop acceptance lanes
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         env:
           MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
         run: |
           $env:Path = "$env:SystemRoot/System32;$env:Path"
-          & .\dist\0.21\machteld.exe tools/gate.tcl --skip-build --runtime out/machteld.exe --msys $env:MSYS2_ROOT
+          & .\dist\0.21\machteld.exe tools/gate.tcl --skip-build --runtime out/machteld.exe --msys $env:MSYS2_ROOT --interactive-gui
           exit $LASTEXITCODE
