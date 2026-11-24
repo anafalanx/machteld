@@ -4,9 +4,14 @@ namespace eval ::lookup {
 }
 
 proc ::lookup::workerCommand {entry} {
-    set cmd [list [info nameofexecutable]]
-    if {[lindex [file system $entry] 0] ne "zipfs"} { lappend cmd [file normalize $entry] }
-    return [linsert $cmd end --worker]
+    set command [list [info nameofexecutable]]
+    if {[lindex [file system $entry] 0] ne "zipfs"} {
+        lappend command [file normalize $entry]
+    } elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
+        # A new interpreter mounts the application archive for itself.
+        lappend command $::argv0
+    }
+    return [linsert $command end --worker]
 }
 
 # The UI owns the empty temporary file or the CLI has just reserved a new one.

@@ -119,6 +119,7 @@ check {the release build needs MSYS2} [::gate::needs [settings {}] msys]
 check {--interactive-gui alone needs the runtime} [::gate::needs [settings {--group reference-generator --interactive-gui}] runtime]
 
 check {the fast group compiles nothing} [expr {[compiled [::gate::plan $fast]] eq {}}]
+check {the fast group tests script and archive launch} [expr {"archive_test.tcl" in [scripts [::gate::plan $fast]]}]
 check {the integration group compiles its own fixtures and the process fixture} \
     [expr {[compiled [::gate::plan [settings {--group integration}]]] eq [list \
         {fixture process_fixture.c} {fixture http_fixture.c} {SQLite test object} \
@@ -221,7 +222,9 @@ set guiPlan [::gate::plan [settings {--interactive-gui}]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
     [expr {"gui_widget_test.tcl" ni [scripts $releasePlan] &&
         "sqlite_lookup_gui_test.tcl" ni [scripts $releasePlan] &&
-        [lrange [scripts $guiPlan] end-1 end] eq {sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]
+        "Tk app archive" ni $releaseLabels &&
+        [lindex [dict get [lindex $guiPlan end-2] argv] end] eq "--tk" &&
+        [lrange [scripts $guiPlan] end-2 end] eq {archive_test.tcl sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]
 set entry [lindex $releasePlan [lsearch -exact $releaseLabels entry]]
 set bareHost [lindex [dict get $entry argv] end]
 check {the entry test gets the process fixture and a bare host of its own, deleted after it} \

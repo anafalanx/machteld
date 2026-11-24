@@ -22,8 +22,9 @@ The product has three layers:
 Startup registers the native commands, loads the embedded prelude, and applies
 the entry gate before Tcl evaluates a program. The gate parses the first command
 without evaluating it. Interactive startup is still available when no file is
-selected; `--help`, `--version`, `--docs`, and the subordinate `wrap` route are
-handled by the host.
+selected; `--help`, `--version`, `--docs`, `pack`, and `wrap` are handled by the host.
+The full host mounts a `.machteld` application ZIP read-only and applies the
+same entry gate to its root `main.tcl`.
 
 For a native startup file, the host captures the file once, checks that decoded
 value, and evaluates the same value; a second path read cannot substitute a

@@ -28,8 +28,8 @@ The binary may start on older builds — ConPTY has existed since Windows 10
 
 ## Entry and package
 
-A direct program is a readable UTF-8 file whose first executable command is one
-of these literal forms. `.tcl` is conventional, not required:
+A program begins with one of these literal commands in its readable UTF-8 entry
+file. A `.machteld` archive uses its root `main.tcl` as the entry.
 
 ```tcl
 package require machteld
@@ -50,6 +50,11 @@ file fails with `{MACHTELD ENTRY notfound}` and a file without the opt-in fails
 with `{MACHTELD ENTRY optin}`. A missing or damaged embedded prelude fails with
 `{MACHTELD ENTRY payload}`. These startup failures exit before the program can
 be evaluated. Programs from stdin are not accepted.
+
+When the full host runs an application archive, `argv0` identifies the archive
+by its absolute native path, `info script` identifies the mounted entry, and
+`argv` holds the program arguments. The caller's working directory is preserved.
+[Packaging guide](packaging.md)
 
 Once loaded, `package require machteld` returns `22`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add

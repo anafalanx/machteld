@@ -37,7 +37,8 @@ puts "[dict get $tree dirs] directories"
 Run it with `machteld.exe program.tcl ?argument ...?`. The `.tcl` extension is a
 convention, not a gate. The runtime parses that first command before evaluation,
 loads the same Machteld package in every host, then lets Tcl handle the file and
-its `argv` normally.
+its `argv` normally. The full host also runs a `.machteld` ZIP containing an
+opted-in `main.tcl` and its assets. [Packaging guide](packaging.md)
 
 The palette has four layers:
 

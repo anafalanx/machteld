@@ -2,10 +2,14 @@
 namespace eval ::inspector { variable finished 0 }
 
 proc ::inspector::worker_command {entry} {
-    if {[lindex [file system $entry] 0] eq "zipfs"} {
-        return [list [info nameofexecutable] --worker]
+    set command [list [info nameofexecutable]]
+    if {[lindex [file system $entry] 0] ne "zipfs"} {
+        lappend command [file normalize $entry]
+    } elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
+        # A new interpreter mounts the application archive for itself.
+        lappend command $::argv0
     }
-    return [list [info nameofexecutable] [file normalize $entry] --worker]
+    return [linsert $command end --worker]
 }
 
 proc ::inspector::no_window {} {

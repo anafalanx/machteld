@@ -1,18 +1,18 @@
 ---
 type: guide
 title: Packaging
-description: Direct Machteld entries and standalone console or GUI tools.
-tags: [machteld, wrap, zipfs, deployment]
+description: Running Tcl files and application archives, and creating standalone console or GUI tools.
+tags: [machteld, pack, wrap, zipfs, deployment]
 ---
 
 # Packaging
 
-Machteld has one program boundary and two deployment forms.
+Machteld runs an opted-in Tcl entry from a file, a shared-runtime application archive, or a wrapped executable.
 
 The workflow below describes machteld 22, in preparation and not yet released.
-The historical signed release is unchanged and does not provide the newer
-`--manifest`, `--plan`, or application-identity features. Inspect the selected executable's `manifest` and artifact identity
-before selecting packaging options.
+Application archives, wrapper inventories, packaging plans, and application
+identity are features of the 22 development runtime. Check the selected
+executable’s artifact identity when selecting packaging options.
 
 ## Direct entry
 
@@ -33,6 +33,49 @@ It does not grant, reduce, or isolate Windows authority. Scripts and loaded DLLs
 are trusted code running with the user's permissions; ordinary Tcl file and
 process commands remain available. It is not a sandbox or a safe way to execute
 an untrusted program.
+
+## Application archive
+
+```text
+machteld.exe pack appdir -o myapp.machteld
+machteld.exe myapp.machteld arg1 "arg two"
+```
+
+For a directory, put the opted-in entry at `appdir/main.tcl`. Put its scripts,
+packages and assets alongside it. Pack a dedicated directory containing the
+files you intend to deliver, and choose an output outside it. The ZIP root
+contains `main.tcl` and the directory's contents, with no enclosing `appdir/`.
+For a single script, `machteld.exe pack hello.tcl -o hello.machteld` stores
+that script as the root `main.tcl`. The destination is replaced after the
+completed archive has been checked. `pack` is a command-line action of the
+full executable.
+
+The full host recognizes the `.machteld` suffix case-insensitively and mounts
+the ZIP read-only for that process. A ZIP made by another tool can use the
+same layout. The host checks the entry's usual literal `package require
+machteld` declaration before evaluating it. The archive can use Tk and the
+host's installed packages. Changes to application data belong in a writable
+native file.
+
+In the entry, `$argv0` is the absolute native pathname of the archive,
+`[info script]` names the mounted `main.tcl`, and `$argv` contains the
+arguments after the archive name. The working directory is the caller's.
+Resolve assets relative to the entry. For example, an archive containing
+`lib/myapp/pkgIndex.tcl` can add its own package directory explicitly.
+
+```tcl
+package require machteld 22-
+set here [file dirname [info script]]
+lappend auto_path [file join $here lib]
+package require myapp
+source [file join $here view.tcl]
+```
+
+A worker in another process opens the archive afresh. Launch it with
+`[list [info nameofexecutable] $::argv0 --worker]`, and let the entry handle
+`--worker` as an application argument. Wrapped programs launch their own
+executable with the worker argument. The repository example in
+`examples/project-inspector` demonstrates all three launch forms.
 
 ## Wrapped entry
 

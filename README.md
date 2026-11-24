@@ -26,6 +26,7 @@ released, and includes its changes:
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
 | Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, metadata and icons |
+| Application archives | Direct Tcl files and wrapped tools | Also runs and creates `.machteld` archives for the shared runtime |
 | Database access | Key/value `store` | `store` and the built-in Tcl `sqlite3` package |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
@@ -158,6 +159,22 @@ Plain JSON uses Tcl representations and cannot preserve every JSON distinction;
 use typed JSON when string/number, boolean, null, and container identity matter.
 The [palette](docs/palette.md) and [exact reference](docs/reference/machteld/index.md)
 describe composition and limits, including retries and cancellation.
+
+## Application archives
+
+To distribute an application to someone who already has Machteld 22, put its
+opted-in `main.tcl` and assets in a staging directory. The full host can pack
+that tree into a plain ZIP and run it with the usual program arguments.
+
+<!-- machteld-example: archive -->
+```text
+machteld.exe pack myapp -o myapp.machteld
+machteld.exe myapp.machteld world
+```
+
+The archive carries the application files. The host supplies Tcl/Tk and the
+runtime. A single-file program can be packed directly with
+`machteld.exe pack app.tcl -o app.machteld`. [Packaging guide](docs/packaging.md)
 
 ## Standalone tools
 

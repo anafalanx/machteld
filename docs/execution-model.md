@@ -61,7 +61,7 @@ loop. The worker command is a Tcl list with one element per argument.
 package require machteld
 package require machteld::job 1.0
 
-# Run this example in a console host, from source or as a wrapped tool.
+# Run in a console host from a Tcl file, a .machteld archive, or a wrapped tool.
 if {$argv eq {--worker}} {
     fconfigure stdout -encoding utf-8 -translation lf
     puts {worker ready}
@@ -77,6 +77,8 @@ proc receive {job event data} {
 set command [list [info nameofexecutable]]
 if {[lindex [file system [info script]] 0] ne "zipfs"} {
     lappend command [file normalize [info script]]
+} elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
+    lappend command $::argv0
 }
 lappend command --worker
 set job [::machteld::job::Job new receive]
