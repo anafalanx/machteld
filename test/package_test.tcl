@@ -104,9 +104,10 @@ proc ::pt::packageTests {} {
     set tclLibrary [file join $prefix lib tcl9.0]
     set tclModules [file join $prefix lib tcl9 9.0]
     writeText [file join $tclLibrary init.tcl] "set ::fixture_tcl 1"
-    foreach name {clock.tcl package.tcl tm.tcl tclIndex} {
+    foreach name {clock.tcl package.tcl tm.tcl} {
         writeText [file join $tclLibrary $name] "# fixture $name"
     }
+    writeText [file join $tclLibrary tclIndex] "# Tcl autoload index file, version 2.0\n"
     writeText [file join $tclLibrary encoding cp1252.enc] "fixture encoding"
     writeText [file join $tclLibrary msgs nl.msg] "fixture catalog"
     writeText [file join $tclLibrary tzdata Europe Brussels] "fixture timezone"
