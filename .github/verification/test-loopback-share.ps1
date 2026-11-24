@@ -29,8 +29,10 @@ try {
         Select-Object ServerName, ShareName, Dialect | Format-Table | Out-Host
     Remove-Item -LiteralPath (Join-Path $unc $marker)
 
-    Write-Host "Testing publication and child launches through $unc"
-    & .\out\machteld.exe test/app_launch_test.tcl $unc
+    $publication = Join-Path $unc 'shared archives 雪'
+    New-Item -Path $publication -ItemType Directory | Out-Null
+    Write-Host "Testing publication and child launches through $publication"
+    & .\out\machteld.exe test/app_launch_test.tcl $publication
     if ($LASTEXITCODE -ne 0) { throw "UNC generation test exited with $LASTEXITCODE" }
 } finally {
     if ($shareCreated) { Remove-SmbShare -Name $shareName -Force -Confirm:$false }

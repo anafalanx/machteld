@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 120
     env:
-      CANDIDATE_SHA: b3cf65cd959d5f410553c18b304ab46d067927db
+      CANDIDATE_SHA: 0f45fc586a4c1cc6c401b0c5e45e39315c87477e
     defaults:
       run:
         working-directory: candidate
