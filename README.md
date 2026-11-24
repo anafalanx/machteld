@@ -173,7 +173,7 @@ machteld.exe myapp.machteld world
 
 The archive carries the application files. The host supplies Tcl/Tk and the
 runtime. A single-file program can be packed directly with
-`machteld.exe pack app.tcl -o app.machteld`. [Packaging guide](docs/packaging.md#application-archive)
+`machteld.exe pack app.tcl -o app.machteld`. [Packaging guide](docs/packaging.md)
 
 ## Standalone tools
 

@@ -54,7 +54,7 @@ be evaluated. Programs from stdin are not accepted.
 When the full host runs an application archive, `argv0` identifies the archive
 by its absolute native path, `info script` identifies the mounted entry, and
 `argv` holds the program arguments. The caller's working directory is preserved.
-[Packaging guide](packaging.md#application-archive)
+[Packaging guide](packaging.md)
 
 Once loaded, `package require machteld` returns `22`. Palette commands are in
 `::machteld`, which is on the global namespace path. A nested namespace may add

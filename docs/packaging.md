@@ -74,7 +74,8 @@ source [file join $here view.tcl]
 A worker in another process opens the archive afresh. Launch it with
 `[list [info nameofexecutable] $::argv0 --worker]`, and let the entry handle
 `--worker` as an application argument. Wrapped programs launch their own
-executable with the worker argument. [Project inspector example](../examples/project-inspector/README.md)
+executable with the worker argument. The repository example in
+`examples/project-inspector` demonstrates all three launch forms.
 
 ## Wrapped entry
 
