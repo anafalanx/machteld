@@ -64,8 +64,11 @@ proc ::machteld::build::common_flags {paths} {
 # sqlite3.o and static Tcl as the rest of the host.
 proc ::machteld::build::sqlite_binding_flags {paths} {
     variable SQLITE_FLAGS
+    # Upstream assertions include __FILE__. Keep the diagnostic filename in
+    # both hosts independent of the dependency cache's location.
+    set sqlite [dict get $paths sqlite]
     return [list {*}$SQLITE_FLAGS -DSTATIC_BUILD=1 -DSQLITE_3_SUFFIX_ONLY \
-        -I[dict get $paths include] -I[dict get $paths sqlite]]
+        "-ffile-prefix-map=$sqlite=sqlite" -I[dict get $paths include] -I$sqlite]
 }
 
 # Run a tool, streaming its output, and turn a nonzero exit into an error that
