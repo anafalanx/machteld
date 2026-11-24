@@ -1,0 +1,33 @@
+name: Probe Windows loopback SMB setup
+on:
+  push:
+    branches:
+      - verify/app-services-smb-probe
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/verification
+          persist-credentials: false
+      - name: Exercise the share setup and Unicode Tcl paths on signed 0.21
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scratch = New-Item -Type Directory (Join-Path $env:RUNNER_TEMP 'unc-check')
+          $exeDir = New-Item -Type Directory (Join-Path $scratch.FullName 'out')
+          $testDir = New-Item -Type Directory (Join-Path $scratch.FullName 'test')
+          $exe = Join-Path $exeDir.FullName 'machteld.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $exe
+          if ((Get-FileHash $exe).Hash -ne '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7') { throw 'Unexpected release digest' }
+          Copy-Item .github/verification/check-unc.tcl (Join-Path $testDir.FullName 'app_launch_test.tcl')
+          $helper = (Resolve-Path .github/verification/test-loopback-share.ps1).Path
+          Set-Location $scratch.FullName
+          try { & $helper } catch {
+            Write-Host $_.ScriptStackTrace
+            throw
+          }
