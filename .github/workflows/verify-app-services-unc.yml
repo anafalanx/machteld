@@ -1,0 +1,100 @@
+name: Verify archive generation on a Windows SMB share
+
+on:
+  push:
+    branches:
+      - verify/22-app-services-unc
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CANDIDATE_SHA: 0f45fc586a4c1cc6c401b0c5e45e39315c87477e
+    defaults:
+      run:
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: candidate
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Read the independent loopback share helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probes
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/verification
+          persist-credentials: false
+
+      - name: Verify the source revision and fresh workspace
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:CANDIDATE_SHA) {
+            throw "Expected $env:CANDIDATE_SHA, checked out $actual"
+          }
+          if ((Test-Path .cache/deps) -or (Test-Path out/machteld.exe)) {
+            throw 'Expected a clean workspace without dependency cache or built runtime'
+          }
+          Write-Host "Testing candidate $actual"
+
+      - name: Set up MSYS2
+        id: msys
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: UCRT64
+          update: true
+          cache: false
+
+      - name: Install the locked UCRT64 build tools
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $lock = (Get-Content tools/dependencies.lock.json -Raw | ConvertFrom-Json).toolchain
+          $mirror = 'https://repo.msys2.org'
+          $ucrt = "$mirror/mingw/ucrt64"
+          $prefix = 'mingw-w64-ucrt-x86_64'
+          $packages = @(
+            "$ucrt/$($lock.gccPackage)-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$prefix-gcc-libs-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.binutilsPackage)-$($lock.binutilsPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.makePackage)-$($lock.makePackageVersion)-any.pkg.tar.zst"
+            "$mirror/msys/x86_64/$($lock.zipPackage)-$($lock.zipPackageVersion)-x86_64.pkg.tar.zst"
+          )
+          # Match the GCC package's .BUILDINFO for the runtime, headers and ISL ABI.
+          foreach ($component in 'crt','headers','libwinpthread','winpthreads') {
+            $packages += "$ucrt/$prefix-$component-14.0.0.r37.g2bfe61fba-1-any.pkg.tar.zst"
+          }
+          $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
+          & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
+          exit $LASTEXITCODE
+
+      - name: Reconstruct the unsigned candidate
+        id: build
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $driverDir = New-Item -ItemType Directory -Path dist/0.21 -Force
+          $driver = Join-Path $driverDir.FullName 'machteld.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $driver
+          $expected = '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7'
+          $actual = (Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Build runtime SHA-256 mismatch: $actual" }
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & $driver tools/release.tcl --msys $env:MSYS2_ROOT
+          exit $LASTEXITCODE
+
+      - name: Verify archive replacement and generation ownership over loopback SMB
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 -LiteralPath .\out\machteld.exe | Format-List
+          & (Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/test-loopback-share.ps1')
