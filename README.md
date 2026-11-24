@@ -71,7 +71,7 @@ older Windows does not extend the support contract.
 Use `store` for key/value data and `package require sqlite3` for SQL queries,
 transactions and backups. Both use the same embedded SQLite engine, including
 in wrapped programs. Database calls are synchronous. External extensions are
-provisioned manually. See [database access](docs/contract.md#sqlite),
+provisioned manually. See [database access](docs/contract.md),
 [execution](docs/execution-model.md), and [external libraries](docs/extensions.md).
 
 ## A first program
