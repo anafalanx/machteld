@@ -246,8 +246,8 @@ internal modified UTF-8 representation.
 `get` always returns a bytearray and raises `STORE notfound` for absence; `del` returns 0/1. `open`
 without a path creates an in-memory store; `open path` creates or opens a durable
 database. Both use a five-second busy timeout. `version` reports the SQLite version. See the
-[contract](contract.md#store) for the cross-host guarantee. For SQL, use the
-built-in [`sqlite3` Tcl package](contract.md#sqlite).
+[contract](contract.md) for the cross-host guarantee. For SQL, use the
+built-in [`sqlite3` Tcl package](contract.md).
 
 These commands are synchronous. HTTP's phase timeouts and SQLite's busy timeout
 are not general cancellation or total GUI-response guarantees. Directory walks,

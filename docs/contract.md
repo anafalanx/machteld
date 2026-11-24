@@ -221,7 +221,7 @@ Use `sqlite3 db $path -readonly 1` for read-only lookups. A query runs on its
 calling thread. For a long lookup from Tk, use `machteld::job` to run a worker
 process, open the connection there, and return results in bounded pages.
 The embedded build disables run-time loading of SQLite extensions.
-See [background jobs](execution-model.md#one-background-job) and the
+See [background jobs](execution-model.md) and the
 [SQLite Tcl API](https://www.sqlite.org/tclsqlite.html).
 
 ## Store

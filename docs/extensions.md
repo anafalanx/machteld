@@ -73,7 +73,7 @@ development-only packages, drivers, credentials, or PATH entries.
 
 ## Database scope
 
-The [database contract](contract.md#sqlite) covers both SQLite interfaces in
+The [database contract](contract.md) covers both SQLite interfaces in
 Machteld. TDBC/ODBC, PostgreSQL, MySQL/MariaDB and Office drivers require their own
 compatibility, authentication, license, and deployment review for a real use
 case. The tiny arithmetic extension proves the loading pattern, not any database
