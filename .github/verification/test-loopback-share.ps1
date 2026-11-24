@@ -25,8 +25,13 @@ try {
     if ([IO.File]::ReadAllText((Join-Path $directory $marker)) -cne $shareName) {
         throw "Loopback SMB write did not reach the new share's backing directory"
     }
-    Get-SmbConnection -ShareName $shareName -ErrorAction SilentlyContinue |
-        Select-Object ServerName, ShareName, Dialect | Format-Table | Out-Host
+    try {
+        Get-SmbConnection -ErrorAction Stop |
+            Where-Object { $_.ShareName -eq $shareName } |
+            Select-Object ServerName, ShareName, Dialect | Format-Table | Out-Host
+    } catch {
+        Write-Host "SMB connection metadata unavailable: $($_.Exception.Message)"
+    }
     Remove-Item -LiteralPath (Join-Path $unc $marker)
 
     $publication = Join-Path $unc 'shared archives 雪'
