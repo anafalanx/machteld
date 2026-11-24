@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 120
     env:
-      CANDIDATE_SHA: e53a18b6279582633b8a5daaee6914a699613e32
+      CANDIDATE_SHA: 7a164b9552ba2998441b5c0f4f26c4c8feb20557
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
