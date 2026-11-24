@@ -90,7 +90,8 @@ namespace eval ::job_test {
             set job [::machteld::job::Job new [list [namespace current]::observe $mode]]
             try {
                 set kind [expr {$mode eq "restart" ? "interrupted" : $mode}]
-                check "$mode starts" [$job start [command $kind]]
+                set opts [expr {$mode eq "burst" ? {-console none} : {}}]
+                check "$mode starts" [$job start [command $kind] {*}$opts]
                 if {$mode eq "restart"} {
                     check "second start refused while busy" [expr {![$job start [command replacement]]}]
                 }

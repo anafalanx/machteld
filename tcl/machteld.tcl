@@ -140,6 +140,56 @@ proc ::machteld::Fail {domain code msg} {
     return -code error -errorcode [list MACHTELD $domain $code] $msg
 }
 
+# Stage bytes beside the destination. Only a file successfully created by
+# this call is ours to remove; never truncate or remove a colliding name.
+proc ::machteld::PublishBytes {destination value} {
+    if {$destination eq "" || [string first \u0000 $destination] >= 0 ||
+            [lindex [file system $destination] 0] ne "native"} {
+        Fail PUBLISH badvalue "publish: expected a native destination file path"
+    }
+    set directory [file dirname [file normalize $destination]]
+    if {![file isdirectory $directory]} {
+        Fail PUBLISH badvalue "publish: destination parent must be an existing directory"
+    }
+    set candidate [file join $directory ".machteld-save-[binary encode hex [hash random 16]].tmp"]
+    set channel [open $candidate {WRONLY CREAT EXCL BINARY} 0600]
+    try {
+        try {
+            PublishWrite $channel $value
+        } finally {
+            close $channel
+        }
+        set published [Publish $candidate $destination]
+    } on error {message options} {
+        catch {file delete -- $candidate}
+        return -options $options $message
+    }
+    return $published
+}
+
+proc ::machteld::publish {args} {
+    if {[llength $args] != 3 || [lindex $args 0] ni {file bytes}} {
+        Fail PUBLISH usage "usage: publish file path stagedFile | publish bytes path value"
+    }
+    lassign $args mode destination value
+    try {
+        if {$mode eq "file"} { return [Publish $value $destination] }
+        return [PublishBytes $destination $value]
+    } trap {MACHTELD WRAP} {message options} {
+        Fail PUBLISH [lindex [dict get $options -errorcode] 2] $message
+    } trap {MACHTELD PUBLISH} {message options} {
+        return -options $options $message
+    } on error {message options} {
+        Fail PUBLISH oserror $message
+    }
+}
+
+::machteld::MetaDefine publish [dict create kind tcl args args domain PUBLISH \
+    codes {badvalue oserror usage} doc machteld/command/publish \
+    subcommands [dict create \
+        file [dict create options {} doc machteld/command/publish#file] \
+        bytes [dict create options {} doc machteld/command/publish#bytes]]]
+
 # _dur2ms: parse a duration with an explicit unit (500ms, 30s, 5m, 2h) to
 # milliseconds. Bare numbers are rejected -- the same rule the C option parser
 # enforces, so a stray `-timeout 100` can never silently mean "100 seconds".
@@ -951,6 +1001,17 @@ proc ::machteld::PackArchive {args} {
     }
     return $out
 }
+
+proc ::machteld::app {args} {
+    if {$args ne {launch}} { Fail APP usage "usage: app launch" }
+    variable launchPrefix
+    if {![info exists launchPrefix]} { Fail APP state "app launch requires an active application" }
+    return $launchPrefix
+}
+
+::machteld::MetaDefine app [dict create kind tcl args args domain APP codes {state usage} \
+    options {} doc machteld/command/app subcommands [dict create \
+        launch [dict create options {} doc machteld/command/app#launch]]]
 
 # Expose the palette as bare verbs: unqualified run / child / pty / wait / scope
 # / detach / store resolve to ::machteld::* -- so the REPL and scripts read like

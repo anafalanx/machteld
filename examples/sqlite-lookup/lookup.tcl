@@ -3,17 +3,6 @@ namespace eval ::lookup {
     variable categories {All Parts Tools Kits Supplies}
 }
 
-proc ::lookup::workerCommand {entry} {
-    set command [list [info nameofexecutable]]
-    if {[lindex [file system $entry] 0] ne "zipfs"} {
-        lappend command [file normalize $entry]
-    } elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
-        # A new interpreter mounts the application archive for itself.
-        lappend command $::argv0
-    }
-    return [linsert $command end --worker]
-}
-
 # The UI owns the empty temporary file or the CLI has just reserved a new one.
 proc ::lookup::seed {path} {
     package require sqlite3
@@ -105,6 +94,6 @@ proc ::lookup::main {entry arguments} {
     if {[llength $arguments] > 1} { error "Usage: Catalogue Lookup ?DATABASE?" }
     package require Tk
     source -encoding utf-8 [file join [file dirname $entry] view.tcl]
-    ::lookup::open [lindex $arguments 0] [workerCommand $entry]
+    ::lookup::open [lindex $arguments 0] [list {*}[::machteld::app launch] --worker]
     tkwait window .
 }

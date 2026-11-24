@@ -62,6 +62,10 @@ _tmain(
         argc--;
         argv[argc] = NULL;
         Machteld_SetHostMode(MACHTELD_HOST_DOCS);
+    } else if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--machteld-generation")) == 0) {
+        _tcscpy(argv[1], _T("generation"));
+        Machteld_SetHostMode(MACHTELD_HOST_GENERATION);
     } else if (startup == NULL && argc == 2 &&
             _tcscmp(argv[1], _T("--help")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_HELP);

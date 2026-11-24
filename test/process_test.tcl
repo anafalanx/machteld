@@ -169,6 +169,39 @@ check "channel child reports exact input byte count" [expr {
     [string trim $channel_err] eq "BYTES:8"}]
 child close $token
 
+# The inner Machteld always starts attached to a ConPTY, including on a headless
+# runner. GetConsoleCP detects an attached console even when it has no window.
+set console_script [file join $WORK console-parent.tcl]
+set report [file join $WORK console-report.txt]
+set channel [open $console_script w]
+puts $channel {package require machteld}
+puts $channel {
+    lassign $argv fixture report
+    set states {}
+    foreach options {{} {-console default} {-console none}} {
+        set token [child start {*}$options -timeout 10s -- $fixture console-state]
+        try { lappend states [child wait $token] } finally { child close $token }
+    }
+    set ch [open "$report.tmp" w]
+    try { puts $ch $states } finally { close $ch }
+    file rename "$report.tmp" $report
+}
+close $channel
+set console_parent [pty spawn -- $MT $console_script $FIXTURE $report]
+try {
+    if {![wait_for_file $report 15000]} { error "console attachment probe did not finish" }
+    lassign [slurp $report] omitted explicit quiet
+    set control [dict get $omitted out]
+    set detached [dict get $quiet out]
+    check "ordinary and explicit default children retain the parent's console" [expr {
+        [dict get $omitted status] eq "ok" && [dict get $explicit status] eq "ok" &&
+        $control eq [dict get $explicit out] && [dict get $control codepage] > 0}]
+    check "console-free child has no console, stays supervised, and writes both pipes" [expr {
+        [dict get $quiet status] eq "ok" && [dict get $detached codepage] == 0 &&
+        ![dict get $detached window] && [dict get $detached job] &&
+        [string trim [dict get $quiet err]] eq "console probe"}]
+} finally { pty close $console_parent }
+
 # A caller's observation timeout is not a process deadline. A short wait must
 # return a running snapshot and leave the supervised job alive.
 set token [child start -- $FIXTURE hang 5000]
@@ -250,6 +283,8 @@ foreach {name script expected} {
 # accepted no-ops. `run` keeps callbacks; asynchronous child, detach and PTY do
 # not pretend to implement them.
 foreach {name script expected} [list \
+    "child rejects unknown console policies" [list child start -console hidden -- $FIXTURE ok x] {MACHTELD CHILD badvalue} \
+    "run rejects child console policy" [list run -console none -- $FIXTURE ok x] {MACHTELD RUN usage} \
     "child rejects run-only callback" [list child start -onout puts -- $FIXTURE ok x] {MACHTELD CHILD usage} \
     "detach rejects run-only timeout" [list detach -timeout 1s -- $FIXTURE ok x] {MACHTELD DETACH usage} \
     "pty rejects run-only stdin" [list pty spawn -stdin x -- $FIXTURE ok x] {MACHTELD PTY usage}] {

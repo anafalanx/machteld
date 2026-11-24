@@ -71,11 +71,14 @@ package require myapp
 source [file join $here view.tcl]
 ```
 
-A worker in another process opens the archive afresh. Launch it with
-`[list [info nameofexecutable] $::argv0 --worker]`, and let the entry handle
-`--worker` as an application argument. Wrapped programs launch their own
-executable with the worker argument. The repository example in
-`examples/project-inspector` demonstrates all three launch forms.
+Use `[list {*}[app launch] --worker]` to start a worker from the same application.
+The worker receives `--worker` as an ordinary argument. For a `.machteld` archive,
+the command selects the archive version that the parent opened. If version B
+replaces version A at the distribution path, A can still start an A worker. A
+fresh `machteld.exe myapp.machteld` opens B. `argv0` identifies the distribution
+path in both generations. Use `info script` to locate assets belonging to the
+running version. The same Tcl worker command also works for a loose script and a
+wrapped executable. [Application launch](reference/machteld/command/app.md)
 
 ## Wrapped entry
 

@@ -74,16 +74,10 @@ proc receive {job event data} {
         finished { set ::outcome [dict get $data phase] }
     }
 }
-set command [list [info nameofexecutable]]
-if {[lindex [file system [info script]] 0] ne "zipfs"} {
-    lappend command [file normalize [info script]]
-} elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
-    lappend command $::argv0
-}
-lappend command --worker
+set command [list {*}[app launch] --worker]
 set job [::machteld::job::Job new receive]
 try {
-    $job start $command -timeout 30s -mem 128M
+    $job start $command -console none -timeout 30s -mem 128M
     # The outer console loop. A Tk application already has an event loop.
     if {![info exists ::outcome]} { vwait ::outcome }
     puts $::outcome
@@ -91,6 +85,10 @@ try {
     $job destroy
 }
 ```
+
+A Tk application can use `$job start $command -console none` to launch a
+background helper without a Windows console. The worker still receives its
+standard pipes. The default is `-console default`.
 
 Call `$job cancel` to stop the current run. The object can start again after
 completion, failure, or cancellation. `start` returns 1 when the run is

@@ -81,10 +81,10 @@ oo::class create ::machteld::job::Job {
     method start {argv args} {
         if {[dict get $state phase] in {running closed}} { return 0 }
         if {![llength $argv]} { error "empty child command" }
-        if {[llength $args] % 2} { error "expected -timeout duration or -mem size" }
+        if {[llength $args] % 2} { error "expected option/value pairs for -timeout, -mem or -console" }
         set options [dict create -timeout 30s -mem 128M]
         foreach {option value} $args {
-            if {![dict exists $options $option]} { error "unknown job option: $option" }
+            if {$option ne "-console" && ![dict exists $options $option]} { error "unknown job option: $option" }
             dict set options $option $value
         }
 

@@ -130,6 +130,28 @@ descendants born afterward and PID reuse can race it. Use `child kill` for a
 tree launched and owned by Machteld, where the Job Object provides the stronger
 lifetime boundary.
 
+## Saving files and coordinating writers
+
+For a settings file, `publish bytes $path $value` stages and replaces the
+file in one operation. For larger output, write and close a temporary file
+beside the target, then call `publish file $path $staged`. Applications that
+perform a read-modify-write operation can also coordinate across processes.
+
+```tcl
+set token [lock try [file join $directory settings.lock]]
+if {$token eq ""} { return busy }
+try {
+    # Read the latest settings and compute the new value under this lock.
+    set updated [updateSettings $path]
+    publish bytes $path [encoding convertto utf-8 $updated]
+} finally {
+    lock release $token
+}
+```
+
+Participants use the same coordination file and leave it in place. Windows
+releases the lock if the holder exits. [File publication](reference/machteld/command/publish.md) · [File locks](reference/machteld/command/lock.md)
+
 ## HTTP, JSON, hashes, and storage
 
 ```tcl

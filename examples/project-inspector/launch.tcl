@@ -1,17 +1,6 @@
 # Application-owned roles: no runtime special cases or shell command strings.
 namespace eval ::inspector { variable finished 0 }
 
-proc ::inspector::worker_command {entry} {
-    set command [list [info nameofexecutable]]
-    if {[lindex [file system $entry] 0] ne "zipfs"} {
-        lappend command [file normalize $entry]
-    } elseif {[lindex [file system $::argv0] 0] ne "zipfs"} {
-        # A new interpreter mounts the application archive for itself.
-        lappend command $::argv0
-    }
-    return [linsert $command end --worker]
-}
-
 proc ::inspector::no_window {} {
     # GUI basekits initialize Tk before sourcing the entry. Destroy the
     # unmapped root before any event/idle processing in non-UI roles.
@@ -63,7 +52,7 @@ proc ::inspector::main {here arguments} {
             if {$mode eq {}} { set mode inspect }
             source [file join $here model.tcl]
             set job [::inspector::Job new [file join $here inspect.tcl] \
-                ::inspector::finished [worker_command [file join $here main.tcl]]]
+                ::inspector::finished [list {*}[::machteld::app launch] --worker]]
             try {
                 set ::inspector::finished 0
                 $job start $directory $mode
@@ -88,6 +77,6 @@ proc ::inspector::main {here arguments} {
     source [file join $here view.tcl]
     set directory [expr {[llength $arguments] ? [lindex $arguments 0] : [pwd]}]
     ::inspector::open $directory [file join $here inspect.tcl] \
-        [worker_command [file join $here main.tcl]]
+        [list {*}[::machteld::app launch] --worker]
     vwait ::inspector::closed
 }
