@@ -112,6 +112,11 @@ most 32 records per turn. It retains the last 8,192 characters of stderr.
 Keep callback work bounded too. For a large result, send a reference or
 small pages and render incrementally.
 
+The Catalogue Lookup example in `examples/sqlite-lookup` opens a read-only
+SQLite connection per page in a child process. It keeps one page in the Tk
+view, keyed by the last displayed item ID. Cancelling the request or closing the
+window releases the child even while SQLite is waiting on another connection.
+
 ## A small GUI-safe composition
 
 The repository's `examples/project-inspector/main.tcl` uses this package.

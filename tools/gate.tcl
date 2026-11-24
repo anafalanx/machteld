@@ -51,7 +51,7 @@ package require machteld 0.21
 #   --public-tls         (integration or release) the native lane's public TLS
 #                        checks, which reach the network
 #   --interactive-pty    (integration or release) the process lane's console I/O
-#   --interactive-gui    gui_widget_test, and the wrapped fixture's own window:
+#   --interactive-gui    GUI widgets, the SQLite lookup and the wrapped fixture:
 #                        both open windows, so this is the owner's check only
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
@@ -293,6 +293,7 @@ proc ::gate::plan {settings} {
         }
     }
     if {[dict get $settings gui]} {
+        addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
     }
     return $steps

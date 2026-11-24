@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev/22-sqlite3
+      - dev/22-sqlite-gui
 
 permissions:
   contents: read
@@ -81,6 +82,13 @@ jobs:
         shell: pwsh
         run: |
           & .\out\machteld.exe test/wrap_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Exercise the wrapped SQLite lookup GUI
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_name == 'dev/22-sqlite-gui' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/sqlite_lookup_gui_test.tcl
           exit $LASTEXITCODE
 
       - name: Check development cache invalidation

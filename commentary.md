@@ -265,4 +265,11 @@ SQLite engine. A Tcl 9.0.4 fixture exercised transactions and verified that
 closing a SQL connection leaves an open store usable. The development branch
 now checks both interfaces and runs a bound query in each relocated wrapper.
 
+### 2026-11-24 · machteld 22 candidate · comment · Codex, GUI database lookups
+
+An indexed page can finish before a test exercises cancellation. Taking an
+exclusive SQLite lock from a separate fixture connection makes the worker
+wait inside a real read and gives the test a reliable point to cancel or close
+the window.
+
 <!-- machteld-version-history: end -->
