@@ -166,6 +166,7 @@ To distribute an application to someone who already has Machteld 22, put its
 opted-in `main.tcl` and assets in a staging directory. The full host can pack
 that tree into a plain ZIP and run it with the usual program arguments.
 
+<!-- machteld-example: archive -->
 ```text
 machteld.exe pack myapp -o myapp.machteld
 machteld.exe myapp.machteld world
