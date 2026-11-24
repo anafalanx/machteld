@@ -51,20 +51,52 @@ autonomous lifetime deadline, and `store`'s five-second busy timeout is a lock
 wait policy, not a whole-operation deadline. Close or kill cancels owned work;
 it does not undo writes or prove that an unanswered operation had no effect.
 
+## One background job
+
+Load the Tcl package with `package require machteld::job 1.0`. It runs one
+supervised child at a time and lets the caller return to the ordinary event
+loop. The worker command is a Tcl list with one element per argument.
+
+```tcl
+package require machteld
+package require machteld::job 1.0
+
+proc receive {job event data} {
+    switch -- $event {
+        lines    { foreach line $data { puts $line } }
+        finished { puts [dict get $data phase] }
+    }
+}
+set job [::machteld::job::Job new receive]
+# In a wrapped program with its own --worker entry role:
+$job start [list [info nameofexecutable] --worker] -timeout 30s -mem 128M
+```
+
+Call `$job cancel` to stop the current run. The object can start again after
+completion, failure, or cancellation. Call `$job destroy` when its owner
+closes. The child receives EOF on stdin. It writes LF-terminated UTF-8
+records to stdout and diagnostics to stderr. The caller chooses the record
+format. An unterminated or invalid record fails the job.
+
+The callback receives the job, an event, and its data. The events are
+`started` (empty data), `lines` (a list of decoded records), `stderr` (a
+chunk of diagnostic text), and `finished` (the terminal snapshot).
+`$job snapshot` reports the phase, error text, recent diagnostic log, and
+the native wait result when available. A nonzero exit or a child deadline
+fails the run. A callback can cancel or destroy the job. Closing or
+destroying it stops further callbacks.
+
+The reader accepts at most 65,536 bytes per stdout record and delivers at
+most 32 records per turn. It retains the last 8,192 characters of stderr.
+Keep callback work bounded too. For a large result, send a reference or
+small pages and render incrementally.
+
 ## A small GUI-safe composition
 
-The repository's `examples/project-inspector/main.tcl` is a working, read-only
-example, not a GUI framework. Run it with `machteld.exe` and an optional directory
-argument. It displays a file table and details while a supervised child does the
-filesystem work; slow, failing, and output-heavy demonstration modes make the
-otherwise easy-to-miss lifecycle paths visible.
-
-Its model owns one `child start -channels` token. Readable events drain stdout
-and stderr in bounded chunks; stdout is strict UTF-8 JSON-lines data and stderr
-is a bounded diagnostic tail. Short `after` callbacks observe completion. Only
-after the child has stopped and both streams reached EOF does the model use a
-zero-time `child wait` to collect its exit result. No Tk callback calls a blocking
-`run`, `pool wait`, or unbounded channel read.
+The repository's `examples/project-inspector/main.tcl` uses this package.
+Run it with `machteld.exe` and an optional directory argument. Its model
+validates each worker record and maintains the application's rows and
+progress while the job owns the child and its pipes.
 
 Widget code subscribes to model snapshots and coalesces rendering. It does not
 call `update` or `vwait` from a callback, so another event cannot enter halfway

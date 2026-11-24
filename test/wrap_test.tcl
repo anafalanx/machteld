@@ -149,6 +149,7 @@ check "wrapped console receives its own --help argument" [expr {
     [dict get $result status] eq "ok" && [wait_for_file $marker]}]
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
 check "wrapped console loads the current package" [string match *version:[version]* $text]
+check "wrapped console loads the background job package" [string match {*job:1.0*} $text]
 check "wrapped console owns --help/--version spelling" [string match *argv:--help\ payload* $text]
 check "wrapped console carries native process API" [string match *run:yes* $text]
 check "wrapped console keeps schema and reports omitted docs/help honestly" \
@@ -303,6 +304,7 @@ check "wrapped GUI selftest exits cleanly" [expr {
 child close $gui_child
 set text [expr {[file exists $marker] ? [slurp $marker] : ""}]
 check "wrapped GUI loads the current package" [string match *version:[version]* $text]
+check "wrapped GUI loads the background job package" [string match {*job:1.0*} $text]
 check "wrapped GUI keeps schema and reports omitted docs/help honestly" \
     [reports_omitted_reference $text]
 regexp -line {^argc:(.*)$} $text _ observed_argc

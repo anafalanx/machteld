@@ -100,7 +100,7 @@ proc toolchain_key {} {
 proc guard_spec {{toolchainKey ""}} {
     if {$toolchainKey eq ""} { set toolchainKey [toolchain_key] }
     set spec [dict create files {} trees {}]
-    foreach name {src tcl docs licenses tools} { dict lappend spec trees [Rp $name] }
+    foreach name {src tcl packages docs licenses tools} { dict lappend spec trees [Rp $name] }
     foreach name {prefix sqlite yyjson downloads} { dict lappend spec trees [file join $::CACHE $name] }
     dict lappend spec files [Rp LICENSE]
     # Reject untracked external search paths rather than assuming a stable path

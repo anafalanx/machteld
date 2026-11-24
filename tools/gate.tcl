@@ -17,7 +17,7 @@ package require machteld 0.21
 #                        claims and their regressions, build identity, the
 #                        reference serializer, this gate's own test, and the
 #                        runtime lanes that need no fixture (filesystem,
-#                        runtime services, protocol, GUI model, embedded
+#                        runtime services, protocol, background jobs, GUI model, embedded
 #                        reference, README examples, JSONTestSuite, native
 #                        adversarial inputs and filesystem boundaries)
 #   integration          the C fixtures, the command-line golden vectors, the
@@ -224,6 +224,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast filesystem filesystem_test.tcl
                 addLane steps $runtime fast "runtime services" runtime_test.tcl
                 addLane steps $runtime fast protocol protocol_test.tcl
+                addLane steps $runtime fast "background jobs" job_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl

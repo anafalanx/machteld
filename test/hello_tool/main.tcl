@@ -10,6 +10,7 @@ set value [binary format H* 0001ff80410042]
 
 set f [open $marker w]
 puts $f "version:[package require machteld]"
+puts $f "job:[package require machteld::job 1.0]"
 puts $f "argc:$argc"
 puts $f "argv:$argv"
 puts $f "tcl_library:$::tcl_library"

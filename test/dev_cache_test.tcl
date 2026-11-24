@@ -455,7 +455,8 @@ try {
         tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch tools/buildlib.tcl
         tools/reference.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
-        tcl/pool.tcl LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
+        tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
+        LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
         docs/reference/machteld/command/help.md staged/prelude.tcl
         staged/console.exe staged/gui.exe staged/reference/manifest.sha256
@@ -565,6 +566,7 @@ try {
 
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl
+        packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
         tools/build_identity.tcl staged/prelude.tcl staged/console.exe staged/gui.exe
         staged/reference/manifest.sha256 staged/reference/markdown/page.md
     } {
