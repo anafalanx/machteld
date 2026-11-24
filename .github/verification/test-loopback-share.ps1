@@ -25,7 +25,8 @@ try {
     if ([IO.File]::ReadAllText((Join-Path $directory $marker)) -cne $shareName) {
         throw "Loopback SMB write did not reach the new share's backing directory"
     }
-    Get-SmbConnection -ShareName $shareName -ErrorAction SilentlyContinue |
+    Get-SmbConnection -ErrorAction SilentlyContinue |
+        Where-Object { $_.ShareName -eq $shareName } |
         Select-Object ServerName, ShareName, Dialect | Format-Table | Out-Host
     Remove-Item -LiteralPath (Join-Path $unc $marker)
 
