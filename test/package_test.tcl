@@ -129,6 +129,17 @@ proc ::pt::packageTests {} {
     set apache [file join $root LICENSE]
     set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper]
 
+    # A collision in the output directory verifies the packager actually uses
+    # a sibling path. Windows may silently ignore the directory of file tempfile.
+    set id [binary encode hex [hash random 16]]
+    set requested [file join $work .machteld-build-$id.exe]
+    set sibling [file join $work .machteld-package-$id.candidate]
+    writeText $sibling "owned by another operation"
+    set r [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $requested]
+    check "packaging reserves its candidate in the output directory and preserves a competing file" [expr {
+        [dict get $r exit] != 0 && ![file exists $requested] && [readBytes $sibling] eq "owned by another operation"}]
+    file delete $sibling
+
     set existing [file join $work [uniqueName .machteld-build-].exe]
     writeText $existing prior-release
     set result [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $existing]

@@ -94,12 +94,6 @@ switch -- [lindex $argv 0] {
     set stale [run -timeout 10s -- {*}$pinned child]
     check "an expired generation refuses to launch" [expr {
         [dict get $stale exit] != 0 && [string match {*generation*} [dict get $stale err]]}]
-    # The wrapper owns its arguments and launches with just its executable.
-    writeText $main {package require machteld
-puts [expr {[app launch] eq [list [info nameofexecutable]]}]}
-    set wrapped [file join $base wrapped.exe]
-    invoke $exe wrap $source -o $wrapped
-    check "a wrapped app's prefix is its own executable" [expr {[invoke $wrapped] eq "1"}]
     check "app reports usage for unknown operations" [expr {
         [catch {app other} msg opts] && [dict get $opts -errorcode] eq {MACHTELD APP usage}}]
 } finally {

@@ -134,18 +134,6 @@ proc ::na::trappedSteps {layout gcc out {runtime ""}} {
     lappend steps [dict create label "trapped hash sequence boundary: compile" argv [list $gcc {*}$flags \
         [file join $test hash_boundary_test.c] {*}$tcl -o $hashBoundary]]
     lappend steps [dict create label "trapped hash sequence boundary" argv [list $hashBoundary]]
-    if {$runtime ne ""} {
-        set identity [file join $out identity-trap.exe]
-        set id [pid]-[binary encode hex [hash random 8]]
-        set console [file join $out .identity-console-$id.exe]
-        set gui [file join $out .identity-gui-$id.exe]
-        set work [file join $out .identity-work-$id]
-        lappend steps [dict create label "trapped identity: compile" argv [list $gcc {*}$flags -municode \
-            [file join $fixtures identity_driver.c] [file join $src resource.c] [file join $src wintext.c] {*}$tcl -o $identity]]
-        lappend steps [dict create label "trapped identity" \
-            argv [list $identity [file join $test identity_native_test.tcl] $console $gui $work] \
-            extract [list basekit/console.exe $console basekit/gui.exe $gui] cleanup [list $console $gui $work]]
-    }
     lmap step $steps {
         if {![dict exists $step timeout]} {
             dict set step timeout 180s

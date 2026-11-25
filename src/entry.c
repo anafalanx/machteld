@@ -24,12 +24,6 @@ Machteld_SetHostMode(int mode)
 }
 
 int
-Machteld_GetHostMode(void)
-{
-    return host_mode;
-}
-
-int
 Machteld_EntryError(Tcl_Interp *interp, const char *code, const char *message)
 {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(message, -1));
@@ -604,9 +598,6 @@ Machteld_EntryGate(Tcl_Interp *interp)
     if (host_mode == MACHTELD_HOST_DOCS) {
         dispatch_command(interp, "::machteld::DocsHost", 1);
     }
-    if (host_mode == MACHTELD_HOST_DOCS_GUI) {
-        dispatch_command(interp, "::machteld::DocsHostGui", 1);
-    }
     if (host_mode == MACHTELD_HOST_STDIN) {
         Machteld_EntryError(interp, "usage",
             "stdin programs are not accepted; use an opted-in program file");
@@ -640,16 +631,12 @@ Machteld_EntryGate(Tcl_Interp *interp)
 
     /* A real program file always wins over a convenience route.  A same-name
      * directory is not executable input and must not hide the host command. */
-    if (strcmp(selected, "wrap") == 0 &&
-            !startup_path_is_regular_file(startup)) {
-        dispatch_command(interp, "::machteld::wrap", 1);
-    }
     if (strcmp(selected, "pack") == 0 &&
             !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::PackArchive", 1);
     }
     /* `machteld docs ...` is the readable counterpart of the reserved
-     * `--docs` route.  As with `wrap`, a real program file named docs wins. */
+     * `--docs` route.  As with `pack`, a real program file named docs wins. */
     if (strcmp(selected, "docs") == 0 &&
             !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::DocsHost", 1);

@@ -517,7 +517,6 @@ proc ::machteld::devcache::reference_version {root} {
         lappend versions $version
     }
     if {[lindex $versions 0] ne [lindex $versions 1]} { error "C/Tcl runtime version mismatch" }
-    if {[regexp {package require machteld [0-9]} $text]} { error "Tcl wrap launcher carries a literal version pin" }
     return [lindex $versions 0]
 }
 
@@ -538,9 +537,9 @@ proc ::machteld::devcache::reference_spec {root cache tclsh} {
         files $files trees [list [file join $root docs]]]
 }
 
-proc ::machteld::devcache::package_spec {root paths prelude bare bareGui reference} {
+proc ::machteld::devcache::package_spec {root paths prelude bare reference} {
     set prefix [dict get $paths prefix]
-    set files [list $prelude $bare $bareGui [dict get $paths tclsh] [file join $prefix bin wish90s.exe] [file join $root LICENSE]]
+    set files [list $prelude $bare [dict get $paths tclsh] [file join $prefix bin wish90s.exe] [file join $root LICENSE]]
     foreach name {package.tcl build_identity.tcl} { lappend files [file join $root tools $name] }
     set trees [list [file join $root licenses] [file join $root packages] $reference]
     foreach name {lib/tcl9.0 tcl_library lib/tcl9 tcl9 lib/tk9.0 tk_library} {

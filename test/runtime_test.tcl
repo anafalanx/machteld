@@ -32,7 +32,7 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
-set expected {app canon child cli clipboard detach dirs docs hash help http json links lock log manifest mtps pmap pool pty publish run scope store version wait watch worker wrap}
+set expected {app canon child cli clipboard detach dirs docs hash help http json links lock log manifest mtps pmap pool pty publish run scope store version wait watch worker}
 check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
 # The version is one natural number, which Tcl reads as a major version: a
 # floor accepts this runtime and every later one, and an upper bound, which
@@ -61,8 +61,6 @@ check "manifest distinguishes launch-window and presentation options" [expr {
     "-class" ni [dict get $metadata child subcommands start options] &&
     [dict get $metadata child subcommands present options] eq {-class} &&
     [dict get $metadata child subcommands present returns] eq {cloaked foreground iconic onScreen status visible}}]
-check "wrap manifest advertises explicit documentation opt-in" [expr {
-    [dict get $metadata wrap options] eq {--console --entry --gui --manifest --plan --with-docs -o}}]
 set pty_map [namespace ensemble configure ::machteld::pty -map]
 check "PTY public ensemble agrees with merged manifest" [expr {
     [lsort [dict keys $pty_map]] eq

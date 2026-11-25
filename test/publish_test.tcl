@@ -68,7 +68,7 @@ namespace eval ::publishTest {
             # Prove that the public command keeps a native diagnostic and its own domain.
             rename ::machteld::Publish ::publishTest::realPublish
             proc ::machteld::Publish {candidate path} {
-                return -code error -errorcode {MACHTELD WRAP oserror} \
+                return -code error -errorcode {MACHTELD PUBLISH oserror} \
                     "replacement failed; prior destination remains at RECOVERY-PATH"
             }
             try {

@@ -34,7 +34,6 @@ extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
 extern int Machteldpublish_Init(Tcl_Interp *interp); /* src/publish.c */
 extern int Machteldlock_Init(Tcl_Interp *interp); /* src/lock.c */
 extern int Machteldclipboard_Init(Tcl_Interp *interp); /* src/clipboard.c */
-extern int Machteldresource_Init(Tcl_Interp *interp); /* src/resource.c */
 
 static void
 payload_root_delete(void *client_data, Tcl_Interp *interp)
@@ -321,11 +320,6 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldclipboard", Machteldclipboard_Init, NULL);
-    if (Machteldresource_Init(interp) == TCL_ERROR) {
-        return TCL_ERROR;
-    }
-    Tcl_StaticLibrary(interp, "machteldresource", Machteldresource_Init, NULL);
-
     /* The prelude registers `package require Tk` against the statically
      * linked Tk. It reads the library's own patch level from this variable,
      * so no hand-maintained literal can drift from what `load {} Tk` provides. */

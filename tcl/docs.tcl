@@ -513,8 +513,8 @@ proc ::machteld::DocsSchema {args} {
             aliases {unicode-lowercase, trim, and whitespace-collapse}] \
         pagination [dict create list_search [dict create default_limit 50 maximum_limit 200] \
             get [dict create unit characters default_limit 32768 maximum_limit 1048576]] \
-        host [dict create full {{docs ...} {--docs ...}} wrapped {{--machteld-docs ...}} \
-            options {{--json} {--output FILE}} gui {--output FILE required except for extract}] \
+        host [dict create full {{docs ...} {--docs ...}} \
+            options {{--json} {--output FILE}}] \
         formats [dict create content {markdown html source} host {text json} \
             json_envelope [dict create success {ok true result value} failure {ok false error {domain DOCS code code message message}}]] \
         errorcode {MACHTELD DOCS code}]
@@ -1193,9 +1193,7 @@ proc ::machteld::DocsJsonResult {subcommand result} {
             set formats [DocsJObject [list content [DocsJStringArray {markdown html source}] \
                 host [DocsJStringArray {text json}] json_envelope $envelope]]
             set host [DocsJObject [list full [DocsJStringArray {{docs ...} {--docs ...}}] \
-                wrapped [DocsJStringArray {{--machteld-docs ...}}] \
-                options [DocsJStringArray {{--json} {--output FILE}}] \
-                gui [DocsJString {--output FILE required except for extract}]]]
+                options [DocsJStringArray {{--json} {--output FILE}}]]]
             return [DocsJObject [list schema 1 catalog_schema 1 command [DocsJString docs] \
                 subcommands [DocsJObject $subcommands] identifiers [DocsJObject $identifiers] \
                 pagination $pagination host $host formats $formats errorcode [DocsJString {MACHTELD DOCS code}]]]
@@ -1426,35 +1424,6 @@ proc ::machteld::DocsHost {args} {
     return -options $options $result
 }
 
-proc ::machteld::DocsGuiCommand {args} {
-    set kept {}
-    for {set index 0} {$index < [llength $args]} {incr index} {
-        set arg [lindex $args $index]
-        if {$arg eq "--output"} {
-            if {$index + 1 < [llength $args]} { incr index }
-            continue
-        }
-        if {$arg eq "--json"} continue
-        lappend kept $arg
-    }
-    return [expr {[llength $kept] ? [lindex $kept 0] : ""}]
-}
-
-proc ::machteld::DocsHostGui {args} {
-    set intent [DocsHostIntent {*}$args]
-    set hasOutput [expr {[dict get $intent output] ne ""}]
-    set command [DocsGuiCommand {*}$args]
-    if {!$hasOutput && $command ne "extract"} {
-        set message "docs: GUI tools require --output FILE for documentation queries"
-        if {[dict get $intent json]} {
-            set error [DocsJObject [list domain [DocsJString DOCS] code [DocsJString usage] message [DocsJString $message]]]
-            return -code error -errorcode {MACHTELD DOCS usage} [DocsJObject [list ok false error $error]]
-        }
-        DocsFail usage $message
-    }
-    return [DocsHost {*}$args]
-}
-
 namespace ensemble create -command ::machteld::DocsEnsemble -prefixes 0 -unknown ::machteld::DocsUnknown -map {
     status  ::machteld::DocsStatus
     schema  ::machteld::DocsSchema
@@ -1508,9 +1477,9 @@ proc ::machteld::help {args} {
                     [dict get $options -errorcode] ne {MACHTELD DOCS unsupported}} {
                 DocsHelpError $message $options
             }
-            return "machteld [::machteld::version]\n\nThis executable carries no embedded reference pack.\nUse the full Machteld [::machteld::version] executable for offline documentation,\nor package the application with wrap --with-docs to include it.\n\nRuntime commands remain available. Use `manifest` for command metadata\nand `docs schema` for the documentation query contract."
+            return "machteld [::machteld::version]\n\nThis executable carries no embedded reference pack.\nUse the full Machteld [::machteld::version] executable for offline documentation.\n\nRuntime commands remain available. Use `manifest` for command metadata\nand `docs schema` for the documentation query contract."
         }
-        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl [info patchlevel] — applications, language commands, and C API\n  Tk $::machteld::tk_patchlevel — applications, widgets, and C API\n\nHost routes:\n  machteld.exe app.tcl\n  machteld.exe pack app-directory -o app.machteld\n  machteld.exe app.machteld\n  machteld.exe --docs ...\n  wrapped-tool.exe --machteld-docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
+        return "machteld [::machteld::version] complete offline reference\n\nThis executable contains the complete, exact-version documentation for:\n  Machteld [::machteld::version] — commands, contracts, and guides\n  Tcl [info patchlevel] — applications, language commands, and C API\n  Tk $::machteld::tk_patchlevel — applications, widgets, and C API\n\nHost routes:\n  machteld.exe app.tcl\n  machteld.exe pack app-directory -o app.machteld\n  machteld.exe app.machteld\n  machteld.exe --docs ...\n\nProgrammatic routes:\n  docs status\n  docs list -scope machteld\n  docs get machteld/command/run\n  docs get tcl/command/dict -section examples\n  docs search {channel binary encoding}\n  docs extract DIRECTORY\n\nUse `docs schema` for the complete machine contract."
     }
     set query [join $args " "]
     if {![catch {DocsGet $query} result options]} {

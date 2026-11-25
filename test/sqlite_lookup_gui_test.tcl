@@ -15,16 +15,19 @@ try {
     try { set files [dict get [read $f] files] } finally { close $f }
     foreach name $files { file copy [file join $example $name] [file join $stage $name] }
     file copy [file join $here fixtures sqlite_lookup_gui.tcl] [file join $stage acceptance.tcl]
-    set built [file join $work built.exe]
-    wrap $stage -o $built --entry acceptance.tcl --gui
-    set app [file join $deployed {Lookup test.exe}]
-    file rename $built $app
+    set project [file join $stage project.dict]
+    set f [open $project {WRONLY CREAT EXCL}]
+    try {puts $f [dict create schema 1 entry acceptance.tcl files [linsert $files end acceptance.tcl]]} finally {close $f}
+    set app [file join $deployed {Lookup test.machteld}]
+    ::machteld::PackArchive $project -o $app
+    set runtime [file join $deployed machteld.exe]
+    file copy [info nameofexecutable] $runtime
     file delete -force -- $stage
 
     set database [file join $work {catalogue 雪.db}]
-    set result [run -timeout 30s -dir $cwd -- $app --create-demo $database]
+    set result [run -timeout 30s -dir $cwd -- $runtime $app --create-demo $database]
     if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || ![file exists $database]} {
-        error "the wrapped demo generator failed: $result"
+        error "the archived demo generator failed: $result"
     }
     sqlite3 catalogue $database -readonly 1
     try {
@@ -36,13 +39,13 @@ try {
     foreach arguments [list [list $database] {}] {
         set report [file join $work result.txt]
         file delete -force -- $report
-        set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $work] -- $app {*}$arguments]
+        set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $work] -- $runtime $app {*}$arguments]
         if {[file exists $report]} {
             set f [open $report]
             try { set detail [read $f] } finally { close $f }
         } else { set detail "missing test report" }
         if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || [string trim $detail] ne "PASS"} {
-            error "wrapped SQLite lookup failed for arguments [list $arguments]: $detail ($result)"
+            error "archived SQLite lookup failed for arguments [list $arguments]: $detail ($result)"
         }
     }
     if {[hash file sha256 $database] ne $original} { error "lookup changed the catalogue" }

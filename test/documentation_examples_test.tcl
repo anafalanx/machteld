@@ -1,12 +1,6 @@
-# Execute the README's exact marked snippets, not separately maintained copies.
-# Examples target the current checkout's runtime contract and documented version;
-# older releases are not expected to satisfy future README requirements. Wrapping
-# preserves optional runtime provenance, including its absence in clean release
-# packaging. Never opens a GUI.
 package require machteld
 
-if {$argv ni {{} --packaging}} { error {usage: documentation_examples_test.tcl ?--packaging?} }
-set packaging [expr {$argv eq {--packaging}}]
+if {[llength $argv]} {error "usage: documentation_examples_test.tcl"}
 set ROOT [file dirname [file dirname [file normalize [info script]]]]
 set HOST [info nameofexecutable]
 set checks 0
@@ -18,16 +12,6 @@ proc check {name condition} {
 proc read_text {path} {
     set channel [open $path rb]
     try { return [encoding convertfrom -profile strict utf-8 [read $channel]] } finally { close $channel }
-}
-proc read_bytes {path} {
-    set channel [open $path rb]
-    try { return [read $channel] } finally { close $channel }
-}
-proc inherited_provenance {hostPath wrappedPath} {
-    set present [file exists $hostPath]
-    if {$present != [file exists $wrappedPath]} { return 0 }
-    if {!$present} { return 1 }
-    return [expr {[read_bytes $hostPath] eq [read_bytes $wrappedPath]}]
 }
 proc write_text {path text} {
     set channel [open $path {WRONLY CREAT EXCL}]
@@ -60,13 +44,13 @@ proc snippets {text} {
         }
     }
     if {$active ne {} || $pending ne {}} { error "unterminated README example" }
-    if {[lsort [dict keys $found]] ne {app archive direct docs supervise supervised wrap}} {
+    if {[lsort [dict keys $found]] ne {app archive direct docs supervise supervised}} {
         error "update documentation acceptance for changed README examples: [dict keys $found]"
     }
     foreach name {app supervise} {
         if {[dict get $found $name language] ne {tcl}} { error "expected Tcl example: $name" }
     }
-    foreach name {archive direct docs supervised wrap} {
+    foreach name {archive direct docs supervised} {
         if {[dict get $found $name language] ne {text}} { error "expected command example: $name" }
     }
     return $found
@@ -78,7 +62,6 @@ proc command {line} {
     set program [lindex $line 0]
     switch -exact -- $program {
         machteld.exe { set executable $::HOST }
-        app.exe - documented-app.exe { set executable [file join $::WORK $program] }
         default { error "unrecognized README executable: $program" }
     }
     set result [run -timeout 120s -- $executable {*}[lrange $line 1 end]]
@@ -155,22 +138,6 @@ file mkdir $WORK
 set previousDirectory [pwd]
 try {
     cd $WORK
-    # Exercise both clean-release and development inheritance without building
-    # another executable. Compare raw bytes: equivalent parsed dictionaries do
-    # not establish that the wrapper copied the host's record unchanged.
-    write_text provenance-source.dict {schema 1 channel development}
-    write_text provenance-copy.dict {schema 1 channel development}
-    write_text provenance-changed.dict {schema 1  channel development}
-    check {absent runtime provenance remains absent} \
-        [inherited_provenance provenance-absent-source.dict provenance-absent-copy.dict]
-    check {wrapping cannot invent runtime provenance} \
-        [expr {![inherited_provenance provenance-absent-source.dict provenance-copy.dict]}]
-    check {wrapping cannot drop runtime provenance} \
-        [expr {![inherited_provenance provenance-source.dict provenance-absent-copy.dict]}]
-    check {runtime provenance bytes are inherited exactly} \
-        [inherited_provenance provenance-source.dict provenance-copy.dict]
-    check {semantically equivalent but changed provenance bytes are rejected} \
-        [expr {![inherited_provenance provenance-source.dict provenance-changed.dict]}]
     write_text app.tcl [dict get $examples app body]
     write_text supervise.tcl [dict get $examples supervise body]
     file mkdir myapp
@@ -195,29 +162,6 @@ try {
         check "reference example returns a success envelope: $line" [expr {
             [dict get $response ok] && [dict exists $response result]}]
     }
-    if {$packaging} {
-        set hostProvenance [file join [::machteld::PayloadRoot] build-info.dict]
-        set lines [split [dict get $examples wrap body] \n]
-        check {four wrapping invocations are covered} [expr {[llength $lines] == 4}]
-        foreach line $lines {
-            set output [command $line]
-            if {[lindex $line 0] ne {machteld.exe}} {
-                check "wrapped greeting: $line" [expr {[string trimright $output \r\n] eq {Hello, world!}}]
-            }
-        }
-        foreach name {app.exe documented-app.exe} present {0 1} {
-            set mount "readme-[pid]-[clock clicks]"
-            zipfs mount [file join $WORK $name] $mount
-            try {
-                check "$name reference inclusion matches README" [expr {
-                    [file exists //zipfs:/$mount/reference/catalog.dict] == $present}]
-                check "$name inherits exact runtime provenance or its absence" \
-                    [inherited_provenance $hostProvenance //zipfs:/$mount/build-info.dict]
-                check "$name does not recursively embed wrapping hosts" [expr {
-                    ![file exists //zipfs:/$mount/basekit]}]
-            } finally { zipfs unmount $mount }
-        }
-    }
 } finally {
     cd $previousDirectory
     if {[file dirname $WORK] eq $TEMP_ROOT &&
@@ -225,5 +169,5 @@ try {
         file delete -force $WORK
     }
 }
-puts "documentation examples: $checks checks, $fails failures; packaging=$packaging"
+puts "documentation examples: $checks checks, $fails failures"
 exit [expr {$fails != 0}]

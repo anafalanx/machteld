@@ -127,23 +127,6 @@ try {
                 puts "ok   runtime has no optional development identity (normal for release packaging)"
             }
         } finally { zipfs unmount actualBuild }
-        set app [file join $work app.tcl]
-        bytes $app "package require machteld\nexit\n"
-        foreach kind {console gui} {
-            set wrapped [file join $work $kind.exe]
-            exec $runtimeExe wrap $app -o $wrapped --$kind
-            zipfs mount $wrapped actualWrap
-            try {
-                if {$hasIdentity} {
-                    check "$kind wrapper inherits runtime provenance without reference" [expr {
-                        [::machteld::buildidentity::read //zipfs:/actualWrap/build-info.dict] eq $actual &&
-                        ![file exists //zipfs:/actualWrap/reference]}]
-                } else {
-                    check "$kind wrapper preserves absent development identity" [expr {
-                        ![file exists //zipfs:/actualWrap/build-info.dict]}]
-                }
-            } finally { zipfs unmount actualWrap }
-        }
     }
 } finally {
     # Delete only this invocation's exclusively claimed sibling directory.

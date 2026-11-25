@@ -1,6 +1,4 @@
-# Headless acceptance of actual examples, including GUI-subsystem wrappers.
-# No normal Inspector UI role is launched; worker/headless roles destroy the
-# GUI host's precreated root before event processing.
+# Headless acceptance of the shipped examples as relocated application archives.
 package require machteld
 if {[llength $argv] != 2} { error "usage: examples_package_test.tcl msys2-root tcl-prefix" }
 lassign $argv MSYS PREFIX
@@ -51,18 +49,18 @@ proc inspect_image {image expected} {
     zipfs mount $image $mount
     try {
         set root //zipfs:/$mount
-        set info [string trim [read_text [file join $root app-info.dict]]]
+        set info [string trim [read_text [file join $root machteld-inventory.dict]]]
         check "[file tail $image]: exact application inventory" [expr {
-            [payload_files [file join $root app]] eq [lsort $expected] &&
+            [payload_files $root] eq [lsort [linsert $expected end machteld-inventory.dict]] &&
             [lsort [dict keys [dict get $info files]]] eq [lsort $expected]}]
         set valid 1
         dict for {name record} [dict get $info files] {
-            set path [file join $root app $name]
+            set path [file join $root $name]
             if {[file size $path] != [dict get $record bytes] ||
                     [hash file sha256 $path] ne [dict get $record sha256]} { set valid 0 }
         }
         check "[file tail $image]: embedded size and SHA-256 match payload" $valid
-        check "[file tail $image]: reference pack is opt-in" [expr {![file exists [file join $root reference]]}]
+        check "[file tail $image]: reference stays in the shared runtime" [expr {![file exists [file join $root reference]]}]
         return $info
     } finally { zipfs unmount $mount }
 }
@@ -111,68 +109,56 @@ try {
     set assets [dict get [read_text $manifest] files]
     foreach name $assets { file copy [file join $INSPECTOR $name] [file join $stage $name] }
     write_text [file join $stage private-note.txt] "Not an application asset."
-    set images {}
-    foreach host {console gui} {
-        set image [file join $WORK "Inspector $host 雪.exe"]
-        set plan [wrap $stage -o $image --manifest $manifest --$host --plan]
-        check "$host: package plan does not publish output" [expr {![file exists $image]}]
-        wrap $stage -o $image --manifest $manifest --$host
-        set info [inspect_image $image $assets]
-        check "$host: committed inventory matches package plan" [expr {$info eq $plan}]
-        check "$host: app identity and runtime identity stay separate" [expr {
-            [dict get $info metadata name] eq "Project Inspector" &&
-            [dict get $info metadata version] eq "1.0" &&
-            [dict get $info runtime name] eq "Machteld"}]
-        dict set images $host $image
-    }
+    file copy $manifest [file join $stage app.dict]
+    set image [file join $WORK "Inspector 雪.machteld"]
+    ::machteld::PackArchive [file join $stage app.dict] -o $image
+    inspect_image $image $assets
     # Remove the original staging pathname as an available dependency; the
     # application must source siblings from its archive and launch its own role.
     file rename $stage [file join $WORK retired-inspector-stage]
     cd $unrelated
     inspect_runs source [list [info nameofexecutable] [file join $INSPECTOR main.tcl]] $directory
-    dict for {host image} $images { inspect_runs $host [list $image] $directory }
-    foreach host {console gui} {
-        set bundle [::extension_example::build [file join $WORK extension-$host] $MSYS $PREFIX --$host]
-        set headers [exec [file join $MSYS ucrt64 bin objdump.exe] -p [file join $bundle examplemath.dll]]
-        set imports [regexp -all -inline -line {DLL Name: ([^\r\n]+)} $headers]
-        set onlyPlatform [expr {[llength $imports] > 0}]
-        foreach {match library} $imports {
-            set library [string tolower [string trim $library]]
-            if {$library ni {kernel32.dll ucrtbase.dll} &&
-                    ![string match api-ms-win-crt-*.dll $library]} { set onlyPlatform 0 }
-        }
-        check "$host extension: imports only Windows/UCRT, not Tcl/compiler DLLs" $onlyPlatform
-        set deployed [file join $WORK "deployed $host 雪"]
-        file rename $bundle $deployed
-        set image [file join $deployed extension-example.exe]
-        inspect_image $image {main.tcl}
-        set shipping [read_text [file join $deployed ship.dict]]
-        set expected {LICENSE-examplemath.txt NOTICE-examplemath.txt examplemath.dll extension-example.exe}
-        check "$host extension: exact external deployment inventory" [expr {
-            [lsort [dict keys [dict get $shipping files]]] eq [lsort $expected] &&
-            [payload_files $deployed] eq [lsort [concat $expected ship.dict]]}]
-        set valid 1
-        dict for {name record} [dict get $shipping files] {
-            set path [file join $deployed $name]
-            if {[file size $path] != [dict get $record size] ||
-                    [hash file sha256 $path] ne [dict get $record sha256]} { set valid 0 }
-        }
-        check "$host extension: deployment sizes and hashes match" $valid
-        check "$host extension: full license and attribution travel beside DLL" [expr {
-            [read_text [file join $deployed LICENSE-examplemath.txt]] eq [read_text [file join $ROOT LICENSE]] &&
-            [string match {*Vincent Vercauteren*} [read_text [file join $deployed NOTICE-examplemath.txt]]]}]
-        set result [run_utf8 -timeout 5s -- $image 2147483647 2147483647]
-        check "$host extension: adjacent stubs DLL loads from unrelated cwd" [expr {
-            [dict get $result status] eq "ok" && [string trim [dict get $result out]] eq "4294967294"}]
-        set result [run_utf8 -timeout 5s -- $image 2147483648 1]
-        check "$host extension: native argument bounds fail clearly" [expr {
-            [dict get $result exit] == 1 && [string match {*signed 32-bit integers*} [dict get $result err]]}]
-        file copy -force [file join $deployed examplemath.dll] [file join $unrelated examplemath.dll]
-        file rename [file join $deployed examplemath.dll] [file join $deployed examplemath.dll.absent]
-        set result [run_utf8 -timeout 5s -- $image 1 2]
-        check "$host extension: missing adjacent DLL never falls back to cwd" [expr {
-            [dict get $result exit] == 1 && [string match {*Required adjacent extension is missing:*} [dict get $result err]]}]
+    inspect_runs archive [list [info nameofexecutable] $image] $directory
+    set bundle [::extension_example::build [file join $WORK extension] $MSYS $PREFIX]
+    set headers [exec [file join $MSYS ucrt64 bin objdump.exe] -p [file join $bundle examplemath.dll]]
+    set imports [regexp -all -inline -line {DLL Name: ([^\r\n]+)} $headers]
+    set onlyPlatform [expr {[llength $imports] > 0}]
+    foreach {match library} $imports {
+        set library [string tolower [string trim $library]]
+        if {$library ni {kernel32.dll ucrtbase.dll} &&
+                ![string match api-ms-win-crt-*.dll $library]} { set onlyPlatform 0 }
     }
+    check "extension: imports only Windows/UCRT, not Tcl/compiler DLLs" $onlyPlatform
+    set deployed [file join $WORK "deployed 雪"]
+    file rename $bundle $deployed
+    set image [file join $deployed extension-example.machteld]
+    inspect_image $image {main.tcl}
+    set shipping [read_text [file join $deployed ship.dict]]
+    set expected {LICENSE-examplemath.txt NOTICE-examplemath.txt examplemath.dll extension-example.machteld machteld.exe}
+    check "extension: exact external deployment inventory" [expr {
+        [lsort [dict keys [dict get $shipping files]]] eq [lsort $expected] &&
+        [payload_files $deployed] eq [lsort [concat $expected ship.dict]]}]
+    set valid 1
+    dict for {name record} [dict get $shipping files] {
+        set path [file join $deployed $name]
+        if {[file size $path] != [dict get $record size] ||
+                [hash file sha256 $path] ne [dict get $record sha256]} { set valid 0 }
+    }
+    check "extension: deployment sizes and hashes match" $valid
+    check "extension: full license and attribution travel beside DLL" [expr {
+        [read_text [file join $deployed LICENSE-examplemath.txt]] eq [read_text [file join $ROOT LICENSE]] &&
+        [string match {*Vincent Vercauteren*} [read_text [file join $deployed NOTICE-examplemath.txt]]]}]
+    set result [run_utf8 -timeout 5s -- [file join $deployed machteld.exe] $image 2147483647 2147483647]
+    check "extension: adjacent stubs DLL loads from unrelated cwd" [expr {
+        [dict get $result status] eq "ok" && [string trim [dict get $result out]] eq "4294967294"}]
+    set result [run_utf8 -timeout 5s -- [file join $deployed machteld.exe] $image 2147483648 1]
+    check "extension: native argument bounds fail clearly" [expr {
+        [dict get $result exit] == 1 && [string match {*signed 32-bit integers*} [dict get $result err]]}]
+    file copy -force [file join $deployed examplemath.dll] [file join $unrelated examplemath.dll]
+    file rename [file join $deployed examplemath.dll] [file join $deployed examplemath.dll.absent]
+    set result [run_utf8 -timeout 5s -- [file join $deployed machteld.exe] $image 1 2]
+    check "extension: missing adjacent DLL never falls back to cwd" [expr {
+        [dict get $result exit] == 1 && [string match {*Required adjacent extension is missing:*} [dict get $result err]]}]
     check "examples leave inspected files unchanged" [expr {
         [hash file sha256 [file join $directory {café 雪.txt}]] eq $originalHash}]
     check "examples leave no supervised children" [expr {[child list] eq $originalChildren}]

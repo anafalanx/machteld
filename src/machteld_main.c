@@ -39,10 +39,7 @@ _tmain(
     TclZipfs_AppHook(&argc, &argv);
 #endif
 
-    /* These switches belong to the runtime executable, not to tools made
-     * with `wrap`.  AppHook has now told us whether this executable carries an
-     * embedded main.tcl, so wrapped programs receive their own --help and
-     * --version arguments unchanged. */
+    /* Application arguments follow the selected program on the command line. */
     Tcl_Obj *startup = Tcl_GetStartupScript(NULL);
     if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("--docs")) == 0) {
@@ -50,17 +47,6 @@ _tmain(
          * remaining words as $argv until AppInit dispatches the host route.
          * The replacement is shorter than the writable CRT argument buffer. */
         _tcscpy(argv[1], _T("docs"));
-        Machteld_SetHostMode(MACHTELD_HOST_DOCS);
-    } else if (startup != NULL && argc >= 2 &&
-            _tcscmp(argv[1], _T("--machteld-docs")) == 0) {
-        /* A wrapped application owns every ordinary argument.  This one
-         * deliberately names the embedded runtime, so remove only the escape
-         * word and pass its tail to ::machteld::DocsHost. */
-        for (int i = 1; i + 1 < argc; i++) {
-            argv[i] = argv[i + 1];
-        }
-        argc--;
-        argv[argc] = NULL;
         Machteld_SetHostMode(MACHTELD_HOST_DOCS);
     } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("--machteld-generation")) == 0) {

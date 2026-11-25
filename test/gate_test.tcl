@@ -132,7 +132,7 @@ check {the packaging group compiles only the process fixture} \
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 7}]
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 6}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
 
@@ -213,14 +213,10 @@ foreach step $nvPlan {
     if {![string match {trapped *} [dict get $step label]] || [string match {*: compile} [dict get $step label]]} continue
     lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
 }
-check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, hash and identity boundaries} \
+check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, and hash boundaries} \
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
-        native-boundary-trap.exe hash-boundary-trap.exe {identity-trap.exe identity_native_test.tcl}]}] $driven
-set identityRun [lindex $nvPlan [lsearch -exact $nvLabels {trapped identity}]]
-check {the trapped identity driver gets both basekits and a work folder, all deleted after it} \
-    [expr {[dict keys [dict get $identityRun extract]] eq {basekit/console.exe basekit/gui.exe} &&
-        [dict get $identityRun cleanup] eq [lrange [dict get $identityRun argv] 2 4]}]
+        native-boundary-trap.exe hash-boundary-trap.exe]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
     [expr {"child_window_test.tcl" ni [scripts $releasePlan] &&
@@ -230,12 +226,6 @@ check {the window-opening lanes run only behind --interactive-gui, last} \
         "Tk app archive" ni $releaseLabels &&
         [lindex [dict get [lindex $guiPlan end-2] argv] end] eq "--tk" &&
         [lrange [scripts $guiPlan] end-2 end] eq {archive_test.tcl sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]
-set entry [lindex $releasePlan [lsearch -exact $releaseLabels entry]]
-set bareHost [lindex [dict get $entry argv] end]
-check {the entry test gets the process fixture and a bare host of its own, deleted after it} \
-    [expr {[dict get $entry extract] eq [list basekit/console.exe $bareHost] &&
-        [dict get $entry cleanup] eq [list $bareHost] &&
-        [string match .machteld-entry-basekit-*.exe [file tail $bareHost]]}]
 set missing {}
 foreach step [concat $releasePlan [::gate::plan [settings {--interactive-gui}]]] {
     foreach word [dict get $step argv] {
@@ -263,7 +253,7 @@ proc mentions {path name} {
     try { expr {[string first $name [read $channel]] >= 0} } finally { close $channel }
 }
 set inner [dict create gui_model_fairness_test.tcl test/gui_model_test.tcl \
-    protocol_fairness_test.tcl test/protocol_test.tcl identity_native_test.tcl test/app_identity_test.tcl \
+    protocol_fairness_test.tcl test/protocol_test.tcl \
     tk_index_format_test.c tools/native-analysis.tcl]
 set unwired {}
 foreach path [lsort [concat [glob -directory [file join $root test] *_test.tcl *.c] \

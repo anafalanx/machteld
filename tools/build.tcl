@@ -77,10 +77,9 @@ run $GCC {*}$::machteld::build::YYJSON_FLAGS \
     -c [file join [dict get $PATHS yyjson] yyjson.c] -o $yyjsonObj
 
 set consoleMain [Rp src machteld_main.c]
-set guiMain [Rp src machteld_gui_main.c]
 set objects [list $bindingObj]
 foreach source [lsort [glob -directory [Rp src] *.c]] {
-    if {$source eq $consoleMain || $source eq $guiMain} continue
+    if {$source eq $consoleMain} continue
     set object [file join $OBJDIR [file rootname [file tail $source]].o]
     puts "cc   [file tail $source]"
     run $GCC {*}$common -c $source -o $object
@@ -89,32 +88,18 @@ foreach source [lsort [glob -directory [Rp src] *.c]] {
 set consoleObj [file join $OBJDIR machteld_main.o]
 puts "cc   machteld_main.c"
 run $GCC {*}$common -municode -c $consoleMain -o $consoleObj
-set guiObj [file join $OBJDIR machteld_gui_main.o]
-puts "cc   machteld_gui_main.c"
-run $GCC {*}$common -municode -c $guiMain -o $guiObj
-
 # Windows Explorer and installer tooling read VERSIONINFO without starting the
-# program. Both host variants derive from the one canonical version macro.
+# program. The resource derives from the canonical version macro.
 set consoleVersionObj [file join $OBJDIR machteld-console-resource.o]
-set guiVersionObj [file join $OBJDIR machteld-gui-resource.o]
 puts "rc   machteld-console.rc"
 ::machteld::build::version_resource $TCLSH $WINDRES $ROOT console \
     [file join $OBJDIR machteld-console.rc] $consoleVersionObj
-puts "rc   machteld-gui.rc"
-::machteld::build::version_resource $TCLSH $WINDRES $ROOT gui \
-    [file join $OBJDIR machteld-gui.rc] $guiVersionObj
-
 # The linker intermediates live in the invocation's work directory, never
 # beside the requested output, so no output name can collide with them.
 set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 ::machteld::build::link_host $GCC $STRIP console $consoleObj $consoleVersionObj \
     $objects $sqliteObj $yyjsonObj $PATHS $bare
-set bareGui [file join $BUILDROOT machteld-bare-gui.exe]
-puts "ld   [file tail $bareGui]"
-::machteld::build::link_host $GCC $STRIP gui $guiObj $guiVersionObj \
-    $objects $sqliteObj $yyjsonObj $PATHS $bareGui
-
 set generatedManifest [file join $OBJDIR manifest.tcl]
 run $TCLSH [Rp tools genmanifest.tcl] [Rp src] $generatedManifest
 set staged [file join $OBJDIR prelude.tcl]
@@ -132,7 +117,6 @@ if {![file isdirectory $referenceRoot]} {
 run $TCLSH [Rp tools package.tcl] \
     --prefix $PREFIX --prelude $staged --wrapper $bare --out $OUT \
     --licenses [Rp licenses] --apache-license [Rp LICENSE] \
-    --reference $referenceRoot \
-    --embed-console $bare --embed-gui $bareGui
+    --reference $referenceRoot
 
 puts "built [file nativename $OUT] ([file size $OUT] bytes)"

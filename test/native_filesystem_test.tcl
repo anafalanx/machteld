@@ -34,7 +34,7 @@ try {
             set target $destination
             if {$side eq "candidate"} {append source $suffix} else {append target $suffix}
             check "publication rejects malformed $side U+[format %04X [scan $suffix %c]]" \
-                [expr {[code {::machteld::Publish $source $target}] eq {MACHTELD WRAP badvalue}}]
+                [expr {[code {::machteld::Publish $source $target}] eq {MACHTELD PUBLISH badvalue}}]
             check "rejected publication retains candidate" [expr {[readbytes $candidate] eq "new"}]
             check "rejected publication retains destination" [expr {[readbytes $destination] eq "original"}]
         }

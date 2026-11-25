@@ -62,8 +62,7 @@ if {[llength $declarations] != 2} {
 }
 set current [lindex $declarations 1]
 
-# The prelude owns the authored package literal. The wrap launcher derives its
-# pin from that value and must not carry an independent one.
+# The prelude owns the authored package literal.
 set prelude [slurp [file join $ROOT tcl machteld.tcl]]
 set declarations [regexp -all -inline -line \
     {^[ \t]*variable version ([1-9][0-9]*)[ \t]*\r?$} $prelude]
@@ -74,10 +73,6 @@ set preludeVersion [lindex $declarations 1]
 if {$preludeVersion ne $current} {
     fail "tcl/machteld.tcl declares $preludeVersion but src/machteld.h declares $current"
 }
-if {[regexp {package\s+require\s+(?:-exact\s+)?machteld\s+[0-9]} $prelude]} {
-    fail "tcl/machteld.tcl carries a literal launcher pin; the launcher must derive it from ::machteld::version"
-}
-
 set pages [lsort [glob -nocomplain -directory $ROOT *.md]]
 if {[file join $ROOT README.md] ni $pages} { fail "README.md is missing" }
 lappend pages {*}[authored_pages [file join $ROOT docs] 0]

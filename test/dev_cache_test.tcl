@@ -140,7 +140,6 @@ proc production_spec {stage} {
             return [::machteld::devcache::package_spec $::fixtureRoot $::fixturePaths \
                 [file join $::fixtureRoot staged prelude.tcl] \
                 [file join $::fixtureRoot staged console.exe] \
-                [file join $::fixtureRoot staged gui.exe] \
                 [file join $::fixtureRoot staged reference]]
         }
         default { error "unknown fixture stage: $stage" }
@@ -459,7 +458,7 @@ try {
         LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/cffi-2.0.3.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
         docs/reference/machteld/command/help.md staged/prelude.tcl
-        staged/console.exe staged/gui.exe staged/reference/manifest.sha256
+        staged/console.exe staged/reference/manifest.sha256
         staged/reference/markdown/page.md
     } {
         write_bytes [file join $::fixtureRoot {*}[split $relative /]] "fixture:$relative"
@@ -572,7 +571,7 @@ try {
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl
         packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
-        tools/build_identity.tcl staged/prelude.tcl staged/console.exe staged/gui.exe
+        tools/build_identity.tcl staged/prelude.tcl staged/console.exe
         staged/reference/manifest.sha256 staged/reference/markdown/page.md
     } {
         spec_tracks package [file join $::fixtureRoot {*}[split $relative /]]

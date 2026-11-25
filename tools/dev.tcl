@@ -162,7 +162,7 @@ proc reference_candidate {candidate} {
         --cache $::CACHE --output $candidate --tclsh $::TCLSH
 }
 
-proc package_candidate {staged bare bareGui reference candidate} {
+proc package_candidate {staged bare reference candidate} {
     # The input guard covers shared group snapshots used by compilation. Check
     # both before and after packaging so an edit during a long generation is
     # never published as a verified current build.
@@ -181,7 +181,7 @@ proc package_candidate {staged bare bareGui reference candidate} {
         ::machteld::buildidentity::create $identity $version $::SOURCE_REVISION $::PACKAGE_INPUT_KEY [dict get $catalog corpus_sha256]
         run $::TCLSH [Rp tools package.tcl] --prefix $::PREFIX --prelude $staged --wrapper $bare --out $candidate \
             --licenses [Rp licenses] --apache-license [Rp LICENSE] --reference $reference \
-            --embed-console $bare --embed-gui $bareGui --build-info $identity
+            --build-info $identity
     } finally { if {[file exists $identity]} { file delete $identity } }
     ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
 }
@@ -224,33 +224,25 @@ proc dev_build_unlocked {{forceRef 0}} {
         $::machteld::build::YYJSON_FLAGS yyjson.c 0]
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
-    set guiMain     [Rp src machteld_gui_main.c]
     set objects [list $bindingObj]
     foreach s [lsort [glob -directory [Rp src] *.c]] {
-        if {$s eq $consoleMain || $s eq $guiMain} continue
+        if {$s eq $consoleMain} continue
         set o [file join $::OBJ [file rootname [file tail $s]].o]
         incr changed [cc $o $s $::common [file tail $s]]
         lappend objects $o
     }
     set consoleObj [file join $::OBJ machteld_main.o]
     incr changed [cc $consoleObj $consoleMain [concat $::common -municode] machteld_main.c]
-    set guiObj [file join $::OBJ machteld_gui_main.o]
-    incr changed [cc $guiObj $guiMain [concat $::common -municode] machteld_gui_main.c]
     set consoleVersionObj [file join $::OBJ machteld-console-resource.o]
-    set guiVersionObj [file join $::OBJ machteld-gui-resource.o]
     incr changed [version_resource console $consoleVersionObj]
-    incr changed [version_resource gui $guiVersionObj]
 
     # Link keys include static libraries and toolchain/configuration identity,
     # not merely whether this invocation compiled an object.
     set bare    [file join $::DEV machteld-bare.exe]
-    set bareGui [file join $::DEV machteld-bare-gui.exe]
-    foreach kind {console gui} main [list $consoleObj $guiObj] resource [list $consoleVersionObj $guiVersionObj] output [list $bare $bareGui] {
-        set inputs [list $main $resource {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
-        foreach name {tcllib tklib tclstub cffilib ffilib} { lappend inputs [dict get $::PATHS $name] }
-        set spec [dict create files $inputs values [list $kind $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
-        ::machteld::devcache::ensure $output.record $spec $output [list link_candidate $kind $main $resource $objects $sqliteObj $yyjsonObj]
-    }
+    set inputs [list $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
+    foreach name {tcllib tklib tclstub cffilib ffilib} { lappend inputs [dict get $::PATHS $name] }
+    set spec [dict create files $inputs values [list console $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
+    ::machteld::devcache::ensure $bare.record $spec $bare [list link_candidate console $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj]
 
     # Manifest + prelude: unchanged builds invoke neither generator.
     set staged [file join $::OBJ prelude.tcl]
@@ -265,13 +257,13 @@ proc dev_build_unlocked {{forceRef 0}} {
 
     set final $::DEV_RUNTIME
     file mkdir [file dirname $final]
-    set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $bareGui $::REF]
+    set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $::REF]
     if {[catch {exec git -C $::ROOT rev-parse HEAD} ::SOURCE_REVISION]} { set ::SOURCE_REVISION unknown }
     set ::SOURCE_REVISION [string trim $::SOURCE_REVISION]
     dict set spec values [list source_revision $::SOURCE_REVISION build_inputs $::GUARD_KEY]
     set ::PACKAGE_INPUT_KEY [::machteld::devcache::fingerprint $spec]
     if {[::machteld::devcache::ensure [file join $::DEV package.record] $spec $final \
-            [list package_candidate $staged $bare $bareGui $::REF]]} {
+            [list package_candidate $staged $bare $::REF]]} {
         puts "build: [file nativename $final] ([file size $final] bytes)"
     } else {
         # Cache hits skip package_candidate, but must not skip the final guard.

@@ -4,7 +4,7 @@ package require machteld 0.21
 # VERSIONINFO derived from the one canonical version, names its publisher, and
 # carries no path of the machine that built it.
 #
-#     machteld.exe test/version_resource_test.tcl RUNTIME ?--cache DIR? ?--no-wrap?
+#     machteld.exe test/version_resource_test.tcl RUNTIME ?--cache DIR?
 #
 # The Tcl port (2026-10-28) of test/version_resource_test.ps1. Neither Tcl nor
 # the runtime offers Windows' version API, so the resource is read from the PE
@@ -111,12 +111,10 @@ proc ::vr::main {argv} {
     set manifestSha256 [dict get $lock toolchain defaultManifestResourceSha256]
     set runtime ""
     set cache ""
-    set wrap 1
     while {[llength $argv]} {
         set argv [lassign $argv word]
         switch -- $word {
             --cache {set argv [lassign $argv cache]}
-            --no-wrap {set wrap 0}
             default {set runtime [file normalize $word]}
         }
     }
@@ -132,38 +130,9 @@ proc ::vr::main {argv} {
     set beta {}
     regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text -> beta
 
-    set work [file join [file normalize $::env(TEMP)] machteld-version-resource-test-[pid]-[binary encode hex [hash random 8]]]
-    file mkdir $work
-    try {
-        checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric $beta
-        set paths [embeddedBuildPaths $runtime $cache]
-        check "full executable carries no repository or dependency-cache path" [expr {[llength $paths] == 0}] [join $paths {, }]
-        if {$wrap} {
-            set entry [file join $work main.tcl]
-            set channel [open $entry wb]
-            puts -nonewline $channel "package require machteld\nexit 0\n"
-            close $channel
-            foreach {kind exe description internal original} {
-                console wrapped-console.exe "machteld runtime" machteld machteld.exe
-                gui wrapped-gui.exe "Machteld GUI application host" machteld-gui machteld-gui.exe
-            } {
-                set out [file join $work $exe]
-                set result [run -- $runtime wrap $entry -o $out --$kind]
-                check "$kind metadata fixture wraps successfully" \
-                    [expr {[dict get $result exit] == 0 && [file isfile $out]}]
-                if {[file isfile $out]} {
-                    checkResource "wrapped $kind" $out $description $internal $original $version $numeric $beta
-                    set paths [embeddedBuildPaths $out $cache]
-                    check "wrapped $kind carries no repository or dependency-cache path" \
-                        [expr {[llength $paths] == 0}] [join $paths {, }]
-                }
-            }
-        } else {
-            puts "--   wrapped-host checks skipped (--no-wrap)"
-        }
-    } finally {
-        file delete -force $work
-    }
+    checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric $beta
+    set paths [embeddedBuildPaths $runtime $cache]
+    check "full executable carries no repository or dependency-cache path" [expr {[llength $paths] == 0}] [join $paths {, }]
     if {$failures} {
         puts stderr "$failures VERSIONINFO test(s) failed"
         exit 1

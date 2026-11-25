@@ -1641,11 +1641,6 @@ proc ::ref::main {argv} {
     if {$preludeVersion ne $version} {
         fail "C/Tcl runtime version mismatch: $version vs $preludeVersion"
     }
-    # The wrap launcher derives its pin from ::machteld::version at run time; a
-    # literal there would be a third copy of the version that could fall behind.
-    if {[regexp -nocase {package require machteld [0-9]} $preludeText]} {
-        fail "tcl/machteld.tcl carries a literal launcher pin"
-    }
 
     set parent [file dirname $output]
     file mkdir $parent
@@ -1912,9 +1907,8 @@ proc ::ref::main {argv} {
             formats [D markdown [S "normalized agent-readable Markdown"] html [S "verbatim output of the pinned upstream converter"] \
                 source [S "verbatim upstream roff/manual source"]] \
             docs_host [D \
-                routes [D full [Ls {{docs ...} {--docs ...}}] wrapped [Ls {{--machteld-docs ...}}]] \
+                routes [D full [Ls {{docs ...} {--docs ...}}]] \
                 options [Ls {--json {--output FILE}}] \
-                gui [S "--output FILE required except for extract"] \
                 operations [Ls {status list schema verify get outline search extract}] \
                 json_envelope [D success [D ok [B 1] result [S value]] \
                     failure [D ok [B 0] error [D domain [S DOCS] code [S code] message [S message]]]] \

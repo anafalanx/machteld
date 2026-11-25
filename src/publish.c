@@ -42,7 +42,7 @@ static int
 publish_error(Tcl_Interp *interp, const char *code, const char *message)
 {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(message, -1));
-    Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", code, NULL);
+    Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", code, NULL);
     return TCL_ERROR;
 }
 
@@ -62,7 +62,7 @@ publish_win_error(Tcl_Interp *interp, const char *message, DWORD error,
             message, (unsigned long)error, Tcl_DStringValue(&path)));
         Tcl_DStringFree(&path);
     }
-    Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "oserror", NULL);
+    Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "oserror", NULL);
     return TCL_ERROR;
 }
 
@@ -96,7 +96,7 @@ native_path_from_obj(Tcl_Interp *interp, Tcl_Obj *value, const char *label,
     path->name = NULL;
     if (Tcl_GetCharLength(value) == 0) {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("%s path must not be empty", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     /* Tcl's string representation encodes NUL as C0 80. Checking the C
@@ -116,7 +116,7 @@ native_path_from_obj(Tcl_Interp *interp, Tcl_Obj *value, const char *label,
     if (normalized == NULL) {
         Tcl_ResetResult(interp);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("%s is not a usable path", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     Tcl_IncrRefCount(normalized);
@@ -126,7 +126,7 @@ native_path_from_obj(Tcl_Interp *interp, Tcl_Obj *value, const char *label,
         Tcl_ResetResult(interp);
         Tcl_SetObjResult(interp, Tcl_ObjPrintf(
             "%s must be on the native Windows filesystem", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     path->object = normalized;
@@ -149,7 +149,7 @@ native_parent(Tcl_Interp *interp, const NativePath *child, const char *label,
         }
         Tcl_SetObjResult(interp, Tcl_ObjPrintf(
             "%s has no publishable parent directory", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     Tcl_IncrRefCount(parts);
@@ -286,7 +286,7 @@ check_parent(Tcl_Interp *interp, const NativePath *parent, const char *label,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, info, &error);
     if (state == PUBLISH_PROBE_ABSENT) {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf("%s does not exist", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     if (state == PUBLISH_PROBE_ERROR) {
@@ -296,7 +296,7 @@ check_parent(Tcl_Interp *interp, const NativePath *parent, const char *label,
     if (!is_plain_directory(info)) {
         Tcl_SetObjResult(interp, Tcl_ObjPrintf(
             "%s must be a directory and not a reparse point", label));
-        Tcl_SetErrorCode(interp, "MACHTELD", "WRAP", "badvalue", NULL);
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "badvalue", NULL);
         return TCL_ERROR;
     }
     return TCL_OK;

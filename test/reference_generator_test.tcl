@@ -98,9 +98,6 @@ proc ::rgt::main {argv} {
                 $preludeVersion ne $runtimeVersion} {
             fail "C and Tcl package versions disagree"
         }
-        if {[regexp {package require machteld [0-9]} $prelude]} {
-            fail "the wrap launcher must derive its pin from ::machteld::version, not carry a literal"
-        }
         # The space-bearing parent exercises the converter's argv handling as
         # well as same-parent immutable publication.
         generate $cache $tclsh $first

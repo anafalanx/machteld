@@ -270,16 +270,14 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime integration "streaming bounds" streaming_bounds_test.tcl $processFixture
             }
             packaging {
-                set bare [file join $out .machteld-entry-basekit-[pid]-[binary encode hex [hash random 16]].exe]
                 addStep steps packaging "build identity of the runtime" [list $tclsh [file join $test build_identity_test.tcl] $runtime]
                 addStep steps packaging entry [list $driver [file join $test entry_test.tcl] $runtime \
-                    --fixture $processFixture --bare $bare] extract [list basekit/console.exe $bare] cleanup [list $bare]
+                    --fixture $processFixture]
                 addStep steps packaging "package and publication" [list $driver [file join $test package_test.tcl] --tclsh $tclsh]
                 addStep steps packaging VERSIONINFO [list $driver [file join $test version_resource_test.tcl] $runtime --cache $cache]
-                addLane steps $runtime packaging wrap/basekits wrap_test.tcl
-                addLane steps $runtime packaging "README examples wrapped" documentation_examples_test.tcl --packaging
-                addLane steps $runtime packaging "wrap inventory" wrap_inventory_test.tcl
-                addStep steps packaging "application identity" [list $driver [file join $test app_identity_test.tcl] $runtime]
+                addLane steps $runtime packaging "legacy application compatibility" legacy_wrapper_test.tcl $driver
+
+                addLane steps $runtime packaging "archive inventory" pack_inventory_test.tcl
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
             }
             native-validation {
@@ -400,9 +398,6 @@ proc ::gate::execute {step runtime identity} {
     }
     set expect [expr {[dict exists $step expect] ? [dict get $step expect] : 0}]
     try {
-        if {[dict exists $step extract]} {
-            extract $runtime [dict get $step extract]
-        }
         if {[catch {run -inherit {*}$options -- {*}[dict get $step argv]} result]} {
             fail "$label could not run: $result"
         }
@@ -423,20 +418,6 @@ proc ::gate::execute {step runtime identity} {
         fail "the tested executable changed during $label"
     }
     puts "PASS $label ([seconds $started]s)"
-}
-
-# Copies files out of the runtime's own payload: the packaged basekits, which
-# the entry test's payload refusal and the trapped identity driver use bare.
-proc ::gate::extract {runtime pairs} {
-    set mount gate-payload-[pid]
-    zipfs mount $runtime $mount
-    try {
-        foreach {inner path} $pairs {
-            file copy //zipfs:/$mount/$inner $path
-        }
-    } finally {
-        zipfs unmount $mount
-    }
 }
 
 # What the gate refuses to inherit: MACHTELD_WERROR=0 would build the runtime

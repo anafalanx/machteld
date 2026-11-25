@@ -8,9 +8,9 @@
 #
 #   tclsh90s package.tcl --prefix <dir> --prelude <machteld.tcl> --wrapper <exe> \
 #           --licenses <dir> --apache-license <file> --reference <dir> --out <exe> \
-#           ?--embed-console <exe>? ?--embed-gui <exe>? ?--build-info <dict-file>?
+#           ?--build-info <dict-file>?
 
-array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --embed-console "" --embed-gui "" --build-info ""}
+array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --build-info ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {![info exists opt($a)]} { error "package.tcl: unknown option $a" }
@@ -78,25 +78,20 @@ proc zip_entries {root {rel ""}} {
 
 set outputDir [file dirname [file normalize $OUT]]
 file mkdir $outputDir
-# Claim a unique namespace beside the destination. The live marker keeps
-# ownership of the derived staging-directory and candidate names. The candidate
-# is opened exclusively rather than with `file tempfile`: on Windows, tempfile
-# sets FILE_ATTRIBUTE_TEMPORARY and that attribute survives publication. We
-# delete only these exact names and publish only after lmkimg has completed.
-set stageClaim ""
-set stageMarker ""
+# Keep the image on the destination volume with its inherited permissions.
+# The scratch tree can use the system temp directory, keeping deep reference
+# paths independent of the caller's output path.
 set stage ""
 set outputCandidate ""
 set candidateChannel ""
 try {
-    set stageMarker [file tempfile stageClaim [file join $outputDir .machteld-package-stage-]]
-    set stage "${stageClaim}.d"
-    if {[file exists $stage]} { error "package staging namespace already exists: $stage" }
-    file mkdir $stage
-    set outputCandidate "${stageClaim}.candidate"
-    set candidateChannel [open $outputCandidate {WRONLY CREAT EXCL}]
+    set candidateName [string map {.machteld-build- .machteld-package-} [file rootname [file tail $OUT]]]
+    set candidate [file join $outputDir "$candidateName.candidate"]
+    set candidateChannel [open $candidate {WRONLY CREAT EXCL}]
+    set outputCandidate $candidate
     close $candidateChannel
     set candidateChannel ""
+    set stage [file tempdir]
 
 # Tcl core script library.
 set tclLib ""
@@ -107,7 +102,7 @@ if {$tclLib eq ""} { error "tcl_library not found under dependency prefix: $TC" 
 copy_tree $tclLib [file join $stage tcl_library]
 
 # Tcl looks for package indexes in the children of its library directory.
-# Both wrapped hosts copy this tree, including these opt-in script packages.
+# The runtime carries these opt-in packages alongside the Tcl library.
 set packageSource [file join [file dirname [file dirname [file normalize [info script]]]] packages machteld-job]
 set packageTarget [file join $stage tcl_library machteld-job]
 file mkdir $packageTarget
@@ -220,27 +215,11 @@ if {$opt(--build-info) ne ""} {
     ::machteld::buildidentity::write [file join $stage build-info.dict] $identity
 }
 
-# The basekits are console and GUI copies of the bare host, so `wrap` can make a
-# standalone exe with no toolchain, no `sdx` and no Tcl install anywhere. It
-# extracts the one matching the chosen subsystem and appends onto it.
-#
-# A wrapped tool does not carry these basekits recursively, so only the full
-# machteld.exe can perform another wrap.
-if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
-    file mkdir [file join $stage basekit]
-    if {$opt(--embed-console) ne ""} {
-        file copy -force $opt(--embed-console) [file join $stage basekit console.exe]
-    }
-    if {$opt(--embed-gui) ne ""} {
-        file copy -force $opt(--embed-gui) [file join $stage basekit gui.exe]
-    }
-}
-
     set entries [zip_entries $stage]
     if {![llength $entries]} { error "package stage is empty: $stage" }
     # zipfs writes each input's local DOS timestamp into both ZIP headers.
     # Use the same wall time on every builder, regardless of checkout times
-    # or UTC offset. These are invocation-owned copies, including the basekits.
+    # or UTC offset. These are invocation-owned copies.
     set archiveTime [clock scan 2000-01-01T12:00:00 -format %Y-%m-%dT%H:%M:%S -timezone :localtime]
     foreach {path name} $entries {
         if {[file attributes $path -readonly]} { file attributes $path -readonly 0 }
@@ -254,7 +233,5 @@ if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
     if {$candidateChannel ne ""} { catch {close $candidateChannel} }
     if {$outputCandidate ne ""} { catch {file delete -force $outputCandidate} }
     if {$stage ne ""} { catch {file delete -force $stage} }
-    if {$stageMarker ne ""} { catch {close $stageMarker} }
-    if {$stageClaim ne ""} { catch {file delete -force $stageClaim} }
 }
 puts "built [file nativename $OUT] ([file size $OUT] bytes)"

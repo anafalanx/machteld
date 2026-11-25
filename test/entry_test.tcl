@@ -7,13 +7,15 @@ package require machteld 0.21
 # over same-name files, a hard host kill taking its supervised tree with it,
 # and a host started below a folder whose parent cannot be listed.
 #
-#     machteld.exe test/entry_test.tcl RUNTIME ?--fixture EXE? ?--bare EXE?
+#     machteld.exe test/entry_test.tcl RUNTIME ?--fixture EXE?
 #
 # RUNTIME is the host under test. The crash checks need the compiled
 # process_fixture.exe (--fixture), the payload check the extracted bare host
 # (--bare); without them those checks are skipped. The Tcl port (2026-10-28)
 # of test/entry_test.ps1. Not checked: that --docs output lacks
 # FILE_ATTRIBUTE_TEMPORARY, which Tcl cannot read.
+
+source [file join [file dirname [info script]] pe_resources.tcl]
 
 namespace eval ::et {
     namespace path ::machteld
@@ -132,7 +134,7 @@ proc ::et::envelopeOk {decoded} {
 # Tcl ticket d40d8db3: an exact descendant can be opened while a parent
 # directory cannot be enumerated. Tcl 9.0.4 used to drop one component while
 # normalizing the executable path, preventing standalone zipfs startup.
-# Exercise the actual packaged host and wrap route under that ACL.
+# Exercise the actual packaged host and pack route under that ACL.
 proc ::et::aclTests {versionRe} {
     variable work
     variable runtime
@@ -178,10 +180,10 @@ proc ::et::aclTests {versionRe} {
             [expr {[dict get $result exit] == 0 && [regexp "ACL-ENTRY:1:$versionRe" [dict get $result out]]}] \
             [dict get $result text]
 
-        set wrapped [file join $work acl-wrapped.exe]
-        set result [host -exe $aclHost wrap $program -o $wrapped --console]
-        check "wrap runs from a host below an ACL-denied parent" \
-            [expr {[dict get $result exit] == 0 && [file isfile $wrapped]}] [dict get $result text]
+        set archive [file join $work acl-app.machteld]
+        set result [host -exe $aclHost pack $program -o $archive]
+        check "pack runs from a host below an ACL-denied parent" \
+            [expr {[dict get $result exit] == 0 && [file isfile $archive]}] [dict get $result text]
     } finally {
         if {$denied} {
             run -- $acl [file nativename $blocked] /remove:d "*$sid"
@@ -385,10 +387,10 @@ after 0 entry_post_start
     check "post-start callbacks see an empty info script context" \
         [expr {[dict get $result exit] == 0 && [file isfile $marker] && [file size $marker] == 0}] [dict get $result text]
 
-    writeText [file join $work wrap] "package require machteld\nputs ENTRY-LITERAL-WRAP\n"
-    set result [host -dir $work wrap]
-    check "an existing startup file literally named wrap wins over host convenience dispatch" \
-        [expr {[dict get $result exit] == 0 && [string match *ENTRY-LITERAL-WRAP* [dict get $result text]]}] [dict get $result text]
+    writeText [file join $work pack] "package require machteld\nputs ENTRY-LITERAL-PACK\n"
+    set result [host -dir $work pack]
+    check "an existing startup file literally named pack wins over host convenience dispatch" \
+        [expr {[dict get $result exit] == 0 && [string match *ENTRY-LITERAL-PACK* [dict get $result text]]}] [dict get $result text]
 
     set result [host [file join $work does-not-exist.tcl]]
     check "direct invocation reports a missing startup with status one" \
@@ -485,15 +487,15 @@ proc ::et::hostModeTests {versionRe} {
                [regexp -nocase {synopsis} [dict get $result out]]}] [dict get $result text]
 
     set shadow [file join $work route-directory-shadow]
-    file mkdir [file join $shadow docs] [file join $shadow wrap]
+    file mkdir [file join $shadow docs] [file join $shadow pack]
     set result [host -dir $shadow docs status --json]
     set decoded [expr {[dict get $result exit] == 0 ? [decodeJson [dict get $result out]] : ""}]
     check "a same-name directory does not hide the docs convenience route" \
         [expr {[dict get $result exit] == 0 && [envelopeOk $decoded]}] [dict get $result text]
 
-    set result [host -dir $shadow wrap]
-    check "a same-name directory does not hide the wrap convenience route" \
-        [expr {[dict get $result exit] == 1 && [regexp -nocase {wrap} [dict get $result text]] &&
+    set result [host -dir $shadow pack]
+    check "a same-name directory does not hide the pack convenience route" \
+        [expr {[dict get $result exit] == 1 && [regexp -nocase {pack} [dict get $result text]] &&
                ![regexp -nocase {regular file|startup program} [dict get $result text]]}] [dict get $result text]
 
     set result [host --docs get no-such-product/no-such-page --json]
@@ -520,15 +522,13 @@ proc ::et::main {argv} {
     variable runtime
     variable failures
     set fixture ""
-    set bare ""
     set argv [lassign $argv runtime]
     while {[llength $argv]} {
         set argv [lassign $argv option value]
         switch -- $option {
             --fixture {set fixture [file normalize $value]}
-            --bare {set bare [file normalize $value]}
             default {
-                puts stderr "usage: entry_test.tcl RUNTIME ?--fixture EXE? ?--bare EXE?"
+                puts stderr "usage: entry_test.tcl RUNTIME ?--fixture EXE?"
                 exit 2
             }
         }
@@ -562,13 +562,23 @@ proc ::et::main {argv} {
             puts "--   host-crash checks skipped (no --fixture)"
         }
         hostModeTests $versionRe
-        if {$bare ne ""} {
-            set result [host -exe $bare --version]
-            check "bare host refuses to run without its packaged payload" \
-                [expr {[dict get $result exit] == 1 && [string match *payload* [dict get $result text]]}] [dict get $result text]
-        } else {
-            puts "--   bare-host check skipped (no --bare)"
+        # Exercise payload refusal using the tested runtime's PE sections.
+        # The release artifact itself remains untouched.
+        set bare [file join $work stripped-runtime.exe]
+        set image [::pe::bytes $runtime]
+        set pe [::pe::u32 $image 0x3c]
+        set count [::pe::u16 $image [expr {$pe + 6}]]
+        set table [expr {$pe + 24 + [::pe::u16 $image [expr {$pe + 20}]]}]
+        set end 0
+        for {set i 0} {$i < $count} {incr i} {
+            set row [expr {$table + 40*$i}]
+            set end [expr {max($end, [::pe::u32 $image [expr {$row+20}]] + [::pe::u32 $image [expr {$row+16}]])}]
         }
+        set f [open $bare {CREAT EXCL WRONLY BINARY}]
+        try {puts -nonewline $f [string range $image 0 [expr {$end-1}]]} finally {close $f}
+        set result [host -exe $bare --version]
+        check "bare host refuses to run without its packaged payload" \
+            [expr {[dict get $result exit] == 1 && [string match *payload* [dict get $result text]]}] [dict get $result text]
     } finally {
         file delete -force $work
     }

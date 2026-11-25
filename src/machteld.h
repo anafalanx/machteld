@@ -78,12 +78,10 @@ enum {
     MACHTELD_HOST_HELP,
     MACHTELD_HOST_VERSION,
     MACHTELD_HOST_DOCS,
-    MACHTELD_HOST_DOCS_GUI,
     MACHTELD_HOST_STDIN,
     MACHTELD_HOST_ENCODING,
     MACHTELD_HOST_GENERATION
 };
 void Machteld_SetHostMode(int mode);
-int Machteld_GetHostMode(void);
 
 #endif /* MACHTELD_H */

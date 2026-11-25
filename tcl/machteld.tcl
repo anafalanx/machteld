@@ -178,8 +178,6 @@ proc ::machteld::publish {args} {
     try {
         if {$mode eq "file"} { return [Publish $value $destination] }
         return [PublishBytes $destination $value]
-    } trap {MACHTELD WRAP} {message options} {
-        Fail PUBLISH [lindex [dict get $options -errorcode] 2] $message
     } trap {MACHTELD PUBLISH} {message options} {
         return -options $options $message
     } on error {message options} {
@@ -317,59 +315,12 @@ proc ::machteld::_children {dir} {
         set tail [file tail $item]
         set key [string tolower $tail]
         if {[dict exists $folded $key] && [dict get $folded $key] ne $tail} {
-            Fail WRAP badvalue \
-                "wrap: sibling names differ only by case: \"[dict get $folded $key]\" and \"$tail\""
+            Fail PACK badvalue \
+                "pack: sibling names differ only by case: \"[dict get $folded $key]\" and \"$tail\""
         }
         dict set folded $key $tail
     }
     return [lsort [dict values $seen]]
-}
-
-proc ::machteld::_copy_tree {src dst} {
-    file mkdir $dst
-    foreach item [::machteld::_children $src] {
-        set target [file join $dst [file tail $item]]
-        set type [file type $item]
-        if {$type eq "directory"} {
-            ::machteld::_copy_tree $item $target
-        } elseif {$type eq "file"} {
-            file copy $item $target
-        } else {
-            Fail WRAP badvalue "wrap: input contains unsupported path type \"$type\": $item"
-        }
-    }
-}
-
-# Resolve a relative application path one component at a time and retain the
-# spelling actually present on disk. NTFS is usually case-insensitive while
-# zipfs is case-sensitive, so copying the caller's spelling into the launcher
-# can create an executable that packages successfully but cannot start.
-proc ::machteld::_actual_relative {root relative} {
-    set current $root
-    set actual {}
-    foreach requested [file split $relative] {
-        if {![file isdirectory $current]} {
-            Fail WRAP notfound "wrap: an entry component before \"$requested\" is not a directory"
-        }
-        set exact {}
-        set folded {}
-        foreach item [::machteld::_children $current] {
-            set tail [file tail $item]
-            if {$tail eq $requested} { lappend exact $item }
-            if {[string equal -nocase $tail $requested]} { lappend folded $item }
-        }
-        if {[llength $exact] == 1} {
-            set current [lindex $exact 0]
-        } elseif {![llength $exact] && [llength $folded] == 1} {
-            set current [lindex $folded 0]
-        } elseif {![llength $exact] && ![llength $folded]} {
-            Fail WRAP notfound "wrap: entry component \"$requested\" does not exist"
-        } else {
-            Fail WRAP badvalue "wrap: entry component \"$requested\" is ambiguous by case"
-        }
-        lappend actual [file tail $current]
-    }
-    return [list $current [file join {*}$actual]]
 }
 
 proc ::machteld::_canon_key {facts} {
@@ -401,43 +352,26 @@ proc ::machteld::_zip_entries {root {rel ""}} {
 proc ::machteld::_new_workdir {parent} {
     for {set tries 0} {$tries < 32} {incr tries} {
         set suffix [binary encode hex [hash random 16]]
-        set work [file join $parent .machteld-wrap-$suffix]
+        set work [file join $parent .machteld-pack-$suffix]
         if {[file exists $work]} continue
         if {![catch {file mkdir $work}]} {
             set facts [canon $work]
             return [list $work [_canon_key $facts]]
         }
     }
-    Fail WRAP oserror "wrap: cannot create a unique work directory beside the output"
+    Fail PACK oserror "pack: cannot create a unique work directory beside the output"
 }
 
-proc ::machteld::_write_launcher {path archiveEntry} {
-    set channel [open $path {WRONLY CREAT EXCL}]
-    try {
-        fconfigure $channel -encoding utf-8 -translation lf
-        # The pin is the running runtime's own version, so the launcher can
-        # never disagree with the host that wraps it. The generated file still
-        # carries a literal, which is what the entry gate parses.
-        puts $channel "package require machteld [::machteld::version]"
-        puts $channel "set argv0 \[file join \[file dirname \[info script\]\] [list $archiveEntry]\]"
-        puts $channel {source $argv0}
-    } finally {
-        close $channel
-    }
-}
-
-# Manifest data is never evaluated. Restrict archive names to unambiguous,
-# portable Windows-relative file paths before asking the filesystem about them.
-proc ::machteld::_wrap_relative {relative} {
+proc ::machteld::_pack_relative {relative} {
     set relative [string map {\\ /} $relative]
     if {$relative eq "" || [file pathtype $relative] ne "relative" ||
             [regexp {[\x00-\x1f\x7f<>:"|?*]} $relative]} {
-        Fail WRAP badvalue "wrap: asset must be a plain relative file path: $relative"
+        Fail PACK badvalue "pack: asset must be a plain relative file path: $relative"
     }
     foreach part [split $relative /] {
         if {$part in {{} . ..} || [string trimright $part {. }] ne $part ||
                 [regexp -nocase {^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)} $part]} {
-            Fail WRAP badvalue "wrap: unsafe asset path component in $relative"
+            Fail PACK badvalue "pack: unsafe asset path component in $relative"
         }
     }
     return $relative
@@ -446,10 +380,10 @@ proc ::machteld::_wrap_relative {relative} {
 # Check lexical ancestors before normalize can erase a junction's spelling.
 # Preserve the filesystem palette's distinction between name surrogates and
 # ordinary content behind a cloud/filter reparse tag.
-proc ::machteld::_wrap_no_links {path {cacheName ""}} {
+proc ::machteld::_pack_no_links {path {cacheName ""}} {
     if {$cacheName eq ""} { set cache {} } else { upvar 1 $cacheName cache }
     if {[file pathtype $path] eq "volumerelative"} {
-        Fail WRAP badvalue "wrap: volume-relative input path is unsupported"
+        Fail PACK badvalue "pack: volume-relative input path is unsupported"
     }
     set current ""
     foreach part [file split [file join [pwd] $path]] {
@@ -458,124 +392,113 @@ proc ::machteld::_wrap_no_links {path {cacheName ""}} {
             if {![dict exists $cache directories $current]} {
                 if {[catch {links $current -depth 0} survey] ||
                         [llength [dict get $survey errors]] || [llength [dict get $survey links]]} {
-                    Fail WRAP badvalue "wrap: selected path has an unreadable or name-surrogate ancestor: $current"
+                    Fail PACK badvalue "pack: selected path has an unreadable or name-surrogate ancestor: $current"
                 }
                 dict set cache directories $current 1
             }
         } else {
             if {[catch {file type $current} type]} {
-                Fail WRAP notfound "wrap: selected file does not exist: $current"
+                Fail PACK notfound "pack: selected file does not exist: $current"
             }
-            if {$type ne "file"} { Fail WRAP badvalue "wrap: selected path is not a regular file: $current" }
+            if {$type ne "file"} { Fail PACK badvalue "pack: selected path is not a regular file: $current" }
             set parent [file dirname $current]
             if {![dict exists $cache filelinks $parent]} {
                 if {[catch {links $parent -depth 1} survey] || [llength [dict get $survey errors]]} {
-                    Fail WRAP badvalue "wrap: selected file cannot be inspected: $current"
+                    Fail PACK badvalue "pack: selected file cannot be inspected: $current"
                 }
                 set found {}
                 foreach row [dict get $survey links] { dict set found [_path_key [dict get $row path]] 1 }
                 dict set cache filelinks $parent $found
             }
             if {[dict exists $cache filelinks $parent [_path_key $current]]} {
-                Fail WRAP badvalue "wrap: selected file is a name surrogate: $current"
+                Fail PACK badvalue "pack: selected file is a name surrogate: $current"
             }
         }
     }
 }
 
-proc ::machteld::_wrap_snapshot {path {root ""} {cacheName ""}} {
+proc ::machteld::_pack_snapshot {path {root ""} {cacheName ""}} {
     if {$cacheName eq ""} { set cache {} } else { upvar 1 $cacheName cache }
-    _wrap_no_links $path cache
+    _pack_no_links $path cache
     if {[catch {
         set before [canon $path]
         if {[dict get $before kind] ne "file"} { error "not a regular file" }
         set size [file size $path]
         set digest [hash file sha256 $path]
         set after [canon $path]
-    } message]} { Fail WRAP badvalue "wrap: cannot snapshot selected file $path: $message" }
+    } message]} { Fail PACK badvalue "pack: cannot snapshot selected file $path: $message" }
     if {[_canon_key $before] ne [_canon_key $after] || $size != [file size $path]} {
-        Fail WRAP badvalue "wrap: selected file changed during inspection: $path"
+        Fail PACK badvalue "pack: selected file changed during inspection: $path"
     }
     if {$root ne "" && ![_inside $root [dict get $after path]]} {
-        Fail WRAP badvalue "wrap: selected asset resolves outside the input directory: $path"
+        Fail PACK badvalue "pack: selected asset resolves outside the input directory: $path"
     }
     return [dict create path $path identity [_canon_key $after] bytes $size sha256 $digest]
 }
 
-proc ::machteld::_wrap_same_snapshot {before after} {
+proc ::machteld::_pack_same_snapshot {before after} {
     foreach key {path identity bytes sha256} {
         if {[dict get $before $key] ne [dict get $after $key]} { return 0 }
     }
     return 1
 }
 
-proc ::machteld::_wrap_data_dict {text label} {
+proc ::machteld::_pack_data_dict {text label} {
     if {[catch {dict size $text} size] || [llength $text] != 2 * $size} {
-        Fail WRAP badvalue "wrap: $label must be a dictionary without duplicate keys"
+        Fail PACK badvalue "pack: $label must be a dictionary without duplicate keys"
     }
     return [dict create {*}$text]
 }
 
-proc ::machteld::_wrap_manifest {path {project 0}} {
-    if {[file isfile $path] && [file size $path] > 1048576} { Fail WRAP badvalue "wrap: manifest exceeds 1 MiB" }
-    set snapshot [_wrap_snapshot $path]
-    if {[dict get $snapshot bytes] > 1048576} { Fail WRAP badvalue "wrap: manifest exceeds 1 MiB" }
+proc ::machteld::_pack_manifest {path} {
+    if {[file isfile $path] && [file size $path] > 1048576} { Fail PACK badvalue "pack: manifest exceeds 1 MiB" }
+    set snapshot [_pack_snapshot $path]
+    if {[dict get $snapshot bytes] > 1048576} { Fail PACK badvalue "pack: manifest exceeds 1 MiB" }
     if {[catch {
         set channel [open $path rb]
         try { set bytes [read $channel 1048577] } finally { close $channel }
         set text [encoding convertfrom -profile strict utf-8 $bytes]
-    } message]} { Fail WRAP badvalue "wrap: cannot read UTF-8 manifest: $message" }
+    } message]} { Fail PACK badvalue "pack: cannot read UTF-8 manifest: $message" }
     if {[string length $bytes] > 1048576 || [hash sum sha256 $bytes] ne [dict get $snapshot sha256]} {
-        Fail WRAP badvalue "wrap: manifest changed while being read"
+        Fail PACK badvalue "pack: manifest changed while being read"
     }
     # Accept the UTF-8 signature emitted by common Windows editors. Its bytes
     # remain part of the source snapshot; only dictionary parsing ignores it.
     if {[string index $text 0] eq "\ufeff"} { set text [string range $text 1 end] }
-    set data [_wrap_data_dict $text manifest]
-    set allowed [expr {$project ? {schema entry files} : {schema files metadata}}]
+    set data [_pack_data_dict $text manifest]
     foreach key [dict keys $data] {
-        if {$key ni $allowed} { Fail WRAP badvalue "wrap: unknown manifest key $key" }
+        if {$key ni {schema entry files}} { Fail PACK badvalue "pack: unknown manifest key $key" }
     }
     if {![dict exists $data schema] || [dict get $data schema] ne "1" || ![dict exists $data files]} {
-        Fail WRAP badvalue "wrap: manifest requires schema 1 and an explicit files list"
+        Fail PACK badvalue "pack: manifest requires schema 1 and an explicit files list"
     }
     if {[catch {llength [dict get $data files]} count] || $count < 1 || $count > 10000} {
-        Fail WRAP badvalue "wrap: manifest files must list between 1 and 10000 files"
+        Fail PACK badvalue "pack: manifest files must list between 1 and 10000 files"
     }
-    if {$project} {
-        if {![dict exists $data entry]} { Fail WRAP badvalue "wrap: project manifest needs an entry" }
-        return [dict create entry [_wrap_relative [dict get $data entry]] files [dict get $data files] snapshot $snapshot]
-    }
-    set metadata {}
-    if {[dict exists $data metadata]} { set metadata [_wrap_data_dict [dict get $data metadata] metadata] }
-    foreach key [dict keys $metadata] {
-        if {$key ni {name version description author publisher copyright icon}} {
-            Fail WRAP badvalue "wrap: unknown application metadata key $key"
-        }
-    }
-    return [dict create files [dict get $data files] metadata $metadata snapshot $snapshot]
+    if {![dict exists $data entry]} { Fail PACK badvalue "pack: project manifest needs an entry" }
+    return [dict create entry [_pack_relative [dict get $data entry]] files [dict get $data files] snapshot $snapshot]
 }
 
-proc ::machteld::_wrap_check_tree {sourceRoot} {
+proc ::machteld::_pack_check_tree {sourceRoot} {
     if {[catch {links $sourceRoot} survey]} {
-        Fail WRAP oserror "wrap: cannot inspect input directory: $survey"
+        Fail PACK oserror "pack: cannot inspect input directory: $survey"
     }
     if {[llength [dict get $survey errors]] || [llength [dict get $survey links]]} {
-        Fail WRAP badvalue "wrap: input directory contains an unreadable path or name surrogate"
+        Fail PACK badvalue "pack: input directory contains an unreadable path or name surrogate"
     }
 }
 
-proc ::machteld::_wrap_tree_files {root {relative ""} {cacheName ""}} {
+proc ::machteld::_pack_tree_files {root {relative ""} {cacheName ""}} {
     if {$cacheName eq ""} { set cache {} } else { upvar 1 $cacheName cache }
     set directory [file join $root $relative]
-    _wrap_no_links $directory cache
+    _pack_no_links $directory cache
     set files {}
     foreach path [_children $directory] {
-        set name [_wrap_relative [string map {\\ /} [file join $relative [file tail $path]]]]
+        set name [_pack_relative [string map {\\ /} [file join $relative [file tail $path]]]]
         switch -- [file type $path] {
-            directory { lappend files {*}[_wrap_tree_files $root $name cache] }
+            directory { lappend files {*}[_pack_tree_files $root $name cache] }
             file { lappend files $name }
-            default { Fail WRAP badvalue "wrap: input contains an unsupported path type: $path" }
+            default { Fail PACK badvalue "pack: input contains an unsupported path type: $path" }
         }
     }
     return [lsort $files]
@@ -584,75 +507,60 @@ proc ::machteld::_wrap_tree_files {root {relative ""} {cacheName ""}} {
 # Directory enumeration is shared only within this one inventory pass. Every
 # final source recheck gets a fresh cache; file identities and bytes are never
 # cached across snapshots. Large same-directory manifests remain linear.
-proc ::machteld::_wrap_actual_relative {root relative cacheName} {
+proc ::machteld::_pack_actual_relative {root relative cacheName} {
     upvar 1 $cacheName cache
     set current $root; set actual {}
     foreach requested [split $relative /] {
         if {![dict exists $cache children $current]} {
-            if {![file isdirectory $current]} { Fail WRAP notfound "wrap: selected parent is not a directory: $current" }
-            _wrap_no_links $current cache
+            if {![file isdirectory $current]} { Fail PACK notfound "pack: selected parent is not a directory: $current" }
+            _pack_no_links $current cache
             set names {}
             foreach path [_children $current] { dict set names [string tolower [file tail $path]] $path }
             dict set cache children $current $names
         }
         set key [string tolower $requested]
-        if {![dict exists $cache children $current $key]} { Fail WRAP notfound "wrap: selected asset component does not exist: $requested" }
+        if {![dict exists $cache children $current $key]} { Fail PACK notfound "pack: selected asset component does not exist: $requested" }
         set current [dict get $cache children $current $key]
         lappend actual [file tail $current]
     }
     return [list $current [join $actual /]]
 }
 
-proc ::machteld::_wrap_inventory {root selected canonicalRoot} {
+proc ::machteld::_pack_inventory {root selected canonicalRoot} {
     set records {}; set folded {}; set cache {}
     foreach name $selected {
-        set name [_wrap_relative $name]
-        lassign [_wrap_actual_relative $root $name cache] path actual
+        set name [_pack_relative $name]
+        lassign [_pack_actual_relative $root $name cache] path actual
         set actual [string map {\\ /} $actual]
         set key [string tolower $actual]
-        if {[dict exists $folded $key]} { Fail WRAP badvalue "wrap: duplicate or case-colliding selected asset: $name" }
+        if {[dict exists $folded $key]} { Fail PACK badvalue "pack: duplicate or case-colliding selected asset: $name" }
         dict set folded $key 1
-        dict set records $actual [_wrap_snapshot $path $canonicalRoot cache]
+        dict set records $actual [_pack_snapshot $path $canonicalRoot cache]
     }
     set sorted {}
     foreach name [lsort [dict keys $records]] { dict set sorted $name [dict get $records $name] }
     return $sorted
 }
 
-proc ::machteld::_wrap_copy_assets {records destination} {
-    file mkdir $destination
-    dict for {name snapshot} $records {
-        set target [file join $destination {*}[split $name /]]
-        file mkdir [file dirname $target]
-        file copy [dict get $snapshot path] $target
-        if {[file size $target] != [dict get $snapshot bytes] ||
-                [hash file sha256 $target] ne [dict get $snapshot sha256]} {
-            Fail WRAP badvalue "wrap: selected asset changed while being staged: $name"
-        }
-    }
-}
-
-proc ::machteld::_wrap_verify_inputs {sourceRoot sourceIdentity selected records wholeTree manifestSnapshot iconSnapshot} {
-    _wrap_no_links $sourceRoot
+proc ::machteld::_pack_verify_inputs {sourceRoot sourceIdentity selected records wholeTree manifestSnapshot} {
+    _pack_no_links $sourceRoot
     if {[_canon_key [canon $sourceRoot]] ne $sourceIdentity} {
-        Fail WRAP badvalue "wrap: input directory was replaced while packaging"
+        Fail PACK badvalue "pack: input directory was replaced while packaging"
     }
-    if {$wholeTree} { set selected [_wrap_tree_files $sourceRoot] }
-    set current [_wrap_inventory $sourceRoot $selected [dict get [canon $sourceRoot] path]]
-    if {[dict keys $current] ne [dict keys $records]} { Fail WRAP badvalue "wrap: selected file inventory changed while packaging" }
+    if {$wholeTree} { set selected [_pack_tree_files $sourceRoot] }
+    set current [_pack_inventory $sourceRoot $selected [dict get [canon $sourceRoot] path]]
+    if {[dict keys $current] ne [dict keys $records]} { Fail PACK badvalue "pack: selected file inventory changed while packaging" }
     dict for {name snapshot} $records {
-        if {![_wrap_same_snapshot $snapshot [dict get $current $name]]} {
-            Fail WRAP badvalue "wrap: selected asset changed while packaging: $name"
+        if {![_pack_same_snapshot $snapshot [dict get $current $name]]} {
+            Fail PACK badvalue "pack: selected asset changed while packaging: $name"
         }
     }
-    foreach snapshot [list $manifestSnapshot $iconSnapshot] {
-        if {$snapshot ne "" && ![_wrap_same_snapshot $snapshot [_wrap_snapshot [dict get $snapshot path]]]} {
-            Fail WRAP badvalue "wrap: manifest or icon changed while packaging"
-        }
+    if {$manifestSnapshot ne {} && ![_pack_same_snapshot $manifestSnapshot [_pack_snapshot [dict get $manifestSnapshot path]]]} {
+        Fail PACK badvalue "pack: project manifest changed while packaging"
     }
 }
 
-proc ::machteld::_wrap_archive_inventory {root} {
+proc ::machteld::_pack_archive_inventory {root} {
     set inventory {}
     foreach {path relative} [_zip_entries $root] {
         dict set inventory $relative [dict create bytes [file size $path] sha256 [hash file sha256 $path]]
@@ -660,18 +568,18 @@ proc ::machteld::_wrap_archive_inventory {root} {
     return $inventory
 }
 
-proc ::machteld::_wrap_verify_candidate {candidate inventory {entry {}}} {
-    set mount "machteld-wrap-[binary encode hex [hash random 16]]"
+proc ::machteld::_pack_verify_candidate {candidate inventory {entry {}}} {
+    set mount "machteld-pack-[binary encode hex [hash random 16]]"
     zipfs mount $candidate $mount
     try {
         if {$entry ne ""} { ::machteld::EntryCheck [file join //zipfs:/$mount $entry] }
-        set actual [_wrap_archive_inventory //zipfs:/$mount]
+        set actual [_pack_archive_inventory //zipfs:/$mount]
         if {[lsort [dict keys $actual]] ne [lsort [dict keys $inventory]]} {
-            Fail WRAP badvalue "wrap: candidate archive inventory differs from staging"
+            Fail PACK badvalue "pack: candidate archive inventory differs from staging"
         }
         dict for {name expected} $inventory {
             if {[dict get $actual $name] ne $expected} {
-                Fail WRAP badvalue "wrap: candidate archive differs from staging: $name"
+                Fail PACK badvalue "pack: candidate archive differs from staging: $name"
             }
         }
     } finally { zipfs unmount $mount }
@@ -679,281 +587,36 @@ proc ::machteld::_wrap_verify_candidate {candidate inventory {entry {}}} {
 
 # Check the physical output location before creating a candidate alongside it.
 # Return the destination identity when a previous build already exists.
-proc ::machteld::_wrap_destination {out sourceCanon entryCanon single} {
-    if {[file isdirectory $out]} { Fail WRAP badvalue "wrap: output \"$out\" is a directory" }
+proc ::machteld::_pack_destination {out sourceCanon entryCanon single} {
+    if {[file isdirectory $out]} { Fail PACK badvalue "pack: output \"$out\" is a directory" }
     set outParent [file dirname $out]
     if {![file isdirectory $outParent]} {
-        Fail WRAP notfound "wrap: output directory \"$outParent\" does not exist"
+        Fail PACK notfound "pack: output directory \"$outParent\" does not exist"
     }
     if {[catch {canon $outParent} parentCanon]} {
-        Fail WRAP badvalue "wrap: output directory cannot be resolved: $parentCanon"
+        Fail PACK badvalue "pack: output directory cannot be resolved: $parentCanon"
     }
     if {!$single && [_inside [dict get $sourceCanon path] [dict get $parentCanon path]]} {
-        Fail WRAP badvalue "wrap: output cannot be inside the input directory"
+        Fail PACK badvalue "pack: output cannot be inside the input directory"
     }
     if {[file exists $out]} {
         if {[catch {canon $out} outCanon]} {
-            Fail WRAP badvalue "wrap: existing output cannot be resolved: $outCanon"
+            Fail PACK badvalue "pack: existing output cannot be resolved: $outCanon"
         }
         if {[_canon_key $entryCanon] eq [_canon_key $outCanon]} {
-            Fail WRAP badvalue "wrap: output cannot overwrite its input entry"
+            Fail PACK badvalue "pack: output cannot overwrite its input entry"
         }
         if {!$single && [_inside [dict get $sourceCanon path] [dict get $outCanon path]]} {
-            Fail WRAP badvalue "wrap: output cannot be inside the input directory"
+            Fail PACK badvalue "pack: output cannot be inside the input directory"
         }
         if {![catch {canon [info nameofexecutable]} hostCanon] &&
                 [_canon_key $hostCanon] eq [_canon_key $outCanon]} {
-            Fail WRAP badvalue "wrap: output cannot overwrite the running host"
+            Fail PACK badvalue "pack: output cannot overwrite the running host"
         }
     }
     if {[info exists outCanon]} { return $outCanon }
     return {}
 }
-
-proc ::machteld::wrap {args} {
-    set gui 0; set withDocs 0; set out ""; set input ""; set entry ""; set entrySet 0
-    set manifest ""; set manifestSet 0; set plan 0
-    for {set i 0} {$i < [llength $args]} {incr i} {
-        set a [lindex $args $i]
-        switch -- $a {
-            --gui        { set gui 1 }
-            --console    { set gui 0 }
-            --with-docs  { set withDocs 1 }
-            --plan       { set plan 1 }
-            --entry - --manifest - -o {
-                if {$i + 1 >= [llength $args]} { Fail WRAP usage "wrap: $a needs a value" }
-                set v [lindex $args [incr i]]
-                switch -- $a {
-                    --entry { set entry $v; set entrySet 1 }
-                    --manifest { set manifest $v; set manifestSet 1 }
-                    -o { set out $v }
-                }
-            }
-            default {
-                if {[string match -* $a]} {
-                    Fail WRAP usage "wrap: unknown option \"$a\""
-                } elseif {$input eq ""} {
-                    set input $a
-                } else {
-                    Fail WRAP usage "wrap: unexpected argument \"$a\""
-                }
-            }
-        }
-    }
-    if {$input eq "" || $out eq ""} {
-        Fail WRAP usage "usage: wrap input -o out.exe ?--entry path? ?--manifest file? ?--plan? ?--gui|--console? ?--with-docs?"
-    }
-    if {![file exists $input]} { Fail WRAP notfound "wrap: input \"$input\" does not exist" }
-    set single [expr {![file isdirectory $input]}]
-    if {$single && $entrySet} { Fail WRAP usage "wrap: --entry applies only to a directory" }
-    if {$single && $manifestSet} { Fail WRAP usage "wrap: --manifest applies only to a directory" }
-    _wrap_no_links $input
-    if {$single} {
-        if {![file isfile $input]} { Fail WRAP badvalue "wrap: input must be a file or directory" }
-        set sourceRoot [file dirname [file normalize $input]]
-        lassign [_actual_relative $sourceRoot [file tail $input]] entryPath actualEntry
-        set archiveEntry [string map {\\ /} [file join app [file tail $entryPath]]]
-    } else {
-        set sourceRoot [file normalize $input]
-        if {!$entrySet} { set entry main.tcl }
-        set entry [_wrap_relative $entry]
-        lassign [::machteld::_actual_relative $sourceRoot $entry] entryPath actualEntry
-        set archiveEntry [string map {\\ /} [file join app {*}[file split $actualEntry]]]
-    }
-    if {![file isfile $entryPath]} { Fail WRAP notfound "wrap: entry \"$entryPath\" is not a file" }
-    if {[catch {canon $entryPath} entryCanon]} {
-        Fail WRAP badvalue "wrap: entry cannot be resolved: $entryCanon"
-    }
-    if {!$single} {
-        if {[catch {canon $sourceRoot} sourceCanon]} {
-            Fail WRAP badvalue "wrap: input directory cannot be resolved: $sourceCanon"
-        }
-        if {![_inside [dict get $sourceCanon path] [dict get $entryCanon path]]} {
-            Fail WRAP badvalue "wrap: --entry must resolve inside the input directory"
-        }
-        if {!$manifestSet} { _wrap_check_tree $sourceRoot }
-    }
-    set sourceCanon [canon $sourceRoot]
-    set manifestSnapshot {}; set iconSnapshot {}; set nativeMetadata {}; set metadata {}
-    if {$manifestSet} {
-        if {$manifest eq ""} { Fail WRAP badvalue "wrap: --manifest requires a file path" }
-        _wrap_no_links $manifest
-        set manifest [file normalize $manifest]
-        set specification [_wrap_manifest $manifest]
-        set manifestSnapshot [dict get $specification snapshot]
-        set selected [dict get $specification files]
-        set metadata [dict get $specification metadata]
-    } elseif {$single} { set selected [list [file tail $entryPath]]
-    } else { set selected [_wrap_tree_files $sourceRoot] }
-    set records [_wrap_inventory $sourceRoot $selected [dict get $sourceCanon path]]
-    set entryRelative [string range $archiveEntry 4 end]
-    if {![dict exists $records $entryRelative]} { Fail WRAP badvalue "wrap: selected entry must be explicitly listed in manifest files" }
-    set selected [dict keys $records]
-
-    set out [file normalize $out]
-    set outParent [file dirname $out]
-    set outCanon [_wrap_destination $out $sourceCanon $entryCanon $single]
-
-    if {$metadata ne ""} {
-        foreach key {name version} {
-            if {![dict exists $metadata $key] || [dict get $metadata $key] eq ""} {
-                Fail WRAP badvalue "wrap: application metadata requires name and version"
-            }
-        }
-        if {[info commands ::machteld::ValidateIdentity] eq "" || [info commands ::machteld::StampIdentity] eq ""} {
-            Fail WRAP unsupported "wrap: this host lacks application identity support"
-        }
-        set nativeMetadata $metadata
-        dict set nativeMetadata internal_name [file rootname [file tail $out]]
-        dict set nativeMetadata original_filename [file tail $out]
-        if {[dict exists $metadata icon] && [dict get $metadata icon] ne ""} {
-            set icon [dict get $metadata icon]
-            if {[file pathtype $icon] eq "relative"} { set icon [file join [file dirname $manifest] $icon] }
-            _wrap_no_links $icon
-            set icon [file normalize $icon]
-            if {[file isfile $icon] && [file size $icon] > 16777216} { Fail WRAP badvalue "wrap: icon exceeds 16 MiB" }
-            set iconSnapshot [_wrap_snapshot $icon]
-            dict set nativeMetadata icon $icon
-        }
-        set nativeMetadata [::machteld::ValidateIdentity $nativeMetadata]
-        set metadata $nativeMetadata
-        dict set metadata icon [expr {$iconSnapshot eq "" ? {} : [dict create \
-            bytes [dict get $iconSnapshot bytes] sha256 [dict get $iconSnapshot sha256]]}]
-    }
-    if {$outCanon ne ""} {
-        foreach snapshot [list $manifestSnapshot $iconSnapshot] {
-            if {$snapshot ne "" && [_canon_key $outCanon] eq [dict get $snapshot identity]} {
-                Fail WRAP badvalue "wrap: output cannot overwrite its manifest or icon input"
-            }
-        }
-    }
-    set files {}
-    dict for {name snapshot} $records {
-        dict set files $name [dict create bytes [dict get $snapshot bytes] sha256 [dict get $snapshot sha256]]
-    }
-    set appInfo [dict create schema 1 entry $archiveEntry host [expr {$gui ? "gui" : "console"}] \
-        with_docs $withDocs metadata $metadata runtime [dict create name Machteld version [version] \
-        author {Vincent Vercauteren}] files $files]
-
-    if {[info commands ::machteld::EntryCheck] eq "" ||
-            [info commands ::machteld::Publish] eq ""} {
-        Fail WRAP unsupported "wrap: this host lacks packaging support"
-    }
-    if {[info commands ::machteld::PayloadRoot] eq "" ||
-            [catch {::machteld::PayloadRoot} root]} {
-        Fail WRAP unsupported "wrap: the embedded runtime root is unavailable"
-    }
-    if {![file isdirectory [file join $root tcl_library]] ||
-            ![file isdirectory [file join $root tcl9]] ||
-            ![file isdirectory [file join $root tk_library]] ||
-            ![file isdirectory [file join $root licenses]] ||
-            ![file isdirectory [file join $root basekit]]} {
-        Fail WRAP unsupported "wrap: this executable carries no wrapper basekits"
-    }
-    set bare [file join $root basekit [expr {$gui ? {gui.exe} : {console.exe}}]]
-    if {![file isfile $bare]} { Fail WRAP notfound "wrap: basekit not embedded: $bare" }
-    # Documentation is a packaging option, not a runtime dependency. Only an
-    # explicit opt-in needs the corpus or pays for its integrity validation.
-    if {$withDocs} {
-        if {[info commands ::machteld::DocsPackFiles] eq ""} {
-            Fail WRAP unsupported "wrap: embedded reference validation is unavailable"
-        }
-        if {[catch {::machteld::DocsPackFiles} referenceError]} {
-            Fail WRAP unsupported "wrap: embedded reference pack is unavailable or invalid: $referenceError"
-        }
-    }
-    if {[catch {::machteld::EntryCheck $entryPath} checked opts]} {
-        set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]
-        if {[lrange $code 0 1] eq {MACHTELD ENTRY}} { Fail WRAP [lindex $code 2] $checked }
-        return -options $opts $checked
-    }
-    if {$plan} {
-        _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records \
-            [expr {!$single && !$manifestSet}] $manifestSnapshot $iconSnapshot
-        return $appInfo
-    }
-
-    lassign [_new_workdir $outParent] work workKey
-    try {
-        set stage [file join $work stage]
-        file mkdir $stage
-        ::machteld::_copy_tree [file join $root tcl_library] [file join $stage tcl_library]
-        ::machteld::_copy_tree [file join $root tcl9]        [file join $stage tcl9]
-        ::machteld::_copy_tree [file join $root tk_library]  [file join $stage tk_library]
-        ::machteld::_copy_tree [file join $root licenses]    [file join $stage licenses]
-        if {$withDocs} {
-            ::machteld::_copy_tree [file join $root reference] [file join $stage reference]
-        }
-        file copy [file join $root machteld.tcl] [file join $stage machteld.tcl]
-        # Runtime provenance is independent of application assets and the
-        # optional reference corpus. Older released hosts have no such record.
-        if {[file isfile [file join $root build-info.dict]]} {
-            file copy [file join $root build-info.dict] [file join $stage build-info.dict]
-        }
-        set app [file join $stage app]
-        _wrap_copy_assets $records $app
-        set stagedEntry [file join $app {*}[split $entryRelative /]]
-        if {[catch {::machteld::EntryCheck $stagedEntry} checked opts]} {
-            set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]
-            if {[lrange $code 0 1] eq {MACHTELD ENTRY}} {
-                Fail WRAP [lindex $code 2] $checked
-            }
-            return -options $opts $checked
-        }
-        ::machteld::_write_launcher [file join $stage main.tcl] $archiveEntry
-        set channel [open [file join $stage app-info.dict] {WRONLY CREAT EXCL}]
-        try {
-            fconfigure $channel -encoding utf-8 -translation lf
-            puts $channel $appInfo
-        } finally { close $channel }
-
-        set tmpbare [file join $work bare.exe]
-        file copy $bare $tmpbare
-        if {$nativeMetadata ne ""} {
-            if {$iconSnapshot ne ""} {
-                set stagedIcon [file join $work identity.ico]
-                file copy [dict get $iconSnapshot path] $stagedIcon
-                if {[file size $stagedIcon] != [dict get $iconSnapshot bytes] ||
-                        [hash file sha256 $stagedIcon] ne [dict get $iconSnapshot sha256]} {
-                    Fail WRAP badvalue "wrap: icon changed while being staged"
-                }
-                dict set nativeMetadata icon $stagedIcon
-            }
-            ::machteld::StampIdentity $tmpbare $nativeMetadata
-        }
-        set candidate [file join $work candidate.exe]
-        set stagedApp [_wrap_archive_inventory $app]
-        if {[lsort [dict keys $stagedApp]] ne [lsort [dict keys $files]]} {
-            Fail WRAP badvalue "wrap: staged application inventory changed before packaging"
-        }
-        dict for {name expected} $files {
-            if {[dict get $stagedApp $name] ne $expected} {
-                Fail WRAP badvalue "wrap: staged application bytes changed before packaging: $name"
-            }
-        }
-        set stagedInventory [_wrap_archive_inventory $stage]
-        zipfs lmkimg $candidate [::machteld::_zip_entries $stage] {} $tmpbare
-        _wrap_verify_candidate $candidate $stagedInventory
-        _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records \
-            [expr {!$single && !$manifestSet}] $manifestSnapshot $iconSnapshot
-        ::machteld::Publish $candidate $out
-    } on error {msg opts} {
-        set code [expr {[dict exists $opts -errorcode] ? [dict get $opts -errorcode] : {}}]
-        if {[lindex $code 0] eq "MACHTELD"} { return -options $opts $msg }
-        Fail WRAP oserror "wrap: $msg"
-    } finally {
-        # Best-effort cleanup.  The identity check avoids deleting an obviously
-        # replaced path; publication safety does not depend on cleanup success.
-        if {![catch {canon $work} finalWork] && [_canon_key $finalWork] eq $workKey} {
-            catch {file delete -force $work}
-        }
-    }
-    return $out
-}
-
-::machteld::MetaDefine wrap [dict create kind tcl args args domain WRAP \
-    codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui --manifest --plan --with-docs -o} \
-    doc machteld/command/wrap]
 
 # Read the pinned generation mounted by the native entry gate. The file list
 # is inert data. Verify every mounted member before returning the entry path.
@@ -968,19 +631,19 @@ proc ::machteld::ArchiveEntry {root} {
         set channel [open $index rb]
         try { set bytes [read $channel 4194305] } finally { close $channel }
         if {[string length $bytes] > 4194304} { error "inventory exceeds 4 MiB" }
-        set record [_wrap_data_dict [encoding convertfrom -profile strict utf-8 $bytes] inventory]
+        set record [_pack_data_dict [encoding convertfrom -profile strict utf-8 $bytes] inventory]
         if {[lsort [dict keys $record]] ne {entry files schema} || [dict get $record schema] ne "1"} {
             error "expected archive inventory schema 1, entry and files"
         }
         set entry [dict get $record entry]
-        set files [_wrap_data_dict [dict get $record files] files]
+        set files [_pack_data_dict [dict get $record files] files]
         if {[dict size $files] > 10000 || ![dict exists $files $entry] || [dict exists $files $indexName]} {
             error "invalid entry or file list"
         }
         foreach {path name} [_zip_entries $root] {
             if {$name eq $indexName} continue
-            if {[_wrap_relative $name] ne $name || ![dict exists $files $name]} { error "unexpected member: $name" }
-            set facts [_wrap_data_dict [dict get $files $name] "record for $name"]
+            if {[_pack_relative $name] ne $name || ![dict exists $files $name]} { error "unexpected member: $name" }
+            set facts [_pack_data_dict [dict get $files $name] "record for $name"]
             if {[lsort [dict keys $facts]] ne {bytes sha256} ||
                     [file size $path] ne [dict get $facts bytes] ||
                     ![regexp {^[a-f0-9]{64}$} [dict get $facts sha256]] ||
@@ -1006,7 +669,7 @@ proc ::machteld::PackArchive {args} {
         Fail PACK badvalue "pack: output must have the .machteld extension"
     }
     try {
-        _wrap_no_links $input
+        _pack_no_links $input
         set input [file normalize $input]
         set single [expr {![file isdirectory $input]}]
         set project [expr {$single && [string equal -nocase [file extension $input] ".dict"] &&
@@ -1014,7 +677,7 @@ proc ::machteld::PackArchive {args} {
         set manifestSnapshot {}
         set entry main.tcl
         if {$project} {
-            set spec [_wrap_manifest $input 1]
+            set spec [_pack_manifest $input]
             set selected [dict get $spec files]
             set entry [dict get $spec entry]
             set manifestSnapshot [dict get $spec snapshot]
@@ -1024,20 +687,20 @@ proc ::machteld::PackArchive {args} {
             set selected [list [file tail $input]]
         } else {
             set sourceRoot $input
-            _wrap_check_tree $sourceRoot
-            set selected [_wrap_tree_files $sourceRoot]
+            _pack_check_tree $sourceRoot
+            set selected [_pack_tree_files $sourceRoot]
             if {"main.tcl" ni $selected} {
                 Fail PACK notfound "pack: directory must contain a root main.tcl"
             }
         }
         set sourceCanon [canon $sourceRoot]
-        set records [_wrap_inventory $sourceRoot $selected [dict get $sourceCanon path]]
+        set records [_pack_inventory $sourceRoot $selected [dict get $sourceCanon path]]
         set out [file normalize $out]
         if {$project && ![dict exists $records $entry]} {
             Fail PACK badvalue "pack: entry must appear in files with its on-disk spelling"
         }
         set entryPath [expr {$single && !$project ? $input : [file join $sourceRoot $entry]}]
-        set existing [_wrap_destination $out $sourceCanon [canon $entryPath] $single]
+        set existing [_pack_destination $out $sourceCanon [canon $entryPath] $single]
         if {$project && $existing ne {}} {
             set identity [_canon_key $existing]
             foreach snapshot [linsert [dict values $records] end $manifestSnapshot] {
@@ -1068,11 +731,11 @@ proc ::machteld::PackArchive {args} {
         dict set inventory machteld-inventory.dict [dict create bytes [file size $index] sha256 [hash file sha256 $index]]
         set candidate [file join $work candidate.machteld]
         zipfs lmkzip $candidate $entries
-        _wrap_verify_candidate $candidate $inventory $entry
-        _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records [expr {!$single}] $manifestSnapshot {}
+        _pack_verify_candidate $candidate $inventory $entry
+        _pack_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records [expr {!$single}] $manifestSnapshot
         ::machteld::Publish $candidate $out
-    } trap {MACHTELD WRAP} {msg opts} {
-        Fail PACK [lindex [dict get $opts -errorcode] 2] [regsub {^wrap:} $msg {pack:}]
+    } trap {MACHTELD PUBLISH} {msg opts} {
+        Fail PACK [lindex [dict get $opts -errorcode] 2] $msg
     } trap {MACHTELD ENTRY} {msg opts} {
         Fail PACK [lindex [dict get $opts -errorcode] 2] "pack: $msg"
     } finally {

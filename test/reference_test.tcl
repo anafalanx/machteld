@@ -213,7 +213,7 @@ set fixtureStatus [catch {
     check {omitted reference help gives honest same-version recovery guidance} [expr {
         [string match {*carries no embedded reference pack*} $noPackHelp] &&
         [string match "*full Machteld [version] executable*" $noPackHelp] &&
-        [string match {*wrap --with-docs*docs schema*} $noPackHelp] &&
+        [string match {*offline documentation*docs schema*} $noPackHelp] &&
         ![string match {*contains the complete*} $noPackHelp]}]
     set fixtureResult ""
 } fixtureError]
@@ -295,10 +295,6 @@ check {repeated JSON still returns the typed failure envelope} [expr {
 catch {::machteld::DocsHost get tcl/command/dict --limit} missingReply missingOptions
 check {host reports missing option values through the DOCS domain} [expr {
     [dict get $missingOptions -errorcode] eq {MACHTELD DOCS usage}}]
-catch {::machteld::DocsHostGui status --json} guiReply guiOptions
-check {GUI adapter requires output with a typed failure envelope} [expr {
-    [dict get [json decode $guiReply] ok] == 0 &&
-    [dict get $guiOptions -errorcode] eq {MACHTELD DOCS usage}}]
 
 check {help delegates exact pages through the trusted reference} [expr {
     [string length [help tcl/command/dict]] > 100}]
