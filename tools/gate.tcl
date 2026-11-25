@@ -289,6 +289,8 @@ proc ::gate::plan {settings} {
                     [file join $cache prefix lib libtclstub.a] -lshell32 -lole32 -luuid -luser32 -lgdi32 -o $catalogFixture]
                 addStep steps integration "isolated desktop selection" [list $privateRunner $runtime \
                     [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
+                addStep steps integration "isolated child window startup and callbacks" [list $privateRunner $runtime \
+                    [file join $test child_window_test.tcl] $windowFixture] timeout 90s
                 addStep steps integration "isolated browser lifecycle" [list $privateRunner $runtime \
                     [file join $test browser_test.tcl]] timeout 120s
                 addStep steps integration "isolated shortcut to a relocated archive" [list $privateRunner $runtime \

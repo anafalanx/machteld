@@ -1,8 +1,12 @@
 package require machteld
 
-# Starts real Win32 windows. Run on an interactive desktop with window_fixture.exe.
-set privateOnly [expr {[lrange $argv 1 end] eq {--startup-only}}]
-if {[llength $argv] != 1 && !$privateOnly} { error "usage: child_window_test.tcl window_fixture.exe ?--startup-only?" }
+# The release runner sets this identifier on its never-switched desktop.
+# The foreground and monitor checks below require the attended lane.
+if {[llength $argv] != 1 && ([llength $argv] != 2 || [lindex $argv 1] ne "--startup-only")} {
+    error "usage: child_window_test.tcl window_fixture.exe ?--startup-only?"
+}
+set privateOnly [expr {[llength $argv] == 2 || ([info exists env(MACHTELD_TEST_EXPECT_DESKTOP)] &&
+    [string match MachteldDesktopTest-* $env(MACHTELD_TEST_EXPECT_DESKTOP)])}]
 set fixture [file normalize [lindex $argv 0]]
 set work [file tempdir]
 set tokens {}

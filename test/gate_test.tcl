@@ -143,6 +143,10 @@ set shortcutStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated s
 check {the relocated archive shortcut runs exclusively through the private desktop runner} [expr {
     [lmap arg [dict get $shortcutStep argv] {file tail $arg}] eq
     {desktop_runner.exe machteld.exe archive_shortcut_test.tcl window_fixture.exe}}]
+set windowStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated child window startup and callbacks}]]
+check {the release exercises supervised child window startup and Tk callbacks on its private desktop} [expr {
+    [lmap arg [dict get $windowStep argv] {file tail $arg}] eq
+    {desktop_runner.exe machteld.exe child_window_test.tcl window_fixture.exe}}]
 check {release compiles the process fixture once, first} \
     [expr {[lsearch -all $releaseLabels {fixture process_fixture.c}] eq {0}}]
 check {release plans the groups in order} \
