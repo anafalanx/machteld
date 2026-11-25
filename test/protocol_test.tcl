@@ -33,6 +33,46 @@ proc dead {process_id} {
 set initialChildren [child list]
 set initialChannels [lsort [chan names]]
 set initialTimers [lsort [after info]]
+set warm [pool create -width 1 -- $MT $WORKER]
+try {
+    proc ::batchReady {tag pool batch} {
+        lappend ::notices [list $tag $pool $batch]
+        set ::notified 1
+    }
+    set ::notices {}
+    set ::notified 0
+    set first [pool call $warm [dict create op delay milliseconds 75 text ready] -command [list ::batchReady first]]
+    check "an active batch reports busy without overwriting prior work" [expr {
+        [errcode_of [list pool result $warm $first]] eq {MACHTELD POOL busy} &&
+        [errcode_of [list pool submit $warm {}]] eq {MACHTELD POOL busy}}]
+    set watchdog [after 10000 {set ::notified timeout}]
+    try {if {!$::notified} {vwait ::notified}} finally {after cancel $watchdog}
+    check "the event loop issues one completion with the owning pool and batch" [expr {
+        $::notified eq "1" && $::notices eq [list [list first $warm $first]]}]
+    set original [pool result $warm $first]
+    set second [pool batch $warm [list [dict create op echo text A] [dict create op echo text B]]]
+    set later [pool wait $warm -timeout 10s]
+    check "warm replies have monotonic IDs, preserve batch boundaries and expire old tokens" [expr {
+        [dict get [lindex $original 0] id] == 0 && [lmap item $later {dict get $item id}] eq {1 2} &&
+        [lmap item $later {dict get $item result}] eq {A B} && [pool result $warm $second] eq $later &&
+        [errcode_of [list pool result $warm $first]] eq {MACHTELD POOL nohandle}}]
+    set pids {}
+    for {set n 0} {$n < 200} {incr n} {
+        pool call $warm [dict create op identity]
+        set reply [lindex [pool wait $warm -timeout 10s] 0]
+        dict set pids [dict get $reply result] 1
+    }
+    check "200 single calls reuse one process and retain only the last reply" [expr {
+        [dict size $pids] == 1 && [dict get [pool info $warm] results] == 1 &&
+        [dict get [pool info $warm] resultbytes] < 256}]
+    set ::notified 0
+    pool batch $warm {} -command [list ::batchReady cancelled]
+} finally {
+    pool close $warm
+}
+update
+check "closing cancels an already scheduled empty-batch notification" [expr {!$::notified && [llength $::notices] == 1}]
+rename ::batchReady {}
 set defaults [dict create maxtries 1 maxframe 16777216 maxitems 10000 maxbatch 67108864 maxresults 67108864]
 check "manifest exposes bounded pool and pmap defaults" [expr {
     [dict get [manifest] pool defaults] eq $defaults &&

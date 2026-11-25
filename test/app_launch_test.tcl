@@ -44,6 +44,9 @@ proc versionText {} {
 switch -- [lindex $argv 0] {
     parent {
         lassign $argv role ready go
+        set pool [pool create -width 1 -- {*}[app launch] serve]
+        pool call $pool [dict create op identity]
+        set before [dict get [lindex [pool wait $pool -timeout 10s] 0] result]
         set f [open $ready w]
         puts $f [app launch]
         close $f
@@ -52,9 +55,17 @@ switch -- [lindex $argv 0] {
         if {![file exists $go]} {error "timed out waiting for publication"}
         set r [run -timeout 10s -- {*}[app launch] child {two words} {-option}]
         if {[dict get $r exit] != 0} {error $r}
+        pool call $pool [dict create op identity]
+        set after [dict get [lindex [pool wait $pool -timeout 10s] 0] result]
+        pool close $pool
+        if {$before ne $after || [lindex $after 1] ne [versionText]} {
+            error "published update displaced a warm archive worker"
+        }
         puts [list [versionText] [string trim [encoding convertfrom -profile strict utf-8 [dict get $r out]]]]
     }
     child {puts [list [versionText] $argv0 [lrange $argv 1 end]]}
+    serve {worker on identity {} {list [pid] [versionText]}; worker serve}
+    mark {set f [open [lindex $argv 1] w]; close $f}
     folders {puts [list [app data local] [app data roaming]]}
     prefix {
         set original [app launch]
@@ -96,6 +107,15 @@ switch -- [lindex $argv 0] {
     }
     set f [open $ready r]
     try {set pinned [string trim [read $f]]} finally {close $f}
+    set ticket [lindex $pinned end]
+    check "workers carry the complete captured archive SHA-256" [expr {
+        [lindex $ticket end] eq [hash file sha256 $archive]}]
+    set changed [lreplace $pinned end end [lreplace $ticket end end [string repeat 0 64]]]
+    set marker [file join $base should-not-start]
+    set refused [run -timeout 10s -- {*}$changed mark $marker]
+    check "a mismatched expected digest fails before any archive code runs" [expr {
+        [dict get $refused exit] != 0 && [string match {*SHA-256 mismatch*} [dict get $refused err]] &&
+        ![file exists $marker]}]
     writeText $asset B
     invoke $exe pack $source -o $archive
     set origin [file normalize $archive]

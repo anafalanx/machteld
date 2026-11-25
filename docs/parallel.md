@@ -95,9 +95,11 @@ death budget and strand later work. A replacement that cannot launch makes `pool
 `POOL launch`. The director also rejects malformed replies and unexpected IDs as
 protocol failures rather than assigning a result to the wrong request.
 
-Each pool accepts exactly one submitted batch; create another pool for later
-work. Replies are returned in that batch's submission order, independent of
-completion order.
+Reuse the pool after retrieving its preceding batch. `pool batch` accepts
+multiple requests and `pool call` accepts one. Both return a token and accept
+`-command prefix` for event-loop completion. The callback receives the pool
+and batch tokens. `pool result $pool $batch` returns the replies in submission
+order. Use `app launch` as the command prefix for reusable archive workers.
 `pool info` reports width, live workers, pending/inflight/result counts, deaths,
 requeues, completion, a fatal message, limits/byte counts, and a capped stderr
 tail. Stderr is drained continuously because an unread pipe can fill and

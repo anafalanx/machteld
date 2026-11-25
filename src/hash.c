@@ -185,6 +185,27 @@ static int digest_result(Tcl_Interp *interp, digest_t *digest, int binary) {
     return TCL_OK;
 }
 
+int Machteld_SnapshotSha256(Tcl_Interp *interp, const unsigned char *data, size_t size, char hex[65]) {
+    digest_t digest = {0};
+    int status = digest_open(interp, &digest, alg_find("sha256"), 0, NULL, 0);
+    if (status == TCL_OK && digest.digest_len != 32) {
+        status = hash_error(interp, "oserror", "the SHA-256 provider returned an unexpected digest length");
+    }
+    while (status == TCL_OK && size > 0) {
+        size_t chunk = size > 1048576 ? 1048576 : size;
+        status = digest_update(interp, &digest, data, (Tcl_Size)chunk);
+        data += chunk;
+        size -= chunk;
+    }
+    if (status == TCL_OK) status = digest_result(interp, &digest, 0);
+    digest_close(&digest);
+    if (status == TCL_OK) {
+        memcpy(hex, Tcl_GetStringResult(interp), 65);
+        Tcl_ResetResult(interp);
+    }
+    return status;
+}
+
 /* -binary, shared by sum / file / hmac / final. Returns -1 on a bad option. */
 static int want_binary(Tcl_Interp *interp, int objc, Tcl_Obj *const objv[], int from) {
     int binary = 0;

@@ -2,8 +2,8 @@
 id: machteld/command/pool
 type: command
 title: pool
-summary: Run one bounded ordered batch across supervised workers with explicit retry opt-in.
-commands: pool, pool create, pool submit, pool wait, pool info, pool close
+summary: Run successive ordered batches on supervised workers and deliver completion to the Tcl event loop.
+commands: pool, pool create, pool submit, pool batch, pool call, pool result, pool wait, pool info, pool close
 ---
 
 # pool
@@ -13,6 +13,9 @@ commands: pool, pool create, pool submit, pool wait, pool info, pool close
 ```tcl
 pool create ?-width n? ?-maxtries n? ?limit options? ?launch options? ?--? command ?arg ...?
 pool submit token items
+pool batch token items ?-command callbackPrefix?
+pool call token request ?-command callbackPrefix?
+pool result token batchToken
 pool wait token ?-timeout duration?
 pool info token
 pool close token
@@ -53,7 +56,7 @@ An item whose attempts end without a valid reply becomes reply data with code
 
 ## Errors
 
-Raised codes are `POOL badvalue`, `POOL failed`, `POOL launch`, `POOL limit`,
+Raised codes are `POOL badvalue`, `POOL busy`, `POOL failed`, `POOL launch`, `POOL limit`,
 `POOL nohandle`, `POOL timeout`, and `POOL usage`. Protocol-malformed workers
 are treated as deaths and retried only when explicitly permitted by maxtries.
 `poison` is reply data rather than a raised error. An unexpected internal
@@ -96,7 +99,10 @@ try {
 
 ## Constraints
 
-Each pool accepts exactly one submitted batch. Create another for later work.
+Retrieve the preceding batch with `result` or `wait` before starting the next
+one. The workers retain their process state across batches. If the command
+starts with the running archive's `app launch` prefix, replacement workers
+also validate and reopen its original archive after an update.
 Workers must implement the `worker serve` JSON-lines protocol and reserve
 stdout for replies. The protocol channels are strict UTF-8 text: non-ASCII
 request and reply text crosses intact, and a reply that is not valid UTF-8 is a
@@ -179,7 +185,8 @@ Returns empty after queueing and starting feeds.
 
 #### Errors
 
-Malformed items report `POOL badvalue`; second submission reports `POOL usage`.
+Malformed items report `POOL badvalue`. Submitting over outstanding work or
+an undelivered completion notification reports `POOL busy`.
 Batch count/byte or individual frame overflow reports `POOL limit` atomically.
 
 #### Lifetime and timeouts
@@ -192,11 +199,34 @@ Items remain owned until replies, poison, fatal replacement failure, or close.
 
 #### Constraints
 
-Exactly one batch per pool, including an empty batch.
+Each worker handles one item at a time. Each pool retains one batch of replies.
 
 #### See also
 
 `machteld/command/pool#wait`.
+
+<a id="batch"></a>
+### batch
+
+`pool batch token items ?-command callbackPrefix?` submits a list of requests
+and returns an opaque batch token. Once work settles, the Tcl event loop calls
+the prefix with the pool token and batch token, including for an empty batch.
+Use `pool result` in the callback to retrieve the outcome. Closing the pool
+cancels pending callback delivery.
+
+<a id="call"></a>
+### call
+
+`pool call token request ?-command callbackPrefix?` submits one request dict
+and returns a batch token. It uses the same limits and completion callback as
+`batch`. The result is a list containing one reply.
+
+<a id="result"></a>
+### result
+
+`pool result token batchToken` returns the current batch's replies in submission
+order. An active batch reports `POOL busy`. A stale or foreign token reports
+`POOL nohandle`. Retrieval also reports any fatal pool error.
 
 <a id="wait"></a>
 ### wait

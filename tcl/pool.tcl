@@ -43,7 +43,7 @@ proc ::machteld::PoolBound {domain option value} {
 proc ::machteld::pool {args} {
     variable POOL
     variable POOL_SEQ
-    set subs {create submit wait info close}
+    set subs {create submit batch call result wait info close}
 
     if {![llength $args]} {
         Fail POOL usage "usage: pool create ?-width n? -- command ?arg ...?"
@@ -65,7 +65,26 @@ proc ::machteld::pool {args} {
             # The item list is one argument; do not guess whether a Tcl value was
             # written as a bare dict or a one-element list.
             if {[llength $rest] != 1} { Fail POOL usage "usage: pool submit token items" }
-            return [PoolSubmit $tok [lindex $rest 0]]
+            PoolSubmit $tok [lindex $rest 0] {}
+            return
+        }
+        batch - call {
+            if {[llength $rest] ni {1 3} || ([llength $rest] == 3 && [lindex $rest 1] ne "-command")} {
+                Fail POOL usage "usage: pool $sub token request ?-command callbackPrefix?"
+            }
+            set callback [lindex $rest 2]
+            if {[catch {llength $callback}]} {Fail POOL badvalue "completion callback must be a command prefix"}
+            set items [lindex $rest 0]
+            if {$sub eq "call"} {set items [list $items]}
+            return [PoolSubmit $tok $items $callback]
+        }
+        result {
+            if {[llength $rest] != 1} {Fail POOL usage "usage: pool result token batchToken"}
+            if {![dict get $POOL $tok submitted_once] || [lindex $rest 0] ne [dict get $POOL $tok batchToken]} {
+                Fail POOL nohandle "pool result: stale or foreign batch token"
+            }
+            if {![dict get $POOL $tok done]} {Fail POOL busy "pool result: the batch is still running"}
+            return [PoolWait $tok {}]
         }
         info {
             if {[llength $rest]} { Fail POOL usage "usage: pool info token" }
@@ -117,7 +136,7 @@ proc ::machteld::PoolCreate {argl} {
     dict set POOL $tok [dict create cmd $cmd launch $launch width $width maxtries $maxtries \
         limits $limits pending {} results {} inflight {} workers {} readers {} resumes {} nextid 0 \
         batchbytes 0 resultbytes 0 dead 0 requeued 0 errbuf "" fatal "" fatalcode {} \
-        done 1 submitted 0 submitted_once 0]
+        done 1 submitted 0 submitted_once 0 retrieved 1 waiting 0 batchToken {} callback {} notice {}]
     if {[catch {
         for {set k 0} {$k < $width} {incr k} { PoolSpawn $tok }
     } msg opts]} {
@@ -238,13 +257,14 @@ proc ::machteld::PoolDiagnostic {tok message} {
     dict set POOL $tok errbuf [string range $tail end-[expr {$POOL_ERRCAP - 1}] end]
 }
 
-proc ::machteld::PoolSubmit {tok items} {
+proc ::machteld::PoolSubmit {tok items callback} {
     variable POOL
+    variable POOL_SEQ
     if {[dict get $POOL $tok fatal] ne ""} {
         return -code error -errorcode [dict get $POOL $tok fatalcode] [dict get $POOL $tok fatal]
     }
-    if {[dict get $POOL $tok submitted_once]} {
-        Fail POOL usage "pool submit: a pool accepts exactly one batch; create another pool"
+    if {![dict get $POOL $tok retrieved] || [dict get $POOL $tok waiting] || [dict get $POOL $tok notice] ne ""} {
+        Fail POOL busy "pool: finish the current batch and retrieve its result before submitting another"
     }
     set limits [dict get $POOL $tok limits]
     if {[llength $items] > [dict get $limits maxitems]} {
@@ -281,21 +301,30 @@ proc ::machteld::PoolSubmit {tok items} {
     }
     dict set POOL $tok pending $pend
     dict set POOL $tok nextid $next
-    dict set POOL $tok submitted $next
+    dict set POOL $tok submitted [llength $items]
+    dict set POOL $tok results {}
+    dict set POOL $tok resultbytes 0
+    dict set POOL $tok tries {}
+    dict set POOL $tok retrieved 0
+    dict set POOL $tok callback $callback
+    set batch batch#[incr POOL_SEQ]
+    dict set POOL $tok batchToken $batch
     dict set POOL $tok batchbytes $bytes
     dict set POOL $tok submitted_once 1
     dict set POOL $tok done 0
     # Idle workers may have exited while the caller was doing other event-loop
     # work before submit. Do not leave an accepted batch with no live readers.
-    if {[llength $pend] && ![llength [dict get $POOL $tok workers]]} {
+    set needed [expr {min([llength $pend],[dict get $POOL $tok width])}]
+    while {[llength [dict get $POOL $tok workers]] < $needed} {
         if {[catch {PoolSpawn $tok} message]} {
+            dict set POOL $tok callback {}
             PoolAbort $tok launch $message
             return -code error -errorcode {MACHTELD POOL launch} $message
         }
     }
     foreach c [dict get $POOL $tok workers] { PoolFeed $tok $c }
     PoolCheckDone $tok
-    return
+    return $batch
 }
 
 proc ::machteld::PoolFeed {tok c} {
@@ -469,11 +498,29 @@ proc ::machteld::PoolRequeue {tok c infl} {
 proc ::machteld::PoolCheckDone {tok} {
     variable POOL
     if {![dict exists $POOL $tok]} return
-    if {![llength [dict get $POOL $tok pending]] &&
+    if {![dict get $POOL $tok done] && ![llength [dict get $POOL $tok pending]] &&
         ![dict size [dict get $POOL $tok inflight]]} {
         dict set POOL $tok done 1
         set ::machteld::POOL_DONE($tok) 1
+        PoolScheduleNotice $tok
     }
+}
+
+proc ::machteld::PoolScheduleNotice {tok} {
+    variable POOL
+    if {[dict exists $POOL $tok] && [dict get $POOL $tok callback] ne "" && [dict get $POOL $tok notice] eq ""} {
+        dict set POOL $tok notice [after 0 [list ::machteld::PoolNotify $tok]]
+    }
+}
+
+proc ::machteld::PoolNotify {tok} {
+    variable POOL
+    if {![dict exists $POOL $tok]} return
+    set callback [dict get $POOL $tok callback]
+    set batch [dict get $POOL $tok batchToken]
+    dict set POOL $tok notice {}
+    dict set POOL $tok callback {}
+    uplevel #0 [list {*}$callback $tok $batch]
 }
 
 # A ready timer can run in the same event-loop turn as completion or close.
@@ -498,12 +545,15 @@ proc ::machteld::PoolWait {tok argl} {
         return -code error -errorcode [dict get $POOL $tok fatalcode] [dict get $POOL $tok fatal]
     }
     if {![dict get $POOL $tok done]} {
+        if {[dict get $POOL $tok waiting]} {Fail POOL busy "pool wait: another wait is in progress"}
+        dict set POOL $tok waiting 1
         set ::machteld::POOL_DONE($tok) 0
         set timer [after $ms [list ::machteld::PoolWaitTimeout $tok]]
         try {
             vwait ::machteld::POOL_DONE($tok)
         } finally {
             after cancel $timer
+            if {[dict exists $POOL $tok]} {dict set POOL $tok waiting 0}
         }
         # `close` unsets POOL_DONE to wake vwait. Check the owned state before
         # touching the notification or results, since a GUI callback may have
@@ -522,9 +572,11 @@ proc ::machteld::PoolWait {tok argl} {
     set byid {}
     foreach r [dict get $POOL $tok results] { dict set byid [dict get $r id] $r }
     set out {}
-    for {set k 0} {$k < [dict get $POOL $tok submitted]} {incr k} {
+    set end [dict get $POOL $tok nextid]
+    for {set k [expr {$end-[dict get $POOL $tok submitted]}]} {$k < $end} {incr k} {
         if {[dict exists $byid $k]} { lappend out [dict get $byid $k] }
     }
+    dict set POOL $tok retrieved 1
     return $out
 }
 
@@ -575,10 +627,12 @@ proc ::machteld::PoolAbort {tok code message} {
     dict set POOL $tok fatalcode [list MACHTELD POOL $code]
     dict set POOL $tok done 1
     set ::machteld::POOL_DONE($tok) 1
+    PoolScheduleNotice $tok
 }
 
 proc ::machteld::PoolClose {tok} {
     variable POOL
+    if {[dict get $POOL $tok notice] ne ""} {after cancel [dict get $POOL $tok notice]}
     PoolStop $tok
     dict unset POOL $tok
     catch {unset ::machteld::POOL_DONE($tok)}
@@ -586,13 +640,16 @@ proc ::machteld::PoolClose {tok} {
 }
 
 ::machteld::MetaDefine pool [dict create kind tcl args args domain POOL \
-    codes {badvalue failed launch limit nohandle timeout usage} replycodes {poison} \
+    codes {badvalue busy failed launch limit nohandle timeout usage} replycodes {poison} \
     options {-arg0 -cpu -dir -env -maxbatch -maxframe -maxitems -maxresults -maxtries -mem -timeout -width} \
     defaults [dict create maxtries 1 maxframe 16777216 maxitems 10000 maxbatch 67108864 maxresults 67108864] \
     doc machteld/command/pool \
     subcommands [dict create \
         create [dict create options {-arg0 -cpu -dir -env -maxbatch -maxframe -maxitems -maxresults -maxtries -mem -timeout -width} doc machteld/command/pool#create] \
         submit [dict create options {} doc machteld/command/pool#submit] \
+        batch [dict create options {-command} doc machteld/command/pool#batch] \
+        call [dict create options {-command} doc machteld/command/pool#call] \
+        result [dict create options {} doc machteld/command/pool#result] \
         wait [dict create options {-timeout} doc machteld/command/pool#wait] \
         info [dict create options {} returns {batchbytes dead done fatal inflight limits maxtries pending requeued resultbytes results stderr width workers} doc machteld/command/pool#info] \
         close [dict create options {} doc machteld/command/pool#close]]]

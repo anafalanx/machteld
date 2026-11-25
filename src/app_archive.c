@@ -22,6 +22,7 @@ typedef struct {
     void *view;
     size_t size;
     char token[TOKEN_CHARS + 1];
+    char expected_sha256[65];
     BY_HANDLE_FILE_INFORMATION file;
 } Generation;
 
@@ -256,10 +257,13 @@ reopen_generation(Tcl_Interp *interp, Tcl_Obj *ticket, HANDLE *backing)
     Tcl_Obj **fields;
     Tcl_Size count;
     Tcl_WideInt numbers[4];
-    if (Tcl_ListObjGetElements(interp, ticket, &count, &fields) != TCL_OK || count != 5) goto invalid;
+    if (Tcl_ListObjGetElements(interp, ticket, &count, &fields) != TCL_OK || count != 6) goto invalid;
     Tcl_Size nchars;
     const char *token = Tcl_GetStringFromObj(fields[0], &nchars);
     if (nchars != TOKEN_CHARS || strspn(token, "0123456789abcdef") != TOKEN_CHARS) goto invalid;
+    const char *expected = Tcl_GetStringFromObj(fields[5], &nchars);
+    if (nchars != 64 || strspn(expected, "0123456789abcdef") != 64) goto invalid;
+    memcpy(current.expected_sha256, expected, sizeof current.expected_sha256);
     for (int i = 0; i < 4; i++) {
         if (Tcl_GetWideIntFromObj(interp, fields[i+1], &numbers[i]) != TCL_OK ||
                 numbers[i] < 0 || (i > 0 && numbers[i] > UINT32_MAX)) goto invalid;
@@ -307,6 +311,13 @@ Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj 
         status = os_error(interp, "cannot read the pinned application generation", GetLastError());
         goto done;
     }
+    char sha256[65];
+    status = Machteld_SnapshotSha256(interp, current.view, current.size, sha256);
+    if (status != TCL_OK) goto done;
+    if (ticket != NULL && strcmp(current.expected_sha256, sha256) != 0) {
+        status = Machteld_EntryError(interp, "inventory", "application generation SHA-256 mismatch");
+        goto done;
+    }
     if (current.size <= BUFFER_MOUNT_MAX) {
         status = TclZipfs_MountBuffer(interp, current.view, current.size, MOUNT, 0);
         if (status != TCL_OK) status = mount_error(interp);
@@ -330,11 +341,11 @@ Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj 
         Tcl_Obj *fields[] = {
             Tcl_NewStringObj(current.token, -1), Tcl_NewWideIntObj((Tcl_WideInt)current.size),
             Tcl_NewWideIntObj(current.file.dwVolumeSerialNumber), Tcl_NewWideIntObj(current.file.nFileIndexHigh),
-            Tcl_NewWideIntObj(current.file.nFileIndexLow)
+            Tcl_NewWideIntObj(current.file.nFileIndexLow), Tcl_NewStringObj(sha256, 64)
         };
         Tcl_ListObjAppendElement(interp, prefix, Tcl_NewStringObj("--machteld-generation", -1));
         Tcl_ListObjAppendElement(interp, prefix, origin);
-        Tcl_ListObjAppendElement(interp, prefix, Tcl_NewListObj(5, fields));
+        Tcl_ListObjAppendElement(interp, prefix, Tcl_NewListObj(6, fields));
     }
 done:
     /* Keep the first temporary file reopenable while its creating process

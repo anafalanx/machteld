@@ -72,7 +72,7 @@ check "worker separates reply-only protocol codes" [expr {
     [dict get $metadata worker codes] eq {badvalue limit usage} &&
     [dict get $metadata worker replycodes] eq {failed limit notfound parse usage}}]
 check "pool separates poison reply from raised codes" [expr {
-    [dict get $metadata pool codes] eq {badvalue failed launch limit nohandle timeout usage} &&
+    [dict get $metadata pool codes] eq {badvalue busy failed launch limit nohandle timeout usage} &&
     [dict get $metadata pool replycodes] eq {poison}}]
 check "help advertises bounded embedded-reference discovery" [expr {
     [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
@@ -286,9 +286,11 @@ for {set index 0} {$index < 24} {incr index} { lappend expected_results value-$i
 check "pool preserves submission order" [expr {
     [lmap reply $replies {result_of $reply}] eq $expected_results}]
 check "healthy pool reports no worker deaths" [expr {[dict get [pool info $pool_token] dead] == 0}]
-check "pool rejects a second batch instead of mixing old and new replies" [expr {
-    [errcode_of [list pool submit $pool_token [list [dict create op echo text later]]]]
-        eq {MACHTELD POOL usage}}]
+pool submit $pool_token [list [dict create op echo text later]]
+set later [pool wait $pool_token -timeout 10s]
+check "a warm pool preserves worker identity and isolates consecutive replies" [expr {
+    [llength $later] == 1 && [result_of [lindex $later 0]] eq "later" &&
+    [dict get [lindex $later 0] id] == 24 && [dict get [pool info $pool_token] dead] == 0}]
 pool close $pool_token
 
 # The wire is UTF-8: non-ASCII request and reply text crosses the pool intact,

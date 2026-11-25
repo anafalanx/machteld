@@ -69,6 +69,7 @@ int Machteld_RegisterLibs(Tcl_Interp *interp);
  */
 int Machteld_EntryGate(Tcl_Interp *interp);
 int Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj *prefix);
+int Machteld_SnapshotSha256(Tcl_Interp *interp, const unsigned char *data, size_t size, char hex[65]);
 int Machteld_EntryError(Tcl_Interp *interp, const char *code,
                         const char *message);
 TCL_NORETURN void Machteld_Fatal(Tcl_Interp *interp);

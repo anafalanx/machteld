@@ -8,6 +8,7 @@ if {[info exists ::env(MACHTELD_TEST_WORKER_SOURCE)]} {
 }
 
 worker on echo {text} { return $text }
+worker on identity {} {pid}
 worker on delay {milliseconds text} {
     after $milliseconds
     return $text
