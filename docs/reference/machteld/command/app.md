@@ -41,7 +41,9 @@ interactive prompt. An unknown operation or extra argument raises
 A direct script's prefix captures its absolute entry path at startup. Another
 instance reads that file again.
 Changing the current directory or assigning a different `argv0` does not alter
-the prefix.
+the prefix. When a renamed executable starts its matching adjacent Tcl
+script, the prefix contains that executable alone. Relaunching it selects
+the companion script again.
 
 A `.machteld` application's prefix starts the same archive generation. The
 running application and its newly started workers keep their original scripts

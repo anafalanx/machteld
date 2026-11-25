@@ -7,13 +7,53 @@
 #undef WIN32_LEAN_AND_MEAN
 #include <locale.h>
 #include <tchar.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "machteld.h"
+#include "wintext.h"
 
 #if defined(__GNUC__)
 int _CRT_glob = 0; /* keep the mingw CRT from glob-expanding argv */
 #endif
 
 static int Machteld_AppInit(Tcl_Interp *interp);
+
+/* Select a matching sibling of the actual process image. argv[0] and the
+ * working directory are caller-controlled and cannot identify the host. */
+static int
+select_companion(void)
+{
+    WCHAR image[32768];
+    DWORD length = GetModuleFileNameW(NULL, image, (DWORD)(sizeof(image) / sizeof(*image)));
+    if (!length || length >= sizeof(image) / sizeof(*image)) {
+        fputs("cannot resolve the Windows host image path\n", stderr);
+        return TCL_ERROR;
+    }
+    WCHAR *base = wcsrchr(image, L'\\');
+    base = base ? base + 1 : image;
+    WCHAR *extension = wcsrchr(base, L'.');
+    if (!extension || extension == base || _wcsicmp(extension, L".exe") != 0 ||
+            _wcsicmp(base, L"machteld.exe") == 0) return TCL_OK;
+    wcscpy(extension, L".tcl");
+    DWORD attributes = GetFileAttributesW(image);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return TCL_OK;
+        fprintf(stderr, "cannot inspect the companion script (Windows error %lu)\n", error);
+        return TCL_ERROR;
+    }
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) return TCL_OK;
+    char *path = mt_wide_to_utf8(image, -1);
+    if (!path) {
+        fputs("cannot represent the companion script path in Tcl\n", stderr);
+        return TCL_ERROR;
+    }
+    for (char *p = path; *p; ++p) if (*p == '\\') *p = '/';
+    Tcl_SetStartupScript(Tcl_NewStringObj(path, -1), "utf-8");
+    free(path);
+    Machteld_SetHostMode(MACHTELD_HOST_COMPANION);
+    return TCL_OK;
+}
 
 /*
  * _tmain -- console entry (wmain under -municode). Normalize argv[0], let
@@ -41,6 +81,12 @@ _tmain(
 
     /* Application arguments follow the selected program on the command line. */
     Tcl_Obj *startup = Tcl_GetStartupScript(NULL);
+    /* A previously captured archive worker must still verify its supplied
+     * generation, even if a sibling script was installed in the meantime. */
+    if (!startup && !(argc >= 2 && _tcscmp(argv[1], _T("--machteld-generation")) == 0)) {
+        if (select_companion() != TCL_OK) return 1;
+        startup = Tcl_GetStartupScript(NULL);
+    }
     if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("--docs")) == 0) {
         /* Tcl_Main needs a startup-shaped word in order to preserve the

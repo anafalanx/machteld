@@ -547,6 +547,70 @@ proc ::et::hostModeTests {versionRe} {
                ![string match *REAL-DOCS-PROGRAM* [dict get $result out]]}] [dict get $result text]
 }
 
+proc ::et::companionTests {} {
+    variable runtime
+    variable work
+    set bin [file join $work {installed alongside 世界}]
+    set cwd [file join $work {other directory}]
+    file mkdir $bin $cwd
+    set host [file join $bin {field notes.exe}]
+    set nativeHost [file join $bin MACHTELD.EXE]
+    file copy -- $runtime $host
+    file copy -- $runtime $nativeHost
+    set body {package require machteld
+fconfigure stdout -translation lf -encoding utf-8
+if {$argv eq {--relaunch}} {
+    set result [run -timeout 10s -- {*}[app launch] worker {two words}]
+    if {[dict get $result exit] != 0} {error {worker relaunch failed}}
+    puts -nonewline [encoding convertfrom -profile strict utf-8 [dict get $result out]]
+    return
+}
+puts [list [file normalize [info script]] [file normalize $argv0] $argv [app launch]]}
+    set side [file join $bin {field notes.tcl}]
+    set decoy [file join $cwd {field notes.tcl}]
+    writeText $decoy "package require machteld\nputs WRONG-DIRECTORY"
+    set explicit [file join $cwd explicit.tcl]
+    writeText $explicit "package require machteld\nputs EXPLICIT"
+    set r [host -exe $host -dir $cwd $explicit]
+    check "renamed host without a sibling still accepts explicit programs" \
+        [expr {[dict get $r exit] == 0 && [string trim [dict get $r out]] eq "EXPLICIT"}] [dict get $r text]
+    writeText $side $body
+    set words [list $explicit {two words} "--help" {éß} {}]
+    set r [host -exe $host -dir $cwd {*}$words]
+    set expected [list [file normalize $side] [file normalize $side] $words [list [file normalize $host]]]
+    check "a renamed host selects its adjacent opted-in script and preserves every argument" \
+        [expr {[dict get $r exit] == 0 && [string trim [dict get $r out]] eq $expected}] [dict get $r text]
+    set r [host -exe $host -dir $cwd --version]
+    check "an option at the front is delivered to the named application" \
+        [expr {[dict get $r exit] == 0 && [lindex [string trim [dict get $r out]] 2] eq "--version"}] [dict get $r text]
+    set r [host -exe $host -dir $cwd]
+    check "a named application starts without arguments from a different working directory" \
+        [expr {[dict get $r exit] == 0 && [lindex [string trim [dict get $r out]] 2] eq {}}] [dict get $r text]
+    set r [host -exe $host -dir $cwd --relaunch]
+    check "app launch starts the same companion without injecting an extra script argument" \
+        [expr {[dict get $r exit] == 0 && [lindex [string trim [dict get $r out]] 2] eq {worker {two words}}}] [dict get $r text]
+    writeText [file join $bin machteld.tcl] "package require machteld\nputs WRONG-CANONICAL"
+    set r [host -exe $nativeHost -dir $cwd $explicit]
+    check "the canonical host ignores a neighboring machteld.tcl, case-insensitively" \
+        [expr {[dict get $r exit] == 0 && [string trim [dict get $r out]] eq "EXPLICIT"}] [dict get $r text]
+    set r [host -exe $host -dir $cwd --machteld-generation invalid]
+    check "a captured worker-generation route retains precedence over the companion" \
+        [expr {[dict get $r exit] != 0 && ![string match "*$side*" [dict get $r out]]}] [dict get $r text]
+    writeText $side "puts UNVALIDATED-COMPANION"
+    set r [host -exe $host -dir $cwd $explicit]
+    check "an unopted companion fails without evaluating it or a fallback script" \
+        [expr {[dict get $r exit] != 0 && [dict get $r out] eq {} &&
+            [string match {*package require machteld*} [dict get $r err]]}] [dict get $r text]
+    file delete -- $side
+    if {![catch {file link -symbolic $side $decoy}]} {
+        set r [host -exe $host -dir $cwd $explicit]
+        check "a companion name redirect never selects its target" \
+            [expr {[dict get $r exit] != 0 && [dict get $r out] eq {}}] [dict get $r text]
+    } else {
+        puts "--   companion symbolic link requires Windows file-symlink permission"
+    }
+}
+
 proc ::et::main {argv} {
     variable root
     variable work
@@ -587,6 +651,7 @@ proc ::et::main {argv} {
     try {
         aclTests $versionRe
         entryTests $versionRe $version
+        companionTests
         if {$fixture ne ""} {
             crashTests $fixture
         } else {

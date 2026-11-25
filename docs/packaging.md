@@ -30,6 +30,22 @@ are trusted code running with the user's permissions; ordinary Tcl file and
 process commands remain available. It is not a sandbox or a safe way to execute
 an untrusted program.
 
+## Renamed executable
+
+A copy of the host named `field-notes.exe` can launch `field-notes.tcl`
+from the same directory. The script must begin with the ordinary Machteld
+opt-in. Application arguments go to that script, including leading options
+such as `--help`. The internal `--machteld-generation` route is reserved for
+verified archive worker startup.
+`app launch` then returns the executable alone as the relaunch prefix.
+The host looks beside its actual executable, independently of the caller's
+working directory. A matching script that redirects through a filesystem
+link is refused. Treat the sibling script as a separate deployment file
+with its own access controls. The executable signature covers the host.
+
+A renamed host with no matching script keeps the direct command-line
+interface. The standard `machteld.exe` name always uses that interface.
+
 ## Application archive
 
 ```text

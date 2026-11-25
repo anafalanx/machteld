@@ -76,8 +76,10 @@ capture_native_startup(Tcl_Interp *interp, Tcl_Obj *path,
         return TCL_OK;
     }
 
+    DWORD flags = FILE_FLAG_SEQUENTIAL_SCAN;
+    if (host_mode == MACHTELD_HOST_COMPANION) flags |= FILE_FLAG_OPEN_REPARSE_POINT;
     HANDLE handle = CreateFileW((const wchar_t *)native, GENERIC_READ,
-        FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+        FILE_SHARE_READ, NULL, OPEN_EXISTING, flags, NULL);
     Tcl_DecrRefCount(normalized);
     if (handle == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
@@ -87,6 +89,26 @@ capture_native_startup(Tcl_Interp *interp, Tcl_Obj *path,
         }
         return entry_win_error(interp,
             "cannot open the startup program", error);
+    }
+    if (host_mode == MACHTELD_HOST_COMPANION) {
+        BY_HANDLE_FILE_INFORMATION base_info;
+        if (!GetFileInformationByHandle(handle, &base_info)) {
+            DWORD error = GetLastError();
+            CloseHandle(handle);
+            return entry_win_error(interp, "cannot inspect the companion script", error);
+        }
+        if (base_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            FILE_ATTRIBUTE_TAG_INFO tag;
+            if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag))) {
+                DWORD error = GetLastError();
+                CloseHandle(handle);
+                return entry_win_error(interp, "cannot inspect the companion script's reparse point", error);
+            }
+            if (IsReparseTagNameSurrogate(tag.ReparseTag)) {
+                CloseHandle(handle);
+                return Machteld_EntryError(interp, "badvalue", "a companion script must not redirect to another path");
+            }
+        }
     }
     if (GetFileType(handle) != FILE_TYPE_DISK) {
         CloseHandle(handle);
@@ -704,7 +726,7 @@ Machteld_EntryGate(Tcl_Interp *interp)
     } else if (capture_native_startup(interp, startup, &captured) != TCL_OK) {
         Machteld_Fatal(interp);
     }
-    if (captured != NULL && Tcl_FSGetNativePath(startup) != NULL) {
+    if (host_mode != MACHTELD_HOST_COMPANION && captured != NULL && Tcl_FSGetNativePath(startup) != NULL) {
         Tcl_Obj *absolute = Tcl_FSGetNormalizedPath(interp, startup);
         if (absolute == NULL || Tcl_ListObjAppendElement(interp, prefix, absolute) != TCL_OK) {
             Machteld_Fatal(interp);
