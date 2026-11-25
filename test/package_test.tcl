@@ -88,6 +88,7 @@ proc ::pt::packageTests {} {
     set licenseHashes {
         Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
         Tk-9.0.4.txt 2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
+        Tk-logo-9.0.4.txt 2695adff8e900c31b4d86414d22b8a49d6dd865ca3dd99678fa355cdc46093a8
         zlib-1.3.2.txt e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2
         LibTomMath-1.3.0.txt 2fa64b163659f41965c9815882a8296d3d03ff546b76153e11445f9bdecf955a
         yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
@@ -132,10 +133,9 @@ proc ::pt::packageTests {} {
     set prelude [file join $work machteld.tcl]
     writeText $prelude "set ::fixture_prelude 1"
     set reference [file join $work reference]
-    foreach name {identity.dict reference.db manifest.sha256 schema.json START-HERE.md AGENTS.md} {
-        writeText [file join $reference $name] "fixture $name\n"
-    }
-    writeText [file join $reference licenses Tcl-9.0.4.txt] "fixture upstream notice\n"
+    writeText [file join $reference reference.db] "fixture reference.db\n"
+    file mkdir [file join $prefix lib tk9.0 images]
+    file copy [file join $root licenses Tk-logo-9.0.4.txt] [file join $prefix lib tk9.0 images README]
     set apache [file join $root LICENSE]
     set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper]
 
@@ -213,9 +213,14 @@ proc ::pt::packageTests {} {
     file delete [file join $reference reference.db]
     set result [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $out]
     writeText [file join $reference reference.db] "fixture reference.db\n"
-    check "packaging refuses a reference pack without its agent JSON catalog" \
+    check "packaging refuses a missing reference database" \
         [expr {[refused $result {reference pack is incomplete: reference\.db}] && ![file exists $out]}] [dict get $result text]
 
+    writeText [file join $reference obsolete.md] stale
+    set result [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $out]
+    check "packaging refuses loose documentation instead of shipping stale content" \
+        [expr {[refused $result {only reference\.db}] && ![file exists $out]}] [dict get $result text]
+    file delete [file join $reference obsolete.md]
     set packagingLicenses [file join $work licenses-with-untracked-sentinel]
     file mkdir $packagingLicenses
     foreach notice [dict keys $licenseHashes] {
@@ -271,8 +276,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             licenses/Els-MIT.txt
             licenses/Ann-MIT.txt
             licenses/Airwave-MIT.txt
-            reference/identity.dict reference/reference.db reference/manifest.sha256
-            reference/schema.json reference/START-HERE.md reference/AGENTS.md reference/licenses/Tcl-9.0.4.txt
+            reference/reference.db licenses/Tk-logo-9.0.4.txt
             licenses/Lunar-MIT.txt
             licenses/rae.txt licenses/minimp3.txt
         } {
@@ -291,13 +295,13 @@ proc ::pt::validatePackage {image apache licenses reference} {
                 return "packaging changed license bytes: $notice"
             }
         }
-        foreach relative {
-            identity.dict reference.db manifest.sha256 schema.json START-HERE.md
-            AGENTS.md licenses/Tcl-9.0.4.txt
-        } {
-            if {[readBytes $base/reference/$relative] ne [readBytes [file join $reference {*}[split $relative /]]]} {
-                return "packaging changed reference bytes: $relative"
-            }
+        if {[glob -tails -directory $base/reference *] ne {reference.db} ||
+            [readBytes $base/reference/reference.db] ne [readBytes [file join $reference reference.db]]} {
+            return "the package must contain exactly the generated reference.db"
+        }
+        if {[file exists $base/tk_library/images/README] ||
+            [readBytes $base/licenses/Tk-logo-9.0.4.txt] ne [readBytes [file join $licenses Tk-logo-9.0.4.txt]]} {
+            return "the Tcl logo permission must be preserved under the distribution licenses"
         }
         set savedPath $::auto_path
         try {

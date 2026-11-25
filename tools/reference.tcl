@@ -1860,7 +1860,7 @@ proc ::ref::main {argv} {
                 title [S [dict get $fm title]] summary [S [dict get $fm summary]] names [Ls $names] \
                 sections [sectionsDict $sections 0] formats $formats path [S $mdRel] raw_path [S ""] \
                 source_file [S [file tail $path]] content_sha256 [S [get $formats markdown sha256]] \
-                source_sha256 [S ""] bytes [N [get $formats markdown bytes]]]
+                source_sha256 [S [sha256 $path]] bytes [N [get $formats markdown bytes]]]
             foreach alias [concat [list $id [dict get $fm title]] $commands] {
                 addUnique aliases [normalizeSearch $alias] $id
             }
@@ -1889,7 +1889,7 @@ proc ::ref::main {argv} {
             dict set documents $id [D id [S $id] product [S machteld] version [S $version] type [S guide] \
                 title [S $title] summary [S $summary] names [Ls [list $title]] sections [sectionsDict $sections 0] \
                 formats $formats path [S $mdRel] raw_path [S ""] source_file [S $name] \
-                content_sha256 [S [get $formats markdown sha256]] source_sha256 [S ""] bytes [N [get $formats markdown bytes]]]
+                content_sha256 [S [get $formats markdown sha256]] source_sha256 [S [sha256 $path]] bytes [N [get $formats markdown bytes]]]
             foreach alias [list $id $base $title] {
                 addUnique aliases [normalizeSearch $alias] $id
             }
@@ -1918,44 +1918,26 @@ proc ::ref::main {argv} {
             }
         }
 
-        set agentText [readUtf8Strict [file join $candidate markdown machteld agent.md]]
-        set bootstrap [join {
-            "# Machteld embedded reference: start here"
-            ""
-            "This directory contains the offline reference for the exact Machteld, Tcl,"
-            "Tk and cffi versions in this build. The canonical query interface is `machteld"
-            "docs`; use `machteld docs get machteld/agent` for the agent workflow."
-            ""
-            "`tcl/application/tclsh` and `tk/application/wish` reproduce upstream shell"
-            "manuals.  They do not promise that Machteld's host accepts every tclsh or wish"
-            "option.  `machteld/command/docs`, the Machteld host help, and entry-contract"
-            "pages govern Machteld itself."
-            ""
-            "Offline pages, notices and search are in `reference.db`. Verify its SHA-256 with `manifest.sha256`."
-            "Schema and response contracts: see `schema.json`."
-        } \n]
+        set bootstrap [join [list "# Machteld $version" "" \
+            "The complete offline reference covers Machteld $version, Tcl [productVersion tcl $version], Tk [productVersion tk $version] and cffi [productVersion cffi $version]." \
+            "" "```text" \
+            "machteld.exe --docs search canvas" \
+            "machteld.exe --docs get tk/command/canvas --section synopsis" \
+            "machteld.exe --docs get machteld/agent" "```" "" \
+            "In a Tcl application, use `docs search canvas`, `docs get tk/command/canvas` and `docs schema` for the query contract." \
+            "Read `machteld/command/docs` for query options and `tcl/application/tclsh` or `tk/application/wish` for the upstream shell manuals." \
+            "Run `machteld.exe --docs verify` to check the embedded database."] \n]
         writeUtf8Lf [file join $candidate START-HERE.md] $bootstrap
-        writeUtf8Lf [file join $candidate AGENTS.md] "$bootstrap\n---\n\n$agentText"
-        foreach name {START-HERE.md AGENTS.md} {
-            set text [readUtf8Strict [file join $candidate $name]]
-            if {[string first \t $text] >= 0 || ![regexp -nocase "`machteld${S}+docs`" $text] ||
-                    ![regexp -nocase {`tcl/application/tclsh`} $text] || ![regexp -nocase {`tk/application/wish`} $text] ||
-                    ![regexp -nocase {`machteld/command/docs`} $text]} {
-                fail "$name lost literal Markdown code spans or contains a tab"
-            }
-        }
-
-        set schema [D schema [N 2] title [S "Machteld embedded reference"] generator [S $generator] \
-            database [D path [S reference.db] format [S "SQLite 3"] version [N 2] \
-                tables [Ls {metadata product page section alias fragment notice search}] \
-                search [S "FTS5 unicode61, external content in page.body"] \
-                sections [S "Ordered by start offset in Unicode characters, exclusive end"]] \
-            formats [Ls {markdown}] \
-            integrity [D corpus_sha256 [S "SHA-256 of reference.db"] manifest [S "SHA-256 of every pack file except manifest.sha256"]] \
-            docs_host [D operations [Ls {status list schema verify get outline search extract}] \
-                routes [Ls {{docs ...} {--docs ...}}] options [Ls {--json {--output FILE}}] \
-                pagination [S "list/search return total, offset, limit, returned, truncated, next and items"]]]
-        writeUtf8Lf [file join $candidate schema.json] [jsonDeterministic $schema]
+        set startId machteld/start-here
+        set startSections [markdownSections $bootstrap $startId]
+        set startFormat [formatRecord $candidate START-HERE.md $startSections]
+        dict set documents $startId [D id [S $startId] product [S machteld] version [S $version] type [S guide] \
+            title [S "Machteld embedded reference"] summary [S "Read, search and verify this build's offline reference."] \
+            names [Ls {start-here START-HERE.md}] sections [sectionsDict $startSections 0] \
+            formats [D markdown $startFormat] path [S START-HERE.md] raw_path [S ""] source_file [S START-HERE.md] \
+            content_sha256 [S [get $startFormat sha256]] source_sha256 [S ""] bytes [N [get $startFormat bytes]]]
+        foreach name [list $startId start-here START-HERE.md] {addUnique aliases [normalizeSearch $name] $startId}
+        addUnique aliases [normalizeSearch AGENTS.md] machteld/agent
 
         # Every normalized catalog link, once the complete ID and fragment set exists.
         dict for {id record} $documents {
@@ -2012,8 +1994,8 @@ proc ::ref::main {argv} {
         }
         checkSchema $documents
 
-        # Intermediate HTML and original manual sources stay in the workspace.
-        # Only the small bootstrap, legal material and compact database ship.
+        # The published directory contains one SQLite file. The builder reads
+        # canonical Markdown, source notices and metadata from the staging tree.
         set aliasNode {}
         dict for {name ids} $aliases { dict set aliasNode $name [Ls $ids] }
         set input [D aliases [list D $aliasNode] documents [list D $documents] fragments [list D $fragments] \
@@ -2022,9 +2004,6 @@ proc ::ref::main {argv} {
         writeUtf8Lf $metadata "[tclData $input]\n"
         set compact [file join $work compact]
         file mkdir $compact
-        foreach name {START-HERE.md AGENTS.md schema.json licenses} {
-            file copy [file join $candidate $name] [file join $compact $name]
-        }
         set db [file join $compact reference.db]
         set result [run -timeout 10m -- $tclsh [file join $root tools reference_db.tcl] \
             [file join $cache prefix bin refsqlite.dll] $metadata $candidate $db]
@@ -2032,13 +2011,6 @@ proc ::ref::main {argv} {
             fail "SQLite reference generation failed: [encoding convertfrom utf-8 [dict get $result err]]"
         }
         set corpusHash [sha256 $db]
-        writeUtf8Lf [file join $compact identity.dict] "[list schema 2 machteld_version $version corpus_sha256 $corpusHash]\n"
-        set lines [list "# machteld reference pack v2; SHA-256 consistency manifest (self excluded)"]
-        foreach pair [filesUnder $compact] {
-            lassign $pair rel path
-            lappend lines "[sha256 $path]  $rel"
-        }
-        writeUtf8Lf [file join $compact manifest.sha256] "[join $lines \n]\n"
 
         # A generated pack is immutable: the destination must be absent, so
         # publication is one rename and never replaces what another owns.

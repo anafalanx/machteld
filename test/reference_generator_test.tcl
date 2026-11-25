@@ -207,17 +207,33 @@ proc ::rgt::main {argv} {
                 fail "two runs differ byte-for-byte at $relative"
             }
         }
-        set expected {AGENTS.md START-HERE.md identity.dict licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
-                      licenses/cffi-2.0.3.txt manifest.sha256 reference.db schema.json}
-        if {[lsort $expected] ne [lsort $firstFiles]} {fail "schema 2 pack inventory mismatch: $firstFiles"}
-        set identity [readUtf8 [file join $first identity.dict]]
-        if {[dict get $identity schema] != 2 || [dict get $identity machteld_version] ne $runtimeVersion ||
-                [dict get $identity corpus_sha256] ne [hash file sha256 [file join $first reference.db]]} {
-            fail "compact corpus identity mismatch"
-        }
+        if {$firstFiles ne {reference.db}} {fail "unexpected single-file reference inventory: $firstFiles"}
         if {![llength [info commands ::sqlite3]]} {load [file join $cache prefix bin refsqlite.dll] Sqlite3}
         sqlite3 ::rgt::fixture [file join $first reference.db] -readonly 1
         try {
+            if {[fixture onecolumn {SELECT value FROM metadata WHERE key='machteld_version'}] ne $runtimeVersion ||
+                [fixture onecolumn {PRAGMA application_id}] != 1296323122 || [fixture onecolumn {PRAGMA user_version}] != 2} {
+                fail "the reference database lacks its runtime/schema identity"
+            }
+            if {![fixture exists {SELECT 1 FROM search WHERE search MATCH 'embedded' AND id='machteld/start-here'}] ||
+                ![fixture exists {SELECT 1 FROM alias WHERE name='agents.md' AND id='machteld/agent'}]} {
+                fail "start and agent instructions are not discoverable as Markdown pages"
+            }
+            if {[fixture onecolumn {SELECT count(*) FROM provenance}] != [fixture onecolumn {SELECT count(*) FROM page}] ||
+                ![fixture exists {SELECT 1 FROM provenance WHERE id='tcl/command/dict' AND length(source_sha256)=64}]} {
+                fail "the database lost original source provenance"
+            }
+            if {![fixture exists {SELECT 1 FROM notice_block WHERE id='tcl/command/dict' AND typeof(body)='blob'
+                    AND instr(CAST(body AS TEXT),'Donal K. Fellows') AND instr(CAST(body AS TEXT),char(92)||'"')}]} {
+                fail "the upstream roff attribution no longer has its verbatim bytes"
+            }
+            foreach {id file} {machteld LICENSE tcl licenses/Tcl-9.0.4.txt tk licenses/Tk-9.0.4.txt cffi licenses/cffi-2.0.3.txt} {
+                set id $id/license
+                if {[hash file sha256 [file join $root $file]] ne
+                        [hash sum sha256 [fixture onecolumn {SELECT CAST(body AS BLOB) FROM page WHERE id=$id}]]} {
+                    fail "verbatim distribution notice changed for $id"
+                }
+            }
             if {[fixture eval {SELECT name,documents,manual_pages FROM product WHERE name IN ('tcl','tk','cffi') ORDER BY name}]
                     ne {cffi 5 4 tcl 250 249 tk 178 177}} {fail "unexpected upstream manual counts"}
             checkCoreManuals $cache
@@ -260,25 +276,6 @@ proc ::rgt::main {argv} {
             }
         }
 
-        set rows [split [string trimright [readUtf8 [file join $first manifest.sha256]] \n] \n]
-        if {[lindex $rows 0] ne "# machteld reference pack v2; SHA-256 consistency manifest (self excluded)"} {
-            fail "manifest header is not canonical"
-        }
-        # The manifest lists files in the order Windows sorts their full paths:
-        # backslashes, ordinal.
-        set manifestFiles [lsort -command {apply {{a b} {
-            string compare [string map {/ \\} $a] [string map {/ \\} $b]
-        }}} [lmap f $firstFiles {if {$f eq "manifest.sha256"} continue; set f}]]
-        if {[llength $rows] != [llength $manifestFiles] + 1} {
-            fail "manifest does not cover the exact file set"
-        }
-        set i 1
-        foreach relative $manifestFiles {
-            if {[lindex $rows $i] ne "[hash file sha256 [file join $first {*}[split $relative /]]]  $relative"} {
-                fail "manifest mismatch at $relative"
-            }
-            incr i
-        }
         puts "REFERENCE GENERATOR TEST PASSED ([llength $firstFiles] byte-identical files, Tcl 249 / Tk 177)"
     } finally {
         if {$keepWork} {

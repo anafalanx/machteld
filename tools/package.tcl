@@ -154,9 +154,6 @@ if {!$copiedTk} {
 }
 if {!$copiedTk} { error "tk_library not found under dependency prefix: $TC" }
 
-# The machteld prelude at the archive root.
-file copy -force $PREL [file join $stage machteld.tcl]
-
 # Machteld carries the exact notices for Tcl, Tk, yyjson, and the zlib/LibTomMath
 # code incorporated into static Tcl in every distribution. They are runtime
 # payload, not distribution-only documentation, because standalone tools are
@@ -165,7 +162,7 @@ if {![file isdirectory $opt(--licenses)]} {
     error "license notice directory not found: $opt(--licenses)"
 }
 set requiredNotices {
-    Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt
+    Tcl-9.0.4.txt Tk-9.0.4.txt Tk-logo-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt
     yyjson-0.12.0.txt xxHash-0.8.3.txt cffi-2.0.3.txt tclh-6afd306.txt libffi-3.5.2.txt
     graphviz-16.1.2.txt graphviz-ellipse.txt expat-2.8.1.txt
     Els-MIT.txt
@@ -190,19 +187,42 @@ if {![file isfile $opt(--apache-license)]} {
 }
 file copy -force $opt(--apache-license) [file join $stagedLicenses Apache-2.0.txt]
 
-# Reference is shared by scripts and application archives. The generator
-# publishes it only after
-# validating inventories, indexes and hashes; distribution packaging still
-# checks the discovery/inert-index boundary instead of accepting an empty tree.
+# Move the verbatim logo permission into the distribution's license directory.
+# Work only on our staging copy of the dependency's Tk library.
+set logoReadme [file join $stage tk_library images README]
+if {[file exists $logoReadme]} {
+    set original [open $logoReadme rb]
+    set notice [open [file join $stagedLicenses Tk-logo-9.0.4.txt] rb]
+    try {if {[read $original] ne [read $notice]} {error "Tk logo permission differs from its tracked notice"}} \
+        finally {close $original; close $notice}
+    file delete $logoReadme
+}
+
 if {![file isdirectory $opt(--reference)]} {
     error "reference pack directory not found: $opt(--reference)"
 }
-foreach relative {reference.db identity.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
-    if {![file isfile [file join $opt(--reference) $relative]]} {
-        error "reference pack is incomplete: $relative"
-    }
+set referenceRoot [file normalize $opt(--reference)]
+set refFile [file join $referenceRoot reference.db]
+if {![file isfile $refFile] || [file type $refFile] ne "file"} {
+    error "reference pack is incomplete: reference.db"
 }
-copy_tree $opt(--reference) [file join $stage reference]
+if {[children $referenceRoot] ne [list $refFile]} {
+    error "reference directory must contain only reference.db"
+}
+file mkdir [file join $stage reference]
+set stagedDatabase [file join $stage reference reference.db]
+file copy $refFile $stagedDatabase
+source [file join [file dirname [info script]] build_identity.tcl]
+set referenceDigest [::machteld::buildidentity::fileSha256 $stagedDatabase]
+set sourcePrelude [open $PREL rb]
+set stagedPrelude [open [file join $stage machteld.tcl] wb]
+try {
+    fcopy $sourcePrelude $stagedPrelude
+    puts -nonewline $stagedPrelude "\n[list set ::machteld::reference_sha256 $referenceDigest]\n"
+} finally {
+    close $sourcePrelude
+    close $stagedPrelude
+}
 
 # An optional development receipt identifies content without changing the API
 # version. Read data, never source/eval it. Staging it inside the executable
@@ -210,7 +230,6 @@ copy_tree $opt(--reference) [file join $stage reference]
 # is the working tree's base, not a clean-checkout claim; input_sha256 identifies
 # the actual build inputs, including any uncommitted runtime changes.
 if {$opt(--build-info) ne ""} {
-    source [file join [file dirname [info script]] build_identity.tcl]
     set identity [::machteld::buildidentity::read $opt(--build-info)]
     set f [open $PREL r]
     try { set preludeText [read $f] } finally { close $f }
@@ -219,9 +238,7 @@ if {$opt(--build-info) ne ""} {
             $runtimeVersion ne [dict get $identity runtime_version]} {
         error "build identity runtime version disagrees with the staged prelude"
     }
-    set f [open [file join $stage reference identity.dict] r]
-    try { set catalog [read $f] } finally { close $f }
-    if {[dict get $catalog corpus_sha256] ne [dict get $identity reference_sha256]} {
+    if {$referenceDigest ne [dict get $identity reference_sha256]} {
         error "build identity reference hash disagrees with the staged corpus"
     }
     ::machteld::buildidentity::write [file join $stage build-info.dict] $identity

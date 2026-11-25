@@ -13,24 +13,27 @@ proc ::refdb::readText {path} {
 }
 
 proc ::refdb::sourceNotices {source} {
-    # Preserve complete roff comment blocks containing a notice, including
-    # multiline attributions, permission grants and warranty disclaimers.
+    # Keep the exact bytes of every matching contiguous comment block as well
+    # as its readable text. Roff comment leaders, indentation and EOLs matter
+    # for an original attribution or permission grant.
     set blocks {}
-    set block {}
-    foreach line [split "$source\n." \n] {
-        if {[regexp {^[.']?\\"(.*)$} $line -> content]} {
-            lappend block [string trimleft $content]
-        } elseif {[llength $block]} {
-            set text [string trim [join $block \n]]
+    set lines {}
+    set raw ""
+    foreach line [concat [regexp -all -inline {[^\n]*\n|[^\n]+$} $source] [list {}]] {
+        if {[regexp {^[.']?\\"(.*)$} [string trimright $line "\r\n"] -> content]} {
+            lappend lines [string trimleft $content]
+            append raw $line
+        } elseif {[llength $lines]} {
+            set text [string trim [join $lines \n]]
             if {[regexp -nocase {copyright|license|permission|redistribut|warrant|attribution|public domain|all rights reserved} $text]} {
-                lappend blocks $text
+                lappend blocks [list $text [encoding convertto -profile strict utf-8 $raw]]
             }
-            set block {}
+            set lines {}
+            set raw ""
         }
     }
-    return [join $blocks \n\n]
+    return $blocks
 }
-
 proc ::refdb::build {module input root output} {
     load $module Sqlite3
     if {[file exists $output]} { error "reference database output already exists" }
@@ -59,6 +62,10 @@ proc ::refdb::build {module input root output} {
                                    FOREIGN KEY(id,slug) REFERENCES section(id,slug)) WITHOUT ROWID;
             CREATE TABLE notice (id TEXT PRIMARY KEY REFERENCES page(id), source TEXT NOT NULL,
                                  text TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE notice_block (id TEXT NOT NULL REFERENCES notice(id), ordinal INTEGER NOT NULL,
+                                       body BLOB NOT NULL, PRIMARY KEY(id,ordinal)) WITHOUT ROWID;
+            CREATE TABLE provenance (id TEXT PRIMARY KEY REFERENCES page(id), source_file TEXT NOT NULL,
+                                     raw_path TEXT NOT NULL, source_sha256 TEXT NOT NULL) WITHOUT ROWID;
             CREATE VIRTUAL TABLE search USING fts5(id,title,names,summary,body,content='page',
                                                    tokenize='unicode61',prefix='2 3');
         }
@@ -82,6 +89,8 @@ proc ::refdb::build {module input root output} {
                 if {[string length $body] != $characters} {error "Markdown length mismatch for $id"}
                 db eval {INSERT INTO page VALUES ($id,$product,$version,$kind,$title,$names,$summary,
                                                   $path,$bytes,$characters,$sha256,$body)}
+                foreach field {source_file raw_path source_sha256} {set $field [dict get $rec $field]}
+                db eval {INSERT INTO provenance VALUES ($id,$source_file,$raw_path,$source_sha256)}
                 dict for {slug offsets} [dict get $fmt sections] {
                     set heading [dict get $rec sections $slug]
                     set start [dict get $offsets start]
@@ -91,8 +100,17 @@ proc ::refdb::build {module input root output} {
                 }
                 if {$kind ne "license" && [dict exists $rec formats source]} {
                     set source [dict get $rec formats source path]
-                    set text [sourceNotices [readText [file join $root $source]]]
-                    if {$text ne ""} {db eval {INSERT INTO notice VALUES ($id,$source,$text)}}
+                    set blocks [sourceNotices [readText [file join $root $source]]]
+                    if {[llength $blocks]} {
+                        set text [join [lmap block $blocks {lindex $block 0}] \n\n]
+                        db eval {INSERT INTO notice VALUES ($id,$source,$text)}
+                        set ordinal 0
+                        foreach block $blocks {
+                            set raw [lindex $block 1]
+                            db eval {INSERT INTO notice_block VALUES ($id,$ordinal,@raw)}
+                            incr ordinal
+                        }
+                    }
                 }
             }
             foreach name [lsort [dict keys [dict get $catalog aliases]]] {

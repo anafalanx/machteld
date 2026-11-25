@@ -183,11 +183,9 @@ proc package_candidate {staged bare reference candidate} {
     if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $header -> version]} {
         error "missing canonical runtime version"
     }
-    set ch [open [file join $reference identity.dict] r]
-    fconfigure $ch -encoding utf-8 -translation lf
-    try { set catalog [read $ch] } finally { close $ch }
+    set referenceDigest [::machteld::hash file sha256 [file join $reference reference.db]]
     try {
-        ::machteld::buildidentity::create $identity $version $::SOURCE_REVISION $::PACKAGE_INPUT_KEY [dict get $catalog corpus_sha256]
+        ::machteld::buildidentity::create $identity $version $::SOURCE_REVISION $::PACKAGE_INPUT_KEY $referenceDigest
         run $::TCLSH [Rp tools package.tcl] --prefix $::PREFIX --prelude $staged --wrapper $bare --out $candidate \
             --licenses [Rp licenses] --apache-license [Rp LICENSE] --reference $reference \
             --build-info $identity

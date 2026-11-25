@@ -2,6 +2,20 @@
 # Development packages carry this record; historical released artifacts do not.
 namespace eval ::machteld::buildidentity {}
 
+proc ::machteld::buildidentity::fileSha256 {path} {
+    if {[llength [info commands ::machteld::hash]]} {
+        return [::machteld::hash file sha256 $path]
+    }
+    # The pinned static Tcl used by the packager has no hash extension. The
+    # Windows system utility prints a separate hexadecimal digest line in all
+    # display languages. Ignore the localized filename and status messages.
+    set program [file join $::env(SystemRoot) System32 certutil.exe]
+    set report [exec -- $program -hashfile [file nativename [file normalize $path]] SHA256]
+    set matches [regexp -all -inline -line -nocase {^[0-9a-f]{64}\r?$} $report]
+    if {[llength $matches] != 1} {error "cannot determine SHA-256 of $path"}
+    return [string tolower [string trim [lindex $matches 0]]]
+}
+
 proc ::machteld::buildidentity::validate {record} {
     set fields {schema channel runtime_version source_revision input_sha256 reference_sha256}
     if {[catch {llength $record} length] || $length != 2 * [llength $fields]} {

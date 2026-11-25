@@ -67,10 +67,8 @@ try {
     set prelude [file join $work prelude.tcl]
     bytes $prelude "namespace eval ::machteld \{\n    variable version $runtime\n\}\n"
     set reference [file join $work reference]
-    foreach name {identity.dict reference.db manifest.sha256 schema.json START-HERE.md AGENTS.md} {
-        bytes [file join $reference $name] fixture
-    }
-    bytes [file join $reference identity.dict] [dict create corpus_sha256 [dict get $good reference_sha256]]
+    bytes [file join $reference reference.db] fixture
+    dict set good reference_sha256 [::machteld::buildidentity::fileSha256 [file join $reference reference.db]]
     set arguments [list [info nameofexecutable] [file join $ROOT tools package.tcl] \
         --prefix $prefix --prelude $prelude --wrapper [info nameofexecutable] \
         --licenses [file join $ROOT licenses] --apache-license [file join $ROOT LICENSE] \
@@ -97,6 +95,10 @@ try {
                 zipfs mount $output identityProbe
                 try {
                     set embedded //zipfs:/identityProbe/build-info.dict
+                    set digest [dict get $good reference_sha256]
+                    check "the $mode package pins the exact database hash in its prelude" [expr {
+                        [regexp -line {^set ::machteld::reference_sha256 ([a-f0-9]{64})$} \
+                            [slurp //zipfs:/identityProbe/machteld.tcl] -> actualHash] && $actualHash eq $digest}]
                     if {$mode eq "absent"} {
                         check "legacy packaging does not invent development provenance" [expr {![file exists $embedded]}]
                     } else {
@@ -115,12 +117,18 @@ try {
         zipfs mount $runtimeExe actualBuild
         try {
             set hasIdentity [file exists //zipfs:/actualBuild/build-info.dict]
+            set staged [file join $work actual-reference.db]
+            bytes $staged [slurp //zipfs:/actualBuild/reference/reference.db]
+            set actualCorpus [::machteld::buildidentity::fileSha256 $staged]
+            check "actual runtime pins the SHA-256 of its only documentation file" [expr {
+                [glob -tails -directory //zipfs:/actualBuild/reference *] eq {reference.db} &&
+                [regexp -line {^set ::machteld::reference_sha256 ([a-f0-9]{64})$} [slurp //zipfs:/actualBuild/machteld.tcl] -> digest] &&
+                $digest eq $actualCorpus}]
             if {$hasIdentity} {
                 set actual [::machteld::buildidentity::read //zipfs:/actualBuild/build-info.dict]
                 check "actual build identifies development without changing runtime version" [expr {
                     [dict get $actual channel] eq "development" &&
                     [dict get $actual runtime_version] eq $runtime}]
-                set actualCorpus [dict get [slurp //zipfs:/actualBuild/reference/identity.dict] corpus_sha256]
                 check "actual build identifies its exact reference" [expr {
                     [dict get $actual reference_sha256] eq $actualCorpus}]
             } else {
