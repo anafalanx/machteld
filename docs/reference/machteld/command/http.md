@@ -8,6 +8,9 @@ commands: http, http get, http post
 
 # http
 
+Applications can also serve local pages using the runtime's
+`machteld::httpd` package. [Loopback server](#loopback-server)
+
 ## Synopsis
 
 ```tcl
@@ -154,6 +157,47 @@ Only POST and GET are exposed; this is not a general HTTP client surface.
 #### See also
 
 `machteld/command/json`.
+
+<a id="loopback-server"></a>
+## Serving a local page
+
+`package require machteld::httpd` loads the built-in server. Call
+`::machteld::httpd::listen handler ?-port number?` with a Tcl command
+prefix. The default port is assigned by Windows. The returned object
+supports `port`, `address` and `close`. Closing it releases the listener
+and all accepted connections.
+
+```tcl
+package require machteld::httpd
+proc page request {
+    switch -- [dict get $request target] {
+        / {return [dict create type {text/html; charset=utf-8} text {<h1>Catalogue</h1>}]}
+        /time {return [dict create type application/json text [json encode -dict [dict create seconds [clock seconds]]]]}
+        default {return [dict create status 404 text {Page not found}]}
+    }
+}
+set site [::machteld::httpd::listen page]
+set url http://127.0.0.1:[$site port]/
+# Tk's event loop serves requests while the window is open.
+# When the application finishes serving, call `$site close`.
+```
+
+The handler receives a dictionary with `method`, `target`, `headers` and
+`body`. The target preserves its query string. Header names are lowercase,
+and each header value is a list. The body is a bytearray. Return a dictionary
+with one of `text` (encoded as UTF-8) or `bytes` (a bytearray). Optional
+`type` and `status` default to a suitable content type and HTTP 200.
+A handler error returns HTTP 500. A HEAD request calls the handler and sends
+the resulting headers.
+
+The listener binds to IPv4 loopback and accepts HTTP/1.0 and HTTP/1.1
+GET, HEAD and POST. A request body uses Content-Length framing. Each
+connection serves one request. The server accepts up to 32 simultaneous
+connections, 16 KiB of headers, 1 MiB of request data and 4 MiB of
+response data per connection. A connection expires after 15 seconds.
+Handlers run in the application's Tcl event loop. Move long work to a
+worker so Tk and other requests can keep running. Applications own
+authorization for any route that changes state.
 
 ## See also
 

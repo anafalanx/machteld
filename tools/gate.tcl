@@ -227,6 +227,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "Tcl scripts and app archives" archive_test.tcl
                 addLane steps $runtime fast "same-application workers and archive replacement" app_launch_test.tcl
                 addLane steps $runtime fast "atomic file publication" publish_test.tcl
+                addLane steps $runtime fast "loopback HTTP server" httpd_test.tcl
                 addLane steps $runtime fast "cross-process file locks" lock_test.tcl
                 addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
                 addLane steps $runtime fast "desktop arguments and document paths" desktop_test.tcl
@@ -324,6 +325,7 @@ proc ::gate::plan {settings} {
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
+        addLane steps $runtime interactive "Tk loopback HTTP server" httpd_test.tcl --tk
     }
     return $steps
 }

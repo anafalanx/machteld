@@ -106,6 +106,7 @@ copy_tree $tclLib [file join $stage tcl_library]
 set packages [file join [file dirname [file dirname [file normalize [info script]]]] packages]
 foreach {package files} {
     machteld-job {pkgIndex.tcl job.tcl}
+    machteld-httpd {pkgIndex.tcl httpd.tcl}
     cffi {pkgIndex.tcl}
     machteld-sqlite {pkgIndex.tcl sqlite.tcl}
 } {
