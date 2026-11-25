@@ -11,22 +11,23 @@ are no compute engines, `macht`, or Lua. Development environments built with
 machteld live in their own repositories on the machines that use them; this
 repository holds the runtime only.
 
-## 22 — preparing release 0.22
+## 22 — development baseline for 0.30
 
-This checkout prepares release **0.22**. Its CLI and Tcl package report
-`22`. The next public release is **0.30** and will report `30`. The build
-tools use the signed 0.21 executable at `dist/0.21/machteld.exe`.
+**0.30 is the next public release after signed 0.21.** Development starts
+from the unpublished 0.22 candidate. This checkout's CLI and Tcl package
+report `22`. The first 0.30 implementation work will advance both to `30`.
+The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
 [Build guide](BUILDING.md)
 
-The 0.22 scope includes the Beta 1 features. Tk applications can run
+The development baseline includes the Beta 1 features. Tk applications can run
 cancellable jobs and SQL queries in supervised workers. Workers started
 from a running archive keep using its version after an update. The runtime
 also supports atomic file replacement, process-owned locks, attended child
 windows and clipboard ownership queries. The exact Beta 1 revision passed
 72 release and desktop steps. [Beta 1 results and checklist](docs/releases/0.22-beta.1.md)
 
-| Behavior | Signed 0.21 release | 22, in preparation |
+| Behavior | Signed 0.21 release | Unpublished 22 baseline |
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
 | Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, optional application name, version and icon |
@@ -35,25 +36,25 @@ windows and clipboard ownership queries. The exact Beta 1 revision passed
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-Before signing 0.22, two independent clean builds of the same source and
-locked inputs must produce unsigned executables with identical SHA-256
-hashes. The runtime and packaged examples must pass acceptance, including
-attended checks of user-visible behavior. The owner signs a copy, the gate
-checks those signed bytes, and the owner decides when to publish.
+Before signing 0.30, the build PC and hosted Windows CI must produce
+byte-identical clean unsigned executables from the same revision and
+locked inputs. The runtime and packaged examples must pass acceptance,
+including attended checks of user-visible behavior. The owner signs a copy,
+the gate checks those signed bytes, and the owner decides when to publish.
 
 The rest of this README and the current guides describe **22**, unless
 explicitly marked as history. Different builds can share that version:
 incremental builds embed `build-info.dict` with source/input and reference
 identities; clean reconstruction omits that development-only record. Compare
 artifact hashes and verification receipts, and query `manifest` and the
-documentation in the executable you actually use. See the [roadmap](docs/roadmap.md)
-for what 22 contains, its history, and the remaining release gate.
+documentation in the executable you actually use.
 
 ## The plan and the commentary
 
-The [release plan](plan-machteld22.md) records the owner's decisions, the
-runtime and build findings, and the remaining acceptance work. The
-[roadmap](docs/roadmap.md) tracks delivery through 0.30.
+The roadmap records the approved 0.30 capabilities. The release plan sets
+the implementation order and acceptance gates for moving directly from
+signed 0.21 to 0.30. [Roadmap](docs/roadmap.md) ·
+[Implementation and release gates in the release plan](plan-machteld22.md)
 
 Agents: what you find in the runtime while you use it or work on it, good or
 bad, goes in [commentary.md](commentary.md), as an entry of your own at its
@@ -71,8 +72,8 @@ declaration, not an authorization boundary.
 The support contract is x64 Windows 11 25H2 (build 26200) and Windows Server
 2025 (build 26100), or newer. Windows 10, Server 2022/2019, and ARM64 are not
 targets. Stabilization checks ran on Windows 11 Pro build 26200, and Beta 1
-passed its Windows Server 2025 acceptance run. Record fresh results for the
-reconciled candidate on the supported targets. Lower-level ConPTY availability on
+passed its Windows Server 2025 acceptance run. Record fresh results for each
+0.30 release candidate on the supported targets. Lower-level ConPTY availability on
 older Windows does not extend the support contract.
 
 Use `store` for key/value data and `package require sqlite3` for SQL queries,

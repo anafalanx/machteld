@@ -1,15 +1,17 @@
 ---
 type: roadmap
 title: Roadmap
-description: Release 0.22 status, planned 0.30 milestones, acceptance checks, and release history.
+description: Direct delivery from signed 0.21 to 0.30, the unsigned 22 baseline, capability ownership and acceptance.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 22 — Release preparation
+## 22 — Unsigned development baseline
 
-On 2026-11-25 the owner selected the full Beta 1 feature set for 0.22.
+**The next public release is 0.30, directly after signed 0.21.** On
+2026-11-25 the owner closed 0.22 as an unsigned development milestone.
+The reconciled Beta 1 work supplies the starting point for 0.30.
 Applications can run as Tcl scripts, packaged archives or wrapped executables.
 The runtime includes supervised Tcl jobs, the upstream SQLite binding,
 same-version archive workers, atomic file publication and process-owned
@@ -17,14 +19,13 @@ locks. The desktop changes cover metadata-only path inspection, quiet workers,
 attended child windows and process-scoped clipboard ownership. The beta also
 corrected Tcl control flow through `scope`. [Beta 1 scope and release checklist](https://github.com/anafalanx/machteld/blob/e0db215ede968d3255415613d86c66abda210249/docs/releases/0.22-beta.1.md)
 
-**The next public release is 0.22. Its successor is 0.30.** The runtime and
-Tcl package use integer versions `22` and `30` for these releases. Only a
-runtime change advances that number. For 0.22, the header declares `"22"`,
+The current source and Tcl package report `22`. The first runtime feature
+change for 0.30 advances both to `30`. For the baseline, the header declares `"22"`,
 the prelude declares `22`, and the fixed Windows file version is `22.0.0.0`.
 A Tcl program can request `package require machteld 22-` to accept later
 versions, or `package require machteld 22-30` to require review before it
-runs on 0.30. Tcl excludes the upper bound. Builds use the signed 0.21
-executable until the owner signs 0.22. Identify 0.22 artifacts by their
+runs on 0.30. Tcl excludes the upper bound. Signed 0.21 drives builds and
+tests through acceptance of the signed 0.30 copy. Identify baseline artifacts by their
 hashes, verification receipts, `manifest`, and embedded reference.
 
 22 begins as the 0.22 candidate (commit 8bcc1ec), the stabilization of
@@ -63,12 +64,13 @@ full sanitizer coverage, or unbounded concurrency. The store remains narrow,
 several APIs remain synchronous, and native extensions still need manual
 deployment.
 
-The **release gate** remains open. The Windows run for Beta 1 passed 72 steps
-on `e0db215`. A second build matched the PE prefix and the uncompressed
-contents of all 2,306 archive files. Its archive bytes differed. Signing
-requires two byte-identical clean unsigned executables built from the final
-source, a comparison with the incremental build, and fresh acceptance of that
-candidate. [Beta 1 verification](https://github.com/anafalanx/machteld/pull/5)
+**Reconciled baseline evidence.** At `eccba70` the build PC passed 67 steps
+and two local cold builds matched. Hosted Windows Server 2025 passed 72
+steps and its two builds matched each other. At the same commit timestamp,
+the PC and hosted binaries still differed. Substituting just the hosted
+MSYS2 `default-manifest.o` in a local replay reproduced the hosted SHA-256.
+The first build task for 0.30 is to control that link input and demonstrate
+whole-executable equality on both hosts. [Hosted verification](https://github.com/anafalanx/machteld/actions/runs/45636999191)
 
 The build PC and hosted CI may run unsigned builds. Executables produced in
 CI stay in the job and expire with it. Other machines use signed releases.
@@ -82,34 +84,244 @@ application-only `.machteld` archives with `pack`, and runs those archives.
 The milestone numbers below identify work items. The first implementation
 in release 0.30 is the foreign-function interface, numbered 30.9.
 
-### Establish the signed baseline
+### Start from signed 0.21 and the reconciled source
 
-1. **Prepare and verify the source (22.0–22.2).** Preserve commit ancestry,
-   branches and release tags. Run the full gate on the reconciled source
-   before pushing it directly to GitHub `main`. Verify the planned pre-push
-   check with a deliberately failing fixture. Keep incremental output in
-   `out/dev/`, standalone clean output in `out/candidate/`, and reserve
-   `out/machteld.exe` for the gate. Keep the whole-generation reference cache.
-2. **Stabilize the runtime (22.4a, 22.3–22.8).** Run repeatable GUI checks on
-   an isolated desktop and verify user-visible behavior in a real attended
-   session before release. Verify crash-dialog suppression and captured
-   console behavior with and without the beta's quiet-worker option. Correct
-   the documentation and build inputs, then fix the outstanding process,
-   resource-lifetime and packaging defects. Each regression gets a test
-   that fails before the fix.
-3. **Ship signed 22 (22.9–22.10).** Require identical SHA-256 hashes for
-   two independent clean unsigned executables, compare the incremental build,
-   and run the release and interactive checks. The owner signs a copy. Run
-   the gate on those signed bytes, record their SHA-256 and adopt the
-   released executable for builds.
+1. **Capture compatibility and build evidence (30.0–30.1).** Use signed
+   0.21 as the driver and public upgrade source. Use `eccba70` as the
+   source baseline for archives, jobs, SQL and desktop behavior. Record the
+   porting application's results on 0.21 with its existing extension and
+   retain synthetic reproductions of runtime gaps. Carry open regressions
+   from the stabilization ledger into the relevant 0.30 work items.
+2. **Close the build mismatch and define the contracts.** Lock the actual
+   linked manifest input, capture its hash, and compare fresh build-PC and
+   hosted results from the same commit and epoch. Before implementing a
+   feature, specify its Tcl inputs, binary/text handling, errors, limits,
+   ownership, cancellation and fixtures. Keep reproducibility and feature
+   acceptance as separate checks throughout the release.
+3. **Qualify 0.30 directly.** Run the runtime gate and packaged examples
+   on the candidate. Exercise application-owned profile migrations, restore,
+   updates and managed sign-in in the porting project's environment. Before
+   publication, verify the exact signed 0.30 executable on the supported
+   Windows targets and the signed desktop/share workflow. The owner decides
+   when to publish. The repository's `plan-machteld22.md` gives the
+   implementation and release gates.
 
-Runtime acceptance includes the packaged example applications. Track profile
-migrations, backup and restore, updates and managed sign-in with the porting
-application. Alongside this work, run its suite against signed 0.21
-with its current native extension (30.1). Record each failure and which side
-needs a change. Repeat on signed 22. Use the results to write a small runtime
-regression test. Open 0.30 by agreeing on the new command contracts, their
-limits, and the handling of binary data and text (30.0).
+### What the application ports established on 0.22
+
+Two existing Tcl/Tk applications passed their own self-tests as packaged
+GUI executables on the unsigned candidate at `eccba70`. The game exercised
+its rules and rendered a frame. The document generator rendered its form
+and produced the same PDF bytes twice. Both used a private desktop.
+Attended keyboard, window and file-viewer checks remain open.
+
+The timer application parsed four shipped sequences, stored them using its
+own Tcl code, and reopened the database read-only with a successful integrity
+check. A file catalog's current schema also loaded. The larger desktop
+application passed 85 selected offline model tests using a test-only Tcl
+adapter. All five archive migrations ran on a synthetic database. Its
+numbered SQL parameters needed adaptation to Tcl bindings, and a backup
+probe overwrote an existing destination. A launcher and a radio
+directory both use FTS5 trigram indexes. Creating such an index on the
+candidate failed with `no such module: fts5`.
+
+Use these cases for the 0.30 porting work. For full-text search (30.5),
+exercise the consumers' external-content trigram indexes through the
+upstream Tcl binding. Verify that insert, update and delete keep search
+results correct and that a populated catalog reopens in a packaged app.
+
+### Which capabilities ship in 0.30
+
+The completed ownership poll assigns 25 capabilities to `machteld.exe`.
+Applications supply system-wide keyboard shortcuts. A capability can be
+implemented in Tcl and still ship inside the runtime. The contracts below
+describe planned behavior and the checks for accepting it.
+
+#### Desktop, browser and process integration
+
+**Browser control ships with Machteld.** Include browser-session and page
+control in `machteld.exe` so any Tcl application can open an installed
+Edge or Chromium browser with a chosen profile, navigate to a page and
+detect when it is ready. Each application owns its sign-in workflow and
+site-specific actions.
+
+Use a local test page and a disposable browser profile to exercise launch,
+navigation and orderly shutdown. Separately, check on
+an attended desktop that the user can complete sign-in and the application
+can resume its work in the same session.
+
+**Initial child window visibility ships with Machteld.** Let the caller
+request a visible or hidden first window when launching a supervised GUI
+child. Windows passes this as a startup hint and the child can override
+it. Exercise both settings with a GUI fixture that follows the hint.
+Verify that supervision and exit reporting work in both cases.
+
+**Desktop-wide window listing and activation ship with Machteld.** Let a
+Tcl application list open windows on the user's desktop, including windows
+opened by unrelated programs, and request activation of a selected window.
+The application chooses what to display and how to search it. Test a window
+that closes after listing and two windows with the same title. Verify in
+an attended session which window actually receives focus.
+
+**Windows application discovery ships with Machteld.** Let Tcl applications
+list Start menu shortcuts and Microsoft Store apps with their display names,
+icons and launch targets. Each application owns its search, ranking and
+presentation. Verify that a shortcut and a Store app appear while closed
+and that each returned target opens the intended application.
+
+**Explorer file drops ship with Machteld.** Let a Tcl application register a
+Tk widget as a drop target and receive the list of file paths dropped on it
+from Windows Explorer. The application decides how to handle those paths.
+Verify an attended multi-file drop using names with spaces and non-ASCII
+characters. Check that destroying the target removes its registration.
+
+**Opening a document in its associated application ships with Machteld.**
+Let Tcl pass a local file path to the Windows shell to open it with the
+user's chosen application. Report a missing file or an unavailable
+association to the caller. Verify on an attended desktop that the selected
+viewer opens the intended document, including a path with spaces.
+
+**Applications ship system-wide keyboard shortcuts.** Each application that
+needs a shortcut while another window has focus supplies its Windows
+registration, conflict reporting, delivery to the Tcl event loop and cleanup.
+The application chooses the key combination and the action it triggers.
+
+#### SQLite, files and text
+
+**Numbered SQLite parameters ship with Machteld (30.5).** Include a helper
+in `machteld.exe` that binds typed Tcl values to numbered SQL parameters
+such as `?1` and `?2` using the existing SQLite engine. Applications can
+keep their SQL. Test repeated and out-of-order parameters, text, integers,
+blobs and explicit SQL NULL. Report a missing value as an error.
+
+**An opt-in SQLite connection profile ships with Machteld (30.5).** Let an
+application request foreign-key enforcement and SQLite defensive mode when
+opening a connection. Apply and verify the settings before returning the
+connection. Report an error if a requested safeguard cannot take effect.
+Test a foreground connection and a separately opened worker connection to
+the same database, including an insert that violates a foreign key.
+
+**Verified SQLite backups ship with Machteld (30.5).** Provide a backup
+operation that reopens the copy read-only, runs SQLite's integrity check and
+publishes the verified copy only if the destination is still absent. An
+existing destination must survive byte-for-byte, including when another
+writer creates it during the backup. Test a successful backup, an existing
+destination, competing writers and a failed verification. Applications choose
+when to back up, how long to retain copies and what to restore.
+
+**Confirmed file saves ship with Machteld.** Offer an opt-in save operation
+that atomically replaces the destination and then asks Windows to flush the
+final file to storage. Report which stage completed so an application can
+distinguish a failed replacement from a completed replacement whose flush
+failed. Applications choose how to present the result or offer a retry.
+Exercise both failures and a successful save. Check the bytes at the
+destination and the result returned to Tcl in each case.
+
+**Bulk directory listings ship with Machteld.** Provide a Tcl operation
+that enumerates one Windows directory and returns each entry's name, size,
+modification time and Windows attributes in a single pass. Include hidden,
+junction, pinned and online-only entries. Listing a cloud placeholder must
+leave its contents online. Applications choose what to display or index.
+Measure a 100,000-entry directory and verify the reported attributes on
+fixtures with Unicode names, a junction and cloud placeholders.
+
+**Local-only file reads ship with Machteld.** Provide an opt-in read mode
+that reads locally available contents and reports an online-only file to Tcl
+without requesting a download. Apply this behavior when opening and reading
+the file, even if an earlier directory listing showed it as local. Let the
+application decide whether to skip the file or request it through a normal
+read. Verify local bytes, an online-only placeholder and a file made
+online-only between listing and reading. Distinguish unavailable cloud
+contents from an access error.
+
+**Text-encoding detection ships with Machteld.** Let Tcl applications pass
+file bytes to a detector and receive a likely encoding and a confidence
+estimate, or an explicit result when the detector finds no match. The
+application chooses how to decode the bytes and when to ask the user.
+Test representative UTF-8 and legacy-encoded text alongside ambiguous
+input, and verify that detection preserves the original bytes.
+
+**XXH3-64 ships with Machteld.** Add it to the existing hash commands for
+bytes, files and incremental input. Match the seed-zero XXH3-64 values in
+existing file catalogs. Test known values and compare a file hashed in one
+pass with the same bytes supplied in uneven chunks. Verify that an unchanged
+file still matches its previously stored checksum.
+
+#### Networking
+
+**HTTP streaming ships with Machteld (30.7).** Let Tcl applications
+consume binary response chunks as they arrive and cancel an open
+transfer. Bound buffering when the consumer is slower than the sender.
+Test with a local server that sends a first chunk and holds the response
+open. Verify delivery before the response ends, prompt cancellation while
+waiting for more bytes, and bounded memory with a slow reader.
+
+**A local HTTP server ships with Machteld.** Let a Tcl application listen
+on the loopback interface and handle HTTP requests from a browser on the
+same PC. The application supplies its pages, routes and request handlers.
+Test serving a local page and a changing JSON response while Tk stays
+responsive. Verify the listener's bound address and that closing the server
+releases its port.
+
+**Windows Wi-Fi connection details ship with Machteld.** Let Tcl applications
+query each wireless adapter for its connected network name, signal quality
+and negotiated link speed. Report when an adapter is disconnected or Windows
+permissions restrict a field. Test those cases and verify adapter identity
+and reported values on a connected Windows machine.
+
+**Adapter-specific ping ships with Machteld.** Let a Tcl application supply
+the source IPv4 address and destination for an ICMP echo request. Return
+the measured round-trip time, a timeout or a Windows error. On a machine
+with two active adapters, verify that the echo uses the selected source.
+
+**UDP sockets ship with Machteld.** Let a Tcl application send and receive
+individual datagrams and receive a readable event through the Tcl event
+loop. Return the sender's address and port with each datagram. Applications
+define their own protocols. Test a local exchange of distinct binary
+datagrams, Tk responsiveness while waiting for a reply, and closing a
+socket with a read notification pending.
+
+**Authenticated network time ships with Machteld.** Provide a Network Time
+Security (NTS) client that obtains an authenticated time sample from a
+server chosen by the Tcl application. Verify key exchange and a valid
+reply against a controlled time server. Check that a failed authentication
+returns an error and yields no accepted time sample. Applications choose
+their servers, compare samples and decide what time and uncertainty to
+display.
+
+#### Audio and graphics
+
+**Windows audio output ships with Machteld.** Let Tcl applications send
+uncompressed PCM samples to the Windows audio device for short effects or
+continuous playback. Verify that a short effect finishes, that successive
+buffers play in order while Tk stays responsive, and that stopping a stream
+releases the device for the next playback. Confirm audible output in an
+attended session.
+
+**MP3 and AAC decoding ship with Machteld.** Expose a Tcl interface that
+accepts compressed audio and returns PCM samples with their sample rate and
+channel count. Support MP3, AAC and HE-AAC and allow the samples to feed
+the runtime's audio output. Test each format with a local fixture split
+across input chunks. Check the decoded duration and signal against known
+audio and verify error reporting for malformed input.
+
+**HLS audio playlist support ships with Machteld.** An application supplies
+a playlist URL. The runtime follows playlist updates, fetches new segments
+in order and extracts compressed audio from MPEG-TS for decoding. Test with
+a local live playlist whose successive versions overlap. Verify that each
+segment plays once in order and that stopping playback cancels further
+playlist and segment requests.
+
+**Hardware-accelerated 2D drawing ships with Machteld.** Expose a Direct2D
+drawing surface in a Tk window that Tcl applications can use for their own
+graphics. Exercise it with a clock face and a moving sprite. Check resizing,
+display scaling and input responsiveness, and measure frame pacing against
+the game's 60 Hz target on the test machine.
+
+**Direct3D 11 rendering ships with Machteld.** Provide a Tk surface that
+lets Tcl applications draw with shaders and read back rendered pixels.
+Use a rotating triangle as the acceptance fixture. Read a background pixel
+and a pixel inside the triangle, repeat after resizing, and record whether
+the test used a hardware device or the Windows software renderer.
 
 ### Build the shared application runtime
 
@@ -120,8 +332,9 @@ limits, and the handling of binary data and text (30.0).
 2. **Supervised processes (30.2–30.3).** Build on `machteld::job`,
    `child start -console none` and `child present` in 0.22. Add native
    child-completion notifications through the Tcl event loop and graceful
-   shutdown. Test one completion notification per child while a Tk window
-   remains responsive. Retain the tests for window handoff within a job.
+   shutdown. Add the initial window visibility option at launch. Test one
+   completion notification per child while a Tk window remains responsive.
+   Retain the tests for window handoff within a job.
 3. **One executable for development and delivery (30.4a, 30.4).** Keep
    direct Tcl entry. Embed `consoleAllocationPolicy=detached` in the Windows
    console-subsystem manifest. Extend the existing `pack` and archive launch
@@ -136,9 +349,11 @@ limits, and the handling of binary data and text (30.0).
    running the signed build. Test terminal input, redirection, waiting and
    exit status. The archive options and manifest syntax are
    design work within this milestone.
-4. **SQLite full-text search (30.5).** Enable FTS5 in the same SQLite
-   engine used by the Tcl `sqlite3` package and the key/value `store` in
-   0.22. Keep the typed parameter, transaction, read-only and backup tests.
+4. **SQLite (30.5).** Enable FTS5 in the same SQLite engine used by the
+   Tcl `sqlite3` package and the key/value `store` in 0.22. Deliver the
+   numbered-parameter helper, opt-in connection profile and verified
+   create-only backups. Test both default and opt-in connections, typed
+   round trips, transactions and read-only access.
    Exercise joins and atomic imports in a packaged example with an external
    writable database. The application owns its schema upgrades and restore
    policy.
@@ -147,17 +362,28 @@ limits, and the handling of binary data and text (30.0).
    instructions. Lay out a graph with named table ports, render it on a Tk
    canvas and verify that selection still works. Measure the size against
    the matching full-SQL executable.
-6. **Desktop and background work (30.6, 30.6b, 30.7, 30.8).** Build on
-   process-owned locks, atomic file replacement and the clipboard ownership
-   query in 0.22. Add per-user storage and finish the process controls, then add
-   cancellable HTTP through the event loop and reusable archive workers.
-   Verify that the application's authenticated request succeeds through its
-   actual proxy before switching its transport. Test competing writers, UI
-   responsiveness and cancellation. Reusable workers must preserve the
-   `app launch` guarantee that an existing session keeps its archive
-   generation after an update. Reject a mismatched generation before
-   executing its code.
-7. **Qualify a real application (30.10).** Run its acceptance suite against
+6. **Desktop and files (30.6, 30.6b).** Add per-user storage and finish the
+   process controls. Deliver browser control, window switching, installed-app
+   discovery, Explorer file drops and opening a document with its associated
+   app. Use the existing file and hash commands as the starting point for
+   confirmed saves, bulk listings, local-only reads and XXH3-64. Add
+   encoding detection. Exercise competing writers and check file handling
+   with a cloud placeholder. Verify user-visible desktop behavior in an
+   attended session.
+7. **Networking and workers (30.7, 30.8).** Add cancellable HTTP streaming,
+   a loopback HTTP server, Wi-Fi connection details and adapter-specific
+   ping. Bring up UDP before qualifying the authenticated network time
+   client. Verify the application's authenticated HTTP request through its
+   actual proxy. Exercise Tk responsiveness and cancellation. Reusable
+   archive workers must preserve the `app launch` guarantee that an existing
+   session keeps its archive generation after an update. Reject a mismatched
+   generation before executing its code.
+8. **Audio and graphics.** Exercise PCM output and the MP3 and AAC decoders
+   with local fixtures, then run a complete HLS stream through HTTP, decoding
+   and playback. Test the Direct2D and Direct3D 11 Tk surfaces on a supported
+   Windows machine. The “Audio and graphics” section gives the playback and
+   rendering checks for each surface and format.
+9. **Qualify a real application (30.10).** Run its acceptance suite against
    the shared runtime and packaged sources. Exercise the signed runtime and
    archive from a user's desktop and share, including an application update
    while an older session is open. Verify that the application builds and

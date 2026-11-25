@@ -8,10 +8,10 @@ description: Native safety regressions, analysis coverage, instrumentation limit
 
 Step 10 of stabilization adds repeatable, headless checks at the native
 boundaries. These are development checks, not a claim of memory safety or
-a release approval. This checkout reports runtime version 22, in
-preparation; its release gate must establish fresh acceptance. The signed
-release is untouched, and the measurements below remain their recorded
-pre-candidate stabilization evidence.
+a release approval. On 2026-11-25 the owner selected 0.30 for direct
+delivery from signed 0.21. This checkout reports development version 22.
+The measurements below record pre-candidate stabilization evidence. Run
+fresh native validation for the 0.30 release candidate.
 
 The recorded stabilization runs used Windows 11 Pro x64, version 10.0.26200
 (build 26200). Windows Server 2025 remains an intended target, not a separately

@@ -6,10 +6,12 @@ and its console and GUI wraps. Keep those executables inside the job. CI can
 publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
-The Beta 1 run produced an unsigned test ZIP before this policy was adopted.
-Its Windows version information carried a prerelease flag and beta number.
-The CLI and Tcl package version for 0.22 are both `22`.
-[Beta 1 results and release checklist](docs/releases/0.22-beta.1.md)
+0.30 is the next public release after signed 0.21. The unpublished 0.22
+candidate supplies the starting source for implementation. Its CLI and Tcl
+package both report `22`. The earlier Beta 1 run produced an unsigned test
+ZIP before the current CI policy was adopted.
+[Beta 1 results](docs/releases/0.22-beta.1.md) ·
+[Implementation and release gates in the release plan](plan-machteld22.md)
 
 ## What the build stands on
 
@@ -17,10 +19,10 @@ The CLI and Tcl package version for 0.22 are both `22`.
    of the 0.21 release's executable that git ignores (SHA-256
    `1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7`, signed
    by Open Source Developer Vincent Vercauteren). The build tools and the
-   driver tests are machteld programs whose first line requires the 0.21, so
-   they run on it and refuse 22. When a signed 22 exists, they move to it
-   (their first line becomes `package require machteld 22-`). Three
-   interpreters share the work:
+   driver tests are machteld programs whose first line requires 0.21. Use
+   this signed driver through the 0.30 build and signed-file acceptance.
+   After publication, qualify any driver switch to signed 0.30 in a
+   separate change. Three interpreters share the work:
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
      `dev.tcl`, `reference.tcl` (the reference generator) and
      `native-analysis.tcl`, and the driver tests: entry, package and
@@ -108,23 +110,30 @@ Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
 
-When preparing the final release commit, remove the `MACHTELD_BETA`
-definition from `src/machteld.h`. Before signing, make two independent
-clean builds of that commit, each with a fresh dependency cache. Give both
-builds the same locked inputs and `SOURCE_DATE_EPOCH`. The GitHub workflow
-uses the commit timestamp from `git show -s --format=%ct HEAD`.
-Verify the Windows file version is 22.0.0.0 and the prerelease flag is clear.
-The SHA-256 hashes of the two complete unsigned executables must match.
-Record the hashes, source commit, epoch and toolchain receipt. Compare the
-incremental build separately, accounting for its development-only
-`build-info.dict`.
+For the final 0.30 commit, clear the prerelease marker in `src/machteld.h`
+and verify Windows file version `30.0.0.0`. Rebuild that commit on the build
+PC and the hosted Windows runner, each from a clean checkout and a fresh
+dependency cache. Use the same locked inputs and the commit timestamp from
+`git show -s --format=%ct HEAD` as `SOURCE_DATE_EPOCH`. Compare the SHA-256
+of the complete unsigned executable on each machine. The hashes must match.
+Record the hashes, commit, epoch and toolchain receipts. Compare the
+incremental build separately and account for its development-only
+`build-info.dict`. The existing hosted workflow also checks a second build
+in a clean checkout on the same runner.
 
-Run the runtime checks and packaged sample applications for 0.22. Automate
+The baseline exposed a previously unpinned linker input, MSYS2's
+`default-manifest.o`. Substituting the hosted object on the build PC
+reproduced the hosted executable hash. The first cross-machine gate must
+control the manifest resource actually linked and record its identity.
+[Implementation and release gates in the release plan](plan-machteld22.md)
+
+Run the runtime checks and packaged sample applications for 0.30. Automate
 repeatable GUI checks on an isolated desktop. Before release, verify
 user-visible behavior, including foreground window presentation, in an
 attended desktop session. Record the Windows target and result for each.
-The porting project tracks its own full managed-desktop suite, including
-profile migration, backup and restore, updates and attended sign-in.
+The porting project supplies its managed-desktop tests for profile
+migration, backup and restore, updates and attended sign-in. Qualify the
+signed runtime and application archive on the target share and desktop.
 
 ## Signing
 
@@ -132,9 +141,10 @@ Signing is the owner's step, on the build PC, with signtool from the Windows
 SDK and the Certum code-signing certificate of Open Source Developer Vincent
 Vercauteren. After acceptance, the owner signs a copy at a dedicated release
 path. The signature follows the appended payload. The signed 0.21 release
-demonstrated that the runtime could still find that payload. Run the gate
-on the signed 0.22 bytes with `--skip-build --runtime FILE`, record their
-SHA-256, and obtain the owner's publication decision.
+demonstrated that the runtime could still find that payload. Verify the
+signature and signer on the 0.30 copy. Run the gate on that exact file
+with `--skip-build --runtime FILE`, using the signed 0.21 driver. Record
+the signed file's SHA-256 and obtain the owner's publication decision.
 
 ## Incremental builds and version numbers
 
@@ -144,8 +154,8 @@ SHA-256, and obtain the owner's publication decision.
    objects and whole reference generations by content in `.cache\dev`.
    A documentation edit regenerates the reference, which takes about a minute
    on the build PC. An unchanged reference reuses its cached generation.
-2. Release 0.22 uses runtime number `22`. Its successor, release 0.30, uses
-   `30`. Each release uses the same integer in `MACHTELD_VERSION` in
-   `src\machteld.h`, `variable version` in `tcl\machteld.tcl`, and the
-   current release heading in `docs\roadmap.md`. The gate checks these
-   values with `tools\check_version.tcl`.
+2. The unpublished baseline uses runtime number `22`. Advance the runtime
+   to `30` with the first 0.30 implementation change. Keep
+   `MACHTELD_VERSION` in `src\machteld.h`, `variable version` in
+   `tcl\machteld.tcl`, and the current-runtime heading in `docs\roadmap.md`
+   consistent. The gate checks these values with `tools\check_version.tcl`.

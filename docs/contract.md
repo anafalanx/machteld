@@ -10,19 +10,19 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-Repository documentation describes machteld 22, in preparation and not yet
-released or signed. The previously signed `dist/0.21` release retains its
-original behavior. Consult the selected executable's own embedded reference and
-artifact identity rather than applying this documentation retroactively to that
-release.
+This contract describes the unpublished development baseline, which reports
+runtime version `22`. Signed 0.21 is the public release and 0.30 is the
+next delivery target. Consult the selected executable's embedded reference
+and artifact identity for the commands it actually provides. [Roadmap](roadmap.md)
 
 ## Platform
 
 Machteld targets x64 Windows 11 25H2 (build 26200) and Windows
 Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor, and ARM64 is not a target. These are the platform policy,
-not a claim of acceptance on every listed OS. Current local validation is on
-x64 Windows 11 Pro build 26200; Server 2025 acceptance remains separate work.
+not a claim of acceptance on every listed OS. The baseline was tested on the
+Windows 11 build PC and in hosted Windows Server 2025 CI. Record fresh
+acceptance results for the 0.30 candidate on both target families.
 The binary may start on older builds — ConPTY has existed since Windows 10
 1809 — but that API minimum does not widen the supported platform policy.
 
@@ -38,12 +38,12 @@ package require machteld 22-30
 package require -exact machteld 22
 ```
 
-The public release numbers 0.22 and 0.30 correspond to Tcl package versions
-`22` and `30`. Tcl treats each whole number as a major version. A request
-for `22` accepts only major version 22. The range `22-` accepts 22 and all
-later runtimes. Use `22-30` for a program that must be reviewed before the
-next release. Its upper bound excludes 30. Only a runtime change advances
-the package version.
+The unpublished 0.22 candidate and planned 0.30 release correspond to Tcl
+package versions `22` and `30`. Tcl treats each whole number as a major
+version. A request for `22` accepts only major version 22. The range
+`22-` accepts 22 and all later runtimes. Use `22-30` for a program that
+must be reviewed before the next release. Its upper bound excludes 30.
+Only a runtime change advances the package version.
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
 is accepted. The host parses this boundary before evaluating the file. A missing

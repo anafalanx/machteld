@@ -47,14 +47,14 @@ Current decisions:
 
 The compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and
 the engine-bound column library were removed. They leave no compatibility
-command or migration layer. The current work is machteld 22, which contains the
-0.22 candidate's stabilization and is not yet released or signed; from 22 on the
-version is one natural number, and only a change to the runtime makes a new
-one. The 0.22 source includes explicit wrapper inventories, optional Windows
-metadata and icons for wrapped applications, and native hardening. The
-[roadmap](roadmap.md) schedules wrapper retirement for 0.30.
-Acceptance of 22 is current work. Signing and publication require a separate
-decision.
+command or migration layer. The unpublished 0.22 candidate supplies the
+development baseline for a direct release from signed 0.21 to 0.30.
+Starting with 22, the runtime version is one natural number and advances
+when the runtime changes. The baseline includes explicit wrapper inventories,
+optional Windows metadata and icons for wrapped applications, and native
+hardening. The 0.30 plan retires wrapping and qualifies applications as
+scripts or archives running on the shared executable. The owner signs and
+authorizes publication after acceptance. [Roadmap](roadmap.md)
 
 Standing architectural decisions:
 

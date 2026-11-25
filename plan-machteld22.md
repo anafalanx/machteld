@@ -1,23 +1,24 @@
 ---
 type: plan
-title: machteld 22
-status: DRAFT, updated 2026-11-25. zef's plan for zef 22 (plan-zef22.md on zef's
-  zef-22 branch, f741ffe), revised for a runtime-only machteld 22 after the
-  owner's rulings of 2026-10-29, then with the owner's rulings of 2026-10-30
-  on the decisions poll. Section 6.3 records the November release decisions.
-  Section 8 uses the successor release number 0.30.
+title: Machteld release implementation plan
+status: Active 0.30 plan, updated 2026-11-25. Includes the decisions and evidence
+  from the unsigned 22 development milestone.
 relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
   docs/direction.md, docs/creed.md, tools/stabilization.json
 ---
 
-# machteld 22
+# Machteld release implementation plan
 
 ## 0. How to read this
 
-The release after 0.22 is **0.30**. Under the existing version convention
-their runtime numbers are 22 and 30. The October decisions and log use
-the earlier number 23 for that successor. Work-item numbers such as 30.4
-identify milestones within the 0.30 plan.
+**Deliver 0.30 directly after signed 0.21.** The owner closed 0.22 as an
+unsigned development milestone on 2026-11-25. The current checkout reports
+`22`. The first 0.30 runtime feature commit advances it to `30`. The
+existing signed 0.21 executable builds and tests every 0.30 candidate,
+including the signed release copy. Work-item numbers such as 30.4 identify
+milestones. October's records used the earlier number 23 for the successor.
+The final section contains the implementation and release gates.
+[Capability decisions](docs/roadmap.md)
 
 On 2026-11-25, the Windows acceptance run passed 72 release and desktop
 steps on unsigned Beta 1, built from `e0db215`. This candidate adds
@@ -25,9 +26,10 @@ supervised Tcl jobs, the upstream SQLite binding, script and archive launch,
 atomic file publication, process-owned locks and Windows desktop services.
 The owner selected all those features for 0.22, including wrapped
 applications' custom Windows metadata and icons. The 72-step result
-applies to that beta. The reconciled source needs its own acceptance,
-two byte-identical clean unsigned builds and a gate run after signing.
-Section 6.3 records the release decisions that supersede the October scope.
+applies to that beta. The reconciled baseline at `eccba70` passed local
+and hosted gates. Cross-host reproducibility and fresh acceptance of the
+complete 0.30 candidate are release requirements. Sections 6.3 and 6.4
+record the original preparation decisions and the direct-release decision.
 [Beta 1 and release checklist](https://github.com/anafalanx/machteld/pull/5) ·
 [Windows acceptance run](https://github.com/anafalanx/machteld/actions/runs/45597853161)
 
@@ -142,7 +144,7 @@ release."
 1. **The version** (c9cbff2): one natural number. Programs ask for `package
    require machteld 22-`; a program that must be read again before it runs on
    a newer runtime names an upper bound, which Tcl excludes (`22-30`). The
-   build tools keep running on the signed 0.21 until a signed 22 exists.
+   signed 0.21 executable remains the build driver through 0.30 acceptance.
 2. **The creed and the direction** (`docs\creed.md`, `docs\direction.md`).
    The runtime uses Tcl/Tk with native C and C++. Tcl drives the build and
    tests. The hosted Windows workflows can use PowerShell to set up the
@@ -330,10 +332,11 @@ merged with the limits write) and the crash containment for children.
 
 `cli parse` naming the program is a fix, not a feature (R24).
 
-## 5. Phases
+## 5. Original phases for the 22 milestone
 
-The October plan assigned no feature phase to 0.22. The November vote
-added Beta 1 to the source that must pass phases 3–5.
+The October plan assigned no feature phase to 0.22. The first November vote
+added Beta 1. The following phases record the original plan. Section 6.4
+supersedes its signing, publication and driver-adoption steps.
 
 0. **Preserve** - done: the candidate's read-only snapshot,
    `C:\dev\.preserve\2026-10-28-machteld-0.22-candidate` (verified when made);
@@ -345,7 +348,7 @@ added Beta 1 to the source that must pass phases 3–5.
    runtime's own knowledge from zef. Every commit gated green. Then the
    rulings of 2026-10-30 (0f62438 and this plan).
 
-What remains:
+The original remaining phases were as follows.
 
 3. **The ledger** (4.2), test first: each fix with a regression test that
    fails before it, grouped by severity. A group is integrated with the tests
@@ -579,6 +582,17 @@ The following numbers match the November release poll.
     `main` after its checks pass. Signing and release publication are
     separate owner decisions.
 
+### 6.4. Direct release decision (2026-11-25)
+
+Signed 0.21 is the upgrade source and the build driver. Preserve the 22
+commits, existing tags, Beta 1 receipts and reconciled source as history.
+Close the standalone 0.22 release work. Apply the preparation decisions on
+build outputs, unsigned CI, reproducibility, attended checks, signing and
+publication to 0.30. The approved ownership poll assigns 25 capabilities
+to the shared executable. Applications supply system-wide hotkeys. The
+independently installable runtime and the application archive replace
+executable-producing `wrap` for new delivery.
+
 ## 7. Log
 
 <!-- machteld-version-history: begin -->
@@ -665,13 +679,13 @@ The following numbers match the November release poll.
 
 ## 8. Plans for 0.30
 
-The “Delivery order” section of the [roadmap](docs/roadmap.md) gives the
-implementation sequence. The items below collect the design rulings by topic.
+The roadmap records the 26 ownership decisions and their implementation sequence.
+The items below collect the earlier design rulings by topic.
 New commands go through the admission questions. The candidates of 4.3
-and the ledger's deferred items (4.2) supply further design input.
+and the ledger's deferred items (4.2) supply further design input. [Roadmap](docs/roadmap.md)
 
 1. **The FFI, the first bundle planned for 0.30** (rulings 3–5). cffi 2.0.3 (BSD-2, Ashok
-   Nadkarni) on libffi 3.5.2 (MIT), static in both hosts and loaded only on
+   Nadkarni) on libffi 3.5.2 (MIT), statically linked in the runtime and loaded only on
    `package require cffi`, built without callbacks, so no executable memory.
    Four machteld patches, recorded and tested: no callbacks; a loader that
    searches only System32 or the given absolute path; strict UTF-16 text; no
@@ -700,8 +714,9 @@ and the ledger's deferred items (4.2) supply further design input.
    thread, with cancellation points. The 0.22 `machteld::job` package already
    delivers worker records through the event loop. Milestone 30.2 covers
    native child-completion notifications.
-   Cancellable HTTP follows at 30.7. Other candidates include `hash file`,
-   `dirs`/`links`, and readiness events for `watch` and `pty`.
+   Cancellable HTTP follows at 30.7, including progressive delivery of
+   binary response chunks with bounded buffering. Other candidates include
+   `hash file`, `dirs`/`links`, and readiness events for `watch` and `pty`.
 4. **One runtime for scripts and archives.** Both `machteld.exe app.tcl` and
    `machteld.exe app.machteld` run in 0.22. For desktop shortcuts in 0.30,
    keep the Windows console subsystem and embed `consoleAllocationPolicy`
@@ -739,8 +754,10 @@ and the ledger's deferred items (4.2) supply further design input.
    `docs\proposals\console-ctrl`, as its design input.
 7. **SQLite full-text search.** The 0.22 runtime already exposes SQL through
    the upstream Tcl `sqlite3` binding, sharing the pinned engine with `store`.
-   Enable FTS5 for documentation search. Applications own their query
-   policies, schemas, migrations and backup guarantees.
+   Enable FTS5 for documentation search. Ship the numbered-parameter helper,
+   opt-in connection profile and verified, create-only backups described in the
+   [roadmap](docs/roadmap.md). Applications own their query policies,
+   schemas, migrations, backup schedules, retention and restore decisions.
 8. **Graphviz layout and drawing for Tk, immediately after full SQL.** Embed
    the static Graphviz `dot` layout engine with orthogonal routing, HTML-like
    table labels backed by static Expat, and xdot drawing instructions. A Tcl
@@ -761,3 +778,119 @@ and the ledger's deferred items (4.2) supply further design input.
 
 Rejected: Tcl's Thread package (2026-10-29) and a GUI twin of `machteld.exe`
 (ruling 18). Ruling 9 keeps Tcl at 9.0.4 through 0.30.
+
+## Implementation and release gates for 0.30
+
+The build starts from `eccba70` on `main`. Signed 0.21 is the driver in
+`dist/0.21`, the dependency cache supplies the static Tcl build interpreter,
+and the candidate is the executable under test. An implementation change
+is complete when its public Tcl contract, code, platform fixtures, reference
+entry, example and gate lane agree. Use small commits that can be reverted
+independently. Keep application source, profiles and credentials in their
+own repositories. Public regression fixtures use synthetic data.
+[Build instructions](BUILDING.md) · [Capability contracts](docs/roadmap.md)
+
+### Work sequence and exit criteria
+
+| Work | Deliverable and condition for moving on |
+| --- | --- |
+| **1. Reproduce the baseline and open contracts (30.0–30.1)** | Capture the 0.21 driver hash, source SHA, commit timestamp, OS, tool and dependency receipts. Fix the manifest-input mismatch described below. Review the open stabilization ledger against current source and keep a failing regression fixture for each confirmed defect. Run the porting application's existing suite on signed 0.21 with its current extension and record runtime gaps separately from app failures. Agree on observable results, errors, cancellation and resource limits before implementing each API. |
+| **2. First feature and process foundation (30.9, then 30.2–30.3)** | Introduce synchronous cffi with the pinned libffi and loader rules in section 8. Make the first feature change advance the header, Tcl prelude, generated Windows version resource, manifest, version checks and current docs to 30 together. Exercise exact and ranged package requirements, including rejection of the exclusive upper bound in `22-30`. Keep the build scripts on signed 0.21. Then deliver event-loop child completion, shutdown and initial window visibility. Test error paths, ownership and cancellation before other features depend on them. |
+| **3. Single executable and archives (30.4a, 30.4)** | Implement the detached-console manifest and verified inventory in the entry, archive and packaging code. Replace wrapper-dependent examples and tests before removing the templates. Run a legacy 0.21 wrapped tool, package its original Tcl sources as a 0.30 archive and launch through a desktop shortcut. Document differences in app identity and writable data paths. Exercise an existing 22 archive and document conversion if required. Verify terminal I/O, relocation and worker-generation pinning. Inventory hashes check contents. The signed runtime identifies its publisher. |
+| **4. SQLite, then Graphviz (30.5, 30.5a)** | Exercise the same SQLite engine through `store` and the Tcl binding, three-gram FTS5 indexes, typed numbered parameters, opt-in safeguards on each connection, and verified create-only backup under contention. Compare default connection behavior with baseline fixtures. Review build-wide SQLite options separately from opt-in settings. Immediately follow full SQL with static Graphviz, Expat and a Tk diagram with named ports. Pin sources and notices and measure packaged size against the matching SQL build. The compact offline reference can follow once FTS5 is available. |
+| **5. Desktop and files (30.6, 30.6b)** | Build browser session control on the tested process and window lifetime behavior. Cover external launch, session reattachment, cancelling a pending navigation, window switching, Start menu/Store discovery, Explorer drops and opening associated documents. Add per-user storage, confirmed saves, cloud-aware listings and reads, encoding detection and seed-zero XXH3-64. Test browser control with a local page and the file operations with the failure and concurrency cases in the roadmap. |
+| **6. Networking and workers (30.7–30.8)** | Deliver the loopback HTTP server and bounded, cancellable streaming client. Test an indefinitely open response, slow consumers, disconnect and restart. Add adapter details and source-bound ping. Qualify UDP before the NTS client. Use a controlled time server and known credentials for valid and invalid authentication, replay and timeout cases. Reusable workers must retain deadlines, cleanup and their archive generation across an update. |
+| **7. Audio and graphics** | Prove PCM output and MP3, AAC and HE-AAC decoding with local fixtures. Then join HTTP, playlist refresh, MPEG-TS extraction, decoding and playback into one cancellable HLS test. Exercise Direct2D and Direct3D 11 on Tk widgets through resize, device loss and recreation. Use pixel readback or a reference signal where machines can check the result. Confirm audio, rendering and focus on a real desktop. |
+| **8. Application qualification and release (30.10)** | Run the runtime regressions, relocated packaged examples and the porting suite against the release candidate. Use the signed candidate for the managed desktop, proxy, sign-in and live-share update tests. Record which application-specific checks passed, remained unavailable or exposed a runtime defect. Resolve runtime defects against their smallest fixture and repeat their dependent lanes. Follow the sign-off sequence below. |
+
+### First engineering tasks
+
+1. **Control the implicit linker input.** At the same epoch (`1795616467`)
+   the PC's unsigned 22 executable started with SHA-256 `5f763b71` and the
+   hosted executable with `663fcff1`. A local control replay reproduced
+   the first hash. Changing only MSYS2's `default-manifest.o` reproduced
+   the second. The machines used package revisions `6.4-4` and
+   `20260815-1`. Pin and verify the actual object/package in
+   `tools/dependencies.lock.json`, bootstrap, build identity and Windows
+   CI, or explicitly supply a project-owned manifest and prove the implicit
+   object is excluded. Inspect the linked PE manifest and VERSIONINFO,
+   deliberately exercise a mismatched input, and compare cold builds
+   across both hosts. Repeat after the detached-console manifest lands.
+   [Hosted baseline run](https://github.com/anafalanx/machteld/actions/runs/45636999191)
+2. **Prepare fixtures and facilities during foundation work.** Inventory
+   exact versions, licenses, build flags, patches, notices and hashes for
+   all new shipped libraries and media fixtures. Check which decoders are
+   present on each Windows target and how the runtime will supply HE-AAC
+   where the OS component is missing. Verify a TLS backend that supports
+   NTS key export and authenticated packets. Measure executable size,
+   startup time and first use against the previous milestone as each major
+   dependency lands. Establish access to an
+   attended Windows 11 desktop, hardware audio/GPU, controllable cloud
+   placeholders, two adapters and a representative managed share. A
+   missing facility is an open test obligation. Raise a backend or support
+   decision while there is still time to change the implementation.
+3. **Make development feedback reliable.** Extend the current main/legacy
+   branch jobs to run the fast lane and relevant integration lane on 0.30
+   integration changes. Build independent cold candidates at integration
+   milestones and at the release freeze. Keep unsigned executables on the
+   build PC or inside their hosted job. Share checksums and test receipts.
+   The reproducibility check on one hosted runner catches repeat-build
+   differences. Compare its receipt with the build PC's for cross-host proof.
+4. **Exercise long-lived behavior.** At integration milestones, repeatedly
+   open and close browser sessions, cancel and restart streams, retire
+   workers and recreate Tk surfaces while work is pending. Record the
+   cycle count, random seed where used, peak and post-cleanup handle counts
+   and memory. Keep the first failing trace and turn it into a repeatable
+   regression. Run these longer cases outside the per-change fast lane.
+
+### Test cadence and evidence
+
+| When and where | Evidence required |
+| --- | --- |
+| **Each implementation slice, build PC** | Run the fast gate and the affected groups. Include valid, invalid and boundary inputs, repeated open/use/close, cancellation during work, competing callers where relevant, and failure after partial completion. For Windows handles, threads and callbacks, exercise interpreter shutdown and measure resource counts before and after repeated cycles. Measure queue bounds, cancellation latency and Tk event delivery against limits written into the feature contract. |
+| **At integration, build PC and hosted Windows Server 2025 x64** | Run all five gate groups: fast, integration, packaging, native-validation and reference-generator. Preserve coverage as obsolete basekit and wrap tests are retired. Package synthetic examples with the candidate and run them after relocation without the source tree. Exercise read-only assets and external writable state, damaged archives, version boundaries and archive replacement while old workers run. Probe instrumentation with positive/negative controls and retain actual coverage limits. [Native validation](docs/native-validation.md) |
+| **Feature-specific oracles and load** | Compare XXH3-64 with stored reference values, PDF and archive outputs by bytes, SQL against known rows and independent integrity checks, HTTP/UDP against controlled peers, media against known duration and signal, and rendered frames by pixel readback. Exercise the 100,000-entry directory and record game frame pacing against 60 Hz. Capture scenario, sample size, latency distribution, peak memory and handles alongside hardware/driver details. Compare with the same fixture and baseline before accepting a regression. |
+| **Desktop and device qualification** | Automate repeatable GUI cases on an isolated desktop. Record attended checks on supported x64 Windows 11 25H2 and the supported Windows Server 2025 configuration, distinguishing actual device coverage from the hosted runner. Exercise two-adapter selection, a placeholder made online-only after listing, a real Explorer drop, default viewer, foreground selection and browser sign-in/resume. Verify audible output and real GPU rendering. Record software rendering and unavailable-device behavior separately. |
+| **Release candidate and deployment** | Use exact release-source and artifact hashes. Test the compact reference offline for command discovery and bounded retrieval. Compare two default app launches, an in-use archive update, managed proxy and SMB permissions, old/new sessions and recovery to the previous runtime/archive pair. Verify a clean desktop can launch using the runtime, app archive and documented Windows prerequisites. Use a signed copy on machines outside the build PC and hosted CI. |
+
+Existing gate entry points from the repository root are shown below. The
+0.30 work adds or replaces fixtures behind these lanes. The development
+command tests an already built candidate. Supply `--msys` or `MSYS2_ROOT`
+as described in the build guide. Use `--interactive-gui`, `--interactive-pty`
+and `--public-tls` in the environments that can exercise them.
+
+```powershell
+& .\dist\0.21\machteld.exe tools\gate.tcl --group fast --group integration --runtime out/dev/machteld.exe
+& .\dist\0.21\machteld.exe tools\gate.tcl --msys C:\dev\.z\r\msys2
+& .\dist\0.21\machteld.exe tools\gate.tcl --skip-build --runtime $signedCandidate
+```
+
+Set `$signedCandidate` to the owner's signed release copy for the last
+command. For each gate record the commit, driver/candidate SHA-256, lock
+and input identities, epoch, OS build and options, expected and actual
+result, and diagnostic or receipt location. Distinguish pass, fail and
+unavailable. A skipped mandatory test stays open. A fix after a freeze
+starts a new candidate with fresh reproducibility and acceptance evidence.
+
+### Signing, publication and recovery
+
+1. Freeze the release commit with public version 30, Windows file version
+   `30.0.0.0` and the prerelease flag clear. From independent clean
+   checkouts and fresh dependency caches, set `SOURCE_DATE_EPOCH` to the
+   same commit timestamp and compare the **complete unsigned SHA-256**
+   across the build PC and hosted CI. Compare incremental output separately,
+   accounting for its development-only build record. Archive test receipts,
+   source/lock hashes and any approved external prerequisites.
+2. After the unsigned gate passes, the owner signs a copy on the build PC.
+   Verify the Authenticode signer, the signed executable's version, payload
+   and SHA-256. Run the full gate with `--skip-build --runtime` on **those
+   signed bytes**. Use that same hash for the second-PC, attended and
+   managed-share qualification. A signature changes the executable hash.
+   Record both unsigned and signed identities.
+3. The owner authorizes publication after reviewing the required receipts.
+   Tag the tested release commit, publish the verified signed bytes and
+   checksum, and publish the 0.21 upgrade and archive migration instructions.
+   Retain the prior signed release and last known-good app archive. Exercise
+   restore using a copy of external app data before approving a deployment
+   that changes its schema. Move the driver to verified signed 0.30 in a
+   separate change and run the gate again using the newly pinned driver.
