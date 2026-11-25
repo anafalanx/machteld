@@ -243,8 +243,8 @@ Start with [the documentation index](docs/index.md) or the
 Machteld's own code is licensed under the [Apache License 2.0](LICENSE).
 Bundled material retains its own terms, including the verbatim
 [Tcl](licenses/Tcl-9.0.4.txt), [Tk](licenses/Tk-9.0.4.txt),
-[zlib](licenses/zlib-1.3.2.txt), [LibTomMath](licenses/LibTomMath-1.3.0.txt), and
-[yyjson](licenses/yyjson-0.12.0.txt) notices. The foreign-function interface includes
+[zlib](licenses/zlib-1.3.2.txt), [LibTomMath](licenses/LibTomMath-1.3.0.txt),
+[yyjson](licenses/yyjson-0.12.0.txt) and [xxHash](licenses/xxHash-0.8.3.txt) notices. The foreign-function interface includes
 [cffi](licenses/cffi-2.0.3.txt), [Tclh](licenses/tclh-6afd306.txt) and
 [libffi](licenses/libffi-3.5.2.txt). The statically linked SQLite
 amalgamation is public domain. JSONTestSuite is test-only and retains

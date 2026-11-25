@@ -24,7 +24,7 @@ hash random count
 
 ## Arguments and options
 
-`algorithm` is one of `md5`, `sha1`, `sha256`, `sha384`, or `sha512`.
+`algorithm` is one of `md5`, `sha1`, `sha256`, `sha384`, `sha512`, or `xxh3-64`.
 `-binary` selects a bytearray digest instead of lowercase hexadecimal. Bytearray
 values remain byte-for-byte; other values are converted to external UTF-8, as
 by `encoding convertto utf-8`, not hashed in Tcl's internal string encoding.
@@ -63,9 +63,16 @@ set nonce [hash random 32]
 
 ## Constraints
 
-The implementation uses Windows CNG. MD5 and SHA-1 are available for
+The cryptographic algorithms use Windows CNG. MD5 and SHA-1 are available for
 interoperability, not recommended for collision resistance. `random` uses the
 system-preferred cryptographic generator.
+
+`xxh3-64` computes a noncryptographic seed-zero XXH3-64 file checksum.
+The sixteen lowercase hexadecimal digits match `xxhsum -H3`. With `-binary`
+it returns the same eight bytes most significant first. To compare with a
+catalog that stores the bits in a signed SQLite INTEGER, use
+`binary scan [hash file xxh3-64 $path -binary] W signed`. The variable
+`signed` then holds the signed 64-bit value.
 
 ## Subcommands
 
@@ -158,6 +165,7 @@ Returns the HMAC digest.
 
 #### Errors
 
+The noncryptographic `xxh3-64` algorithm reports `HASH badvalue` for HMAC.
 Invalid algorithm/size and CNG failures use `HASH badvalue` or `oserror`.
 
 #### Lifetime and timeouts
@@ -197,7 +205,7 @@ Unknown algorithms and allocation/provider failures use `badvalue`/`oserror`.
 
 #### Lifetime and timeouts
 
-The token owns native CNG state until `final` or interpreter teardown.
+The token owns the algorithm's native state until `final` or interpreter teardown.
 
 #### Examples
 
@@ -329,7 +337,7 @@ No arguments.
 
 #### Results
 
-Returns `md5 sha1 sha256 sha384 sha512`.
+Returns `md5 sha1 sha256 sha384 sha512 xxh3-64`.
 
 #### Errors
 

@@ -704,6 +704,17 @@ proc ::boot::main {argv} {
         file delete -force $yyjsonExtract
     }
 
+    set xxhash [dict get $archives xxhash]
+    unpack [getDownload $xxhash] $sourceRoot
+    set xxsrc [file join $sourceRoot [dict get $xxhash directory]]
+    set header [file join $xxsrc xxhash.h]
+    assertHash $header [dict get $xxhash headerSha256] "xxHash header"
+    set notice [dict get $xxhash notice]
+    assertHash [file join $xxsrc LICENSE] [dict get $notice sha256] "xxHash source notice"
+    assertHash [file join $root licenses [dict get $notice file]] [dict get $notice sha256] "xxHash distributed notice"
+    file mkdir [file join $prefix include machteld-vendor]
+    file copy -force $header [file join $prefix include machteld-vendor xxhash.h]
+
     stageCffi $sourceRoot $archives [dict get $lock patches]
     stageGraphviz $sourceRoot $archives
     if {$sourcesOnly} {

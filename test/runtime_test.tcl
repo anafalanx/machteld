@@ -121,6 +121,7 @@ foreach {notice expected} {
     graphviz-ellipse.txt 133e194718ad2183f397682ca271ff088de745d6859c524483e1c743f1b992cd
     expat-2.8.1.txt 31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87
     libffi-3.5.2.txt d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366
+    xxHash-0.8.3.txt 6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a
 } {
     set path [file join //zipfs:/app/licenses $notice]
     if {![file isfile $path]} {

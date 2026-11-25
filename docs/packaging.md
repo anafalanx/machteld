@@ -123,6 +123,8 @@ that needs to find an application-specific disk file can resolve it beside
 the archive via `$argv0`. Use `[info script]` for files inside the archive
 and `[info nameofexecutable]` for the runtime itself.
 
+The runtime carries its bundled library notices in the embedded `licenses/` directory, including xxHash, Graphviz and Expat.
+
 ## External DLLs
 
 Place an application-supplied DLL, its dependencies and notices in the

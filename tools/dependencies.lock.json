@@ -82,6 +82,19 @@
       "sha256": "b16246f617b2a136c78d73e5e2647c6f1de1313e46678062985bdcf1f40bb75d"
     },
     {
+      "id": "xxhash",
+      "version": "0.8.3",
+      "file": "xxhash-0.8.3.tar.gz",
+      "url": "https://codeload.github.com/Cyan4973/xxHash/tar.gz/refs/tags/v0.8.3",
+      "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+      "directory": "xxHash-0.8.3",
+      "headerSha256": "17973c0dc49d9854ca26caa191f0e12f7a424b68858d9a78de3860d959d85e4b",
+      "notice": {
+        "file": "xxHash-0.8.3.txt",
+        "sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a"
+      }
+    },
+    {
       "id": "cffi",
       "version": "2.0.3",
       "file": "cffi-2.0.3.tar.gz",

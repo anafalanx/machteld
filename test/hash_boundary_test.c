@@ -29,8 +29,22 @@ int main(int argc, char **argv) {
     if (state->ctxs != NULL) failures++;
     if (Tcl_Eval(interp, "::machteld::hash sum sha256 abc") != TCL_OK ||
             strcmp(Tcl_GetStringResult(interp), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") != 0) failures++;
+    if (Tcl_Eval(interp, "::machteld::hash start xxh3-64") != TCL_ERROR ||
+            state->ctxs != NULL || state->seq != INT_MAX) failures++;
+
+    state->seq = 0;
+    if (Tcl_Eval(interp, "set live [::machteld::hash start xxh3-64]") != TCL_OK) return 2;
+    /* Reject oversized lengths before either implementation reads the buffer. */
+    const unsigned char byte = 1;
+    if (digest_update(interp, &state->ctxs->digest, &byte, (Tcl_Size)ULONG_MAX + 1) != TCL_ERROR ||
+            digest_update(interp, &state->ctxs->digest, &byte, -1) != TCL_ERROR) failures++;
+    if (Tcl_Eval(interp, "::machteld::hash update $live abc; ::machteld::hash final $live") != TCL_OK ||
+            strcmp(Tcl_GetStringResult(interp), "78af5f94892f3950") != 0 || state->ctxs != NULL) failures++;
+    /* Leave a CNG provider and an aligned xxHash state live across teardown. */
+    if (Tcl_Eval(interp, "::machteld::hash start sha256; ::machteld::hash start xxh3-64") != TCL_OK ||
+            state->ctxs == NULL || state->ctxs->next == NULL) failures++;
     Tcl_DeleteInterp(interp);
     Tcl_Finalize();
-    printf("hash boundary: %d/6 passed; %d failures\n", 6 - failures, failures);
+    printf("hash boundary: %d/10 passed; %d failures\n", 10 - failures, failures);
     return failures ? 1 : 0;
 }

@@ -1,7 +1,8 @@
 /*
  * hash.c -- ::machteld::hash: digests, HMAC and cryptographic random.
  *
- * It uses Windows CNG (bcrypt.dll): no vendored crypto or runtime DLLs.
+ * Windows CNG supplies crypto. The statically compiled xxHash library supplies
+ * the seed-zero XXH3-64 checksums used by file catalogs.
  *
  * WHICH BYTES GET HASHED -- the decision that actually matters here. A Tcl value
  * is not bytes; it is a value that has a byte representation depending on how you
@@ -31,6 +32,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
+#define XXH_INLINE_ALL
+#include <machteld-vendor/xxhash.h>
 
 #define HASH_CHUNK (64 * 1024)
 #define HASH_MAX_DIGEST 64
@@ -52,6 +55,7 @@ static const alg_t ALGS[] = {
     { "sha256", BCRYPT_SHA256_ALGORITHM },
     { "sha384", BCRYPT_SHA384_ALGORITHM },
     { "sha512", BCRYPT_SHA512_ALGORITHM },
+    { "xxh3-64", NULL }, /* A named entry without a CNG provider uses xxHash. */
     { NULL, NULL }
 };
 
@@ -62,15 +66,17 @@ static const alg_t *alg_find(const char *name) {
     return NULL;
 }
 
-/* An open incremental context. Stateful, so it is a token with the same lifetime
- * discipline as child#N / pty#N / watch#N -- `list` to see them, and `final`
- * consumes it. */
-typedef struct hctx_s {
-    char   token[24];
-    const alg_t *alg;
+/* One backend owns the state; the xxHash allocator supplies its alignment. */
+typedef struct {
     BCRYPT_ALG_HANDLE  alg_h;
     BCRYPT_HASH_HANDLE h;
+    XXH3_state_t *xxh;
     DWORD  digest_len;
+} digest_t;
+
+typedef struct hctx_s {
+    char token[24];
+    digest_t digest;
     struct hctx_s *next;
 } hctx_t;
 
@@ -86,41 +92,64 @@ static hctx_t *hctx_find(hash_state *st, const char *token) {
     return NULL;
 }
 
+static void digest_close(digest_t *digest) {
+    if (digest->xxh != NULL) XXH3_freeState(digest->xxh);
+    if (digest->h != NULL) BCryptDestroyHash(digest->h);
+    if (digest->alg_h != NULL) BCryptCloseAlgorithmProvider(digest->alg_h, 0);
+}
+
 static void hctx_free(hash_state *st, hctx_t *c) {
     for (hctx_t **p = &st->ctxs; *p; p = &(*p)->next) {
         if (*p == c) { *p = c->next; break; }
     }
-    if (c->h != NULL) BCryptDestroyHash(c->h);
-    if (c->alg_h != NULL) BCryptCloseAlgorithmProvider(c->alg_h, 0);
+    digest_close(&c->digest);
     free(c);
 }
 
-/* Open a provider and a hash object. `key` non-NULL makes it an HMAC. */
-static int alg_open(Tcl_Interp *interp, const alg_t *a, const unsigned char *key, Tcl_Size keylen,
-                    BCRYPT_ALG_HANDLE *alg_h, BCRYPT_HASH_HANDLE *h, DWORD *dlen) {
-    ULONG flags = (key != NULL) ? BCRYPT_ALG_HANDLE_HMAC_FLAG : 0;
-    if (BCryptOpenAlgorithmProvider(alg_h, a->id, NULL, flags) != 0) {
+/* The caller zeroes the state and closes it even when initialization fails. */
+static int digest_open(Tcl_Interp *interp, digest_t *digest, const alg_t *a,
+                       int hmac, const unsigned char *key, Tcl_Size keylen) {
+    if (a->id == NULL) {
+        if (hmac) return hash_error(interp, "badvalue", "xxh3-64 does not support HMAC");
+        digest->xxh = XXH3_createState();
+        if (digest->xxh == NULL || XXH3_64bits_reset(digest->xxh) != XXH_OK) {
+            return hash_error(interp, "oserror", "cannot create the XXH3 state");
+        }
+        digest->digest_len = sizeof(XXH64_canonical_t);
+        return TCL_OK;
+    }
+    if (keylen < 0 || (unsigned long long)keylen > ULONG_MAX) {
+        return hash_error(interp, "badvalue", "the HMAC key is too large");
+    }
+    ULONG flags = hmac ? BCRYPT_ALG_HANDLE_HMAC_FLAG : 0;
+    if (BCryptOpenAlgorithmProvider(&digest->alg_h, a->id, NULL, flags) != 0) {
         return hash_error(interp, "oserror", "cannot open the crypto provider");
     }
     DWORD n = 0, cb = 0;
-    if (BCryptGetProperty(*alg_h, BCRYPT_HASH_LENGTH, (PUCHAR)&n, sizeof n, &cb, 0) != 0) {
-        BCryptCloseAlgorithmProvider(*alg_h, 0);
+    if (BCryptGetProperty(digest->alg_h, BCRYPT_HASH_LENGTH, (PUCHAR)&n, sizeof n, &cb, 0) != 0) {
         return hash_error(interp, "oserror", "cannot read the digest length");
     }
     if (n == 0 || n > HASH_MAX_DIGEST) {
-        BCryptCloseAlgorithmProvider(*alg_h, 0);
         return hash_error(interp, "oserror", "the crypto provider returned an invalid digest length");
     }
-    *dlen = n;
-    if (keylen < 0 || (unsigned long long)keylen > ULONG_MAX) {
-        BCryptCloseAlgorithmProvider(*alg_h, 0);
-        return hash_error(interp, "badvalue", "the HMAC key is too large");
-    }
-    if (BCryptCreateHash(*alg_h, h, NULL, 0, (PUCHAR)key, (ULONG)keylen, 0) != 0) {
-        BCryptCloseAlgorithmProvider(*alg_h, 0);
+    digest->digest_len = n;
+    if (BCryptCreateHash(digest->alg_h, &digest->h, NULL, 0, (PUCHAR)key, (ULONG)keylen, 0) != 0) {
         return hash_error(interp, "oserror", "cannot create the hash object");
     }
     return TCL_OK;
+}
+
+static int digest_update(Tcl_Interp *interp, digest_t *digest, const unsigned char *data, Tcl_Size len) {
+    /* Keep the public per-update limit consistent across algorithms. */
+    if (len < 0 || (unsigned long long)len > ULONG_MAX) {
+        return hash_error(interp, "badvalue", "the input is too large");
+    }
+    if (digest->xxh != NULL) {
+        if (XXH3_64bits_update(digest->xxh, data, (size_t)len) == XXH_OK) return TCL_OK;
+    } else if (BCryptHashData(digest->h, (PUCHAR)data, (ULONG)len, 0) == 0) {
+        return TCL_OK;
+    }
+    return hash_error(interp, "oserror", "hashing failed");
 }
 
 /* The bytes of a Tcl value come from Machteld_ValueBytes (machteld.h), the byte
@@ -139,6 +168,21 @@ static Tcl_Obj *digest_obj(const unsigned char *d, DWORD n, int binary) {
     Tcl_Obj *o = Tcl_NewStringObj(hex, (Tcl_Size)n * 2);
     free(hex);
     return o;
+}
+
+static int digest_result(Tcl_Interp *interp, digest_t *digest, int binary) {
+    unsigned char out[HASH_MAX_DIGEST];
+    if (digest->xxh != NULL) {
+        XXH64_canonical_t canonical;
+        XXH64_canonicalFromHash(&canonical, XXH3_64bits_digest(digest->xxh));
+        memcpy(out, canonical.digest, sizeof(canonical.digest));
+    } else if (BCryptFinishHash(digest->h, out, digest->digest_len, 0) != 0) {
+        return hash_error(interp, "oserror", "finishing the hash failed");
+    }
+    Tcl_Obj *result = digest_obj(out, digest->digest_len, binary);
+    if (result == NULL) return hash_error(interp, "oserror", "out of memory");
+    Tcl_SetObjResult(interp, result);
+    return TCL_OK;
 }
 
 /* -binary, shared by sum / file / hmac / final. Returns -1 on a bad option. */
@@ -230,11 +274,11 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             }
             hctx_t *c = (hctx_t *)calloc(1, sizeof(*c));
             if (c == NULL) return hash_error(interp, "oserror", "out of memory");
-            if (alg_open(interp, a, NULL, 0, &c->alg_h, &c->h, &c->digest_len) != TCL_OK) {
+            if (digest_open(interp, &c->digest, a, 0, NULL, 0) != TCL_OK) {
+                digest_close(&c->digest);
                 free(c);
                 return TCL_ERROR;
             }
-            c->alg = a;
             snprintf(c->token, sizeof c->token, "hash#%d", ++st->seq);
             c->next = st->ctxs;
             st->ctxs = c;
@@ -242,61 +286,29 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             return TCL_OK;
         }
 
-        if (idx == HMAC) {
-            if (objc < 5) { Tcl_WrongNumArgs(interp, 2, objv, "algorithm key data ?-binary?"); return TCL_ERROR; }
-            int binary = want_binary(interp, objc, objv, 5);
-            if (binary < 0) return TCL_ERROR;
-            Tcl_Size klen = 0, dlen_in = 0;
-            Tcl_DString kds, dds;
-            const unsigned char *key = Machteld_ValueBytes(objv[3], &klen, &kds);
-            const unsigned char *data = Machteld_ValueBytes(objv[4], &dlen_in, &dds);
-            if (dlen_in < 0 || (unsigned long long)dlen_in > ULONG_MAX) {
-                Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
-                return hash_error(interp, "badvalue", "the input is too large");
-            }
-            BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
-            if (alg_open(interp, a, key, klen, &ah, &hh, &dn) != TCL_OK) {
-                Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
+        if (idx == SUM || idx == HMAC) {
+            int hmac = idx == HMAC;
+            int count = hmac ? 5 : 4;
+            if (objc < count) {
+                Tcl_WrongNumArgs(interp, 2, objv, hmac ? "algorithm key data ?-binary?" : "algorithm data ?-binary?");
                 return TCL_ERROR;
             }
-            unsigned char out[64];
-            int ok = (BCryptHashData(hh, (PUCHAR)data, (ULONG)dlen_in, 0) == 0) &&
-                     (BCryptFinishHash(hh, out, dn, 0) == 0);
-            Tcl_DStringFree(&kds); Tcl_DStringFree(&dds);
-            BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
-            if (!ok) return hash_error(interp, "oserror", "hmac failed");
-            Tcl_Obj *result = digest_obj(out, dn, binary);
-            if (result == NULL) return hash_error(interp, "oserror", "out of memory");
-            Tcl_SetObjResult(interp, result);
-            return TCL_OK;
-        }
-
-        if (idx == SUM) {
-            if (objc < 4) { Tcl_WrongNumArgs(interp, 2, objv, "algorithm data ?-binary?"); return TCL_ERROR; }
-            int binary = want_binary(interp, objc, objv, 4);
+            int binary = want_binary(interp, objc, objv, count);
             if (binary < 0) return TCL_ERROR;
-            Tcl_Size n = 0;
-            Tcl_DString ds;
-            const unsigned char *data = Machteld_ValueBytes(objv[3], &n, &ds);
-            if (n < 0 || (unsigned long long)n > ULONG_MAX) {
+            Tcl_Size klen = 0, n = 0;
+            Tcl_DString kds, ds;
+            const unsigned char *key = hmac ? Machteld_ValueBytes(objv[3], &klen, &kds) : NULL;
+            digest_t digest = {0};
+            int rc = digest_open(interp, &digest, a, hmac, key, klen);
+            if (hmac) Tcl_DStringFree(&kds);
+            if (rc == TCL_OK) {
+                const unsigned char *data = Machteld_ValueBytes(objv[count - 1], &n, &ds);
+                rc = digest_update(interp, &digest, data, n);
                 Tcl_DStringFree(&ds);
-                return hash_error(interp, "badvalue", "the input is too large");
             }
-            BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
-            if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) {
-                Tcl_DStringFree(&ds);
-                return TCL_ERROR;
-            }
-            unsigned char out[64];
-            int ok = (BCryptHashData(hh, (PUCHAR)data, (ULONG)n, 0) == 0) &&
-                     (BCryptFinishHash(hh, out, dn, 0) == 0);
-            Tcl_DStringFree(&ds);
-            BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
-            if (!ok) return hash_error(interp, "oserror", "hashing failed");
-            Tcl_Obj *result = digest_obj(out, dn, binary);
-            if (result == NULL) return hash_error(interp, "oserror", "out of memory");
-            Tcl_SetObjResult(interp, result);
-            return TCL_OK;
+            if (rc == TCL_OK) rc = digest_result(interp, &digest, binary);
+            digest_close(&digest);
+            return rc;
         }
 
         /* FILE_: streamed in chunks, so hashing a DVD image costs 64 KB of
@@ -323,8 +335,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             Tcl_Close(NULL, ch);
             return TCL_ERROR;
         }
-        BCRYPT_ALG_HANDLE ah; BCRYPT_HASH_HANDLE hh; DWORD dn;
-        if (alg_open(interp, a, NULL, 0, &ah, &hh, &dn) != TCL_OK) {
+        digest_t digest = {0};
+        if (digest_open(interp, &digest, a, 0, NULL, 0) != TCL_OK) {
+            digest_close(&digest);
             Tcl_Close(NULL, ch);
             return TCL_ERROR;
         }
@@ -334,22 +347,15 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             Tcl_Size got = Tcl_ReadRaw(ch, (char *)buf, HASH_CHUNK);
             if (got < 0) { failed = 1; break; }
             if (got == 0) break;
-            if (BCryptHashData(hh, buf, (ULONG)got, 0) != 0) {
+            if (digest_update(interp, &digest, buf, got) != TCL_OK) {
                 failed = 1;
                 break;
             }
         }
         if (Tcl_Close(interp, ch) != TCL_OK) failed = 1;
-        unsigned char out[64];
-        if (failed || BCryptFinishHash(hh, out, dn, 0) != 0) {
-            BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
-            return hash_error(interp, "oserror", "reading the file failed");
-        }
-        BCryptDestroyHash(hh); BCryptCloseAlgorithmProvider(ah, 0);
-        Tcl_Obj *result = digest_obj(out, dn, binary);
-        if (result == NULL) return hash_error(interp, "oserror", "out of memory");
-        Tcl_SetObjResult(interp, result);
-        return TCL_OK;
+        int rc = failed ? hash_error(interp, "oserror", "reading the file failed") : digest_result(interp, &digest, binary);
+        digest_close(&digest);
+        return rc;
     }
 
     /* UPDATE / FINAL: both take a token. */
@@ -362,12 +368,7 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         Tcl_Size n = 0;
         Tcl_DString ds;
         const unsigned char *data = Machteld_ValueBytes(objv[3], &n, &ds);
-        int rc = TCL_OK;
-        if (n < 0 || (unsigned long long)n > ULONG_MAX) {
-            rc = hash_error(interp, "badvalue", "the input is too large");
-        } else if (BCryptHashData(c->h, (PUCHAR)data, (ULONG)n, 0) != 0) {
-            rc = hash_error(interp, "oserror", "hashing failed");
-        }
+        int rc = digest_update(interp, &c->digest, data, n);
         Tcl_DStringFree(&ds);
         return rc;
     }
@@ -376,15 +377,9 @@ static int HashCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
      * handle does not outlive the answer. */
     int binary = want_binary(interp, objc, objv, 3);
     if (binary < 0) return TCL_ERROR;
-    unsigned char out[64];
-    DWORD dn = c->digest_len;
-    int ok = (BCryptFinishHash(c->h, out, dn, 0) == 0);
+    int rc = digest_result(interp, &c->digest, binary);
     hctx_free(st, c);
-    if (!ok) return hash_error(interp, "oserror", "finishing the hash failed");
-    Tcl_Obj *result = digest_obj(out, dn, binary);
-    if (result == NULL) return hash_error(interp, "oserror", "out of memory");
-    Tcl_SetObjResult(interp, result);
-    return TCL_OK;
+    return rc;
 }
 
 /* Tcl_CmdDeleteProc takes the client data alone. Contexts left open when the
