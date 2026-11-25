@@ -65,11 +65,18 @@ namespace eval ::inspector_fairness {
                 set state(stdin) [open NUL w]
                 set state(stdout) [open $state(outputFile) rb]
                 set state(stderr) [open $state(errorFile) rb]
+                set at [lsearch -exact $args -onexit]
+                if {$at < 0} {error "missing child completion callback"}
+                set callback [lindex $args [expr {$at+1}]]
+                set state(exitEvent) [after 0 [list {*}$callback ready-channel-test [dict create exit 0 status $state(status)]]]
                 return ready-channel-test
             }
             info { return [dict create stdin $state(stdin) stdout $state(stdout) stderr $state(stderr) running 0] }
             wait { return [dict create exit 0 status $state(status)] }
-            close { foreach name {stdin stdout stderr} { catch {close $state($name)} } }
+            close {
+                after cancel $state(exitEvent)
+                foreach name {stdin stdout stderr} {catch {close $state($name)}}
+            }
             default { error "unexpected test child command: $sub" }
         }
     }
