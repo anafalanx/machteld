@@ -208,25 +208,120 @@ Each worker handles one item at a time. Each pool retains one batch of replies.
 <a id="batch"></a>
 ### batch
 
-`pool batch token items ?-command callbackPrefix?` submits a list of requests
-and returns an opaque batch token. Once work settles, the Tcl event loop calls
+#### Synopsis
+
+`pool batch token items ?-command callbackPrefix?`
+
+#### Arguments and options
+
+Supply a pool token and a list of request dictionaries. Each request must
+contain an `op`. The optional `-command` argument is a Tcl command prefix.
+
+#### Results
+
+Returns an opaque batch token. Once work settles, the Tcl event loop calls
 the prefix with the pool token and batch token, including for an empty batch.
-Use `pool result` in the callback to retrieve the outcome. Closing the pool
-cancels pending callback delivery.
+
+#### Errors
+
+`POOL busy` means a previous batch still needs completion, retrieval or
+callback delivery. Oversized input raises `POOL limit` before acceptance.
+
+#### Lifetime and timeouts
+
+Call `pool result` in the completion callback. Closing the pool cancels
+pending callback delivery. `pool wait -timeout` can bound a synchronous wait.
+
+#### Examples
+
+```tcl
+proc completed {poolToken batchToken} {
+    set ::replies [pool result $poolToken $batchToken]
+}
+set batch [pool batch $p {{op digest path a.iso} {op digest path b.iso}} -command completed]
+```
+
+#### Constraints
+
+One pool retains one batch. Retrieve its replies before reusing the workers.
+
+#### See also
+
+`machteld/command/pool#result` and `machteld/command/pool#wait`.
 
 <a id="call"></a>
 ### call
 
-`pool call token request ?-command callbackPrefix?` submits one request dict
-and returns a batch token. It uses the same limits and completion callback as
-`batch`. The result is a list containing one reply.
+#### Synopsis
+
+`pool call token request ?-command callbackPrefix?`
+
+#### Arguments and options
+
+Supply one request dictionary with an `op`. The optional completion prefix
+receives the pool token and batch token.
+
+#### Results
+
+Returns a batch token. `pool result` retrieves a list containing one reply.
+
+#### Errors
+
+The request uses the same validation, limits and busy checks as `pool batch`.
+
+#### Lifetime and timeouts
+
+The event loop delivers completion. Closing the pool cancels a pending callback.
+
+#### Examples
+
+`set batch [pool call $p [dict create op digest path a.iso] -command completed]`
+
+#### Constraints
+
+The pool must be ready to accept another batch.
+
+#### See also
+
+`machteld/command/pool#batch` and `machteld/command/pool#result`.
 
 <a id="result"></a>
 ### result
 
-`pool result token batchToken` returns the current batch's replies in submission
-order. An active batch reports `POOL busy`. A stale or foreign token reports
+#### Synopsis
+
+`pool result token batchToken`
+
+#### Arguments and options
+
+Pass the owning pool and its current batch token from `pool call` or `pool batch`.
+
+#### Results
+
+Returns replies in submission order. An empty batch returns an empty list.
+Successful retrieval permits submission of later work.
+
+#### Errors
+
+An active batch reports `POOL busy`. A stale or foreign token reports
 `POOL nohandle`. Retrieval also reports any fatal pool error.
+
+#### Lifetime and timeouts
+
+Result retrieval checks completion immediately. Reusing the pool for the next
+batch invalidates the previous batch token.
+
+#### Examples
+
+`set firstReply [lindex [pool result $p $batch] 0]`
+
+#### Constraints
+
+Service the Tcl event loop while work is in progress.
+
+#### See also
+
+`machteld/command/pool#batch` and `machteld/command/pool#wait`.
 
 <a id="wait"></a>
 ### wait
