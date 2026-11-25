@@ -81,48 +81,91 @@ proc test2d {driver pace} {
 }
 
 proc paceFrame {s} {
-    set now [clock clicks -microseconds]
-    lappend ::times $now
-    set i [llength $::times]
-    if {$i == 60} {
-        set ::queued $now
-        event generate $s <ButtonPress-1> -x 14 -y 20 -when tail
+    global frame
+    set start [clock clicks -microseconds]
+    if {$frame(count) == 0} {
+        # Waiting for the initial after-0 dispatch belongs to neither the
+        # sample intervals nor their nominal deadlines.
+        set frame(origin) $start
+    } else {
+        lappend frame(late) [expr {$start - $frame(due)}]
+        lappend frame(overshoot) [expr {$start - $frame(armed) - $frame(delay)*1000}]
     }
-    $s draw #102030 [clockScene [expr {94 + $i % 24}]]
-    lappend ::drawTimes [expr {([clock clicks -microseconds] - $now)/1000.0}]
-    if {$i >= 121} {set ::paced done; return}
-    # Use absolute deadlines, dropping a missed interval when the event loop
-    # falls behind. Drawing does not pump messages or own an animation thread.
-    set elapsed [expr {[clock clicks -microseconds] - $::origin}]
-    set next [expr {max($::slot+1, int(floor($elapsed*60.0/1000000))+1)}]
-    set ::slot $next
-    set wait [expr {max(1, round(($next*1000000.0/60 - $elapsed)/1000))}]
-    set ::paceTimer [after $wait [list safeFrame $s]]
+    incr frame(count)
+    if {$frame(draw)} {
+        if {$frame(count) == 60} {
+            set ::queued $start
+            event generate $s <ButtonPress-1> -x 14 -y 20 -when tail
+        }
+        set scene [clockScene [expr {94 + $frame(count) % 24}]]
+        set dispatch [clock clicks -microseconds]
+        $s draw #102030 $scene
+        set finish [clock clicks -microseconds]
+        lappend frame(scene) [expr {$dispatch - $start}]
+        lappend frame(submit) [expr {$finish - $dispatch}]
+    } else {
+        set finish [clock clicks -microseconds]
+    }
+    lappend frame(finishes) $finish
+    if {$frame(count) == 181} {set ::paced done; return}
+
+    # Pick the next absolute 60 Hz deadline that has yet to pass. Count slots
+    # missed under load. Never submit a burst of frames to inflate the rate.
+    set frame(armed) [clock clicks -microseconds]
+    set elapsed [expr {$frame(armed) - $frame(origin)}]
+    set frame(slot) [expr {max($frame(slot)+1, ($elapsed*60)/1000000+1)}]
+    set frame(due) [expr {$frame(origin) + ($frame(slot)*1000000+30)/60}]
+    set remaining [expr {$frame(due) - $frame(armed)}]
+    set frame(delay) [expr {max(0, ($remaining+999)/1000)}]
+    lappend frame(rounding) [expr {$frame(delay)*1000 - $remaining}]
+    set frame(timer) [after $frame(delay) [list safeFrame $s]]
 }
 proc safeFrame {s} {
     if {[catch {paceFrame $s} message]} {set ::paced $message}
 }
-proc measurePacing {s} {
-    set ::times {}; set ::drawTimes {}; set ::slot 0; set ::paced {}; set ::paceTimer {}
-    set ::origin [clock clicks -microseconds]
-    set timeout [after 20000 {set ::paced timeout}]
-    set first [after 0 [list safeFrame $s]]
-    try {vwait ::paced} finally {after cancel $first; after cancel $timeout; after cancel $::paceTimer}
-    check {$::paced eq "done"} "frame loop: $::paced"
-    check {[info exists ::inputLag] && $::inputLag < 1000000} "input delivery stalled while rendering"
-    set deltas {}
-    foreach prev [lrange $::times 0 end-1] next [lrange $::times 1 end] {
-        lappend deltas [expr {($next-$prev)/1000.0}]
-    }
-    set sorted [lsort -real $deltas]
-    set hz [expr {120000000.0 / ([lindex $::times end] - [lindex $::times 0])}]
-    puts [format "Direct2D 60 Hz target: actual %.2f Hz over 120 intervals, median %.2f ms, p95 %.2f ms, max %.2f ms" \
-        $hz [lindex $sorted 59] [lindex $sorted 113] [lindex $sorted end]]
-    set render [lsort -real $::drawTimes]
-    puts [format "Direct2D draw+present median %.2f ms, p95 %.2f ms, max %.2f ms; queued Tk input %.2f ms" \
-        [lindex $render 60] [lindex $render 114] [lindex $render end] [expr {$::inputLag/1000.0}]]
+proc percentileMs {samples percentile} {
+    set sorted [lsort -integer $samples]
+    set index [expr {($percentile*[llength $sorted]+99)/100-1}]
+    expr {[lindex $sorted $index]/1000.0}
 }
-
+proc measurePacing {s} {
+    global frame
+    # Both passes use identical Tk timers. Rate uses completion-to-completion
+    # wall time for 180 intervals between 181 frames. Present returns after
+    # submission. The measured rate describes the application's submissions.
+    # Wake lateness includes Windows scheduling and Tcl event dispatch.
+    foreach draw {0 1} {
+        array unset frame
+        array set frame {count 0 slot 0 timer {} finishes {} late {} overshoot {} rounding {} scene {} submit {}}
+        set frame(draw) $draw
+        set ::paced {}
+        set timeout [after 20000 {set ::paced timeout}]
+        set first [after 0 [list safeFrame $s]]
+        try {vwait ::paced} finally {after cancel $first; after cancel $timeout; after cancel $frame(timer)}
+        check {$::paced eq "done"} "frame loop: $::paced"
+        set times $frame(finishes)
+        set elapsed [expr {[lindex $times end]-[lindex $times 0]}]
+        set intervals [expr {[llength $times]-1}]
+        set missed [expr {$frame(slot)-$intervals}]
+        check {$intervals == 180 && $elapsed > 0 && $missed >= 0} "invalid interval/slot accounting"
+        set deltas {}
+        foreach prev [lrange $times 0 end-1] next [lrange $times 1 end] {
+            lappend deltas [expr {$next-$prev}]
+        }
+        set name [expr {$draw ? "Direct2D" : "Tk timer control"}]
+        puts [format "%s: %d intervals / %.6f s = %.2f Hz; %d nominal 60 Hz slots missed; intervals median %.2f, p95 %.2f, max %.2f ms" \
+            $name $intervals [expr {$elapsed/1e6}] [expr {$intervals*1e6/$elapsed}] $missed \
+            [percentileMs $deltas 50] [percentileMs $deltas 95] [percentileMs $deltas 100]]
+        puts [format "%s: p95 after-ms rounding %.2f, timer wake beyond requested delay %.2f, wake beyond nominal deadline %.2f ms" \
+            $name [percentileMs $frame(rounding) 95] [percentileMs $frame(overshoot) 95] [percentileMs $frame(late) 95]]
+        if {$draw} {
+            check {[info exists ::inputLag] && $::inputLag < 1000000} "input delivery stalled while rendering"
+            puts [format "Direct2D: Tcl scene p95 %.2f ms; draw through Present return median %.2f, p95 %.2f, max %.2f ms; queued Tk input %.2f ms" \
+                [percentileMs $frame(scene) 95] [percentileMs $frame(submit) 50] [percentileMs $frame(submit) 95] \
+                [percentileMs $frame(submit) 100] [expr {$::inputLag/1000.0}]]
+        }
+    }
+}
 proc triangle {angle} {
     set vertices {}
     for {set i 0} {$i < 3} {incr i} {
