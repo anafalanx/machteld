@@ -126,7 +126,7 @@ proc ::pt::packageTests {} {
     set prelude [file join $work machteld.tcl]
     writeText $prelude "set ::fixture_prelude 1"
     set reference [file join $work reference]
-    foreach name {catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
+    foreach name {identity.dict reference.db manifest.sha256 schema.json START-HERE.md AGENTS.md} {
         writeText [file join $reference $name] "fixture $name\n"
     }
     writeText [file join $reference markdown machteld agent.md] "# Fixture agent reference\n"
@@ -198,17 +198,17 @@ proc ::pt::packageTests {} {
         [expr {[refused $result {reference pack directory not found}] && ![file exists $out]}] [dict get $result text]
 
     set incompleteReference [file join $work incomplete-reference]
-    writeText [file join $incompleteReference catalog.dict] fixture
+    writeText [file join $incompleteReference identity.dict] fixture
     set result [runPackage {*}$common --licenses $licenses --apache-license $apache \
         --reference $incompleteReference --out $out]
     check "packaging refuses an incomplete reference pack" \
         [expr {[refused $result {reference pack is incomplete}] && ![file exists $out]}] [dict get $result text]
 
-    file delete [file join $reference catalog.json]
+    file delete [file join $reference reference.db]
     set result [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $out]
-    writeText [file join $reference catalog.json] "fixture catalog.json\n"
+    writeText [file join $reference reference.db] "fixture reference.db\n"
     check "packaging refuses a reference pack without its agent JSON catalog" \
-        [expr {[refused $result {reference pack is incomplete: catalog\.json}] && ![file exists $out]}] [dict get $result text]
+        [expr {[refused $result {reference pack is incomplete: reference\.db}] && ![file exists $out]}] [dict get $result text]
 
     set packagingLicenses [file join $work licenses-with-untracked-sentinel]
     file mkdir $packagingLicenses
@@ -261,7 +261,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             licenses/LibTomMath-1.3.0.txt licenses/yyjson-0.12.0.txt
             licenses/xxHash-0.8.3.txt licenses/cffi-2.0.3.txt licenses/libffi-3.5.2.txt licenses/tclh-6afd306.txt
             licenses/graphviz-16.1.2.txt licenses/graphviz-ellipse.txt licenses/expat-2.8.1.txt
-            reference/catalog.dict reference/catalog.json reference/search.dict reference/manifest.sha256
+            reference/identity.dict reference/reference.db reference/manifest.sha256
             reference/schema.json reference/START-HERE.md reference/AGENTS.md reference/markdown/machteld/agent.md
         } {
             if {![file isfile $base/$relative]} {
@@ -280,7 +280,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             }
         }
         foreach relative {
-            catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md
+            identity.dict reference.db manifest.sha256 schema.json START-HERE.md
             AGENTS.md markdown/machteld/agent.md
         } {
             if {[readBytes $base/reference/$relative] ne [readBytes [file join $reference {*}[split $relative /]]]} {

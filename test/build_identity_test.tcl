@@ -67,10 +67,10 @@ try {
     set prelude [file join $work prelude.tcl]
     bytes $prelude "namespace eval ::machteld \{\n    variable version $runtime\n\}\n"
     set reference [file join $work reference]
-    foreach name {catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
+    foreach name {identity.dict reference.db manifest.sha256 schema.json START-HERE.md AGENTS.md} {
         bytes [file join $reference $name] fixture
     }
-    bytes [file join $reference catalog.dict] [dict create corpus_sha256 [dict get $good reference_sha256]]
+    bytes [file join $reference identity.dict] [dict create corpus_sha256 [dict get $good reference_sha256]]
     set arguments [list [info nameofexecutable] [file join $ROOT tools package.tcl] \
         --prefix $prefix --prelude $prelude --wrapper [info nameofexecutable] \
         --licenses [file join $ROOT licenses] --apache-license [file join $ROOT LICENSE] \
@@ -120,7 +120,7 @@ try {
                 check "actual build identifies development without changing runtime version" [expr {
                     [dict get $actual channel] eq "development" &&
                     [dict get $actual runtime_version] eq $runtime}]
-                set actualCorpus [dict get [slurp //zipfs:/actualBuild/reference/catalog.dict] corpus_sha256]
+                set actualCorpus [dict get [slurp //zipfs:/actualBuild/reference/identity.dict] corpus_sha256]
                 check "actual build identifies its exact reference" [expr {
                     [dict get $actual reference_sha256] eq $actualCorpus}]
             } else {

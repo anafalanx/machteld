@@ -245,7 +245,7 @@ proc ::boot::artifactManifest {} {
             lappend relatives [cacheRelative $file]
         }
     }
-    foreach file [list [file join $prefix bin tclsh90s.exe] [file join $prefix bin wish90s.exe] \
+    foreach file [list [file join $prefix bin tclsh90s.exe] [file join $prefix bin wish90s.exe] [file join $prefix bin refsqlite.dll] \
             [file join $prefix lib libtcl90.a] [file join $prefix lib libtcl9tk90.a] [file join $prefix lib libtclstub.a] \
             [file join $prefix lib libffi.a] [file join $prefix lib libcffi.a] [file join $prefix lib libmachteldgraphviz.a] \
             [file join $cache sqlite sqlite3.c] [file join $cache sqlite sqlite3.h] \
@@ -723,6 +723,16 @@ proc ::boot::main {argv} {
     }
     buildCffi $msys $home $sourceRoot $prefix $archives
     buildGraphviz $msys $home $sourceRoot $prefix $archives $jobs
+    # Only the offline manual generator loads this module. Use the same
+    # pinned core and upstream Tcl interface as the runtime, with Tcl stubs.
+    set sqliteDir [file join $cache sqlite]
+    set include [shq [unixPath $msys [file join $prefix include]]]
+    set stubs [shq [unixPath $msys [file join $prefix lib libtclstub.a]]]
+    set output [shq [unixPath $msys [file join $prefix bin refsqlite.dll]]]
+    msysRun $msys $home $sqliteDir "gcc -O2 -shared -static-libgcc -DUSE_TCL_STUBS -DBUILD_sqlite \
+        -DSQLITE_THREADSAFE=1 -DSQLITE_3_SUFFIX_ONLY -DSQLITE_ENABLE_FTS5 -DSQLITE_OMIT_LOAD_EXTENSION \
+        -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE -I$include -I. \
+        tclsqlite.c sqlite3.c $stubs -Wl,--no-insert-timestamp -o $output"
     # A cache made while the recipe or the toolchain changed is a mixture:
     # it is left unrecorded, so the next bootstrap makes it again.
     if {[stateHash $inputs $msys] ne $stateHash} {

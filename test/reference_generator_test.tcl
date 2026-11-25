@@ -112,68 +112,43 @@ proc ::rgt::main {argv} {
                 fail "two runs differ byte-for-byte at $relative"
             }
         }
-        foreach required {
-            catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md AGENTS.md
-            markdown/tcl/command/dict.md markdown/tk/command/bind.md source/tcl/doc/dict.n source/tk/doc/bind.n
-            html/TclCmd/dict.html html/TkCmd/bind.html
-        } {
-            if {![file isfile [file join $first {*}[split $required /]]]} {
-                fail "required reference path is absent: $required"
+        set expected {AGENTS.md START-HERE.md identity.dict licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
+                      licenses/cffi-2.0.3.txt manifest.sha256 reference.db schema.json}
+        if {[lsort $expected] ne [lsort $firstFiles]} {fail "schema 2 pack inventory mismatch: $firstFiles"}
+        set identity [readUtf8 [file join $first identity.dict]]
+        if {[dict get $identity schema] != 2 || [dict get $identity machteld_version] ne $runtimeVersion ||
+                [dict get $identity corpus_sha256] ne [hash file sha256 [file join $first reference.db]]} {
+            fail "compact corpus identity mismatch"
+        }
+        if {![llength [info commands ::sqlite3]]} {load [file join $cache prefix bin refsqlite.dll] Sqlite3}
+        sqlite3 ::rgt::fixture [file join $first reference.db] -readonly 1
+        try {
+            if {[fixture eval {SELECT name,documents,manual_pages FROM product WHERE name IN ('tcl','tk','cffi') ORDER BY name}]
+                    ne {cffi 5 4 tcl 250 249 tk 178 177}} {fail "unexpected upstream manual counts"}
+            foreach required {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/agent machteld/license tcl/license tk/license} {
+                if {![fixture exists {SELECT 1 FROM page WHERE id=$required}]} {fail "missing stable page $required"}
             }
-        }
-
-        set catalog [json decode [readUtf8 [file join $first catalog.json]]]
-        if {[dict get $catalog schema] != 1 ||
-                [dict get $catalog products tcl manual_pages] != 249 || [dict get $catalog products tk manual_pages] != 177 ||
-                [dict get $catalog products tcl documents] != 250 || [dict get $catalog products tk documents] != 178} {
-            fail "catalog product/manual counts do not preserve the 249/177 core-manual contract"
-        }
-        set documents [dict get $catalog documents]
-        foreach retired {machteld/command/macht machteld/guide/engine} {
-            if {[dict exists $documents $retired]} {
-                fail "retired document remains in catalog: $retired"
+            fixture eval {SELECT id,path,body,sha256,characters,bytes FROM page ORDER BY id} {
+                if {$id ne [string tolower $id] || $id in {machteld/command/macht machteld/guide/engine} ||
+                        [regexp {/(?:tdbc|sqlite3|itcl|tclx|tktable)(?:/|$)} $id] ||
+                        ([regexp {/thread(?:/|$)} $id] && $id ne "tcl/c-api/thread")} {fail "invalid page $id"}
+                set utf8 [encoding convertto utf-8 $body]
+                if {[string length $body] != $characters || [string length $utf8] != $bytes ||
+                        [hash sum sha256 $utf8] ne $sha256} {fail "page content changed for $id"}
             }
-        }
-        foreach id {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/agent machteld/license tcl/license tk/license} {
-            if {![dict exists $documents $id]} {
-                fail "catalog document is absent: $id"
+            if {[fixture exists {SELECT 1 FROM section s JOIN page p ON s.id=p.id WHERE s.start<0 OR s.end<s.start OR s.end>p.characters}] ||
+                    [fixture onecolumn {PRAGMA integrity_check}] ne "ok" || [fixture eval {PRAGMA foreign_key_check}] ne ""} {
+                fail "database or section bounds failed verification"
             }
-        }
-        dict for {id record} $documents {
-            if {$id ne [string tolower $id]} {
-                fail "canonical ID is not lowercase: $id"
+            if {![string match {*Donal K. Fellows*} [fixture onecolumn {SELECT text FROM notice WHERE id='tcl/command/dict'}]]} {
+                fail "the dict manual lost its original roff attribution"
             }
-            # Tcl's own C API has tcl/c-api/thread; the Thread package is not shipped.
-            if {[regexp {/(?:tdbc|sqlite3|itcl|tclx|tktable)(?:/|$)} $id] ||
-                    ([regexp {/thread(?:/|$)} $id] && $id ne "tcl/c-api/thread")} {
-                fail "unshipped extension was auto-discovered into the core catalog: $id"
+            foreach {var id} {dict tcl/command/dict filesystem tcl/c-api/filesystem canvas tk/command/canvas colors tk/command/colors} {
+                set $var [fixture onecolumn {SELECT body FROM page WHERE id=$id}]
             }
+        } finally {
+            fixture close
         }
-        set inventory [dict get $catalog inventory]
-        set represented [dict create]
-        dict for {id record} $documents {
-            dict for {name format} [dict get $record formats] {
-                if {![dict exists $inventory [dict get $format path]]} {
-                    fail "representation is outside inventory: [dict get $format path]"
-                }
-                dict set represented [dict get $format path] 1
-            }
-        }
-        set auxiliary [dict create]
-        foreach path [dict get $catalog auxiliary] {
-            if {![dict exists $inventory $path] || [dict exists $represented $path] || [dict exists $auxiliary $path]} {
-                fail "invalid auxiliary partition path: $path"
-            }
-            dict set auxiliary $path 1
-        }
-        if {[dict size $represented] + [dict size $auxiliary] != [dict size $inventory]} {
-            fail "document representations and auxiliary paths do not exactly partition inventory"
-        }
-
-        set dict [readUtf8 [file join $first markdown tcl command dict.md]]
-        set filesystem [readUtf8 [file join $first markdown tcl c-api filesystem.md]]
-        set canvas [readUtf8 [file join $first markdown tk command canvas.md]]
-        set colors [readUtf8 [file join $first markdown tk command colors.md]]
         if {![regexp {(?n)^## NAME\s*$} $dict] || ![regexp {(?n)^## SYNOPSIS\s*$} $dict]} {
             fail "normalized dict page lost canonical headings/synopsis"
         }
@@ -190,7 +165,7 @@ proc ::rgt::main {argv} {
         }
 
         set rows [split [string trimright [readUtf8 [file join $first manifest.sha256]] \n] \n]
-        if {[lindex $rows 0] ne "# machteld reference pack v1; SHA-256 consistency manifest (self excluded)"} {
+        if {[lindex $rows 0] ne "# machteld reference pack v2; SHA-256 consistency manifest (self excluded)"} {
             fail "manifest header is not canonical"
         }
         # The manifest lists files in the order Windows sorts their full paths:

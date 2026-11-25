@@ -525,8 +525,8 @@ proc ::machteld::devcache::reference_version {root} {
 # final validator.
 proc ::machteld::devcache::reference_spec {root cache tclsh} {
     set version [reference_version $root]
-    set files [list $tclsh [file join $root LICENSE] [info nameofexecutable]]
-    foreach name {reference.tcl dependencies.lock.json} { lappend files [file join $root tools $name] }
+    set files [list $tclsh [file join $cache prefix bin refsqlite.dll] [file join $root LICENSE] [info nameofexecutable]]
+    foreach name {reference.tcl reference_db.tcl dependencies.lock.json} { lappend files [file join $root tools $name] }
     foreach name {Tcl-9.0.4.txt Tk-9.0.4.txt cffi-2.0.3.txt} { lappend files [file join $root licenses $name] }
     foreach name {cffi.3tcl cffi-cffi.3tcl cffi-Concepts.3tcl cffi-Cookbook.3tcl} {
         lappend files [file join $cache cffi-doc $name]

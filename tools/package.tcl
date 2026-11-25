@@ -188,7 +188,7 @@ file copy -force $opt(--apache-license) [file join $stagedLicenses Apache-2.0.tx
 if {![file isdirectory $opt(--reference)]} {
     error "reference pack directory not found: $opt(--reference)"
 }
-foreach relative {catalog.dict catalog.json search.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
+foreach relative {reference.db identity.dict manifest.sha256 schema.json START-HERE.md AGENTS.md} {
     if {![file isfile [file join $opt(--reference) $relative]]} {
         error "reference pack is incomplete: $relative"
     }
@@ -210,7 +210,7 @@ if {$opt(--build-info) ne ""} {
             $runtimeVersion ne [dict get $identity runtime_version]} {
         error "build identity runtime version disagrees with the staged prelude"
     }
-    set f [open [file join $stage reference catalog.dict] r]
+    set f [open [file join $stage reference identity.dict] r]
     try { set catalog [read $f] } finally { close $f }
     if {[dict get $catalog corpus_sha256] ne [dict get $identity reference_sha256]} {
         error "build identity reference hash disagrees with the staged corpus"
