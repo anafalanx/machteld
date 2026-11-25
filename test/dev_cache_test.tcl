@@ -452,7 +452,7 @@ try {
         tclsh [file join $prefix bin tclsh90s.exe]]
     foreach relative {
         tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/graphviz-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
-        tools/reference.tcl tools/package.tcl
+        tools/reference.tcl tools/reference_db.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
         tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
         LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/cffi-2.0.3.txt
@@ -468,7 +468,7 @@ try {
     foreach relative {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
         cffi-doc/cffi.3tcl cffi-doc/cffi-cffi.3tcl cffi-doc/cffi-Concepts.3tcl cffi-doc/cffi-Cookbook.3tcl
-        prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
+        prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe prefix/bin/refsqlite.dll
         prefix/lib/tcl9.0/init.tcl prefix/lib/tcl9/9.0/msgcat.tm
         prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h sqlite/tclsqlite.c yyjson/yyjson.h
     } {
@@ -513,14 +513,14 @@ try {
     file delete $additionalHeader
 
     foreach relative {
-        LICENSE tools/reference.tcl
+        LICENSE tools/reference.tcl tools/reference_db.tcl
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/cffi-2.0.3.txt docs/overview.md docs/reference/machteld/command/help.md
     } {
         spec_tracks reference [file join $::fixtureRoot {*}[split $relative /]]
     }
     foreach relative {
-        prefix/bin/tclsh90s.exe downloads/tcl904-src.zip downloads/tk904-src.zip
+        prefix/bin/tclsh90s.exe prefix/bin/refsqlite.dll downloads/tcl904-src.zip downloads/tk904-src.zip
         cffi-doc/cffi.3tcl cffi-doc/cffi-cffi.3tcl cffi-doc/cffi-Concepts.3tcl cffi-doc/cffi-Cookbook.3tcl
     } {
         spec_tracks reference [file join $::fixtureCache {*}[split $relative /]]

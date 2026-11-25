@@ -21,7 +21,7 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -
 
 set status [docs status]
 check {status identifies schema and runtime} [expr {
-    [dict get $status schema] == 1 && [dict get $status machteld] eq $expectedVersion &&
+    [dict get $status schema] == 2 && [dict get $status machteld] eq $expectedVersion &&
     [dict get $status root] eq "self" && [string length [dict get $status corpus_sha256]] == 64}]
 check {status inventories exact Tcl/Tk manuals} [expr {
     [dict get $status products tcl version] eq "9.0.4" &&
@@ -32,16 +32,16 @@ check {status inventories exact Tcl/Tk manuals} [expr {
     [dict get $status products tk manual_pages] == 177}]
 
 set cffiManual [docs get cffi/manual/cookbook -section {defining-a-function} -all 1]
-check {the bundled cffi manual preserves upstream declarations, with the original source available} [expr {
+check {the bundled cffi manual preserves upstream declarations, as searchable Markdown} [expr {
     [dict get $status products cffi version] eq [lindex [package versions cffi] 0] &&
     [dict get $status products cffi manual_pages] == 4 &&
     [string first {WINAPI DWORD GetCurrentProcessId(void);} [dict get $cffiManual text]] >= 0 &&
-    [string first {.TH "Cookbook"} [dict get [docs get cffi/manual/cookbook -format source -limit 200] text]] >= 0 &&
+    [errorcode {docs get cffi/manual/cookbook -format source}] eq {MACHTELD DOCS unsupported} &&
     [dict get [docs get cffi/license -limit 16] id] eq "cffi/license"}]
 
 set schema [docs schema]
 check {schema describes all operations and bounded retrieval} [expr {
-    [dict get $schema schema] == 1 && [dict get $schema catalog_schema] == 1 &&
+    [dict get $schema schema] == 2 && [dict get $schema catalog_schema] == 2 &&
     [lsort [dict keys [dict get $schema subcommands]]] eq
         {extract get list outline schema search status verify} &&
     [dict get $schema pagination get maximum_limit] == 1048576}]
@@ -84,11 +84,10 @@ set fragment [docs get machteld/command/child#start -limit 100]
 check {fragment IDs select authored subcommand sections} [expr {
     [dict get $fragment id] eq "machteld/command/child" && [dict get $fragment section] eq "start"}]
 
-set source [docs get tcl/command/dict -format source -limit 100]
-set html [docs get tcl/command/dict -format html -limit 100]
-check {upstream source and HTML representations are retained} [expr {
-    [dict get $source format] eq "source" && [string match {*.n} [dict get $source path]] &&
-    [dict get $html format] eq "html" && [string match {*.html} [dict get $html path]]}]
+check {schema two declares Markdown and rejects the retired representations} [expr {
+    [dict get $status formats] eq {markdown} &&
+    [errorcode {docs get tcl/command/dict -format html}] eq {MACHTELD DOCS unsupported} &&
+    [errorcode {docs get tcl/command/dict -format source}] eq {MACHTELD DOCS unsupported}}]
 check {authored Machteld pages refuse nonexistent upstream representation} [expr {
     [errorcode {docs get machteld/command/run -format source}] eq {MACHTELD DOCS unsupported}}]
 
@@ -99,14 +98,16 @@ check {original C API spelling is an exact alias} [expr {[dict get $alias id] eq
 set normalizedAlias [docs get {  Tcl   Tcl_CreateObjCommand  } -limit 80]
 check {alias lookup lowercases, trims, and collapses whitespace} [expr {
     [dict get $normalizedAlias id] eq [dict get $capi id]}]
-set savedCatalog $::machteld::DOCS_CATALOG
-dict set ::machteld::DOCS_CATALOG aliases __test_ambiguous__ \
-    {tcl/command/dict tcl/command/list}
-set ambiguousCode [errorcode {docs get __test_ambiguous__}]
-set ::machteld::DOCS_CATALOG $savedCatalog
-check {ambiguous aliases are explicit rather than guessed} [expr {
-    $ambiguousCode eq {MACHTELD DOCS ambiguous}}]
-
+# Choose an actual ambiguous name from this version's catalog.
+set ambiguous [::machteld::ReferenceDb onecolumn {
+    SELECT a.name FROM alias a WHERE NOT EXISTS (SELECT 1 FROM page WHERE id=a.name)
+    GROUP BY a.name HAVING count(*)>1 ORDER BY a.name LIMIT 1}]
+check {ambiguous aliases identify multiple candidates} [expr {
+    $ambiguous ne "" && [errorcode [list docs get $ambiguous]] eq {MACHTELD DOCS ambiguous}}]
+check {reference connection rejects writes even after query_only is disabled} [expr {
+    ![catch {::machteld::ReferenceDb eval {PRAGMA query_only=OFF}}] &&
+    [catch {::machteld::ReferenceDb eval {DELETE FROM page}}]}]
+::machteld::ReferenceDb eval {PRAGMA query_only=ON}
 set listed [docs list -scope tcl -type command -limit 7]
 set listFiltersOk 1
 foreach item [dict get $listed items] {
@@ -124,8 +125,8 @@ check {search is ranked, filtered, bounded, and actionable} [expr {
     [dict get [lindex [dict get $searched items] 0] product] eq "tcl"}]
 check {search rejects degenerate query} [expr {
     [errorcode {docs search {   }}] eq {MACHTELD DOCS badvalue}}]
-check {search rejects one-character terms while get accepts exact short names} [expr {
-    [errorcode {docs search a}] eq {MACHTELD DOCS badvalue} &&
+check {search accepts short tokens and get resolves an exact short name} [expr {
+    [dict get [docs search a -limit 1] returned] == 1 &&
     [dict get [docs get if -limit 16] id] eq {tcl/command/if}}]
 
 foreach spelling {+1 01 0x10 1_0 -1} {
@@ -144,15 +145,15 @@ set verified [docs verify]
 check {verify proves the full declared corpus} [expr {
     [dict get $verified ok] && [dict get $verified documents] == [dict get $status documents] &&
     [dict get $verified corpus_sha256] eq [dict get $status corpus_sha256] &&
-    [dict get $verified files] > 1000}]
+    [dict get $verified files] >= 6 && [dict get $verified files] < 20}]
 
 set work [file join $env(TEMP) machteld-reference-test-[pid]-[binary encode hex [hash random 8]]]
 file mkdir $work
 set destination [file join $work exported]
 set extracted [docs extract $destination]
 check {extract publishes a complete standalone reference} [expr {
-    [file isfile [file join $destination catalog.dict]] &&
-    [file isfile [file join $destination search.dict]] &&
+    [file isfile [file join $destination identity.dict]] &&
+    [file isfile [file join $destination reference.db]] &&
     [file isfile [file join $destination manifest.sha256]] &&
     [dict get $extracted corpus_sha256] eq [dict get $status corpus_sha256]}]
 check {extract never replaces an existing destination} [expr {
@@ -198,7 +199,7 @@ set fixtureStatus [catch {
     set fixtureRoot [file join $work corrupt-fixture]
     file mkdir $fixtureRoot
     file copy $destination [file join $fixtureRoot reference]
-    set channel [open [file join $fixtureRoot reference catalog.dict] ab]
+    set channel [open [file join $fixtureRoot reference reference.db] ab]
     fconfigure $channel -translation binary
     puts -nonewline $channel [encoding convertto utf-8 { orphan}]
     close $channel
@@ -209,15 +210,13 @@ set fixtureStatus [catch {
     rename ::machteld::PayloadRoot ::machteld::PayloadRootLive
     set rootRenamed 1
     proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName]
-    set ::machteld::DOCS_LOADED 0
-    set ::machteld::DOCS_CATALOG {}
-    set ::machteld::DOCS_SEARCH_LOADED 0
-    set ::machteld::DOCS_SEARCH {}
+    catch {::machteld::ReferenceDb close}
+    set ::machteld::DOCS_IDENTITY {}
     set corruptCode [errorcode {docs status}]
     set corruptHelpCode [errorcode {help dict}]
     # This existing zipfs directory has no reference/ child: it models a
     # wrapped payload whose runtime is present but whose corpus was omitted.
-    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/reference/markdown]
+    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/reference/licenses]
     foreach query {
         {docs status}
         {docs list}
@@ -234,7 +233,7 @@ set fixtureStatus [catch {
             {MACHTELD DOCS unsupported} &&
         ![file exists [file join $work omitted-export]]}]
     check {omitted reference retains schema and maps help query errors} [expr {
-        [dict get [docs schema] schema] == 1 &&
+        [dict get [docs schema] schema] == 2 &&
         [errorcode {help dict}] eq {MACHTELD HELP unsupported}}]
     set noPackHelp [help]
     check {omitted reference help gives honest same-version recovery guidance} [expr {
@@ -248,10 +247,8 @@ if {$rootRenamed} {
     catch {rename ::machteld::PayloadRoot {}}
     catch {rename ::machteld::PayloadRootLive ::machteld::PayloadRoot}
 }
-set ::machteld::DOCS_LOADED 0
-set ::machteld::DOCS_CATALOG {}
-set ::machteld::DOCS_SEARCH_LOADED 0
-set ::machteld::DOCS_SEARCH {}
+catch {::machteld::ReferenceDb close}
+set ::machteld::DOCS_IDENTITY {}
 if {$mounted} { catch {zipfs unmount $mountName} }
 check {catalog corruption fails closed in an isolated fixture} [expr {
     $fixtureStatus == 0 && $fixtureError eq "" &&
@@ -345,7 +342,7 @@ check {help returns a truncated real page with a literal continuation hint} [exp
     [dict get $longPage truncated] && !$longHelpRc &&
     $longHelp eq "[dict get $longPage text]\n\n$continuation"}] $longHelpRc
 check {help translates docs discovery failures into its own domain} [expr {
-    [errorcode {help a}] eq {MACHTELD HELP notfound}}]
+    [errorcode {help zxqzunknownmachteldverb}] eq {MACHTELD HELP notfound}}]
 check {help discovery advertises agent query primitives} [expr {
     [string match {*docs get*docs search*docs schema*} [help]]}]
 

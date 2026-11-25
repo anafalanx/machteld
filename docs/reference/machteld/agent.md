@@ -67,8 +67,8 @@ Operational rules:
 2. Prefer exact stable IDs; use search only for discovery.
 3. Retrieve only the section needed to preserve context.
 4. Follow `next` for complete list/search pagination.
-5. Use normalized Markdown by default; request `-format source` only for
-   upstream notation or audit.
+5. Export Markdown with `docs get ID --all 1 --output FILE` at the host command line.
+   The extracted SQLite database includes the page-specific upstream notices.
 6. Never infer an option, error, default, or lifetime rule absent from the exact
    command page and live `manifest`.
 7. Treat scripts, loaded extensions, and subprocesses as trusted code running

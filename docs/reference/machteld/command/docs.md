@@ -22,7 +22,7 @@ docs status
 docs schema
 docs verify
 docs list ?-scope scope? ?-type type? ?-offset n? ?-limit n?
-docs get id ?-section slug? ?-format markdown|html|source? \
+docs get id ?-section slug? ?-format markdown? \
     ?-offset n? ?-limit n? ?-all boolean?
 docs outline id
 docs search query ?-scope scope? ?-type type? ?-offset n? ?-limit n?
@@ -59,12 +59,11 @@ archive name are passed to its entry.
   `c-api`, or `application`; empty or `all` is unfiltered.
 - For `list` and `search`, `-offset` defaults to `0`; `-limit` defaults to `50`
   and is from `1` through `200` records.
-- Search terms contain at least two characters after normalization. Use `get`
-  for an exact short command name or stable ID.
+- Search accepts up to 64 words and matches token prefixes. Exact aliases rank first.
+  Use `get` to retrieve an exact short command name or stable ID.
 - `-section slug` selects one indexed H2/H3 section. `outline` discovers valid
   section slugs.
-- `-format` selects `markdown` (default), `html`, or verbatim upstream `source`.
-  A representation not carried for that document reports `DOCS unsupported`.
+- Schema 2 returns Markdown. The former `html` and `source` formats report `DOCS unsupported`.
 - Get offset defaults to 0 characters and limit to 32,768, with a maximum of
   1,048,576 and a minimum of 1. `-all 1` forbids offset/limit and retrieves the
   complete selected content intentionally. Booleans are strictly `0` or `1`.
@@ -112,8 +111,8 @@ silently returned from a mismatched corpus.
 ## Lifetime and timeouts
 
 Schema returns local API metadata without needing the reference pack. Status,
-verify, list, get, outline, and search read the immutable self-mounted zipfs
-payload and retain no handles. Search is local and bounded.
+verify, list, get, outline, and search open an in-memory, read-only SQLite database
+on first use. Each interpreter owns its connection. Search uses the embedded FTS5 index.
 Extraction stages a complete randomly named sibling directory and publishes it
 by same-volume rename, so an incomplete tree is never presented as success.
 Cleanup after an interrupted extraction is best effort. There is no network or
@@ -130,20 +129,18 @@ set matches [docs search {process lifetime deadline} -scope machteld -limit 5]
 set page [docs get machteld/command/child -section lifetime-and-timeouts]
 puts [dict get $page text]
 
-# Inspect upstream Tcl source notation where required.
-set source [docs get tcl/command/dict -format source]
+# Export exactly one page as Markdown.
+# Run from a shell: machteld.exe docs get tcl/command/dict --all 1 --output dict.md
 
-# Export once for rg, indexing, or offline audit.
+# Export the searchable database, schema, bootstrap, and notices.
 set exported [docs extract C:/work/machteld-reference]
 ```
 
 ## Constraints
 
-Normalized Markdown is the default agent representation; source pages preserve
-upstream Tcl/Tk manpage syntax and may be roff. Search ranks the packaged
-corpus, not external tutorials or later language releases. Query the executable
-first instead of relying on web memory: it knows the exact API and Tcl/Tk
-versions it actually runs.
+Each page is stored once as Markdown. The extracted `reference.db` includes the
+pinned Tcl, Tk and cffi manuals, section offsets, aliases, and source-specific
+attributions in the `notice` table. The build cache retains the original archives.
 Package-version equality alone is insufficient when comparing artifacts:
 different builds can share one version. Record artifact and corpus hashes, plus
 the development build identity when present, not only `version`, when comparing
@@ -306,7 +303,7 @@ diagnosis, not before every page lookup.
 
 #### Synopsis
 
-`docs get id ?-section slug? ?-format markdown|html|source? ?-offset n?
+`docs get id ?-section slug? ?-format markdown? ?-offset n?
 ?-limit n? ?-all 0|1?`
 
 #### Arguments and options

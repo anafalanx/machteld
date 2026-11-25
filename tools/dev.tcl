@@ -175,7 +175,7 @@ proc package_candidate {staged bare reference candidate} {
     if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $header -> version]} {
         error "missing canonical runtime version"
     }
-    set ch [open [file join $reference catalog.dict] r]
+    set ch [open [file join $reference identity.dict] r]
     fconfigure $ch -encoding utf-8 -translation lf
     try { set catalog [read $ch] } finally { close $ch }
     try {

@@ -60,7 +60,7 @@ puts [list [package provide machteld] $argv]}} finally {close $f}
     zipfs mount $runtime verifyDelivered
     try {
         if {[file exists //zipfs:/verifyDelivered/basekit]} {error "runtime still carries embedded executable templates"}
-        foreach item {reference/catalog.dict licenses/Apache-2.0.txt tcl_library/init.tcl tk_library/tk.tcl} {
+        foreach item {reference/identity.dict licenses/Apache-2.0.txt tcl_library/init.tcl tk_library/tk.tcl} {
             if {![file isfile //zipfs:/verifyDelivered/$item]} {error "missing runtime member: $item"}
         }
     } finally {zipfs unmount verifyDelivered}

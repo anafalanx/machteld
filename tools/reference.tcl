@@ -17,7 +17,7 @@ package require machteld 0.21
 namespace eval ::ref {
     namespace path ::machteld
     variable root [file dirname [file dirname [file normalize [info script]]]]
-    variable generator machteld-reference-v1
+    variable generator machteld-reference-v2
     # .NET's whitespace: char.IsWhiteSpace and the regex class \s.
     variable ws "\t\n\v\f\r \u0085   -     　"
     variable S "\[$ws\]"
@@ -1873,14 +1873,14 @@ proc ::ref::main {argv} {
             ""
             "This directory contains the offline reference for the exact Machteld, Tcl,"
             "Tk and cffi versions in this build. The canonical query interface is `machteld"
-            "docs`; read `markdown/machteld/agent.md` for the compact agent workflow."
+            "docs`; use `machteld docs get machteld/agent` for the agent workflow."
             ""
             "`tcl/application/tclsh` and `tk/application/wish` reproduce upstream shell"
             "manuals.  They do not promise that Machteld's host accepts every tclsh or wish"
             "option.  `machteld/command/docs`, the Machteld host help, and entry-contract"
             "pages govern Machteld itself."
             ""
-            "Corpus identity: see `catalog.dict`, `catalog.json`, and `manifest.sha256`."
+            "Offline pages, notices and search are in `reference.db`. Verify its SHA-256 with `manifest.sha256`."
             "Schema and response contracts: see `schema.json`."
         } \n]
         writeUtf8Lf [file join $candidate START-HERE.md] $bootstrap
@@ -1894,27 +1894,16 @@ proc ::ref::main {argv} {
             }
         }
 
-        set schema [D schema [N 1] title [S "Machteld embedded reference schema"] generator [S $generator] \
-            catalog [D \
-                encoding [S "catalog.dict is inert canonical Tcl dict/list data; catalog.json is an equivalent JSON view"] \
-                fields [Ls {aliases auxiliary corpus_sha256 documents fragments generator inventory machteld_version products schema search}] \
-                document [S "id, product, version, type, title, summary, names, sections, formats; each format has path, sha256, bytes, and character-offset sections"] \
-                ids [S "Canonical IDs are lowercase. Ordinary pages use product/type/name. Tcl/Tk names are lowercased source basenames. Two-part IDs are machteld/agent, machteld/index and each product/license. Original spelling remains in names, aliases, and representation paths. Lowercased collisions fail generation."] \
-                aliases [S "Unicode-lowercased, whitespace-collapsed keys map to ordered candidate ID lists; ambiguity is explicit and never silently resolved"]] \
-            integrity [D \
-                meaning [S "consistency and provenance identity, not cryptographic authenticity; there is no separately trusted compiled root hash"] \
-                corpus_sha256 [S "SHA-256 of concatenated UTF-8 bytes path NUL lowercase-file-sha256 NUL for every ordinally sorted catalog inventory path"] \
-                inventory_scope [S "all Markdown, HTML, source, license, bootstrap, and schema payload files; catalog/search/manifest files are excluded to avoid recursive hashes"] \
-                manifest [S "manifest.sha256 hashes every pack file except itself, including catalog.dict, catalog.json, and search.dict"]] \
-            formats [D markdown [S "normalized agent-readable Markdown"] html [S "verbatim output of the pinned upstream converter"] \
-                source [S "verbatim upstream roff/manual source"]] \
-            docs_host [D \
-                routes [D full [Ls {{docs ...} {--docs ...}}]] \
-                options [Ls {--json {--output FILE}}] \
-                operations [Ls {status list schema verify get outline search extract}] \
-                json_envelope [D success [D ok [B 1] result [S value]] \
-                    failure [D ok [B 0] error [D domain [S DOCS] code [S code] message [S message]]]] \
-                pagination [S "list/search return total, offset, limit, returned, truncated, next, and items"]]]
+        set schema [D schema [N 2] title [S "Machteld embedded reference"] generator [S $generator] \
+            database [D path [S reference.db] format [S "SQLite 3"] version [N 2] \
+                tables [Ls {metadata product page section alias fragment notice search}] \
+                search [S "FTS5 unicode61, external content in page.body"] \
+                sections [S "Ordered by start offset in Unicode characters, exclusive end"]] \
+            formats [Ls {markdown}] \
+            integrity [D corpus_sha256 [S "SHA-256 of reference.db"] manifest [S "SHA-256 of every pack file except manifest.sha256"]] \
+            docs_host [D operations [Ls {status list schema verify get outline search extract}] \
+                routes [Ls {{docs ...} {--docs ...}}] options [Ls {--json {--output FILE}}] \
+                pagination [S "list/search return total, offset, limit, returned, truncated, next and items"]]]
         writeUtf8Lf [file join $candidate schema.json] [jsonDeterministic $schema]
 
         # Every normalized catalog link, once the complete ID and fragment set exists.
@@ -1951,36 +1940,6 @@ proc ::ref::main {argv} {
 
         checkRepresentatives $candidate $documents
 
-        set inventory [dict create]
-        foreach pair [filesUnder $candidate] {
-            lassign $pair rel path
-            if {$rel in {catalog.dict catalog.json search.dict manifest.sha256}} {
-                continue
-            }
-            set rel [normalizeSlashPath $rel]
-            if {[dict exists $inventory $rel]} {
-                fail "duplicate inventory path $rel"
-            }
-            dict set inventory $rel [D sha256 [S [sha256 $path]] bytes [N [file size $path]]]
-        }
-        set corpusHash [corpusHash $inventory]
-        set represented [dict create]
-        dict for {id record} $documents {
-            dict for {name format} [get $record formats] {
-                set path [normalizeSlashPath [get $format path]]
-                if {![dict exists $inventory $path]} {
-                    fail "document representation is absent from inventory: [get $record id] -> $path"
-                }
-                dict set represented $path 1
-            }
-        }
-        set auxiliary [lsort [lmap path [dict keys $inventory] {
-            if {[dict exists $represented $path]} continue
-            set path
-        }]]
-        if {[dict size $represented] + [llength $auxiliary] != [dict size $inventory]} {
-            fail "document/auxiliary partition does not exactly cover inventory"
-        }
         set productCounts [dict create]
         foreach product {machteld tcl tk cffi} {
             set catalogCount 0
@@ -2002,92 +1961,40 @@ proc ::ref::main {argv} {
         }
         checkSchema $documents
 
-        set searchDocs [dict create]
-        foreach id [lsort [dict keys $documents]] {
-            set r [dict get $documents $id]
-            set text [readUtf8Strict [file join $candidate {*}[split [get $r formats markdown path] /]]]
-            set searchText $text
-            if {[string match -nocase machteld/guide/* [get $r id]]} {
-                set searchText [dict get [guideMetadata $text [get $r formats markdown path]] body]
-            }
-            set priority [switch -nocase -- [get $r product]/[get $r type] {
-                machteld/command {format 400} tcl/command {format 300} tk/command {format 250}
-                machteld/guide {format 220} machteld/index {format 220} tcl/application {format 200}
-                tk/application {format 200} tcl/c-api {format 100} tk/c-api {format 90} default {format 180}
-            }]
-            set snippets [dict create]
-            set display [dict create]
-            set spans [get $r formats markdown sections]
-            dict for {slug heading} [get $r sections] {
-                if {![dict exists $spans $slug]} {
-                    continue
-                }
-                set start [get [dict get $spans $slug] start]
-                set end [get [dict get $spans $slug] end]
-                set plain [stripMarkdown [string range $text $start [expr {$end - 1}]]]
-                if {[string length $plain] > 240} {
-                    set plain "[netTrim [string range $plain 0 239]]..."
-                }
-                dict set display $slug [S $plain]
-                dict set snippets $slug [S [normalizeSearch $plain]]
-            }
-            dict set searchDocs $id [D priority [N $priority] title [S [normalizeSearch [get $r title]]] \
-                aliases [S [normalizeSearch [join [lmap n [get $r names] {lindex $n 1}] { }]]] \
-                summary [S [normalizeSearch [get $r summary]]] body [S [normalizeSearch [stripMarkdown $searchText]]] \
-                snippets [list D $snippets] display_snippets [list D $display]]
+        # Intermediate HTML and original manual sources stay in the workspace.
+        # Only the small bootstrap, legal material and compact database ship.
+        set aliasNode {}
+        dict for {name ids} $aliases { dict set aliasNode $name [Ls $ids] }
+        set input [D aliases [list D $aliasNode] documents [list D $documents] fragments [list D $fragments] \
+            generator [S $generator] machteld_version [S $version] products [list D $productCounts]]
+        set metadata [file join $work input.dict]
+        writeUtf8Lf $metadata "[tclData $input]\n"
+        set compact [file join $work compact]
+        file mkdir $compact
+        foreach name {START-HERE.md AGENTS.md schema.json licenses} {
+            file copy [file join $candidate $name] [file join $compact $name]
         }
-        set search [D schema [N 1] normalization [S unicode-lower-whitespace-v1] documents [list D $searchDocs]]
-        writeUtf8Lf [file join $candidate search.dict] "[tclData $search]\n"
-
-        set searchPath [file join $candidate search.dict]
-        set searchFacts [D path [S search.dict] sha256 [S [sha256 $searchPath]] bytes [N [file size $searchPath]]]
-        set aliasNode [dict create]
-        dict for {alias ids} $aliases {
-            dict set aliasNode $alias [Ls $ids]
-        }
-        set catalog [D aliases [list D $aliasNode] auxiliary [Ls $auxiliary] corpus_sha256 [S $corpusHash] \
-            documents [list D $documents] fragments [list D $fragments] generator [S $generator] \
-            inventory [list D $inventory] machteld_version [S $version] products [list D $productCounts] \
-            schema [N 1] search $searchFacts]
-        writeUtf8Lf [file join $candidate catalog.dict] "[tclData $catalog]\n"
-        writeUtf8Lf [file join $candidate catalog.json] [jsonDeterministic $catalog]
-
-        set manifestLines [list "# machteld reference pack v1; SHA-256 consistency manifest (self excluded)"]
-        foreach pair [filesUnder $candidate] {
-            lassign $pair rel path
-            if {$rel eq "manifest.sha256"} {
-                continue
-            }
-            lappend manifestLines "[sha256 $path]  $rel"
-        }
-        writeUtf8Lf [file join $candidate manifest.sha256] "[join $manifestLines \n]\n"
-        set rows [lmap row [split [readUtf8Strict [file join $candidate manifest.sha256]] \n] {
-            if {$row eq ""} continue
-            set row
-        }]
-        if {[llength $rows] != [llength $manifestLines] || [lindex $rows 0] ne [lindex $manifestLines 0]} {
-            fail "manifest shape changed while writing"
-        }
-
-        # The inert catalog and search indexes, read back by the exact Tcl the
-        # build uses.
-        set validator [file join $work validate.tcl]
-        set fixturePath [file join $work serializer-fixture.list]
-        set fixture [list {} "a b" "a\t b" "a\n b" "a\v b" "a\f b" "a\r b" "a\u0001b" "a\u007fb" 00123 true \
-            "na\u00efve \u03a9" [join [list {braces { and } brackets [ and ] dollars $ semicolon ; backslash} \\] { }]]
-        writeUtf8Lf $fixturePath "[tclData [Ls $fixture]]\n"
-        writeUtf8Lf $validator [validatorScript]
-        set result [run -timeout 10m -- $tclsh $validator $candidate $fixturePath]
+        set db [file join $compact reference.db]
+        set result [run -timeout 10m -- $tclsh [file join $root tools reference_db.tcl] \
+            [file join $cache prefix bin refsqlite.dll] $metadata $candidate $db]
         if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
-            fail "Tcl rejected generated inert indexes (exit [dict get $result exit]): [encoding convertfrom utf-8 [dict get $result err]]"
+            fail "SQLite reference generation failed: [encoding convertfrom utf-8 [dict get $result err]]"
         }
+        set corpusHash [sha256 $db]
+        writeUtf8Lf [file join $compact identity.dict] "[list schema 2 machteld_version $version corpus_sha256 $corpusHash]\n"
+        set lines [list "# machteld reference pack v2; SHA-256 consistency manifest (self excluded)"]
+        foreach pair [filesUnder $compact] {
+            lassign $pair rel path
+            lappend lines "[sha256 $path]  $rel"
+        }
+        writeUtf8Lf [file join $compact manifest.sha256] "[join $lines \n]\n"
 
         # A generated pack is immutable: the destination must be absent, so
         # publication is one rename and never replaces what another owns.
         if {[file exists $output]} {
             fail "output already exists; reference packs are immutable: [file nativename $output]"
         }
-        file rename $candidate $output
+        file rename $compact $output
         puts "reference: [dict size $documents] catalog documents; Tcl 249, Tk 177; corpus $corpusHash"
     } finally {
         if {!$keepWork} {
@@ -2099,60 +2006,6 @@ proc ::ref::main {argv} {
     }
 }
 
-proc ::ref::validatorScript {} {
-    return {if {[llength $argv] != 2} {error {usage: validate.tcl REFERENCE SERIALIZER-FIXTURE}}
-set root [lindex $argv 0]
-proc read_utf8 {path} {
-    set ch [open $path r]
-    fconfigure $ch -encoding utf-8 -translation lf
-    try {return [read $ch]} finally {close $ch}
-}
-proc normalize {value} {
-    return [string trim [regsub -all {\s+} [string tolower $value] { }]]
-}
-foreach name {catalog.dict search.dict} {
-    set value [read_utf8 [file join $root $name]]
-    if {[catch {dict size $value} message]} {error "$name is not inert dict data: $message"}
-    if {[dict get $value schema] != 1} {error "$name schema is not 1"}
-}
-set c [read_utf8 [file join $root catalog.dict]]
-set search [read_utf8 [file join $root search.dict]]
-if {[dict size [dict get $c documents]] < 400} {error {catalog is unexpectedly small}}
-if {![dict exists $c documents tcl/command/dict formats markdown]} {error {dict page is absent}}
-dict for {alias candidates} [dict get $c aliases] {
-    if {$alias ne [normalize $alias]} {error "Tcl normalization disagrees for alias: $alias"}
-}
-dict for {id fields} [dict get $search documents] {
-    if {[lsort [dict keys $fields]] ne {aliases body display_snippets priority snippets summary title}} {
-        error "search record fields disagree for $id"
-    }
-    set priority [dict get $fields priority]
-    if {![string is integer -strict $priority] || $priority ni {400 300 250 220 200 180 100 90}} {
-        error "search priority is not one canonical scalar integer for $id: $priority"
-    }
-    foreach field {title aliases summary body} {
-        set value [dict get $fields $field]
-        if {$value ne [normalize $value]} {error "Tcl normalization disagrees for $id $field"}
-    }
-    dict for {slug value} [dict get $fields snippets] {
-        if {$value ne [normalize $value]} {error "Tcl normalization disagrees for $id snippet $slug"}
-    }
-}
-# Serializer round-trip covers every Tcl list separator/control class plus
-# numeric-looking and Unicode values independently of the production corpus.
-set fixture [list {} "a b" "a\t b" "a\n b" "a\v b" "a\f b" "a\r b" \
-    "a\u0001b" "a\u007fb" {00123} {true} "na\u00efve \u03a9"]
-lappend fixture [join [list {braces { and } brackets [ and ] dollars $ semicolon ; backslash} \\] { }]
-set encoded [string trimright [read_utf8 [lindex $argv 1]] \n]
-if {[llength $encoded] != [llength $fixture]} {error {serializer fixture list shape changed}}
-foreach actual $encoded expected $fixture {
-    if {$actual ne $expected} {error {serializer fixture failed to round-trip}}
-}
-}
-}
-
-# The representative fidelity gates: prose, code, tables, C API, Tk widgets,
-# and large syntax and index pages.
 proc ::ref::checkRepresentatives {candidate documents} {
     variable S
     set read {{candidate documents id} {
