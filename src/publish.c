@@ -551,15 +551,49 @@ recover_replace_failure(HANDLE old_handle, const wchar_t *backup,
     return 1;
 }
 
+/* Reopen the published name and hold it stable through the flush. If another
+ * writer won the name between replacement and open, its flush cannot confirm
+ * our bytes. The original publication has already succeeded in either case. */
+static int
+confirm_published(Tcl_Interp *interp, const NativePath *destination,
+                  const PublishFileInfo *candidate)
+{
+    DWORD error = ERROR_SUCCESS;
+    HANDLE file = CreateFileW(destination->name, GENERIC_WRITE, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        error = GetLastError();
+    } else {
+        PublishFileInfo found;
+        if (query_handle(file, &found, &error)) {
+            if (!is_regular(&found) || !same_identity(candidate, &found)) {
+                error = ERROR_FILE_INVALID;
+            } else if (!FlushFileBuffers(file)) {
+                error = GetLastError();
+            }
+        }
+        CloseHandle(file);
+    }
+    if (error != ERROR_SUCCESS) {
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+            "published the file, but could not confirm its flush (Windows error %lu)",
+            (unsigned long)error));
+        Tcl_SetErrorCode(interp, "MACHTELD", "PUBLISH", "unconfirmed", NULL);
+        return TCL_ERROR;
+    }
+    return TCL_OK;
+}
+
 static int
 PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
            Tcl_Obj *const objv[])
 {
     (void)client_data;
     int create_only = objc == 4 && strcmp(Tcl_GetString(objv[3]), "-createonly") == 0;
-    if (objc != 3 && !create_only) {
+    int flush = objc == 4 && strcmp(Tcl_GetString(objv[3]), "-flush") == 0;
+    if (objc != 3 && !create_only && !flush) {
         return publish_error(interp, "badvalue",
-            "usage: ::machteld::Publish candidate destination ?-createonly?");
+            "usage: ::machteld::Publish candidate destination ?-createonly|-flush?");
     }
 
     int result = TCL_ERROR;
@@ -748,6 +782,9 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
         "publication destination changed too often to publish safely");
 
 done:
+    if (result == TCL_OK && flush) {
+        result = confirm_published(interp, &destination, &original_candidate);
+    }
     native_path_release(&destination_parent);
     native_path_release(&candidate_parent);
     native_path_release(&destination);

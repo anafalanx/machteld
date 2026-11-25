@@ -145,7 +145,7 @@ proc ::machteld::Fail {domain code msg} {
 
 # Stage bytes beside the destination. Only a file successfully created by
 # this call is ours to remove; never truncate or remove a colliding name.
-proc ::machteld::PublishBytes {destination value} {
+proc ::machteld::PublishBytes {destination value args} {
     if {$destination eq "" || [string first \u0000 $destination] >= 0 ||
             [lindex [file system $destination] 0] ne "native"} {
         Fail PUBLISH badvalue "publish: expected a native destination file path"
@@ -162,7 +162,10 @@ proc ::machteld::PublishBytes {destination value} {
         } finally {
             close $channel
         }
-        set published [Publish $candidate $destination]
+        set published [Publish $candidate $destination {*}$args]
+    } trap {MACHTELD PUBLISH unconfirmed} {message options} {
+        # The move consumed our staging file, so this name is no longer ours.
+        return -options $options $message
     } on error {message options} {
         catch {file delete -- $candidate}
         return -options $options $message
@@ -171,13 +174,14 @@ proc ::machteld::PublishBytes {destination value} {
 }
 
 proc ::machteld::publish {args} {
-    if {[llength $args] != 3 || [lindex $args 0] ni {file bytes}} {
-        Fail PUBLISH usage "usage: publish file path stagedFile | publish bytes path value"
+    set options [lrange $args 3 end]
+    if {[llength $args] < 3 || $options ni {{} -flush} || [lindex $args 0] ni {file bytes}} {
+        Fail PUBLISH usage "usage: publish file path stagedFile ?-flush? | publish bytes path value ?-flush?"
     }
     lassign $args mode destination value
     try {
-        if {$mode eq "file"} { return [Publish $value $destination] }
-        return [PublishBytes $destination $value]
+        if {$mode eq "file"} { return [Publish $value $destination {*}$options] }
+        return [PublishBytes $destination $value {*}$options]
     } trap {MACHTELD PUBLISH} {message options} {
         return -options $options $message
     } on error {message options} {
@@ -186,10 +190,10 @@ proc ::machteld::publish {args} {
 }
 
 ::machteld::MetaDefine publish [dict create kind tcl args args domain PUBLISH \
-    codes {badvalue oserror usage} doc machteld/command/publish \
+    codes {badvalue oserror unconfirmed usage} doc machteld/command/publish \
     subcommands [dict create \
-        file [dict create options {} doc machteld/command/publish#file] \
-        bytes [dict create options {} doc machteld/command/publish#bytes]]]
+        file [dict create options -flush doc machteld/command/publish#file] \
+        bytes [dict create options -flush doc machteld/command/publish#bytes]]]
 
 # _dur2ms: parse a duration with an explicit unit (500ms, 30s, 5m, 2h) to
 # milliseconds. Bare numbers are rejected -- the same rule the C option parser

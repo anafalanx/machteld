@@ -64,6 +64,39 @@ namespace eval ::publishTest {
                 [bytes $dest] eq [encoding convertto utf-8 $text] &&
                 [publish bytes $dest $binary] eq $dest && [bytes $dest] eq $binary}]
 
+            set confirmed [file join $homeDir confirmed.bin]
+            check "confirms a first publication and a replacement" [expr {
+                [publish bytes $confirmed $binary -flush] eq $confirmed &&
+                [bytes $confirmed] eq $binary &&
+                [publish bytes $staged $text] eq $staged &&
+                [publish file $confirmed $staged -flush] eq $confirmed &&
+                ![file exists $staged] && [bytes $confirmed] eq [encoding convertto utf-8 $text]}]
+            check "rejects unsupported options before publication" [expr {
+                [code {publish bytes $confirmed lost -other}] eq {MACHTELD PUBLISH usage} &&
+                [code {publish bytes $confirmed lost -flush -flush}] eq {MACHTELD PUBLISH usage} &&
+                [bytes $confirmed] eq [encoding convertto utf-8 $text]}]
+            set reader [open $confirmed rb]
+            try {
+                check "a denied switch with -flush preserves the previous bytes" [expr {
+                    [code {publish bytes $confirmed lost -flush}] eq {MACHTELD PUBLISH oserror} &&
+                    [read $reader] eq [encoding convertto utf-8 $text]}]
+            } finally { close $reader }
+
+            # Windows permits moving a read-only file to a new name. The
+            # subsequent GENERIC_WRITE open required by FlushFileBuffers fails.
+            set readonly [file join $homeDir readonly.bin]
+            publish bytes $staged $binary
+            file attributes $staged -readonly 1
+            try {
+                check "a refused flush reports completed publication and preserves the installed bytes" [expr {
+                    [code {publish file $readonly $staged -flush}] eq {MACHTELD PUBLISH unconfirmed} &&
+                    ![file exists $staged] && [bytes $readonly] eq $binary}]
+            } finally {
+                foreach p [list $staged $readonly] {
+                    if {[file exists $p]} { file attributes $p -readonly 0 }
+                }
+            }
+
             # Windows recovery-path failures are difficult to induce deterministically.
             # Prove that the public command keeps a native diagnostic and its own domain.
             rename ::machteld::Publish ::publishTest::realPublish

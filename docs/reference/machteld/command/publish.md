@@ -11,8 +11,8 @@ commands: publish, publish file, publish bytes
 ## Synopsis
 
 ```tcl
-publish file path stagedFile
-publish bytes path value
+publish file path stagedFile ?-flush?
+publish bytes path value ?-flush?
 ```
 
 ## Arguments and options
@@ -21,6 +21,11 @@ publish bytes path value
 directory on the native Windows filesystem. An existing destination must be
 a regular file. Close the prepared file before publishing it. Keep other
 writers away from that file until the operation returns.
+
+With `-flush`, Machteld reopens the published file, checks its identity and
+asks Windows to flush its buffered data to storage. A successful call returns
+after Windows acknowledges that request. Another publisher may subsequently
+replace the file. The storage device determines persistence across power loss.
 
 ## Results
 
@@ -37,6 +42,11 @@ unsuitable staged file, or a source and destination referring to the same
 file. `{MACHTELD PUBLISH oserror}` reports a write, close, access, or Windows
 publication error.
 
+`{MACHTELD PUBLISH unconfirmed}` means the switch succeeded and the flush
+could not be confirmed. The diagnostic includes the Windows error number.
+A competing replacement can cause this outcome. Check the destination
+before retrying. The staged name was consumed by the publication.
+
 A failure before the switch preserves an existing destination. If Windows
 partially completes a replacement and cannot restore the old file to its
 name, the diagnostic gives the recovery path containing its prior bytes.
@@ -52,7 +62,7 @@ and close a staged file on the destination volume, then use `publish file`.
 
 ```tcl
 set settings [file join $directory settings.json]
-publish bytes $settings [json encode -dict [dict create title "Résumé"]]
+publish bytes $settings [json encode -dict [dict create title "Résumé"]] -flush
 publish bytes [file join $directory token.bin] [binary decode hex 00ff80]
 publish file [file join $directory report.csv] $completedReport
 ```
@@ -70,7 +80,7 @@ destination handle that denies replacement can prevent publication.
 
 #### Synopsis
 
-`publish file path stagedFile`
+`publish file path stagedFile ?-flush?`
 
 #### Arguments and options
 
@@ -85,7 +95,7 @@ consumes the staged name.
 
 #### Errors
 
-Reports `badvalue` or `oserror` as described above.
+Reports `badvalue`, `oserror` or `unconfirmed` as described above.
 
 #### Lifetime and timeouts
 
@@ -110,7 +120,7 @@ its contents first.
 
 #### Synopsis
 
-`publish bytes path value`
+`publish bytes path value ?-flush?`
 
 #### Arguments and options
 
@@ -125,7 +135,7 @@ publishes it. Returns `path`.
 
 #### Errors
 
-Reports `badvalue` or `oserror` as described above.
+Reports `badvalue`, `oserror` or `unconfirmed` as described above.
 
 #### Lifetime and timeouts
 
