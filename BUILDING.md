@@ -112,7 +112,8 @@ publishes a release: the one file it publishes is its own build,
    set. It caches objects and reference generations by content in
    `.cache\dev` and publishes `out\machteld.exe`, the path the gate uses. Only
    the gate decides a release.
-2. A new runtime version is one natural number higher: `MACHTELD_VERSION` in
-   `src\machteld.h`, `variable version` in `tcl\machteld.tcl`, and a `## N`
-   section in `docs\roadmap.md`. `tools\check_version.tcl`, part of the gate,
-   refuses any current claim of another version outside the history markers.
+2. Release 0.22 uses runtime number `22`. Its successor, release 0.30, uses
+   `30`. Each release uses the same integer in `MACHTELD_VERSION` in
+   `src\machteld.h`, `variable version` in `tcl\machteld.tcl`, and the
+   current release heading in `docs\roadmap.md`. The gate checks these
+   values with `tools\check_version.tcl`.

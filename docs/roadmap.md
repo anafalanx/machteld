@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: Release 22 status, the delivery order for the shared runtime, acceptance checks, and release history.
+description: Release 0.22 status, planned 0.30 milestones, acceptance checks, and release history.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -9,15 +9,15 @@ tags: [machteld, roadmap, windows]
 
 ## 22 — in preparation
 
-**machteld 22 is the next release; it is not released or signed.** From 22 on
-the version is one natural number, and only a change to the runtime makes a
-new one: the header says `"22"`, the prelude `22`, the Windows fixed version
-22.0.0.0. Programs ask for `package require machteld 22-`; a program that must
-be read again before it runs on a newer runtime names an upper bound, which Tcl
-excludes, as in `package require machteld 22-24`. The build tools keep running
-on the signed 0.21 until a signed 22 exists. The historical signed release
-remains preserved; artifacts of 22 must be identified by their hashes,
-verification receipts, `manifest`, and embedded reference.
+**The next public release is 0.22. Its successor is 0.30.** The runtime and
+Tcl package use integer versions `22` and `30` for these releases. Only a
+runtime change advances that number. For 0.22, the header declares `"22"`,
+the prelude declares `22`, and the fixed Windows file version is `22.0.0.0`.
+A Tcl program can request `package require machteld 22-` to accept later
+versions, or `package require machteld 22-30` to require review before it
+runs on 0.30. Tcl excludes the upper bound. Builds use the signed 0.21
+executable until the owner signs 0.22. Identify 0.22 artifacts by their
+hashes, verification receipts, `manifest`, and embedded reference.
 
 22 begins as the 0.22 candidate (commit 8bcc1ec), the stabilization of
 2026-09-30 to 2026-10-02, which was never released. Its completed steps 1
@@ -68,7 +68,7 @@ authorizes publication after acceptance.
 The target is one signed `machteld.exe` that runs Tcl scripts, creates
 application-only `.machteld` archives with `pack`, and runs those archives.
 The milestone numbers below identify work items. The first implementation
-in release 23 is the foreign-function interface, numbered 23.9.
+in release 0.30 is the foreign-function interface, numbered 30.9.
 
 ### Establish the signed baseline
 
@@ -88,23 +88,23 @@ in release 23 is the foreign-function interface, numbered 23.9.
    bytes, record their SHA-256 and adopt the released executable for builds.
 
 Alongside this work, run an existing application's suite against signed 0.21
-with its current native extension (23.1). Record each failure and which side
+with its current native extension (30.1). Record each failure and which side
 needs a change. Repeat on signed 22. Use the results to write a small runtime
-regression test. Open 23 by agreeing on the new command contracts, their
-limits, and the handling of binary data and text (23.0).
+regression test. Open 0.30 by agreeing on the new command contracts, their
+limits, and the handling of binary data and text (30.0).
 
 ### Build the shared application runtime
 
-1. **Windows DLL calls (23.9).** Add the optional, statically linked `cffi`
+1. **Windows DLL calls (30.9).** Add the optional, statically linked `cffi`
    package for synchronous calls. Document ownership, text encoding and DLL
    lookup. Test an allowed call, a refused load, and handling of a failing
    call in a worker.
-2. **Supervised processes (23.2–23.3).** Deliver child completion through the
+2. **Supervised processes (30.2–30.3).** Deliver child completion through the
    Tcl event loop. Support hidden helpers, attended windows and graceful
    shutdown. Test that a Tk window keeps responding, a child receives one
    completion notification, and a window can be found after a child hands
    work to another process in its job.
-3. **One executable for development and delivery (23.4a, 23.4).** Keep
+3. **One executable for development and delivery (30.4a, 30.4).** Keep
    direct Tcl entry. Embed `consoleAllocationPolicy=detached` in the Windows
    console-subsystem manifest. Implement `machteld.exe pack` and direct
    archive launch. Verify the inventory before executing any application code.
@@ -117,17 +117,17 @@ limits, and the handling of binary data and text (23.0).
    running the signed build. Test terminal input, redirection, waiting and
    exit status. The archive options and manifest syntax are
    design work within this milestone.
-4. **Full SQL (23.5).** Expose SQLite's query language and compile in FTS5.
+4. **Full SQL (30.5).** Expose SQLite's query language and compile in FTS5.
    Choose the binding, remaining features and application-level safeguards
    here. Exercise typed parameters, joins, atomic imports, schema upgrades,
    read-only access and checked backup and restore. Run a packaged example against a writable
    database outside the application archive.
-5. **Graphviz for Tk, immediately after SQL (23.5a).** Embed the static
+5. **Graphviz for Tk, immediately after SQL (30.5a).** Embed the static
    `dot` engine, orthogonal routing, HTML-like table labels and xdot drawing
    instructions. Lay out a graph with named table ports, render it on a Tk
    canvas and verify that selection still works. Measure the size against
    the matching full-SQL executable.
-6. **Desktop and background work (23.6, 23.6b, 23.7, 23.8).** Add
+6. **Desktop and background work (30.6, 30.6b, 30.7, 30.8).** Add
    cross-process locks, atomic file replacement, per-user storage and
    reliable clipboard handling. Finish the process controls, then add
    cancellable HTTP through the event loop and reusable archive workers.
@@ -135,7 +135,7 @@ limits, and the handling of binary data and text (23.0).
    actual proxy before switching its transport. Test competing writers, UI
    responsiveness and cancellation. A worker must reject an archive whose
    digest differs from the parent's.
-7. **Qualify a real application (23.10).** Run its acceptance suite against
+7. **Qualify a real application (30.10).** Run its acceptance suite against
    the shared runtime and packaged sources. Exercise the signed runtime and
    archive from a user's desktop and share, including an application update
    while an older session is open. Verify that the application builds and
@@ -466,7 +466,7 @@ formats numbers, so nothing observable changes.
 
 ## Candidate studies
 
-- **Console control ownership** remains a candidate for 23. A program
+- **Console control ownership** remains a candidate for 0.30. A program
   handing its console to a child needs a way to let that child handle
   Ctrl-C. The proposal in `docs/proposals/console-ctrl/` describes
   `console ctrl ignore|default` and a query for the current mode. The

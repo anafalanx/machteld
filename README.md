@@ -17,10 +17,10 @@ The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.
 is preserved, and its release notes describe that artifact, not everything now
 in this checkout; on the build PC its executable is the build runtime,
 `dist/0.21/machteld.exe`, which git ignores ([BUILDING.md](BUILDING.md)). This
-checkout is machteld **22**, the next release, in preparation. From 22 on the
-version is one natural number, and only a change to the runtime makes a new
-one. 22 begins as the 0.22 candidate, the stabilization that was never
-released, and includes its changes:
+checkout is preparing release **0.22**. Its CLI and Tcl package report
+`22`. The following release is **0.30** and will report `30`. Only a runtime
+change advances that number. The original 0.22 stabilization candidate
+contributed the following changes.
 
 | Behavior | Signed 0.21 release | 22, in preparation |
 | --- | --- | --- |
@@ -96,11 +96,10 @@ This prints `Hello, world!`. The entry parser accepts `package require
 machteld`, an optional literal version, or `package require -exact machteld
 <version>`. Generic Tcl scripts without that declaration are refused.
 
-machteld's version is one natural number, and Tcl reads every whole number as
-a major version: `22-` accepts 22 and every later runtime. A program that must
-be read again before it runs on a newer runtime names an upper bound, which Tcl
-excludes: `package require machteld 22-24` runs on 22 and 23 and refuses 24
-until someone has checked it and widened the range.
+Tcl treats each whole-number runtime version as a major version.
+`package require machteld 22-` accepts 22 and later runtimes, including the
+planned 30. Use `package require machteld 22-30` to run on 22 and require
+a compatibility review before running on 30. Tcl excludes the upper bound.
 
 For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
 and run it with the distribution executable. This is a direct-script example:

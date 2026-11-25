@@ -34,15 +34,16 @@ of these literal forms. `.tcl` is conventional, not required:
 ```tcl
 package require machteld
 package require machteld 22-
-package require machteld 22-24
+package require machteld 22-30
 package require -exact machteld 22
 ```
 
-machteld's version is one natural number, and Tcl reads every whole number as a
-major version: `22` alone accepts 22 only, `22-` accepts 22 and every later
-runtime, and `22-24` accepts 22 and 23 but refuses 24. A program that must be
-read again before it runs on a newer runtime names such an upper bound. Only a
-change to the runtime makes a new number.
+The public release numbers 0.22 and 0.30 correspond to Tcl package versions
+`22` and `30`. Tcl treats each whole number as a major version. A request
+for `22` accepts only major version 22. The range `22-` accepts 22 and all
+later runtimes. Use `22-30` for a program that must be reviewed before the
+next release. Its upper bound excludes 30. Only a runtime change advances
+the package version.
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
 is accepted. The host parses this boundary before evaluating the file. A missing

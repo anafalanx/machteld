@@ -1,11 +1,11 @@
 ---
 type: plan
 title: machteld 22
-status: DRAFT, 2026-10-30. zef's plan for zef 22 (plan-zef22.md on zef's
+status: DRAFT, updated 2026-11-25. zef's plan for zef 22 (plan-zef22.md on zef's
   zef-22 branch, f741ffe), revised for a runtime-only machteld 22 after the
   owner's rulings of 2026-10-29, then with the owner's rulings of 2026-10-30
-  on the decisions poll. Section 6 holds the rulings, section 8 what they put
-  in 23.
+  on the decisions poll. Section 6 records those rulings. Section 8 uses the
+  successor release number 0.30.
 relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
   docs/direction.md, docs/creed.md, tools/stabilization.json
 ---
@@ -14,12 +14,27 @@ relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
 
 ## 0. How to read this
 
+The release after 0.22 is **0.30**. Under the existing version convention
+their runtime numbers are 22 and 30. The October decisions and log use
+the earlier number 23 for that successor. Work-item numbers such as 30.4
+identify milestones within the 0.30 plan.
+
+On 2026-11-25, the Windows acceptance run passed 72 release and desktop
+steps on unsigned Beta 1, built from `e0db215`. This candidate adds
+supervised Tcl jobs, the upstream SQLite binding, script and archive launch,
+atomic file publication, process-owned locks and Windows desktop services.
+It also retains wrapped applications' custom Windows metadata and icons.
+The test result applies to that candidate. The final 0.22 feature set and
+the treatment of wrapper identity on `main` remain open. The October
+scope below records the earlier stabilization plan.
+[Beta 1 and release checklist](https://github.com/anafalanx/machteld/pull/5) ·
+[Windows acceptance run](https://github.com/anafalanx/machteld/actions/runs/45597853161)
+
 Four kinds of statement appear here:
 
 - **Rulings**: what the owner decided on 2026-10-29 (section 1) and on
   2026-10-30 (section 6, with each ruling's reason and how it is applied),
-  and the rulings in force before (section 3). They are constraints, not
-  reopened.
+  and the rulings in force before (section 3).
 - **Proposals**: the plan's substance, each grounded in what was read or
   measured, with its date.
 - **Open decisions** (section 6.3): the two questions of the consolidation's
@@ -154,11 +169,11 @@ release."
    testing; other machines run signed releases only. Signing is the owner's
    step.
 
-## 4. What machteld 22 is
+## 4. The October scope for 0.22
 
-machteld 22 is a runtime release: the candidate's stabilization, the build in
-Tcl and the ledger's remaining fixes, in one signed `machteld.exe`. It adds no
-runtime feature (ruling 2).
+The October plan called for the candidate's stabilization, the build in
+Tcl and the ledger's remaining fixes in one signed `machteld.exe`.
+Ruling 2 limited that scope to stabilization.
 
 ### 4.1. What it contains
 
@@ -183,7 +198,7 @@ runtime feature (ruling 2).
   publishes in one operation (2a39777). Version 22 and the owner's wording
   (c9cbff2, 735b738). The console-control proposal, as documentation only
   (c8e1173: machteld's own text at 287702b, as zef imported it in 346948c),
-  the design input for console control in 23 (4.3, section 8). The els
+  the design input for console control in 0.30 (4.3, section 8). The els
   method as a guide, the streaming-bounds test's race fixed, the commentary,
   BUILDING.md and this plan (section 7).
 - **Not carried from zef:** its rename (840fbc2) and everything of the
@@ -196,7 +211,7 @@ runtime feature (ruling 2).
   application identity, a wrapped tool's own metadata and icons
   (`src\resource.c`), removed in 0f62438 and kept on the branch
   `app-identity` (ruling 1); every new runtime feature (ruling 2, 4.3); the
-  FFI (ruling 3). Section 8 holds what goes to 23.
+  FFI (ruling 3). Section 8 records the plans for 0.30.
 
 ### 4.2. The bug ledger
 
@@ -211,7 +226,7 @@ test that fails before it.
 | Fixed in the candidate (8bcc1ec), carried | R2 help, R3 json NUL, R4 typed null, R10 key leaks, R18 interp cleanup, S2 pool stderr eof; json bytearray as Latin-1; typed depth; recycled channel names; reentrant child close; pool close in callback; store leaks; NUL paths; hash counter |
 |---|---|
 | New fixes in 22 | R1 scope -level; R5 -stdin broken pipe; R6 kill after exit; R7 canon on a locked file; R8 detach console and process group; R11 capture race; R12 strict text from -onout and store keys; R13 -env block size; R14 pty_free; R15 dead code; R16 breakaway (merged with the limits write); R17 one size grammar; R19 comments; R22 PATH from -env; R24 cli parse name; R25 bytearray docs; S3 watch overflow; S4 worker non-error codes; S7 creed wording (its rewording done in c9cbff2); -onout read errors; long resolved paths; crash containment (no error dialogs from children); R26 one package search in every interpreter; R27 registry and dde registered; R28 handle tokens unique across the process; R29 panic containment; the GUI host's file description and product name in the owner's wording |
-| Deferred to 23 | R9 the polling monitor (a completion-port supervisor is a redesign; the `-onout` pump polls the same way, `src\proc.c:1243`, and read 16 MiB in 3 to 11 s on the build PC); R20 limit status; S1 incremental UTF-8 for pty; S5 GUI fatal message; S6 bounded reap; R21 rename pairing across reads; R23 narrowing the global path |
+| Deferred to 0.30 | R9 the polling monitor (a completion-port supervisor is a redesign; the `-onout` pump polls the same way, `src\proc.c:1243`, and read 16 MiB in 3 to 11 s on the build PC); R20 limit status; S1 incremental UTF-8 for pty; S5 GUI fatal message; S6 bounded reap; R21 rename pairing across reads; R23 narrowing the global path |
 | Build, done | B12 BUILDING.md's interpreters (BUILDING.md); B13 toolchain fingerprint (d29c268); B16 the streaming-bounds overflow check raced its fixture's descendant, whose newline split the overflowing line when the pump was slow (found and fixed in f6393df) |
 | Build, partly | B3 retried renames (the development cache's publications in 306b38f, the release build's in 2a39777; `tools\reference.tcl`, `tools\package.tcl` and `tcl\docs.tcl` still rename once); B4 bash profiles (d29c268; the bash steps have no timeout yet); B7 publish semantics (2a39777: one operation, and debris checked; not write-through, retried on any error); B10 a development build must not overwrite a signed exe (the gate's build goes to `out\machteld.exe` only, since it refuses `--runtime` when it builds; where the development loop publishes is D4) |
 | Build, open | B1 detach coverage (with R16); B2 tolerant cleanup; B5 curl timeouts and tar checks; B6 MSYS2 discovery (BUILDING.md names `--msys` and `MSYS2_ROOT`; `tools\dev.tcl` takes no `--msys`); B8 attribute checks; B9 cache-path match; B11 publish only after every lane passed (ruling 10); B14 a signing recipe (at release, BUILDING.md); B15 the entry test runs `whoami.exe` by bare name (`test\entry_test.tcl:145`), so a caller's PATH with Git's tools first gives its ACL fixture no SID (found in c9cbff2's first gate run, from Git Bash); the fix names System32's `whoami.exe`, and until then the gate runs from PowerShell; B17 the development build lock's stale-lock race (below) |
@@ -257,7 +272,7 @@ The newer items, in full:
   `.cache\dev`. It affects only the development loop. Fix: an atomic
   takeover, with a test of two processes.
 
-### 4.3. Candidates for 23 and later
+### 4.3. Candidates for 0.30 and later
 
 None of these is in 22: asked twice, the owner ruled "None in 22" (ruling 2).
 They came from zef's verbs (zef's plan, its section 4.3; the commentary's
@@ -306,7 +321,7 @@ merged with the limits write) and the crash containment for children.
 
 ## 5. Phases
 
-22 has no feature phase (ruling 2).
+The October plan assigned no feature phase to 0.22 (ruling 2).
 
 0. **Preserve** - done: the candidate's read-only snapshot,
    `C:\dev\.preserve\2026-10-28-machteld-0.22-candidate` (verified when made);
@@ -605,14 +620,14 @@ minute. (b) Port it to Tcl. *Rec: (a).*
 
 <!-- machteld-version-history: end -->
 
-## 8. For 23
+## 8. Plans for 0.30
 
-The [roadmap's delivery order](docs/roadmap.md#delivery-order) gives the
+The “Delivery order” section of the [roadmap](docs/roadmap.md) gives the
 implementation sequence. The items below collect the design rulings by topic.
 New commands go through the admission questions. The candidates of 4.3
 and the ledger's deferred items (4.2) supply further design input.
 
-1. **The FFI, 23's first bundle** (rulings 3-5). cffi 2.0.3 (BSD-2, Ashok
+1. **The FFI, the first bundle planned for 0.30** (rulings 3–5). cffi 2.0.3 (BSD-2, Ashok
    Nadkarni) on libffi 3.5.2 (MIT), static in both hosts and loaded only on
    `package require cffi`, built without callbacks, so no executable memory.
    Four machteld patches, recorded and tested: no callbacks; a loader that
@@ -625,12 +640,12 @@ and the ledger's deferred items (4.2) supply further design input.
    promise and a wrong one is undefined behaviour; cffi's error codes; the
    loader rule; strict UTF-16 through W functions; no callbacks; who frees
    memory and handles; blocking and crashes, with calls that may crash
-   belonging in a pool worker). Update the manifest description at 23.4a.
+   belonging in a pool worker). Update the manifest description at 30.4a.
    Creed 8 gains one sentence, and direction.md's placement list gains
    "one synchronous call
    into a Windows DLL with no lifetime beyond the call: declare it through
    cffi in the program". Its prerequisites, R26 and R29, land in 22.
-2. **Warm pool workers** (23.8): a pool takes successive
+2. **Warm pool workers** (30.8): a pool takes successive
    batches and single calls and announces completion through the event loop,
    with an opaque token. Preserve Job Object termination, deadlines and
    memory caps. Archive workers reopen the parent's archive and verify its
@@ -638,8 +653,8 @@ and the ledger's deferred items (4.2) supply further design input.
 3. **Evented natives** (in place of Thread): evented variants of the commands
    that block for long, whose native threads do the work and deliver
    completion with `Tcl_ThreadQueueEvent`, never evaluating Tcl off the main
-   thread, with cancellation points. Start with child completion at 23.2.
-   Cancellable HTTP follows at 23.7. Other candidates include `hash file`,
+   thread, with cancellation points. Start with child completion at 30.2.
+   Cancellable HTTP follows at 30.7. Other candidates include `hash file`,
    `dirs`/`links`, and readiness events for `watch` and `pty`.
 4. **One runtime for scripts and archives.** Run `machteld.exe app.tcl` or
    `machteld.exe app.machteld`. A desktop shortcut uses the same command.
@@ -650,7 +665,7 @@ and the ledger's deferred items (4.2) supply further design input.
    redirection, shell waiting and exit status. Pass application arguments
    through in both cases. Ruling 17 also allows a renamed copy of the signed
    runtime to find its same-named script.
-5. **Retire `wrap` completely.** The archive delivery milestone (23.4)
+5. **Retire `wrap` completely.** The archive delivery milestone (30.4)
    removes the executable-producing CLI and Tcl command, its console and GUI
    options, and both embedded executable templates. Migrate the help, examples
    and tests to archive delivery. The release build still packages
@@ -694,8 +709,8 @@ and the ledger's deferred items (4.2) supply further design input.
    with stable IDs, sections and bounded JSON. Use FTS5 in a read-only
    SQLite database for discovery and exact lookups for IDs and aliases.
    Markdown alone is the proposed body format.
-   The [reference plan](docs/roadmap.md#compact-offline-reference-for-agents)
-   gives the size and retrieval checks for this decision.
+   The “Compact offline reference for agents” section of the
+   [roadmap](docs/roadmap.md) gives the size and retrieval checks.
 
 Rejected: Tcl's Thread package (2026-10-29) and a GUI twin of `machteld.exe`
-(ruling 18). Tcl stays 9.0.4 through 23 (ruling 9).
+(ruling 18). Ruling 9 keeps Tcl at 9.0.4 through 0.30.
