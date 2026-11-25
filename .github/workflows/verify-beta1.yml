@@ -1,0 +1,262 @@
+name: Build and verify Machteld 0.22 Beta 1 for Windows
+
+on:
+  push:
+    branches:
+      - verify/22-beta1
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      CANDIDATE_SHA: d9df71f01d2c4f66d2d6f6e7a36bc72f7b40b75c
+    defaults:
+      run:
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: candidate
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Read the independent desktop and SMB probes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probes
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/verification
+          persist-credentials: false
+
+      - name: Verify the source revision and fresh workspace
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:CANDIDATE_SHA) {
+            throw "Expected $env:CANDIDATE_SHA, checked out $actual"
+          }
+          if ((Test-Path .cache/deps) -or (Test-Path out/machteld.exe)) {
+            throw 'Expected a clean workspace without dependency cache or built runtime'
+          }
+          $epoch = git show -s --format=%ct HEAD
+          if ($LASTEXITCODE -ne 0 -or $epoch -notmatch '^\d+$') { throw 'Cannot identify source commit timestamp' }
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+          Write-Host "Testing candidate $actual, source epoch $epoch"
+
+      - name: Set up MSYS2
+        id: msys
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: UCRT64
+          update: true
+          cache: false
+
+      - name: Install the locked UCRT64 build tools
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $lock = (Get-Content tools/dependencies.lock.json -Raw | ConvertFrom-Json).toolchain
+          $mirror = 'https://repo.msys2.org'
+          $ucrt = "$mirror/mingw/ucrt64"
+          $prefix = 'mingw-w64-ucrt-x86_64'
+          $packages = @(
+            "$ucrt/$($lock.gccPackage)-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$prefix-gcc-libs-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.binutilsPackage)-$($lock.binutilsPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.makePackage)-$($lock.makePackageVersion)-any.pkg.tar.zst"
+            "$mirror/msys/x86_64/$($lock.zipPackage)-$($lock.zipPackageVersion)-x86_64.pkg.tar.zst"
+          )
+          # Match the GCC package's .BUILDINFO for the runtime, headers and ISL ABI.
+          foreach ($component in 'crt','headers','libwinpthread','winpthreads') {
+            $packages += "$ucrt/$prefix-$component-14.0.0.r37.g2bfe61fba-1-any.pkg.tar.zst"
+          }
+          $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
+          & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
+          exit $LASTEXITCODE
+
+      - name: Reconstruct the unsigned candidate
+        id: build
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $driverDir = New-Item -ItemType Directory -Path dist/0.21 -Force
+          $driver = Join-Path $driverDir.FullName 'machteld.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $driver
+          $expected = '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7'
+          $actual = (Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Build runtime SHA-256 mismatch: $actual" }
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & $driver tools/release.tcl --msys $env:MSYS2_ROOT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $digest = (Get-FileHash -LiteralPath out/machteld.exe).Hash.ToLowerInvariant()
+          "BETA_SHA256=$digest" >> $env:GITHUB_ENV
+          Write-Host "Fresh beta executable SHA-256 $digest"
+
+      - name: Verify the beta PE metadata
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path out/machteld.exe).Path)
+          $info | Select-Object FileVersion, ProductVersion, IsPreRelease, IsPrivateBuild, Comments | Format-List
+          if (-not $info.IsPreRelease -or $info.Comments -cne 'Machteld 22 Beta 1') {
+            throw 'The executable does not carry the expected Beta 1 Windows prerelease marker and comment.'
+          }
+
+      - name: Verify Windows clipboard ownership under real contention
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/clipboard_test.tcl --hosted-clipboard
+          exit $LASTEXITCODE
+
+      - name: Verify atomic file publication
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/publish_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Verify process lock ownership and contention
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/lock_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Verify archive replacement and generation ownership on local storage
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & .\out\machteld.exe test/app_launch_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Verify archive replacement and generation ownership over loopback SMB
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & (Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/test-loopback-share.ps1')
+
+      - name: Pack and use SQLite Lookup and Project Inspector archives
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/archives-gui-probe.tcl'
+          & .\out\machteld.exe $probe (Get-Location).Path
+          exit $LASTEXITCODE
+
+      - name: Retain a disk-backed generation through parent and child exits
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/generation-stress.tcl'
+          & .\out\machteld.exe $probe
+          exit $LASTEXITCODE
+
+      - name: Inspect console attachment of real archive and wrapped GUI workers
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $probes = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification'
+          $compilerBin = Join-Path $env:MSYS2_ROOT 'ucrt64/bin'
+          $env:Path = "$compilerBin;$env:Path"
+          $dll = Join-Path $env:RUNNER_TEMP 'consoleprobe.dll'
+          & "$compilerBin/gcc.exe" -shared -static-libgcc -std=c17 -O2 -Wall -Wextra -Werror -DUSE_TCL_STUBS -I.cache/deps/prefix/include "$probes/consoleprobe.c" .cache/deps/prefix/lib/libtclstub.a -o $dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\out\machteld.exe "$probes/gui-console-probe.tcl" (Get-Location).Path $dll
+          exit $LASTEXITCODE
+
+      - name: Run all five gate groups and the Windows desktop acceptance lanes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & .\dist\0.21\machteld.exe tools/gate.tcl --skip-build --runtime out/machteld.exe --msys $env:MSYS2_ROOT --interactive-gui
+          exit $LASTEXITCODE
+
+      - name: Compare a second package from the same pinned toolchain and dependency cache
+        id: rebuild
+        if: ${{ success() }}
+        continue-on-error: true
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          $second = Join-Path $env:RUNNER_TEMP 'second-beta/machteld.exe'
+          & .\dist\0.21\machteld.exe tools/release.tcl --skip-bootstrap --msys $env:MSYS2_ROOT --output $second
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $secondDigest = (Get-FileHash -LiteralPath $second).Hash.ToLowerInvariant()
+          $match = if ($secondDigest -ceq $env:BETA_SHA256) { 'equal' } else { 'different' }
+          "comparison=$match" >> $env:GITHUB_OUTPUT
+          "second-sha256=$secondDigest" >> $env:GITHUB_OUTPUT
+          Write-Host "Second executable SHA-256 $secondDigest; byte digests $match."
+          if ($match -eq 'different') {
+            $compare = Join-Path $env:GITHUB_WORKSPACE 'probes/.github/verification/compare-beta-builds.py'
+            & python $compare out/machteld.exe $second
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Stage the gated beta and its release notes
+        shell: pwsh
+        env:
+          REBUILD_COMPARISON: ${{ steps.rebuild.outputs.comparison }}
+          REBUILD_SHA256: ${{ steps.rebuild.outputs.second-sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'machteld-beta-artifact')
+          $exe = Join-Path $dest.FullName 'machteld.exe'
+          Copy-Item -LiteralPath 'out/machteld.exe' -Destination $exe
+          if ((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant() -cne $env:BETA_SHA256) {
+            throw 'Staged executable differs from the freshly built and gated executable.'
+          }
+          Copy-Item -LiteralPath 'docs/releases/0.22-beta.1.md' -Destination $dest.FullName
+          Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $dest.FullName 'SHA256SUMS') -Value "$env:BETA_SHA256  machteld.exe"
+          [ordered]@{
+            distribution = 'Machteld 0.22 Beta 1'
+            runtimeApi = 22
+            platform = 'windows-x64'
+            signing = 'unsigned'
+            source = $env:CANDIDATE_SHA
+            workflowSource = $env:GITHUB_SHA
+            run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+            sourceDateEpoch = $env:SOURCE_DATE_EPOCH
+            executableSha256 = $env:BETA_SHA256
+            repeatedBuildUsingSameDependencies = if ($env:REBUILD_COMPARISON) { $env:REBUILD_COMPARISON } else { 'unavailable' }
+            repeatedBuildSha256 = $env:REBUILD_SHA256
+          } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $dest.FullName 'build.json')
+
+      - name: Upload the downloadable beta ZIP
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: machteld-0.22-beta.1-windows-x64
+          path: ${{ runner.temp }}/machteld-beta-artifact/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Show the download and digest
+        shell: pwsh
+        env:
+          DOWNLOAD: ${{ steps.artifact.outputs.artifact-url }}
+          ZIP_SHA256: ${{ steps.artifact.outputs.artifact-digest }}
+        run: |
+          "## Machteld 0.22 Beta 1" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "[Download the Windows x64 beta ZIP]($env:DOWNLOAD)" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Source commit $env:CANDIDATE_SHA" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Executable SHA-256 $env:BETA_SHA256" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "ZIP SHA-256 $env:ZIP_SHA256" >> $env:GITHUB_STEP_SUMMARY
