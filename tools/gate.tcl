@@ -8,7 +8,7 @@ package require machteld 0.21
 # included. The gate's build goes to out/machteld.exe only.
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
-#         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty?
+#         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty? ?--cloud?
 #         ?--interactive-gui?
 #
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
@@ -48,6 +48,8 @@ package require machteld 0.21
 #
 #   --public-tls         (integration or release) the native lane's public TLS
 #                        checks, which reach the network
+#   --cloud              (integration or release) register a temporary NTFS
+#                        Cloud Files provider using the x64 Windows SDK
 #   --interactive-pty    (integration or release) the process lane's console I/O
 #   --interactive-gui    the Tk archive, GUI widgets and the SQLite lookup
 #                        open windows for attended checks
@@ -88,7 +90,7 @@ proc ::gate::parse {argv} {
     variable groups
     set settings [dict create runtime [file join $root out machteld.exe] \
         cache [file join $root .cache deps] msys "" skipBuild 0 \
-        tls 0 pty 0 gui 0]
+        tls 0 pty 0 gui 0 cloud 0]
     set requested {}
     set given {}
     while {[llength $argv]} {
@@ -108,6 +110,7 @@ proc ::gate::parse {argv} {
             }
             --skip-build {dict set settings skipBuild 1}
             --public-tls {dict set settings tls 1}
+            --cloud {dict set settings cloud 1}
             --interactive-pty {dict set settings pty 1}
             --interactive-gui {dict set settings gui 1}
             default {fail "unknown option $option"}
@@ -135,8 +138,8 @@ proc ::gate::parse {argv} {
         fail "--runtime names an executable to test as it is, and the build would publish over it: add --skip-build, or select groups with --group"
     }
     set chosen [dict get $settings groups]
-    if {([dict get $settings tls] || [dict get $settings pty]) && "integration" ni $chosen} {
-        fail "--public-tls and --interactive-pty need the integration or release group"
+    if {([dict get $settings tls] || [dict get $settings pty] || [dict get $settings cloud]) && "integration" ni $chosen} {
+        fail "--public-tls, --interactive-pty and --cloud need the integration or release group"
     }
     return $settings
 }
@@ -247,6 +250,14 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "native filesystem boundaries" native_filesystem_test.tcl
             }
             integration {
+                if {[dict get $settings cloud]} {
+                    set provider [file join $out cloud_files_provider.exe]
+                    set object [file join $out cloud_files_provider.obj]
+                    addStep steps integration "Windows SDK cloud provider" [list cl.exe /nologo /W4 /WX /O2 \
+                        /Fe:[file nativename $provider] /Fo:[file nativename $object] \
+                        [file join $test fixtures cloud_files_provider.c] cldapi.lib]
+                    addLane steps $runtime integration "Cloud Files zero-fetch acceptance" localfiles_test.tcl --cloud $provider
+                }
                 set httpFixture [file join $out http_fixture.exe]
                 set sqliteObject [file join $out sqlite3-test.o]
                 set lockFixture [file join $out sqlite_lock_fixture.exe]

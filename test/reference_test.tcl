@@ -125,6 +125,34 @@ check {search is ranked, filtered, bounded, and actionable} [expr {
     [dict get [lindex [dict get $searched items] 0] product] eq "tcl"}]
 check {search rejects degenerate query} [expr {
     [errorcode {docs search {   }}] eq {MACHTELD DOCS badvalue}}]
+foreach query {{-maxframe} {MACHTELD POOL} {tcl/command/dict} {read "binary" data}} {
+    set result [docs search $query -limit 2]
+    check "punctuation, options and plain-language queries produce bounded matches: $query" [expr {
+        [dict get $result returned] > 0 && [dict get $result returned] <= 2}]
+}
+set resolved 0
+set checkedSections 0
+set mismatches {}
+for {set offset 0} {$offset < [dict get $status documents]} {incr offset 200} {
+    foreach page [dict get [docs list -offset $offset -limit 200] items] {
+        set id [dict get $page id]
+        set whole [docs get $id -all 1]
+        set body [dict get $whole text]
+        if {[hash sum sha256 [encoding convertto utf-8 $body]] ne [dict get $whole sha256]} {lappend mismatches $id}
+        set spans [::machteld::ReferenceDb eval {SELECT slug,start,end FROM section WHERE id=$id ORDER BY start,slug}]
+        foreach {slug start end} $spans {
+            set slice [docs get $id#$slug -limit 19]
+            if {[dict get $slice section] ne $slug || [dict get $slice total] != $end-$start ||
+                    [dict get $slice text] ne [string range $body $start [expr {min($start+19,$end)-1}]]} {
+                lappend mismatches $id#$slug
+            }
+            incr checkedSections
+        }
+        incr resolved
+    }
+}
+check "all $resolved pages and $checkedSections section IDs retrieve the stored Markdown" [expr {
+    $resolved == [dict get $status documents] && $checkedSections > 3000 && ![llength $mismatches]}] [lrange $mismatches 0 3]
 check {search accepts short tokens and get resolves an exact short name} [expr {
     [dict get [docs search a -limit 1] returned] == 1 &&
     [dict get [docs get if -limit 16] id] eq {tcl/command/if}}]

@@ -80,7 +80,7 @@ check {named groups run in the order given, once each, and never build} \
 check {an unknown group is refused} [refused {--group slow} {*unknown group slow*}]
 check {an unknown option is refused} [refused {--fast} {*unknown option --fast*}]
 check {--group needs a value} [refused {--group} {*--group needs a value*}]
-foreach option {--public-tls --interactive-pty} {
+foreach option {--public-tls --interactive-pty --cloud} {
     check "$option needs the integration or release group" \
         [expr {[refused [list --group fast $option] {*need the integration or release group*}] &&
             ![catch {::gate::parse [list --group integration $option]}] &&
@@ -133,7 +133,7 @@ check {the packaging group compiles only the process fixture} \
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 6}]
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 10}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
 
@@ -217,7 +217,8 @@ foreach step $nvPlan {
 check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, and hash boundaries} \
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
-        native-boundary-trap.exe hash-boundary-trap.exe]}] $driven
+        native-boundary-trap.exe hash-boundary-trap.exe files-provider-trap.exe udp-trap.exe network-trap.exe \
+        {encoding-trap.exe system} {encoding-trap.exe missing} {encoding-trap.exe incomplete}]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 set attended [lmap step $guiPlan {if {[dict get $step group] ne "interactive"} continue; set step}]
 set archiveLane [lindex $attended [lsearch -exact [labels $attended] "Tk app archive"]]
@@ -247,7 +248,16 @@ check {every program and source the plan names exists} [expr {![llength $missing
 # Every test program and C source under test/ is something the gate runs or
 # compiles, behind an option or not, or is run by another test (named here
 # with that test, which must name it).
-set everything [concat $releasePlan [::gate::plan [settings {--interactive-gui}]]]
+set cloudPlan [::gate::plan [settings {--group integration --cloud}]]
+set cloudBuild [lsearch -exact [labels $cloudPlan] {Windows SDK cloud provider}]
+set cloudRun [lsearch -exact [labels $cloudPlan] {Cloud Files zero-fetch acceptance}]
+check {the optional SDK lane builds the provider and passes it to the real Cloud Files test} \
+    [expr {$cloudBuild >= 0 && $cloudRun == $cloudBuild + 1 &&
+        {Windows SDK cloud provider} ni $releaseLabels && {Cloud Files zero-fetch acceptance} ni $releaseLabels &&
+        [lindex [dict get [lindex $cloudPlan $cloudBuild] argv] 0] eq "cl.exe" &&
+        [lmap word [lrange [dict get [lindex $cloudPlan $cloudRun] argv] end-2 end] {file tail $word}] eq
+        {localfiles_test.tcl --cloud cloud_files_provider.exe}}]
+set everything [concat $releasePlan [::gate::plan [settings {--interactive-gui}]] $cloudPlan]
 set named {}
 foreach step $everything {
     foreach word [dict get $step argv] {

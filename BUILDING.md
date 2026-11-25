@@ -90,7 +90,9 @@ ZIP before the current CI policy was adopted.
    - To verify Windows Cloud Files, compile the disposable provider in an x64
      Windows SDK developer prompt. Run the test on an NTFS drive where the
      account can register a temporary sync root. The provider counts data-fetch
-     callbacks and unregisters the test root before exit.
+     callbacks and unregisters the test root before exit. Add `--cloud` to
+     the integration or release gate in that prompt to build and run the
+     provider automatically. To run just the provider check, use these commands.
 
      ```text
      cl /nologo /W4 /WX /O2 /Fe:out/cloud_files_provider.exe /Fo:out/cloud_files_provider.obj test/fixtures/cloud_files_provider.c cldapi.lib
