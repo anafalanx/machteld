@@ -776,7 +776,10 @@ and the ledger's deferred items (4.2) supply further design input. [Roadmap](doc
 9. **Compact offline documentation for agents.** Keep one queryable reference
    with stable IDs, sections and bounded JSON. Use FTS5 in a read-only
    SQLite database for discovery and exact lookups for IDs and aliases.
-   Markdown alone is the proposed body format.
+   The packaged and exported reference consists of a single `reference.db`.
+   Store Markdown page bodies and their FTS5 index in that database. Check
+   all Tcl/Tk manual entries from the pinned sources and all shipped Machteld
+   commands, packages and host features. Development retains the source documents.
    The “Compact offline reference for agents” section of the
    [roadmap](docs/roadmap.md) gives the size and retrieval checks.
 

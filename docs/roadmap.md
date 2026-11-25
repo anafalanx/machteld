@@ -406,8 +406,13 @@ aliases, ordered sections and corpus identity remain ordinary database
 records. The build generates the FTS5 index once. Open the read-only database
 on the first docs query.
 
-The proposed text format is Markdown alone. Store each section once and point
-FTS5 at that text. Maintain Machteld's original Markdown and the reference
+The executable's complete self-documentation ships as one file,
+`reference/reference.db`. It stores each page's Markdown once, with section
+offsets and an external-content FTS5 index over the same text. The database
+covers the shipped Machteld commands, packages and host features, and the
+Tcl and Tk programs, commands, widgets and C APIs for the pinned versions.
+`docs extract` publishes that same file as `reference.db` in a new directory.
+Maintain Machteld's original Markdown and the reference
 generator in Git. For Tcl/Tk, keep the versioned source archives available
 in the dependency cache and their SHA-256 hashes in the lockfile. The build
 uses their original manuals and pinned converter to generate HTML and then
@@ -417,7 +422,7 @@ stylesheets, and the original upstream manpage files from the compact
 executable. Carry over any file-specific attribution found only in those
 sources. The catalog used to plan the conversion had 468 Markdown pages and
 three license records served as text. Agents must still be able to query
-exact IDs and export Markdown.
+exact IDs and retrieve the Markdown from the exported database.
 Version the removal of HTML and raw-source retrieval and the change to the
 extracted file layout. Keep the machine-readable schema and integrity checks.
 

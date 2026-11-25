@@ -9,21 +9,6 @@ proc ::machteld::DocsFail {code message} {
     return -code error -errorcode [list MACHTELD DOCS $code] $message
 }
 
-proc ::machteld::DocsReadUtf8 {path {label "reference data"}} {
-    set channel ""
-    if {[catch {
-        set channel [open $path rb]
-        set bytes [read $channel]
-        close $channel
-        set channel ""
-        set text [encoding convertfrom -profile strict utf-8 $bytes]
-    } message]} {
-        if {$channel ne ""} { catch {close $channel} }
-        DocsFail corrupt "docs: cannot read embedded $label: $message"
-    }
-    return $text
-}
-
 proc ::machteld::DocsRoot {} {
     if {[info commands ::machteld::PayloadRoot] eq ""} {
         DocsFail unsupported "docs: this host has no trusted embedded reference root"
@@ -39,80 +24,33 @@ proc ::machteld::DocsRoot {} {
     return $reference
 }
 
-proc ::machteld::DocsSafeRelative {path} {
-    if {$path eq "" || [string length $path] > 32767} { return 0 }
-    if {[catch {file pathtype $path} pathType] || $pathType ne "relative"} { return 0 }
-    if {[regexp {[\x00-\x1f\x7f]} $path] ||
-            [string first "\\" $path] >= 0 || [string first ":" $path] >= 0 ||
-            [string first "//" $path] >= 0 || [string index $path end] eq "/"} { return 0 }
-    if {[catch {file split $path} parts] ||
-            [catch {file join {*}$parts} joined] ||
-            $path ne [string map {\\ /} $joined]} { return 0 }
-    if {![llength $parts]} { return 0 }
-    foreach part $parts {
-        if {$part in {. .. ""}} { return 0 }
-    }
-    return 1
-}
-
-proc ::machteld::DocsValidateHash {value where} {
-    if {![regexp {^[0-9a-f]{64}$} $value]} {
-        DocsFail corrupt "docs: invalid SHA-256 in $where"
-    }
-}
-
-proc ::machteld::DocsNonnegative {value where} {
-    if {[string length $value] > 10 || ![regexp {^(0|[1-9][0-9]*)$} $value] ||
-            $value > 2147483647} {
-        DocsFail corrupt "docs: invalid nonnegative integer in $where"
-    }
-}
-
 proc ::machteld::DocsNormalizeAlias {value} {
     set value [string tolower [string trim $value]]
     regsub -all {\s+} $value { } value
     return $value
 }
 
-proc ::machteld::DocsUniqueDict {value where} {
-    if {[catch {llength $value} length] || $length % 2} {
-        DocsFail corrupt "docs: $where is not an inert dict"
+proc ::machteld::DocsDatabaseFile {directory} {
+    set database [file join $directory reference.db]
+    if {[DocsNativeChildren $directory] ne [list $database] || [file type $database] ne "file"} {
+        DocsFail corrupt "docs: expected a single reference.db in the reference directory"
     }
-    set seen {}
-    foreach {key ignored} $value {
-        if {[dict exists $seen $key]} { DocsFail corrupt "docs: duplicate key in $where" }
-        dict set seen $key 1
-    }
-    return [expr {$length / 2}]
-}
-
-proc ::machteld::DocsJoin {relative} {
-    if {![DocsSafeRelative $relative]} {
-        DocsFail corrupt "docs: unsafe reference path in catalog"
-    }
-    return [file join [DocsRoot] {*}[file split $relative]]
+    return $database
 }
 
 proc ::machteld::DocsLoad {} {
     variable DOCS_IDENTITY
+    variable reference_sha256
     if {$DOCS_IDENTITY ne "" && [llength [info commands ::machteld::ReferenceDb]]} {return $DOCS_IDENTITY}
     set root [DocsRoot]
-    set manifest [DocsManifest]
-    set identity [DocsReadUtf8 [file join $root identity.dict] identity]
-    set database [file join $root reference.db]
     if {[catch {
-        DocsUniqueDict $identity identity
-        set receipt $identity
-        if {[dict get $receipt schema] != 2 || [dict get $receipt machteld_version] ne [::machteld::version] ||
-                [dict get $receipt corpus_sha256] ne [dict get $manifest reference.db] ||
-                [hash sum sha256 [encoding convertto utf-8 $identity]] ne [dict get $manifest identity.dict]} {
-            error "invalid reference identity"
-        }
+        set database [DocsDatabaseFile $root]
         set size [file size $database]
         if {$size < 4096 || $size > 67108864} {error "unexpected reference database size"}
         set ch [open $database rb]
         try {set bytes [read $ch $size]} finally {close $ch}
-        if {[string length $bytes] != $size || [hash sum sha256 $bytes] ne [dict get $receipt corpus_sha256]} {
+        if {![info exists reference_sha256] || ![regexp {^[0-9a-f]{64}$} $reference_sha256] ||
+                [string length $bytes] != $size || [hash sum sha256 $bytes] ne $reference_sha256} {
             error "reference database digest mismatch"
         }
         package require sqlite3
@@ -129,8 +67,8 @@ proc ::machteld::DocsLoad {} {
         catch {ReferenceDb close}
         DocsFail corrupt "docs: cannot open the embedded reference: $reason"
     }
-    set DOCS_IDENTITY $receipt
-    return $receipt
+    set DOCS_IDENTITY [dict create corpus_sha256 $reference_sha256 bytes $size]
+    return $DOCS_IDENTITY
 }
 
 proc ::machteld::DocsStrictBoolean {value option} {
@@ -363,14 +301,14 @@ proc ::machteld::DocsSearch {args} {
 proc ::machteld::DocsVerify {args} {
     if {[llength $args]} {DocsFail usage {docs: wrong # args: should be "docs verify"}}
     set identity [DocsLoad]
-    set packFiles [DocsPackFiles]
-    if {[ReferenceDb onecolumn {PRAGMA integrity_check}] ne "ok" || [ReferenceDb eval {PRAGMA foreign_key_check}] ne ""} {
-        DocsFail corrupt "docs: SQLite integrity check failed"
+    set database [DocsDatabaseFile [DocsRoot]]
+    if {[hash file sha256 $database] ne [dict get $identity corpus_sha256] ||
+            [ReferenceDb onecolumn {PRAGMA integrity_check}] ne "ok" ||
+            [ReferenceDb eval {PRAGMA foreign_key_check}] ne ""} {
+        DocsFail corrupt "docs: reference database failed verification"
     }
-    set bytes 0
-    dict for {relative facts} $packFiles {incr bytes [dict get $facts bytes]}
-    return [dict create ok 1 documents [ReferenceDb onecolumn {SELECT count(*) FROM page}] files [dict size $packFiles] \
-        bytes $bytes corpus_sha256 [dict get $identity corpus_sha256]]
+    return [dict create ok 1 documents [ReferenceDb onecolumn {SELECT count(*) FROM page}] files 1 \
+        bytes [dict get $identity bytes] corpus_sha256 [dict get $identity corpus_sha256]]
 }
 
 proc ::machteld::DocsNativeChildren {directory} {
@@ -380,113 +318,6 @@ proc ::machteld::DocsNativeChildren {directory} {
         dict set result [file normalize $item] $item
     }
     return [lsort [dict values $result]]
-}
-
-proc ::machteld::DocsTreeFiles {root {relative ""} {depth 0}} {
-    if {$depth > 64} { DocsFail corrupt "docs: reference tree is too deep" }
-    set files {}
-    set directory [expr {$relative eq "" ? $root : [file join $root {*}[file split $relative]]}]
-    foreach item [DocsNativeChildren $directory] {
-        set child [expr {$relative eq "" ? [file tail $item] : "$relative/[file tail $item]"}]
-        set type [file type $item]
-        if {$type eq "directory"} {
-            dict for {path facts} [DocsTreeFiles $root $child [expr {$depth + 1}]] {
-                dict set files $path $facts
-                if {[dict size $files] > 100000} { DocsFail corrupt "docs: reference tree has too many files" }
-            }
-        } elseif {$type eq "file"} {
-            if {[catch {file size $item} bytes] || [catch {hash file sha256 $item} sha256]} {
-                DocsFail oserror "docs: cannot inspect reference file $child"
-            }
-            dict set files $child [dict create sha256 $sha256 bytes $bytes]
-            if {[dict size $files] > 100000} { DocsFail corrupt "docs: reference tree has too many files" }
-        } else {
-            DocsFail corrupt "docs: reference pack contains an unsupported path type"
-        }
-    }
-    return $files
-}
-
-proc ::machteld::DocsManifest {} {
-    set path [file join [DocsRoot] manifest.sha256]
-    if {![file isfile $path] || [catch {file size $path} bytes] ||
-            $bytes <= 0 || $bytes > 16777216} {
-        DocsFail corrupt "docs: reference manifest is missing or too large"
-    }
-    set text [DocsReadUtf8 $path manifest]
-    if {[string first "\r" $text] >= 0 || [string index $text end] ne "\n" ||
-            [string range $text end-1 end] eq "\n\n"} {
-        DocsFail corrupt "docs: reference manifest is not canonical LF text"
-    }
-    set lines [split [string range $text 0 end-1] \n]
-    if {![llength $lines] || [lindex $lines 0] ne
-            {# machteld reference pack v2; SHA-256 consistency manifest (self excluded)} ||
-            [llength $lines] > 100000} {
-        DocsFail corrupt "docs: malformed reference manifest"
-    }
-    set manifest {}
-    set previous ""
-    foreach line [lrange $lines 1 end] {
-        if {![regexp {^([0-9a-f]{64})  (.+)$} $line -> sha256 relative] ||
-                ![DocsSafeRelative $relative] || $relative eq "manifest.sha256" ||
-                [dict exists $manifest $relative]} {
-            DocsFail corrupt "docs: malformed reference manifest entry"
-        }
-        if {$previous ne "" && [string compare $previous $relative] >= 0} {
-            DocsFail corrupt "docs: reference manifest is not ordinally sorted"
-        }
-        dict set manifest $relative $sha256
-        set previous $relative
-    }
-    if {![dict size $manifest]} { DocsFail corrupt "docs: reference manifest is empty" }
-    return $manifest
-}
-
-proc ::machteld::DocsPackFiles {} {
-    DocsLoad
-    if {[catch {DocsTreeFiles [DocsRoot]} files options]} {
-        set errorcode [expr {[dict exists $options -errorcode] ? [dict get $options -errorcode] : {}}]
-        if {[lrange $errorcode 0 1] eq {MACHTELD DOCS} && [lindex $errorcode 2] eq "corrupt"} {
-            return -options $options $files
-        }
-        DocsFail corrupt "docs: cannot inspect the embedded reference pack"
-    }
-    set manifest [DocsManifest]
-    foreach control {reference.db identity.dict START-HERE.md AGENTS.md schema.json} {
-        if {![dict exists $files $control] || ![dict exists $manifest $control]} {
-            DocsFail corrupt "docs: reference control file $control is missing"
-        }
-    }
-    set declared [dict keys $manifest]
-    lappend declared manifest.sha256
-    if {[lsort [dict keys $files]] ne [lsort $declared]} {
-        DocsFail corrupt "docs: reference pack contains an undeclared or missing file"
-    }
-    dict for {relative sha256} $manifest {
-        if {[dict get $files $relative sha256] ne $sha256 ||
-                [dict get $files $relative bytes] > 268435456} {
-            DocsFail corrupt "docs: manifest hash mismatch for $relative"
-        }
-    }
-    return $files
-}
-
-proc ::machteld::DocsCopyTree {source destination statsVariable} {
-    upvar 1 $statsVariable stats
-    file mkdir $destination
-    foreach item [DocsNativeChildren $source] {
-        set target [file join $destination [file tail $item]]
-        set type [file type $item]
-        if {$type eq "directory"} {
-            DocsCopyTree $item $target stats
-        } elseif {$type eq "file"} {
-            file copy $item $target
-            dict incr stats files
-            dict incr stats bytes [file size $item]
-        } else {
-            DocsFail corrupt "docs: reference pack contains an unsupported path type"
-        }
-    }
 }
 
 proc ::machteld::DocsExtract {args} {
@@ -512,9 +343,8 @@ proc ::machteld::DocsExtract {args} {
     set parent [dict get $parentIdentity path]
     set destination [file join $parent [file tail $destination]]
     if {[file exists $destination]} { DocsFail exists "docs: extraction destination already exists" }
-    set sourceFiles [DocsPackFiles]
-    set expectedBytes 0
-    dict for {relative facts} $sourceFiles { incr expectedBytes [dict get $facts bytes] }
+    set identity [DocsLoad]
+    set database [DocsDatabaseFile [DocsRoot]]
     set stage ""
     for {set tries 0} {$tries < 32} {incr tries} {
         if {[catch {binary encode hex [hash random 16]} suffix]} {
@@ -530,7 +360,6 @@ proc ::machteld::DocsExtract {args} {
         }
     }
     if {$stage eq ""} { DocsFail oserror "docs: cannot reserve an extraction staging path" }
-    set stats [dict create files 0 bytes 0]
     set stagedIdentity ""
     try {
         set stagedIdentity [canon $stage]
@@ -545,7 +374,7 @@ proc ::machteld::DocsExtract {args} {
                     [list [dict get $parentIdentity volume] [dict get $parentIdentity file]]} {
             DocsFail oserror "docs: extraction staging identity is unsafe"
         }
-        DocsCopyTree [DocsRoot] $stage stats
+        file copy $database [file join $stage reference.db]
         if {[catch {canon $stage} currentStage] ||
                 [list [dict get $currentStage volume] [dict get $currentStage file]] ne
                     [list [dict get $stagedIdentity volume] [dict get $stagedIdentity file]] ||
@@ -554,19 +383,14 @@ proc ::machteld::DocsExtract {args} {
                     [list [dict get $parentIdentity volume] [dict get $parentIdentity file]]} {
             DocsFail oserror "docs: extraction staging identity changed"
         }
-        set stagedFiles [DocsTreeFiles $stage]
         if {[catch {links $stage} stageSurvey] || [llength [dict get $stageSurvey errors]] ||
-                [llength [dict get $stageSurvey links]] || [llength [dict get $stageSurvey entered]] ||
-                [lsort [dict keys $stagedFiles]] ne [lsort [dict keys $sourceFiles]] ||
-                [dict get $stats files] != [dict size $sourceFiles] ||
-                [dict get $stats bytes] != $expectedBytes} {
+                [llength [dict get $stageSurvey links]] || [llength [dict get $stageSurvey entered]]} {
             DocsFail corrupt "docs: staged extraction inventory changed"
         }
-        dict for {relative facts} $sourceFiles {
-            if {[dict get $stagedFiles $relative sha256] ne [dict get $facts sha256] ||
-                    [dict get $stagedFiles $relative bytes] != [dict get $facts bytes]} {
-                DocsFail corrupt "docs: staged extraction failed verification for $relative"
-            }
+        set staged [DocsDatabaseFile $stage]
+        if {[file size $staged] != [dict get $identity bytes] ||
+                [hash file sha256 $staged] ne [dict get $identity corpus_sha256]} {
+            DocsFail corrupt "docs: staged reference database failed verification"
         }
         try {
             DirectoryStage publish $stage $destination
@@ -586,8 +410,8 @@ proc ::machteld::DocsExtract {args} {
             catch {file delete -force $stage}
         }
     }
-    return [dict create path $destination files [dict get $stats files] bytes [dict get $stats bytes] \
-        corpus_sha256 [dict get [DocsLoad] corpus_sha256]]
+    return [dict create path $destination files 1 bytes [dict get $identity bytes] \
+        corpus_sha256 [dict get $identity corpus_sha256]]
 }
 
 proc ::machteld::DocsUnknown {ensemble subcommand args} {

@@ -51,4 +51,5 @@ are not part of the embedded reference corpus.
 
 The shared executable carries these guides and the Machteld, Tcl, Tk and cffi
 manuals. Use `docs status` for versions, `docs get` for a known ID, `docs search`
-for discovery and `docs extract` for a filesystem copy.
+for discovery and `docs extract` for a standalone copy of `reference.db`.
+The database stores the Markdown pages and their FTS5 index together.

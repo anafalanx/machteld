@@ -173,17 +173,27 @@ set verified [docs verify]
 check {verify proves the full declared corpus} [expr {
     [dict get $verified ok] && [dict get $verified documents] == [dict get $status documents] &&
     [dict get $verified corpus_sha256] eq [dict get $status corpus_sha256] &&
-    [dict get $verified files] >= 6 && [dict get $verified files] < 20}]
+    [dict get $verified files] == 1}]
 
 set work [file join $env(TEMP) machteld-reference-test-[pid]-[binary encode hex [hash random 8]]]
 file mkdir $work
 set destination [file join $work exported]
 set extracted [docs extract $destination]
-check {extract publishes a complete standalone reference} [expr {
-    [file isfile [file join $destination identity.dict]] &&
-    [file isfile [file join $destination reference.db]] &&
-    [file isfile [file join $destination manifest.sha256]] &&
+set exported [file join $destination reference.db]
+check {the embedded and extracted documentation each contain only the same reference.db} [expr {
+    [glob -tails -directory [::machteld::DocsRoot] *] eq {reference.db} &&
+    [glob -tails -directory $destination *] eq {reference.db} &&
+    [dict get $extracted files] == 1 && [dict get $extracted bytes] == [file size $exported] &&
+    [hash file sha256 $exported] eq [dict get $status corpus_sha256] &&
     [dict get $extracted corpus_sha256] eq [dict get $status corpus_sha256]}]
+sqlite3 ::exportedManual $exported -readonly 1
+try {
+    check {a standalone SQLite reader can search and retrieve the Markdown without sidecars} [expr {
+        [exportedManual exists {SELECT 1 FROM search JOIN page ON page.rowid=search.rowid
+            WHERE search MATCH '"dictionary"' AND page.id='tcl/command/dict'}] &&
+        [exportedManual onecolumn {SELECT body FROM page WHERE id='tcl/command/dict'}] eq
+            [dict get [docs get tcl/command/dict -all 1] text]}]
+} finally {exportedManual close}
 check {extract never replaces an existing destination} [expr {
     [errorcode [list docs extract $destination]] eq {MACHTELD DOCS exists}}]
 
@@ -227,6 +237,9 @@ set fixtureStatus [catch {
     set fixtureRoot [file join $work corrupt-fixture]
     file mkdir $fixtureRoot
     file copy $destination [file join $fixtureRoot reference]
+    file mkdir [file join $fixtureRoot extra]
+    file copy $destination [file join $fixtureRoot extra reference]
+    close [open [file join $fixtureRoot extra reference README.md] {WRONLY CREAT EXCL}]
     set channel [open [file join $fixtureRoot reference reference.db] ab]
     fconfigure $channel -translation binary
     puts -nonewline $channel [encoding convertto utf-8 { orphan}]
@@ -237,14 +250,16 @@ set fixtureStatus [catch {
     set mounted 1
     rename ::machteld::PayloadRoot ::machteld::PayloadRootLive
     set rootRenamed 1
-    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName]
     catch {::machteld::ReferenceDb close}
     set ::machteld::DOCS_IDENTITY {}
+    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/extra]
+    check {a valid database beside a loose manual is rejected} [expr {
+        [errorcode {docs status}] eq {MACHTELD DOCS corrupt}}]
+    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName]
     set corruptCode [errorcode {docs status}]
     set corruptHelpCode [errorcode {help dict}]
-    # This existing zipfs directory has no reference/ child: it models a
-    # wrapped payload whose runtime is present but whose corpus was omitted.
-    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/reference/licenses]
+    # This existing zipfs directory has no reference/ child.
+    proc ::machteld::PayloadRoot {} [list return //zipfs:/$mountName/reference]
     foreach query {
         {docs status}
         {docs list}

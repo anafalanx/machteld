@@ -159,8 +159,10 @@ machteld.exe --docs get tcl/command/dict --json
 machteld.exe --docs search "channel binary encoding" --limit 10 --json
 ```
 
-Use these references instead of assuming another runtime's API. `docs extract`
-publishes the corpus for filesystem search; `help` is a concise shorthand.
+The executable carries its documentation in one SQLite database. Each page
+has a Markdown body, and `docs search` uses its FTS5 index. `docs extract`
+writes `reference.db` into a new directory for use with a SQLite reader.
+Use `help` for a quick lookup.
 Plain JSON uses Tcl representations and cannot preserve every JSON distinction;
 use typed JSON when string/number, boolean, null, and container identity matter.
 The [palette](docs/palette.md) and [exact reference](docs/reference/machteld/index.md)
