@@ -217,7 +217,9 @@ and the full analysis of `tools/native-analysis.tcl`, GCC's analyzer and the
 sanitizer probes among it; [its guide](docs/native-validation.md) records
 coverage gaps. Off by default, each behind its own option: public TLS and
 interactive console checks (`--public-tls`, `--interactive-pty`), and the real
-Tk windows of `--interactive-gui`. A gate run signs nothing and publishes no
+Tk windows of `--interactive-gui`. The integration group always tests the
+MP3, AAC and HLS fixtures. A separate `--group audio-device` run plays silence
+through the Windows endpoint and requires a working output device. A gate run signs nothing and publishes no
 release; its build goes to `out/machteld.exe` only.
 
 Unchanged development builds reuse each reference generation by content; a

@@ -65,7 +65,7 @@ proc writeText {path text} {
 
 set all {fast integration packaging native-validation reference-generator}
 set default [::gate::parse {}]
-check {no --group runs every group after the release build} \
+check {no --group runs every default group after the release build} \
     [expr {[dict get $default groups] eq $all && [dict get $default release] && [dict get $default build]}]
 set skip [::gate::parse {--skip-build}]
 check {--skip-build keeps every group and drops the build} \
@@ -229,6 +229,22 @@ check {the trapped drivers run the native, filesystem, encoding and networking b
         nts-crypto-trap.exe nts-lifetime-trap.exe udp-trap.exe network-trap.exe \
         {encoding-trap.exe system} {encoding-trap.exe missing} {encoding-trap.exe incomplete}]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
+set audioSettings [::gate::parse {--group audio-device}]
+set audioPlan [::gate::plan $audioSettings]
+check {hardware playback alone needs the existing runtime and opens its endpoint with silence} \
+    [expr {![dict get $audioSettings build] && [::gate::needs $audioSettings runtime] &&
+        ![::gate::needs $audioSettings msys] && ![::gate::needs $audioSettings tclsh] &&
+        [lmap step $audioPlan {lmap word [lrange [dict get $step argv] 1 end] {file tail $word}}] eq
+        {{audio_test.tcl --device} {hls_test.tcl --device}}}]
+foreach {mode normal} [list default $releasePlan hosted-GUI $guiPlan] {
+    set media [lmap step $normal {
+        set cmd [dict get $step argv]
+        if {[file tail [lindex $cmd 1]] ni {audio_test.tcl hls_test.tcl}} continue
+        lmap word [lrange $cmd 1 end] {file tail $word}
+    }]
+    check "the $mode gate requires the offline codec and HLS suites" \
+        [expr {$media eq {audio_test.tcl hls_test.tcl}}] $media
+}
 set attended [lmap step $guiPlan {if {[dict get $step group] ne "interactive"} continue; set step}]
 set archiveLane [lindex $attended [lsearch -exact [labels $attended] "Tk app archive"]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
@@ -266,7 +282,7 @@ check {the optional SDK lane builds the provider and passes it to the real Cloud
         [lindex [dict get [lindex $cloudPlan $cloudBuild] argv] 0] eq "cl.exe" &&
         [lmap word [lrange [dict get [lindex $cloudPlan $cloudRun] argv] end-2 end] {file tail $word}] eq
         {localfiles_test.tcl --cloud cloud_files_provider.exe}}]
-set everything [concat $releasePlan [::gate::plan [settings {--interactive-gui}]] $cloudPlan]
+set everything [concat $releasePlan $guiPlan $cloudPlan $audioPlan]
 set named {}
 foreach step $everything {
     foreach word [dict get $step argv] {

@@ -1,7 +1,7 @@
 package require machteld 0.21
 
 # tools/gate.tcl -- the release gate. With no --group it builds the runtime
-# (unless --skip-build) and runs every group on it; with --group it runs the
+# (unless --skip-build) and runs the default groups on it; with --group it runs the
 # named groups, in that order, on the runtime as it is, and builds nothing.
 # --runtime names an executable to test as it is, so the gate refuses it when
 # it would build: the build would publish over that file, a signed copy
@@ -43,6 +43,8 @@ package require machteld 0.21
 #                        out/native-analysis-<id>/
 #   reference-generator  two cold reference generations, byte for byte
 #   release              alone: the build, then every group above (the default)
+#   audio-device         explicit hardware qualification of an existing runtime:
+#                        silent PCM and local HLS playback on a Windows endpoint
 #
 # Off by default, each behind its own option, none of it in a release run:
 #
@@ -117,9 +119,10 @@ proc ::gate::parse {argv} {
         }
     }
     set selected {}
+    set known [concat $groups audio-device release]
     foreach name $requested {
-        if {$name ni [concat $groups release]} {
-            fail "unknown group $name (known: [join [concat $groups release] {, }])"
+        if {$name ni $known} {
+            fail "unknown group $name (known: [join $known {, }])"
         }
         if {$name ni $selected} {
             lappend selected $name
@@ -159,7 +162,7 @@ proc ::gate::needs {settings what} {
     set chosen [dict get $settings groups]
     switch -- $what {
         runtime {
-            expr {[dict get $settings gui] || [anyOf {fast integration packaging native-validation} $chosen]}
+            expr {[dict get $settings gui] || [anyOf {fast integration packaging native-validation audio-device} $chosen]}
         }
         msys {
             expr {[dict get $settings build] || [dict get $settings gui] ||
@@ -216,6 +219,10 @@ proc ::gate::plan {settings} {
     }
     foreach group $chosen {
         switch -- $group {
+            audio-device {
+                addLane steps $runtime audio-device "WASAPI device lifecycle (silence)" audio_test.tcl --device
+                addLane steps $runtime audio-device "HLS through a Windows audio endpoint (silence)" hls_test.tcl --device
+            }
             fast {
                 addStep steps fast "reference coverage" [list $tclsh [file join $root tools check_reference.tcl]]
                 addStep steps fast "version consistency" [list $tclsh [file join $root tools check_version.tcl]]
@@ -358,14 +365,12 @@ proc ::gate::plan {settings} {
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
-        addLane steps $runtime interactive "WASAPI device lifecycle (silence)" audio_test.tcl --device
         addLane steps $runtime interactive "Direct2D and Direct3D Tk rendering and pre-present readback" surface_test.tcl
         set displays [file join $out surface_displays.exe]
         addStep steps interactive "fixture surface_displays.c" [list $gcc {*}$strict \
             [file join $test fixtures surface_displays.c] -luser32 -lshcore -o $displays]
         addLane steps $runtime interactive "Tk graphics on each connected monitor" surface_dpi_test.tcl $displays
         addLane steps $runtime interactive "per-monitor-aware Tk graphics" surface_dpi_test.tcl $displays --per-monitor
-        addLane steps $runtime interactive "HLS through a Windows audio endpoint (silence)" hls_test.tcl --device
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
