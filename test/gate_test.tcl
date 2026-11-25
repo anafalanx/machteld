@@ -218,6 +218,8 @@ check {the trapped drivers run the command line, allocation failures, Unicode, J
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
         native-boundary-trap.exe hash-boundary-trap.exe]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
+set attended [lmap step $guiPlan {if {[dict get $step group] ne "interactive"} continue; set step}]
+set archiveLane [lindex $attended [lsearch -exact [labels $attended] "Tk app archive"]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
     [expr {"child_window_test.tcl" ni [scripts $releasePlan] &&
         "child_window_test.tcl" in [scripts $guiPlan] &&
@@ -226,8 +228,9 @@ check {the window-opening lanes run only behind --interactive-gui, last} \
         "graphviz_test.tcl" in [scripts $releasePlan] &&
         "graphviz_tk_test.tcl" ni [scripts $releasePlan] && "graphviz_tk_test.tcl" in [scripts $guiPlan] &&
         "Tk app archive" ni $releaseLabels &&
-        [lindex [dict get [lindex $guiPlan end-2] argv] end] eq "--tk" &&
-        [lrange [scripts $guiPlan] end-2 end] eq {archive_test.tcl sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]
+        [lindex [dict get $archiveLane argv] end] eq "--tk" &&
+        [lrange $guiPlan end-[expr {[llength $attended]-1}] end] eq $attended &&
+        [lrange [scripts $attended] end-3 end] eq {archive_test.tcl sqlite_lookup_gui_test.tcl gui_widget_test.tcl httpd_test.tcl}}]
 set missing {}
 foreach step [concat $releasePlan [::gate::plan [settings {--interactive-gui}]]] {
     foreach word [dict get $step argv] {

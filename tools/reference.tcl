@@ -1931,6 +1931,13 @@ proc ::ref::main {argv} {
                 }
                 set hash [string first # $target]
                 set base $target; if {$hash >= 0} {set base [string range $target 0 [expr {$hash - 1}]]}
+                if {$hash == 0} {
+                    set slug [string range $target 1 end]
+                    if {![dict exists [get $record sections] $slug]} {
+                        fail "$id links to missing section $target"
+                    }
+                    continue
+                }
                 if {![dictHasNocase $documents $base]} {
                     fail "[get $record id] links to missing stable ID $target"
                 }
