@@ -226,7 +226,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     # Authored translation units.
     set consoleMain [Rp src machteld_main.c]
     set objects [list $bindingObj]
-    foreach s [lsort [glob -directory [Rp src] *.c]] {
+    foreach s [::machteld::build::native_sources $::ROOT] {
         if {$s eq $consoleMain} continue
         set o [file join $::OBJ [file rootname [file tail $s]].o]
         incr changed [cc $o $s $::common [file tail $s]]

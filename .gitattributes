@@ -10,3 +10,6 @@ LICENSE text eol=lf
 licenses/*.txt text eol=lf
 licenses/graphviz-16.1.2.txt -whitespace
 tools/patches/*.patch -text -whitespace
+src/vendor/minimp3.h -text -whitespace
+test/fixtures/audio/*.aac binary
+test/fixtures/audio/*.mp3 binary

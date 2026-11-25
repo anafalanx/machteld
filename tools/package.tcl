@@ -172,6 +172,7 @@ set requiredNotices {
     Ann-MIT.txt
     Airwave-MIT.txt
     Lunar-MIT.txt
+    rae.txt minimp3.txt
 }
 foreach notice $requiredNotices {
     if {![file isfile [file join $opt(--licenses) $notice]]} {

@@ -11,6 +11,17 @@ namespace eval ::machteld::manifest {}
 set ::machteld::manifest::private {AppDataRoot BrowserPeer BrowserStart BrowserStartupOwner DirectoryStage EntryCheck PayloadRoot Publish PublishWrite}
 
 set ::machteld::manifest::native {
+    audio {
+        kind c domain AUDIO codes {device format limit oserror state unavailable unsupported} options {}
+        doc machteld/command/audio
+        subcommands {
+            decoder  {options {} doc machteld/command/audio#decoder}
+            output   {options {} doc machteld/command/audio#output}
+            playlist {options {} doc machteld/command/audio#playlist}
+            demux    {options {} doc machteld/command/audio#demux}
+        }
+        limits {compressed_buffer_bytes 262144 playlist_bytes 1048576 segment_bytes 16777216}
+    }
     canon {
         kind c domain DIRS codes {badvalue dangling notfound oserror} options {}
         doc machteld/command/canon

@@ -181,7 +181,7 @@ TLS certificate validation and automatic proxy discovery.
 | Event | Additional fields |
 | --- | --- |
 | `pending` | Windows is waiting for the next network operation. |
-| `headers` | `status`, `headers` and `rawheaders` match a synchronous GET. |
+| `headers` | `status`, `headers` and `rawheaders` match a synchronous GET. `url` is the final response URL after redirects. |
 | `data` | `data` contains a binary chunk of at most 65,536 bytes. |
 | `eof` | The response is complete. |
 | `cancelled` | The application cancelled this transfer. |

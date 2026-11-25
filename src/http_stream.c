@@ -2,6 +2,7 @@
  * handles, requests another read, or uses Tcl. Windows may deliver completions
  * after cancellation, including after the interpreter has already gone away. */
 #include "http_internal.h"
+#include "wintext.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -125,6 +126,27 @@ static int available(Phase p) {
 
 /* Advance network protocol completions as far as possible without waiting.
  * HEADERS_READY and DATA_READY stop the pipeline until Tcl takes the event. */
+static int effective_url(Stream *s) {
+    DWORD size = 0;
+    if (WinHttpQueryOption(s->request.req, WINHTTP_OPTION_URL, NULL, &size) ||
+        GetLastError() != ERROR_INSUFFICIENT_BUFFER || !size || size % sizeof(wchar_t)) {
+        return http_win_error(s->interp, "oserror", "cannot size the final URL", GetLastError());
+    }
+    wchar_t *wide = calloc(1, (size_t)size + sizeof(wchar_t));
+    if (!wide) return http_error(s->interp, "oserror", "out of memory reading final URL");
+    if (!WinHttpQueryOption(s->request.req, WINHTTP_OPTION_URL, wide, &size)) {
+        DWORD error = GetLastError();
+        free(wide);
+        return http_win_error(s->interp, "oserror", "cannot read final URL", error);
+    }
+    char *url = mt_wide_to_utf8(wide, -1);
+    free(wide);
+    if (!url) return http_error(s->interp, "oserror", "final URL is not representable");
+    Tcl_DictObjPut(NULL, s->headers, Tcl_NewStringObj("url", -1), Tcl_NewStringObj(url, -1));
+    free(url);
+    return TCL_OK;
+}
+
 static void advance(Stream *s) {
     Transfer *t = s->transfer;
     while (!available(s->phase)) {
@@ -147,7 +169,7 @@ static void advance(Stream *s) {
             if (!WinHttpReceiveResponse(s->request.req, NULL)) failed_operation(s, GetLastError());
             break;
         case WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE:
-            if (http_response_headers(s->interp, s->request.req, &s->headers) != TCL_OK) {
+            if (http_response_headers(s->interp, s->request.req, &s->headers) != TCL_OK || effective_url(s) != TCL_OK) {
                 remember_failure(s);
             } else {
                 s->phase = HEADERS_READY;

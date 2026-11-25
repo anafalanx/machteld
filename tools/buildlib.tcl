@@ -35,18 +35,23 @@ set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}
 set ::machteld::build::SYSLIBS {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32 -liphlpapi
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
-    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4 -lshlwapi -liphlpapi
+    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4 -lshlwapi -liphlpapi -lmfuuid -lavrt
 }
 
 # Prelude parts in sourcing order: machteld.tcl first (it defines Fail,
 # MetaDefine, and the version every later part reads); the generated manifest
 # is appended last by stage_prelude.
 set ::machteld::build::PRELUDE_PARTS {
-    machteld.tcl docs.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl
+    machteld.tcl docs.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl hls.tcl
 }
 
 proc ::machteld::build::werror {} {
     return [expr {![info exists ::env(MACHTELD_WERROR)] || $::env(MACHTELD_WERROR) ne "0"}]
+}
+
+proc ::machteld::build::native_sources {root} {
+    set src [file join $root src]
+    return [lsort [concat [glob -directory $src *.c] [glob -nocomplain -directory [file join $src media] *.c]]]
 }
 
 # The flags for one authored translation unit.

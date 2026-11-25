@@ -303,6 +303,9 @@ proc ::na::main {argv} {
         requireOk $version
         dict set report compiler_version [list S [string trim [dict get $version text]]]
         set inputs [lsort [concat [glob -directory [file join $root src] *.c] [glob -directory [file join $root src] *.h]]]
+        foreach directory {media vendor} {
+            lappend inputs {*}[lsort [glob -nocomplain -directory [file join $root src $directory] *.h *.c]]
+        }
         foreach relative {
             tools/native-analysis.tcl tools/buildlib.tcl test/cmdline_test.c test/cmdline_alloc_test.c
             test/wintext_test.c test/hash_boundary_test.c test/fixtures/localfiles_driver.c test/fixtures/encoding_driver.c test/fixtures/network_driver.c test/fixtures/udp_driver.c

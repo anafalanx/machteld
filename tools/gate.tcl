@@ -290,6 +290,8 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime integration store store_test.tcl $lockFixture
                 addLane steps $runtime integration native native_test.tcl $httpFixture $processFixture
                 addLane steps $runtime integration "asynchronous HTTP response streams" http_stream_test.tcl
+                addLane steps $runtime integration "MP3, AAC and HE-AAC PCM" audio_test.tcl
+                addLane steps $runtime integration "rolling HLS audio" hls_test.tcl
                 addLane steps $runtime integration "streaming bounds" streaming_bounds_test.tcl $processFixture
             }
             packaging {
@@ -336,6 +338,8 @@ proc ::gate::plan {settings} {
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
+        addLane steps $runtime interactive "WASAPI device lifecycle (silence)" audio_test.tcl --device
+        addLane steps $runtime interactive "HLS through a Windows audio endpoint (silence)" hls_test.tcl --device
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl

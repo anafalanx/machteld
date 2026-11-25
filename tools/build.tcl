@@ -78,7 +78,7 @@ run $GCC {*}$::machteld::build::YYJSON_FLAGS \
 
 set consoleMain [Rp src machteld_main.c]
 set objects [list $bindingObj]
-foreach source [lsort [glob -directory [Rp src] *.c]] {
+foreach source [::machteld::build::native_sources $ROOT] {
     if {$source eq $consoleMain} continue
     set object [file join $OBJDIR [file rootname [file tail $source]].o]
     puts "cc   [file tail $source]"
