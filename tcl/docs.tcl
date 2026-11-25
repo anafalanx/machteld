@@ -967,21 +967,26 @@ proc ::machteld::DocsExtract {args} {
     set destination [file join $parent [file tail $destination]]
     if {[file exists $destination]} { DocsFail exists "docs: extraction destination already exists" }
     set sourceFiles [DocsPackFiles]
+    set expectedBytes 0
+    dict for {relative facts} $sourceFiles { incr expectedBytes [dict get $facts bytes] }
     set stage ""
     for {set tries 0} {$tries < 32} {incr tries} {
         if {[catch {binary encode hex [hash random 16]} suffix]} {
             DocsFail oserror "docs: cannot generate an extraction staging identity"
         }
         set candidate [file join $parent .machteld-docs-$suffix]
-        if {![file exists $candidate]} { set stage $candidate; break }
+        if {![catch {DirectoryStage create $candidate} message options]} {
+            set stage $candidate
+            break
+        }
+        if {[dict get $options -errorcode] ne {MACHTELD PUBLISH exists}} {
+            DocsFail oserror "docs: cannot create extraction staging directory: $message"
+        }
     }
     if {$stage eq ""} { DocsFail oserror "docs: cannot reserve an extraction staging path" }
-    set expectedBytes 0
-    dict for {relative facts} $sourceFiles { incr expectedBytes [dict get $facts bytes] }
     set stats [dict create files 0 bytes 0]
     set stagedIdentity ""
     try {
-        file mkdir $stage
         set stagedIdentity [canon $stage]
         if {[catch {links $stage -depth 0} stageSurvey] ||
                 [llength [dict get $stageSurvey errors]] ||
@@ -1017,8 +1022,11 @@ proc ::machteld::DocsExtract {args} {
                 DocsFail corrupt "docs: staged extraction failed verification for $relative"
             }
         }
-        if {[file exists $destination]} { DocsFail exists "docs: extraction destination appeared during staging" }
-        file rename $stage $destination
+        try {
+            DirectoryStage publish $stage $destination
+        } trap {MACHTELD PUBLISH exists} {message options} {
+            DocsFail exists "docs: extraction destination appeared during staging"
+        }
         set stage ""
     } on error {message options} {
         if {[lrange [dict get $options -errorcode] 0 1] eq {MACHTELD DOCS}} {

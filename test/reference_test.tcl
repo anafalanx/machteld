@@ -158,6 +158,33 @@ check {extract publishes a complete standalone reference} [expr {
 check {extract never replaces an existing destination} [expr {
     [errorcode [list docs extract $destination]] eq {MACHTELD DOCS exists}}]
 
+# Put a competing directory in the namespace after all staged files have
+# passed verification, immediately before the real Windows rename.
+set competitor [file join $work late-target]
+rename ::machteld::DirectoryStage ::machteld::ReferenceDirectoryStage
+proc ::machteld::DirectoryStage {action from args} {
+    if {$action eq "publish"} {
+        set dest [lindex $args 0]
+        file mkdir $dest
+        set writer [open [file join $dest keep.txt] {WRONLY CREAT EXCL}]
+        try {puts -nonewline $writer winner} finally {close $writer}
+    }
+    return [::machteld::ReferenceDirectoryStage $action $from {*}$args]
+}
+try {
+    set lateCode [errorcode [list docs extract $competitor]]
+} finally {
+    rename ::machteld::DirectoryStage {}
+    rename ::machteld::ReferenceDirectoryStage ::machteld::DirectoryStage
+}
+set reader [open [file join $competitor keep.txt] rb]
+try {set winner [read $reader]} finally {close $reader}
+check {a competing destination keeps its contents without receiving the staging directory} [expr {
+    $lateCode eq {MACHTELD DOCS exists} && $winner eq "winner" &&
+    [glob -tails -directory $competitor *] eq {keep.txt} &&
+    ![llength [glob -nocomplain -directory $competitor .machteld-docs-*]] &&
+    ![llength [glob -nocomplain -directory $work .machteld-docs-*]]}]
+
 # Exercise fail-closed catalog parsing in an isolated mounted fixture without
 # changing the executable's immutable payload.
 set fixtureError ""
