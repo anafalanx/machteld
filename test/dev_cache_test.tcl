@@ -453,7 +453,8 @@ try {
     foreach relative {
         tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/graphviz-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
         tools/reference.tcl tools/reference_db.tcl tools/package.tcl
-        tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
+        tools/build_identity.tcl src/machteld.h src/other.h src/media/rae_ring.h
+        src/vendor/minimp3.h tcl/machteld.tcl
         tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
         LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/cffi-2.0.3.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
@@ -482,7 +483,7 @@ try {
     foreach relative {lock.sha256 artifacts.sha256} {
         spec_tracks dependencies [file join $::fixtureCache $relative]
     }
-    foreach relative {tools/buildlib.tcl src/machteld.h src/other.h} {
+    foreach relative {tools/buildlib.tcl src/machteld.h src/other.h src/media/rae_ring.h src/vendor/minimp3.h} {
         spec_tracks native [file join $::fixtureRoot {*}[split $relative /]]
     }
     spec_tracks native [file join $prefix include tcl.h]
@@ -674,6 +675,37 @@ try {
                 [dict get $loaded $coordinator] eq [read_bytes $coordinator]}]
         check {unchanged loaded recipes pass startup verification} \
             [expr {![catch {interp eval $startup verify_loaded_recipes}]}]
+        set inventory [::boot::filesBelow [file join $repo src]]
+        set selected [interp eval $startup [list ::machteld::build::native_sources $repo]]
+        check {release and development use all authored C translation units} \
+            [expr {[lsort $selected] eq [lsearch -all -inline -glob $inventory *.c]}]
+        set shared [::machteld::devcache::native_shared_spec $repo $::fixturePaths toolchain]
+        check {development tracks every authored and vendored header under src} \
+            [expr {[lsort [lsearch -all -inline -glob [dict get $shared files] *.h]] eq \
+                [lsearch -all -inline -glob $inventory *.h]}]
+
+        # A reference may already be a cache hit when an input is edited.
+        # The real coordinator still checks its guard before publishing or
+        # reporting a current executable. Preserve timestamps as in an editor.
+        interp eval $startup {
+            set guardKey [::machteld::devcache::fingerprint [guard_spec]]
+        }
+        foreach relative {cffi-doc/cffi.3tcl lock.sha256 artifacts.sha256} {
+            set input [file join $::fixtureCache $relative]
+            set bytes [read_bytes $input]
+            set stamp [file mtime $input]
+            write_bytes $input "${bytes}-edited"
+            file mtime $input $stamp
+            set rejected [catch {interp eval $startup {
+                ::machteld::devcache::verify_guard $guardKey guard_spec
+            }} message]
+            check "final publication guard rejects changed $relative" \
+                [expr {$rejected && [string match {*development inputs changed*} $message]}] $message
+            write_bytes $input $bytes
+            file mtime $input $stamp
+        }
+        check {restoring dependency bytes restores the publication guard} \
+            [expr {![catch {interp eval $startup {::machteld::devcache::verify_guard $guardKey guard_spec}}]}]
         set releaseRuntime [file join $startupRoot out machteld.exe]
         set devRuntime [file join $startupRoot out dev machteld.exe]
         write_bytes $releaseRuntime release
@@ -711,6 +743,25 @@ try {
             [expr {$nativePaths eq [lrepeat 3 $expectedNativePath]}]
         check {native entry points preserve caller PATH for other build stages} \
             [interp eval $startup {expr {$::env(PATH) eq $::inheritedPath}}]
+        # An edit immediately after the bootstrap verifier reads the input
+        # must also be seen by the final guard. Stop at the first compiler
+        # invocation to avoid executing any of the fixture tools.
+        set input [file join $::fixtureCache prefix include tcl.h]
+        set bytes [read_bytes $input]
+        interp alias $startup edit_verified_header {} write_bytes $input edited-after-verification
+        interp eval $startup {
+            proc run args {edit_verified_header}
+            proc cc args {error "fixture reached compilation"}
+        }
+        set stopped [catch {interp eval $startup dev_build_unlocked} message]
+        check {coordinator reached compilation after bootstrap fixture} \
+            [expr {$stopped && $message eq "fixture reached compilation"}] $message
+        set rejected [catch {interp eval $startup {
+            ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
+        }} message]
+        check {final publication guard covers edits during dependency verification} \
+            [expr {$rejected && [string match {*development inputs changed*} $message]}] $message
+        write_bytes $input $bytes
         foreach name $recipes {
             set path [file join $startupRoot tools $name]
             set bytes [read_bytes $path]

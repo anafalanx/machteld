@@ -104,7 +104,8 @@ proc guard_spec {{toolchainKey ""}} {
     if {$toolchainKey eq ""} { set toolchainKey [toolchain_key] }
     set spec [dict create files {} trees {}]
     foreach name {src tcl packages docs licenses tools} { dict lappend spec trees [Rp $name] }
-    foreach name {prefix sqlite yyjson downloads} { dict lappend spec trees [file join $::CACHE $name] }
+    foreach name {prefix sqlite yyjson downloads cffi-doc} { dict lappend spec trees [file join $::CACHE $name] }
+    foreach name {lock.sha256 artifacts.sha256} { dict lappend spec files [file join $::CACHE $name] }
     dict lappend spec files [Rp LICENSE]
     # Reject untracked external search paths rather than assuming a stable path
     # string proves the contents of headers/libraries located through it.
@@ -200,12 +201,14 @@ proc dev_build {{forceRef 0}} {
 proc dev_build_unlocked {{forceRef 0}} {
     puts "build: incremental (cache [file nativename $::DEV])"
     ::machteld::devcache::compiler_environment
-    run [info nameofexecutable] [Rp tools bootstrap.tcl] --cache $::CACHE --msys $::MSYS2 --verify-only
     # Missing/legacy records cause a rebuild. In particular a timestamp-only
     # reference.stamp is never accepted as proof of a generated pack's inputs.
+    # Snapshot before bootstrap verification. An edit after the verifier has
+    # read a dependency must still be detected before publishing its consumer.
     set ::TOOLCHAIN_KEY [toolchain_key]
     set ::GUARD_SPEC [guard_spec $::TOOLCHAIN_KEY]
     set ::GUARD_KEY [::machteld::devcache::fingerprint $::GUARD_SPEC]
+    run [info nameofexecutable] [Rp tools bootstrap.tcl] --cache $::CACHE --msys $::MSYS2 --verify-only
     verify_loaded_recipes
     set ::BUILD_ENV [::machteld::devcache::native_environment $::MSYS2]
     set ::DEPS_KEY [::machteld::devcache::fingerprint [::machteld::devcache::dependency_spec $::ROOT $::CACHE]]
