@@ -90,10 +90,12 @@ set ::machteld::manifest::native {
         kind c domain HTTP
         doc machteld/command/http
         codes {badvalue notfound oserror timeout tls toobig usage}
+        limits {stream_buffer_bytes 65536}
         options {-agent -headers -maxbody -redirect -timeout -type}
         subcommands {
             get  {options {-agent -headers -maxbody -redirect -timeout} doc machteld/command/http#get}
             post {options {-agent -headers -maxbody -redirect -timeout -type} doc machteld/command/http#post}
+            stream {options {-agent -headers -maxbody -redirect -timeout} doc machteld/command/http#stream}
         }
         returns {body bytes headers rawheaders status}
     }

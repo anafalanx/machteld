@@ -122,7 +122,8 @@ proc ::na::trappedSteps {layout gcc out} {
         -DSQLITE_OMIT_SHARED_CACHE -c [file join $sqlite sqlite3.c] -o $sqliteObject]]
     set boundary [file join $out native-boundary-trap.exe]
     lappend steps [dict create label "trapped native boundaries: compile" argv [list $gcc {*}$flags -I$sqlite \
-        [file join $fixtures native_boundary_driver.c] [file join $src wintext.c] $sqliteObject {*}$tcl -o $boundary]]
+        [file join $fixtures native_boundary_driver.c] [file join $src http_stream.c] \
+        [file join $src wintext.c] $sqliteObject {*}$tcl -o $boundary]]
     lappend steps [dict create label "trapped native boundaries" argv [list $boundary]]
     set hashBoundary [file join $out hash-boundary-trap.exe]
     lappend steps [dict create label "trapped hash sequence boundary: compile" argv [list $gcc {*}$flags \

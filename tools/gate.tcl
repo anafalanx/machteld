@@ -284,6 +284,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime integration "child notifications" child_notifications_test.tcl $processFixture
                 addLane steps $runtime integration store store_test.tcl $lockFixture
                 addLane steps $runtime integration native native_test.tcl $httpFixture $processFixture
+                addLane steps $runtime integration "asynchronous HTTP response streams" http_stream_test.tcl
                 addLane steps $runtime integration "streaming bounds" streaming_bounds_test.tcl $processFixture
             }
             packaging {

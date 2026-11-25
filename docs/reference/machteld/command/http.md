@@ -2,8 +2,8 @@
 id: machteld/command/http
 type: command
 title: http
-summary: Perform bounded HTTP and HTTPS GET and POST requests through Windows WinHTTP.
-commands: http, http get, http post
+summary: Send HTTP and HTTPS requests and stream binary responses through Windows WinHTTP.
+commands: http, http get, http post, http stream
 ---
 
 # http
@@ -18,6 +18,8 @@ http get url ?-headers dict? ?-timeout duration? ?-agent name? \
     ?-maxbody size? ?-redirect none?
 http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
     ?-type mediaType? ?-maxbody size? ?-redirect none?
+http stream url ?-headers dict? ?-timeout duration? ?-agent name? \
+    ?-maxbody size? ?-redirect none?
 ```
 
 ## Arguments and options
@@ -30,7 +32,8 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
   WinHTTP network phases rather than to the complete operation. The converted
   value is limited to `2147483647` milliseconds.
 - `-agent` defaults to `machteld`.
-- `-maxbody` defaults to 64 MiB and must be a positive binary size.
+- `-maxbody` takes a positive binary size. For `get` and `post` it defaults
+  to 64 MiB. A stream can run indefinitely within the host's signed byte count.
 - `-redirect` takes exactly `none`: the first 3xx response returns normally
   with its `location` header, and no second request is issued to anyone - so
   no caller-supplied header or body is forwarded. Use it on every
@@ -43,7 +46,7 @@ http post url body ?-headers dict? ?-timeout duration? ?-agent name? \
 
 ## Results
 
-Returns a dict with integer `status`, cooked lowercase `headers`, original
+`get` and `post` return a dict with integer `status`, cooked lowercase `headers`, original
 `rawheaders`, bytearray `body`, and byte count `bytes`. Repeated response headers
 are joined with comma-space in the cooked dict.
 
@@ -55,10 +58,11 @@ are returned normally rather than raised.
 
 ## Lifetime and timeouts
 
-Each request owns its WinHTTP session, connection, and request handles only for
-the call. Timeouts are per phase; redirects and body reads can make wall-clock
-time exceed one timeout value. Calls are synchronous and do not service Tcl
-events. A timeout or transport error does not establish whether a POST took
+Each request owns its WinHTTP session, connection and request handles.
+Timeouts apply to each network phase. Redirects and body reads can make elapsed
+time exceed one timeout value. `get` and `post` are synchronous. `stream`
+uses the Tcl event loop for readiness notifications.
+A timeout or transport error does not establish whether a POST took
 effect at the server; retry only with application-level replay safety.
 
 ## Examples
@@ -79,10 +83,9 @@ HTTPS uses system trust, proxy discovery, redirects, and transport decoding.
 HTTPS-to-HTTP downgrade redirects are refused. There is deliberately no option
 to disable certificate validation. A body over `-maxbody` is rejected, never
 returned as plausible truncation.
-The complete response body is materialized in memory; `-maxbody` is a response
-byte limit, not a total host-memory budget or a streaming API. Request data
-already exists in memory before sending. For a GUI, put slow requests in a
-supervised worker instead of invoking them in a widget callback.
+`get` and `post` hold the complete response body in memory. Request data
+already exists in memory before sending. For a GUI, use `stream` to consume
+a response as it arrives or run synchronous work in a supervised worker.
 
 ## Subcommands
 
@@ -157,6 +160,81 @@ Only POST and GET are exposed; this is not a general HTTP client surface.
 #### See also
 
 `machteld/command/json`.
+
+<a id="stream"></a>
+### stream
+
+#### Synopsis
+
+`http stream url ?common GET options?` returns a command handle immediately.
+
+#### Arguments and options
+
+Use GET options for request headers, the user agent, redirects, the network
+phase timeout and an optional total response byte limit. Windows provides
+TLS certificate validation and automatic proxy discovery.
+
+#### Results
+
+`$handle next` returns a dictionary with an `event` field.
+
+| Event | Additional fields |
+| --- | --- |
+| `pending` | Windows is waiting for the next network operation. |
+| `headers` | `status`, `headers` and `rawheaders` match a synchronous GET. |
+| `data` | `data` contains a binary chunk of at most 65,536 bytes. |
+| `eof` | The response is complete. |
+| `cancelled` | The application cancelled this transfer. |
+
+`$handle readable commandPrefix` arranges one callback on the Tcl event loop
+when the next event or error is ready. The callback receives the handle as its
+last argument. Register again when the application can accept more, or pass
+an empty prefix to remove a pending callback.
+
+#### Errors
+
+`next` raises the usual structured HTTP errors, including `HTTP tls`,
+`HTTP timeout` and `HTTP toobig`. The stream retains a terminal error until
+the application closes the handle. HTTP response statuses arrive as headers.
+
+#### Lifetime and timeouts
+
+`$handle cancel` cancels an open request, including a request waiting for
+headers or more body data. `$handle close` releases the command and stops
+any outstanding request. Interpreter deletion also closes its streams.
+
+#### Examples
+
+```tcl
+proc consumeResponse {output handle} {
+    try {
+        set item [$handle next]
+        switch [dict get $item event] {
+            data {puts -nonewline $output [dict get $item data]}
+            eof - cancelled {$handle close; return}
+        }
+        $handle readable [list consumeResponse $output]
+    } on error {message options} {
+        $handle close
+        return -options $options $message
+    }
+}
+set output [open response.bin wb]
+set handle [http stream $url -timeout 15s]
+$handle readable [list consumeResponse $output]
+```
+
+The application owns the output channel and closes it after the transfer.
+
+#### Constraints
+
+The runtime allows one outstanding operation and one 64 KiB body buffer per
+stream. Windows maintains transport buffers, and the caller owns the chunks
+it retains. A consumer can pause between reads.
+
+#### See also
+
+`machteld/command/http#get`.
 
 <a id="loopback-server"></a>
 ## Serving a local page
