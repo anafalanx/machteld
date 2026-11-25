@@ -12,9 +12,7 @@ package require machteld 0.21
 # conversion and Windows argv round trips, the JSON reader, emitter and typed
 # tree with yyjson over the JSON corpus and the adversarial inputs, the
 # filesystem and SQLite result boundaries, and the hash token sequence's
-# exhaustion; in the gate also the identity primitives, which parse the ICO
-# and PE bytes wrap stamps (test/fixtures/identity_driver.c, which nothing ran
-# in the candidate). Tcl/Tk and SQLite are linked as built, not instrumented.
+# exhaustion. Tcl/Tk and SQLite are linked as built.
 #
 # The full harness is the last step of the gate's native-validation group, as
 # tools/native-analysis.ps1 was of the candidate's, and it also runs alone,
@@ -76,12 +74,8 @@ proc ::na::layout {cache} {
 # differs from exit 0), their products in out. Every step has a deadline, as
 # every invocation of the candidate's harness had: 180 s, and 30 s for a fault
 # the canary must trap; a hung driver or compiler fails its step instead of
-# hanging the gate. Given the runtime under test, the identity primitives come
-# too: identity_driver.c with src/resource.c, which parses the ICO and PE bytes
-# wrap stamps, over test/identity_native_test.tcl and that runtime's packaged
-# basekits (the step's extract, put in place before it and deleted after with
-# its work).
-proc ::na::trappedSteps {layout gcc out {runtime ""}} {
+# hanging the gate.
+proc ::na::trappedSteps {layout gcc out} {
     variable root
     variable trapped
     set src [file join $root src]

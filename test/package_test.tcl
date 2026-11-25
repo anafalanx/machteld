@@ -384,7 +384,6 @@ proc ::pt::publicationTests {} {
     close $channel
     check "linker intermediates are isolated from every requested output name" \
         [expr {[string first {set bare [file join $BUILDROOT machteld-bare.exe]} $buildTcl] >= 0 &&
-               [string first {set bareGui [file join $BUILDROOT machteld-bare-gui.exe]} $buildTcl] >= 0 &&
                [string first {[file join $OUTDIR machteld-bare.exe]} $buildTcl] < 0}]
     set channel [open [file join $root tools package.tcl] rb]
     set packageTcl [read $channel]

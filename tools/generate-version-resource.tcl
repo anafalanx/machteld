@@ -1,22 +1,17 @@
 # Generate one Windows VERSIONINFO resource from Machteld's canonical header.
 #
 # Usage:
-#   tclsh generate-version-resource.tcl HEADER console|gui OUTPUT.rc
+#   tclsh generate-version-resource.tcl HEADER OUTPUT.rc
 #
 # machteld's version is one natural number, and the string version is exactly
 # as authored in the header. Windows' fixed numeric version has four fields,
-# so the other three are zero: 22 is 22.0.0.0.
+# so the other three are zero: 30 is 30.0.0.0.
 
-if {[llength $argv] != 3} {
-    puts stderr "usage: generate-version-resource.tcl HEADER console|gui OUTPUT.rc"
+if {[llength $argv] != 2} {
+    puts stderr "usage: generate-version-resource.tcl HEADER OUTPUT.rc"
     exit 2
 }
-lassign $argv header kind output
-
-if {$kind ni {console gui}} {
-    puts stderr "generate-version-resource.tcl: kind must be console or gui"
-    exit 2
-}
+lassign $argv header output
 
 set channel [open $header r]
 fconfigure $channel -encoding utf-8 -translation lf
@@ -49,24 +44,12 @@ if {[regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text 
     set milestone [list Comments "Machteld $version Beta $beta"]
 }
 
-if {$kind eq "console"} {
-    set description "machteld runtime"
-    set internalName "machteld"
-    set originalFilename "machteld.exe"
-} else {
-    set description "Machteld GUI application host"
-    set internalName "machteld-gui"
-    set originalFilename "machteld-gui.exe"
-}
-
 file mkdir [file dirname [file normalize $output]]
 set channel [open $output w]
 fconfigure $channel -encoding utf-8 -translation lf
 try {
-    if {$kind eq "console"} {
-        set manifest [file join [file dirname [file normalize $header]] machteld.manifest]
-        puts $channel "1 24 \"$manifest\""
-    }
+    set manifest [file join [file dirname [file normalize $header]] machteld.manifest]
+    puts $channel "1 24 \"$manifest\""
     puts $channel "1 VERSIONINFO"
     puts $channel " FILEVERSION $fixed"
     puts $channel " PRODUCTVERSION $fixed"
@@ -83,11 +66,11 @@ try {
     foreach {name value} [list \
             Author "Vincent Vercauteren" \
             CompanyName "Vincent Vercauteren" \
-            FileDescription $description \
+            FileDescription "machteld runtime" \
             FileVersion $version \
-            InternalName $internalName \
+            InternalName machteld \
             LegalCopyright "Copyright 2026 Vincent Vercauteren" \
-            OriginalFilename $originalFilename \
+            OriginalFilename machteld.exe \
             ProductName Machteld \
             ProductVersion $version {*}$milestone] {
         puts $channel "            VALUE \"$name\", \"$value\\0\""
@@ -103,4 +86,4 @@ try {
     close $channel
 }
 
-puts "version-resource: $kind $version -> [file nativename $output]"
+puts "version-resource: machteld $version -> [file nativename $output]"

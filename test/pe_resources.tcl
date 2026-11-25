@@ -4,7 +4,7 @@
 # type, then name, then language, to the data entry and its bytes; and parse
 # VS_VERSIONINFO's fixed part and its 040904B0 string table.
 #
-# Sourced by test/version_resource_test.tcl and test/app_identity_test.tcl.
+# Sourced by test/version_resource_test.tcl and test/entry_test.tcl.
 # Plain Tcl 9: no runtime command is used.
 
 namespace eval ::pe {}

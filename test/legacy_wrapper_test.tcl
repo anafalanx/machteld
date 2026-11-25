@@ -26,6 +26,29 @@ puts [list [package provide machteld] $argv]}} finally {close $f}
     if {[dict get $result status] ne "ok" || [string trim [dict get $result out]] ne [list 0.21 $argvWords]} {
         error "legacy executable could not run independently: $result"
     }
+    # Run the same application fixture through the current archive path after
+    # relocation, with the executable, archive and launch directory independent.
+    set app [file join $work shared.machteld]
+    set fixture [file join [file dirname [file normalize [info script]]] hello_tool]
+    ::machteld::PackArchive $fixture -o $app
+    set host [file join $dir machteld.exe]
+    file copy $runtime $host
+    set appDir [file join $work applications]
+    file mkdir $appDir
+    set relocated [file join $appDir sample.machteld]
+    file rename $app $relocated
+    set result [run -dir $work -timeout 30s -- $host $relocated {*}$argvWords]
+    if {[dict get $result status] ne "ok"} {error "relocated archive failed: $result"}
+    set f [open [file join $dir _hello_ran.txt] r]
+    try {set marker [read $f]} finally {close $f}
+    foreach line [list "version:[package present machteld]" "argv:$argvWords" "argc:[llength $argvWords]" \
+            run:yes store:yes sqlite3:yes help-query:ok] {
+        if {$line ni [split $marker "\n"]} {error "missing archive result '$line': $marker"}
+    }
+    if {![regexp -line {^runtime:msgcat:[0-9.]+ modules:embedded cp1252:80 clock:.+} $marker] ||
+            ![regexp -line {^docs-corpus:[0-9a-f]{64}$} $marker]} {
+        error "relocated archive did not receive runtime libraries and help: $marker"
+    }
     if {[dict exists [manifest] wrap] || [llength [info commands ::machteld::wrap]]} {
         error "the shared runtime advertises wrap"
     }

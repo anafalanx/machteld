@@ -129,25 +129,24 @@ proc cc {obj src flags label {shared 1}} {
     return [::machteld::devcache::ensure $obj.record $spec $obj [list compile_candidate $src $flags $label]]
 }
 
-proc resource_candidate {kind candidate} {
-    puts "  rc  machteld-$kind.rc"
+proc resource_candidate {candidate} {
+    puts "  rc  machteld-console.rc"
     ::machteld::devcache::with_native_environment $::MSYS2 {
-        ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT $kind \
-            [file join $::OBJ "machteld-$kind.rc"] $candidate
+        ::machteld::build::version_resource $::TCLSH $::WINDRES $::ROOT \
+            [file join $::OBJ machteld-console.rc] $candidate
     }
 }
 
-proc version_resource {kind obj} {
-    set spec [dict create files [list [Rp src machteld.h] [Rp tools generate-version-resource.tcl] \
-        [Rp tools buildlib.tcl] $::TCLSH] values [list $kind $::TOOLCHAIN_KEY $::BUILD_ENV]]
-    if {$kind eq "console"} { dict lappend spec files [Rp src machteld.manifest] }
-    return [::machteld::devcache::ensure $obj.record $spec $obj [list resource_candidate $kind]]
+proc version_resource {obj} {
+    set spec [dict create files [list [Rp src machteld.h] [Rp src machteld.manifest] [Rp tools generate-version-resource.tcl] \
+        [Rp tools buildlib.tcl] $::TCLSH] values [list $::TOOLCHAIN_KEY $::BUILD_ENV]]
+    return [::machteld::devcache::ensure $obj.record $spec $obj resource_candidate]
 }
 
-proc link_candidate {kind main resource objects sqlite yyjson candidate} {
-    puts "  ld  $kind host"
+proc link_candidate {main resource objects sqlite yyjson candidate} {
+    puts "  ld  machteld"
     ::machteld::devcache::with_native_environment $::MSYS2 {
-        ::machteld::build::link_host $::GCC $::STRIP $kind $main $resource $objects $sqlite $yyjson $::PATHS $candidate
+        ::machteld::build::link_host $::GCC $::STRIP $main $resource $objects $sqlite $yyjson $::PATHS $candidate
     }
 }
 
@@ -235,7 +234,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     set consoleObj [file join $::OBJ machteld_main.o]
     incr changed [cc $consoleObj $consoleMain [concat $::common -municode] machteld_main.c]
     set consoleVersionObj [file join $::OBJ machteld-console-resource.o]
-    incr changed [version_resource console $consoleVersionObj]
+    incr changed [version_resource $consoleVersionObj]
 
     # Link keys include static libraries and toolchain/configuration identity,
     # not merely whether this invocation compiled an object.
@@ -243,7 +242,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     set inputs [list $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
     foreach name {tcllib tklib tclstub cffilib ffilib} { lappend inputs [dict get $::PATHS $name] }
     set spec [dict create files $inputs values [list console $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
-    ::machteld::devcache::ensure $bare.record $spec $bare [list link_candidate console $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj]
+    ::machteld::devcache::ensure $bare.record $spec $bare [list link_candidate $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj]
 
     # Manifest + prelude: unchanged builds invoke neither generator.
     set staged [file join $::OBJ prelude.tcl]
@@ -334,8 +333,8 @@ proc dev_docs {} {
 
 # ---- targeted test lanes (the pure-Tcl ones you iterate on) ----
 
-# Lanes needing compiled C fixtures or basekit extraction (process, native,
-# store, wrap, entry) and the full conversion/determinism check (the reference
+# Lanes needing compiled C fixtures or packaged runtimes (process, native,
+# store, entry) and the full conversion/determinism check (the reference
 # generator) run in tools/gate.tcl, alone with --group integration, packaging
 # or reference-generator.
 set ::LANES {
@@ -360,7 +359,7 @@ proc dev_test {lanes} {
     foreach lane $lanes {
         if {![dict exists $::LANES $lane]} {
             puts "test: unknown lane '$lane' (known: [dict keys $::LANES]);"
-            puts "      fixture-heavy lanes (process native store wrap entry) use tools/gate.tcl --group integration or packaging"
+            puts "      fixture-heavy lanes (process native store entry) use tools/gate.tcl --group integration or packaging"
             incr fail; continue
         }
         set path [Rp {*}[split [dict get $::LANES $lane] /]]

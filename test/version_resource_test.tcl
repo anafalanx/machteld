@@ -6,12 +6,7 @@ package require machteld 0.21
 #
 #     machteld.exe test/version_resource_test.tcl RUNTIME ?--cache DIR?
 #
-# The Tcl port (2026-10-28) of test/version_resource_test.ps1. Neither Tcl nor
-# the runtime offers Windows' version API, so the resource is read from the PE
-# file itself (test/pe_resources.tcl, which test/app_identity_test.tcl shares):
-# the resource directory to RT_VERSION, then VS_VERSIONINFO's fixed part and
-# its 040904B0 string table. --no-wrap skips the checks that write wrapped
-# executables (for a machine that must not build any).
+# Read RT_MANIFEST and RT_VERSION directly from the runtime PE image.
 
 source -encoding utf-8 [file join [file dirname [file normalize [info script]]] pe_resources.tcl]
 
@@ -32,7 +27,6 @@ proc ::vr::check {name condition {detail ""}} {
 }
 
 proc ::vr::checkResource {label path description internalName originalFilename version numeric beta} {
-    variable manifestSha256
     if {![file isfile $path]} {
         check "$label exists" 0 $path
         return
@@ -42,19 +36,13 @@ proc ::vr::checkResource {label path description internalName originalFilename v
     # 2026-10-28 on porting the runtime's tests).
     set data [bytes $path]
     set manifest [resource $data 24 1]
-    if {$internalName eq "machteld"} {
-        variable root
-        set peHeader [::pe::u32 $data 0x3c]
-        check "$label keeps the Windows console subsystem" \
-            [expr {[::pe::u16 $data [expr {$peHeader + 24 + 68}]] == 3}]
-        check "$label embeds the authored detached-console manifest" \
-            [expr {$manifest eq [bytes [file join $root src machteld.manifest]] &&
-                [string match {*consoleAllocationPolicy*2024/WindowsSettings">detached</consoleAllocationPolicy>*} $manifest]}]
-    } else {
-        set digest [hash sum sha256 $manifest]
-        check "$label carries the locked Windows application manifest (RT_MANIFEST #1)" \
-            [expr {$digest eq $manifestSha256}] "SHA-256=$digest"
-    }
+    variable root
+    set peHeader [::pe::u32 $data 0x3c]
+    check "$label keeps the Windows console subsystem" \
+        [expr {[::pe::u16 $data [expr {$peHeader + 24 + 68}]] == 3}]
+    check "$label embeds the authored detached-console manifest" \
+        [expr {$manifest eq [bytes [file join $root src machteld.manifest]] &&
+            [string match {*consoleAllocationPolicy*2024/WindowsSettings">detached</consoleAllocationPolicy>*} $manifest]}]
     if {[catch {parse [resource $data 16]} info]} {
         check "$label carries a VERSIONINFO resource" 0 $info
         return
@@ -117,9 +105,6 @@ proc ::vr::embeddedBuildPaths {path cache} {
 proc ::vr::main {argv} {
     variable root
     variable failures
-    variable manifestSha256
-    set lock [json decode [encoding convertfrom utf-8 [bytes [file join $root tools dependencies.lock.json]]]]
-    set manifestSha256 [dict get $lock toolchain defaultManifestResourceSha256]
     set runtime ""
     set cache ""
     while {[llength $argv]} {

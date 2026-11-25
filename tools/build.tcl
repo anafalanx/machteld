@@ -92,13 +92,13 @@ run $GCC {*}$common -municode -c $consoleMain -o $consoleObj
 # program. The resource derives from the canonical version macro.
 set consoleVersionObj [file join $OBJDIR machteld-console-resource.o]
 puts "rc   machteld-console.rc"
-::machteld::build::version_resource $TCLSH $WINDRES $ROOT console \
+::machteld::build::version_resource $TCLSH $WINDRES $ROOT \
     [file join $OBJDIR machteld-console.rc] $consoleVersionObj
 # The linker intermediates live in the invocation's work directory, never
 # beside the requested output, so no output name can collide with them.
 set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
-::machteld::build::link_host $GCC $STRIP console $consoleObj $consoleVersionObj \
+::machteld::build::link_host $GCC $STRIP $consoleObj $consoleVersionObj \
     $objects $sqliteObj $yyjsonObj $PATHS $bare
 set generatedManifest [file join $OBJDIR manifest.tcl]
 run $TCLSH [Rp tools genmanifest.tcl] [Rp src] $generatedManifest

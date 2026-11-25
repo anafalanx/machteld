@@ -10,10 +10,8 @@ package require machteld 0.21
 #     machteld.exe test/entry_test.tcl RUNTIME ?--fixture EXE?
 #
 # RUNTIME is the host under test. The crash checks need the compiled
-# process_fixture.exe (--fixture), the payload check the extracted bare host
-# (--bare); without them those checks are skipped. The Tcl port (2026-10-28)
-# of test/entry_test.ps1. Not checked: that --docs output lacks
-# FILE_ATTRIBUTE_TEMPORARY, which Tcl cannot read.
+# process_fixture.exe (--fixture). The payload test derives the bare PE from
+# the candidate's section table before checking the startup error.
 
 source [file join [file dirname [info script]] pe_resources.tcl]
 

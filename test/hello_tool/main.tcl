@@ -1,7 +1,5 @@
 #!/usr/bin/env machteld
-# Wrapped console/GUI fixture. Its marker proves startup, argv ownership, and
-# that the same static Machteld package (including SQLite/store) is present in
-# both embedded basekits.
+# Shared-runtime archive fixture for Tcl modules, SQLite, store and help.
 package require machteld
 
 set marker [file join [file dirname [info nameofexecutable]] _hello_ran.txt]
@@ -75,24 +73,5 @@ if {[catch {
     puts $f "sqlite3:[expr {$sql_ok ? {yes} : {no}}]"
 }
 
-# Packaging checks must not take over the desktop. Actual widget/interaction
-# coverage now lives in gui_widget_test.tcl; this optional fixture window is
-# opened only when explicitly requested, never by routine wrapping tests.
-if {![info exists env(MACHTELD_WRAP_GUI_INTERACTIVE)] ||
-        $env(MACHTELD_WRAP_GUI_INTERACTIVE) ne "1" ||
-        ([info exists env(MACHTELD_WRAP_GUI_SELFTEST)] && $env(MACHTELD_WRAP_GUI_SELFTEST) eq "1")} {
-    set gui_result "not-requested"
-} elseif {[catch {
-    package require Tk
-    wm title . "Machteld wrapped fixture"
-    pack [label .label -text "Machteld wrapped fixture"]
-    update
-    destroy .
-} gui_error]} {
-    set gui_result "unavailable:$gui_error"
-} else {
-    set gui_result ok
-}
-puts $f "gui:$gui_result"
 close $f
 exit [expr {$store_ok && $sql_ok ? 0 : 1}]

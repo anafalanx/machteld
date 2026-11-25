@@ -24,9 +24,8 @@ package require machteld 0.21
 #                        development cache, and the process, store, native and
 #                        streaming-bounds lanes
 #   packaging            the runtime's build identity, entry, package and
-#                        publication, VERSIONINFO, wrap and basekits, the README
-#                        examples wrapped, wrap inventory, application identity,
-#                        the examples packaged
+#                        publication, VERSIONINFO, 0.21 executable compatibility,
+#                        archive inventories and relocated examples
 #   native-validation    the candidate's group: native lifetime with the
 #                        telemetry probe; bounded worker scaling (every child
 #                        live and closed, 128 ordered pool replies and the
@@ -36,8 +35,7 @@ package require machteld 0.21
 #                        canary, each under a deadline: command line and its
 #                        allocation failures, Unicode, the JSON corpus and
 #                        adversarial inputs, the native filesystem and SQLite
-#                        boundaries, the hash boundary, and the identity
-#                        primitives on the runtime's basekits; and last the
+#                        boundaries and the hash boundary; and last the
 #                        full harness of tools/native-analysis.tcl: GCC's
 #                        analyzer over src/*.c, the sanitizer probes, the
 #                        trapped drivers again, the Tk index formatter and
@@ -51,8 +49,8 @@ package require machteld 0.21
 #   --public-tls         (integration or release) the native lane's public TLS
 #                        checks, which reach the network
 #   --interactive-pty    (integration or release) the process lane's console I/O
-#   --interactive-gui    the Tk archive, GUI widgets, the SQLite lookup and the
-#                        wrapped fixture open windows, so this is the owner's check only
+#   --interactive-gui    the Tk archive, GUI widgets and the SQLite lookup
+#                        open windows for attended checks
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
 # under test, the Tcl-only checks on the dependency cache's static tclsh. The
@@ -290,7 +288,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
                 # Its checks gate; only its timings are observations.
                 addLane steps $runtime native-validation "native scaling" native_scaling_test.tcl $probe $processFixture
-                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
+                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out] {
                     addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
                 }
                 # The whole harness, as the candidate's group ran it: it runs

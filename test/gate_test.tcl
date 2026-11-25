@@ -185,7 +185,7 @@ check {native validation shows the traps fire before any trapped driver runs} \
 # candidate's harness did (tools/native-analysis.ps1: 180 s, and 15 s for its
 # negative canaries), and the gate's plan carries each one to run -timeout.
 set trapped [::na::trappedSteps [::na::layout [file join $root .cache deps]] \
-    C:/fake-msys/ucrt64/bin/gcc.exe [file join $root out test] [file join $root out machteld.exe]]
+    C:/fake-msys/ucrt64/bin/gcc.exe [file join $root out test]]
 set wrongDeadlines {}
 foreach step $trapped {
     set want [expr {[string match {UB-trap canary traps *} [dict get $step label]] ? "30s" : "180s"}]

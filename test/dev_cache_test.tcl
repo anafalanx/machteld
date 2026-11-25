@@ -699,8 +699,8 @@ try {
             proc ::machteld::build::link_host args { lappend ::nativePaths $::env(PATH) }
             set ::inheritedPath $::env(PATH)
             compile_candidate source.c {-O2} fixture candidate.o
-            resource_candidate console candidate.o
-            link_candidate console main.o resource.o objects sqlite.o yyjson.o candidate.exe
+            resource_candidate candidate.o
+            link_candidate main.o resource.o objects sqlite.o yyjson.o candidate.exe
         }
         set nativePaths [interp eval $startup {set ::nativePaths}]
         set expectedNativePath [interp eval $startup {

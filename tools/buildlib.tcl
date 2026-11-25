@@ -134,9 +134,9 @@ proc ::machteld::build::paths {cache} {
 }
 
 # Generate and compile one host's VERSIONINFO resource from the canonical header.
-proc ::machteld::build::version_resource {tclsh windres root kind rc object} {
+proc ::machteld::build::version_resource {tclsh windres root rc object} {
     run $tclsh [file join $root tools generate-version-resource.tcl] \
-        [file join $root src machteld.h] $kind $rc
+        [file join $root src machteld.h] $rc
     run $windres --codepage=65001 -O coff -i $rc -o $object
 }
 
@@ -158,8 +158,8 @@ proc ::machteld::build::stage_prelude {root manifest output} {
     close $out
 }
 
-# Link one bare host and strip it. `subsystem` is console or gui.
-proc ::machteld::build::link_host {gcc strip subsystem mainobj resobj objects sqliteobj yyjsonobj paths output} {
+# Link the runtime and strip its debugging symbols.
+proc ::machteld::build::link_host {gcc strip mainobj resobj objects sqliteobj yyjsonobj paths output} {
     variable SYSLIBS
     set flags [list -municode -static-libgcc -Wl,--gc-sections]
     # GCC supplies default-manifest.o through its Win64 specs. Select our
