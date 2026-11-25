@@ -516,7 +516,7 @@ proc ::machteld::_wrap_data_dict {text label} {
     return [dict create {*}$text]
 }
 
-proc ::machteld::_wrap_manifest {path} {
+proc ::machteld::_wrap_manifest {path {project 0}} {
     if {[file isfile $path] && [file size $path] > 1048576} { Fail WRAP badvalue "wrap: manifest exceeds 1 MiB" }
     set snapshot [_wrap_snapshot $path]
     if {[dict get $snapshot bytes] > 1048576} { Fail WRAP badvalue "wrap: manifest exceeds 1 MiB" }
@@ -532,14 +532,19 @@ proc ::machteld::_wrap_manifest {path} {
     # remain part of the source snapshot; only dictionary parsing ignores it.
     if {[string index $text 0] eq "\ufeff"} { set text [string range $text 1 end] }
     set data [_wrap_data_dict $text manifest]
+    set allowed [expr {$project ? {schema entry files} : {schema files metadata}}]
     foreach key [dict keys $data] {
-        if {$key ni {schema files metadata}} { Fail WRAP badvalue "wrap: unknown manifest key $key" }
+        if {$key ni $allowed} { Fail WRAP badvalue "wrap: unknown manifest key $key" }
     }
     if {![dict exists $data schema] || [dict get $data schema] ne "1" || ![dict exists $data files]} {
         Fail WRAP badvalue "wrap: manifest requires schema 1 and an explicit files list"
     }
     if {[catch {llength [dict get $data files]} count] || $count < 1 || $count > 10000} {
         Fail WRAP badvalue "wrap: manifest files must list between 1 and 10000 files"
+    }
+    if {$project} {
+        if {![dict exists $data entry]} { Fail WRAP badvalue "wrap: project manifest needs an entry" }
+        return [dict create entry [_wrap_relative [dict get $data entry]] files [dict get $data files] snapshot $snapshot]
     }
     set metadata {}
     if {[dict exists $data metadata]} { set metadata [_wrap_data_dict [dict get $data metadata] metadata] }
@@ -950,12 +955,52 @@ proc ::machteld::wrap {args} {
     codes {badvalue notfound optin oserror unsupported usage} options {--console --entry --gui --manifest --plan --with-docs -o} \
     doc machteld/command/wrap]
 
-# CLI-only so that Tk retains the global pack geometry manager. A .machteld
-# file is a plain ZIP of application files; the entry always has one spelling.
+# Read the pinned generation mounted by the native entry gate. The file list
+# is inert data. Verify every mounted member before returning the entry path.
+proc ::machteld::ArchiveEntry {root} {
+    set indexName machteld-inventory.dict
+    set index [file join $root $indexName]
+    if {![file isfile $index]} {
+        Fail ENTRY inventory "archive has no $indexName; pack the original application sources with Machteld 30"
+    }
+    try {
+        if {[file size $index] > 4194304} { error "inventory exceeds 4 MiB" }
+        set channel [open $index rb]
+        try { set bytes [read $channel 4194305] } finally { close $channel }
+        if {[string length $bytes] > 4194304} { error "inventory exceeds 4 MiB" }
+        set record [_wrap_data_dict [encoding convertfrom -profile strict utf-8 $bytes] inventory]
+        if {[lsort [dict keys $record]] ne {entry files schema} || [dict get $record schema] ne "1"} {
+            error "expected archive inventory schema 1, entry and files"
+        }
+        set entry [dict get $record entry]
+        set files [_wrap_data_dict [dict get $record files] files]
+        if {[dict size $files] > 10000 || ![dict exists $files $entry] || [dict exists $files $indexName]} {
+            error "invalid entry or file list"
+        }
+        foreach {path name} [_zip_entries $root] {
+            if {$name eq $indexName} continue
+            if {[_wrap_relative $name] ne $name || ![dict exists $files $name]} { error "unexpected member: $name" }
+            set facts [_wrap_data_dict [dict get $files $name] "record for $name"]
+            if {[lsort [dict keys $facts]] ne {bytes sha256} ||
+                    [file size $path] ne [dict get $facts bytes] ||
+                    ![regexp {^[a-f0-9]{64}$} [dict get $facts sha256]] ||
+                    [hash file sha256 $path] ne [dict get $facts sha256]} {
+                error "size or SHA-256 mismatch: $name"
+            }
+            dict unset files $name
+        }
+        if {[dict size $files]} { error "missing member: [lindex [dict keys $files] 0]" }
+    } on error {message options} {
+        Fail ENTRY inventory "invalid application archive inventory: $message"
+    }
+    return [file join $root {*}[split $entry /]]
+}
+
+# CLI-only so Tk retains its global pack geometry manager.
 proc ::machteld::PackArchive {args} {
     lassign $args input flag out
     if {[llength $args] != 3 || $input eq "" || $flag ne "-o" || $out eq ""} {
-        Fail PACK usage "usage: pack file-or-directory -o name.machteld"
+        Fail PACK usage "usage: pack script-or-directory-or-project.dict -o name.machteld"
     }
     if {![string equal -nocase [file extension $out] ".machteld"]} {
         Fail PACK badvalue "pack: output must have the .machteld extension"
@@ -964,7 +1009,17 @@ proc ::machteld::PackArchive {args} {
         _wrap_no_links $input
         set input [file normalize $input]
         set single [expr {![file isdirectory $input]}]
-        if {$single} {
+        set project [expr {$single && [string equal -nocase [file extension $input] ".dict"] &&
+            [catch {::machteld::EntryCheck $input}]}]
+        set manifestSnapshot {}
+        set entry main.tcl
+        if {$project} {
+            set spec [_wrap_manifest $input 1]
+            set selected [dict get $spec files]
+            set entry [dict get $spec entry]
+            set manifestSnapshot [dict get $spec snapshot]
+            set sourceRoot [file dirname $input]
+        } elseif {$single} {
             set sourceRoot [file dirname $input]
             set selected [list [file tail $input]]
         } else {
@@ -978,20 +1033,43 @@ proc ::machteld::PackArchive {args} {
         set sourceCanon [canon $sourceRoot]
         set records [_wrap_inventory $sourceRoot $selected [dict get $sourceCanon path]]
         set out [file normalize $out]
-        set entryPath [expr {$single ? $input : [file join $sourceRoot main.tcl]}]
-        _wrap_destination $out $sourceCanon [canon $entryPath] $single
+        if {$project && ![dict exists $records $entry]} {
+            Fail PACK badvalue "pack: entry must appear in files with its on-disk spelling"
+        }
+        set entryPath [expr {$single && !$project ? $input : [file join $sourceRoot $entry]}]
+        set existing [_wrap_destination $out $sourceCanon [canon $entryPath] $single]
+        if {$project && $existing ne {}} {
+            set identity [_canon_key $existing]
+            foreach snapshot [linsert [dict values $records] end $manifestSnapshot] {
+                if {[dict get $snapshot identity] eq $identity} {
+                    Fail PACK badvalue "pack: output cannot replace a selected file or the project manifest"
+                }
+            }
+        }
         set entries {}; set inventory {}
         dict for {name record} $records {
-            set member [expr {$single ? "main.tcl" : $name}]
+            set member [expr {$single && !$project ? "main.tcl" : $name}]
+            if {[string equal -nocase [lindex [split $member /] 0] "machteld-inventory.dict"]} {
+                Fail PACK badvalue "pack: machteld-inventory.dict is reserved"
+            }
             lappend entries [dict get $record path] $member
             dict set inventory $member [dict create bytes [dict get $record bytes] sha256 [dict get $record sha256]]
         }
 
         lassign [_new_workdir [file dirname $out]] work workKey
+        set index [file join $work machteld-inventory.dict]
+        set indexBytes [encoding convertto -profile strict utf-8 [dict create schema 1 entry $entry files $inventory]]
+        if {[dict size $inventory] > 10000 || [string length $indexBytes] > 4194304} {
+            Fail PACK badvalue "pack: inventory exceeds 10000 files or 4 MiB"
+        }
+        set channel [open $index {WRONLY CREAT EXCL BINARY}]
+        try { puts -nonewline $channel $indexBytes } finally { close $channel }
+        lappend entries $index machteld-inventory.dict
+        dict set inventory machteld-inventory.dict [dict create bytes [file size $index] sha256 [hash file sha256 $index]]
         set candidate [file join $work candidate.machteld]
         zipfs lmkzip $candidate $entries
-        _wrap_verify_candidate $candidate $inventory main.tcl
-        _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records [expr {!$single}] {} {}
+        _wrap_verify_candidate $candidate $inventory $entry
+        _wrap_verify_inputs $sourceRoot [_canon_key $sourceCanon] $selected $records [expr {!$single}] $manifestSnapshot {}
         ::machteld::Publish $candidate $out
     } trap {MACHTELD WRAP} {msg opts} {
         Fail PACK [lindex [dict get $opts -errorcode] 2] [regsub {^wrap:} $msg {pack:}]

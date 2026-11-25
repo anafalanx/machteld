@@ -50,15 +50,38 @@ that script as the root `main.tcl`. The destination is replaced after the
 completed archive has been checked. `pack` is a command-line action of the
 full executable.
 
+To select individual files, pass a UTF-8 project dictionary to the same
+executable. Paths are relative to the dictionary's directory and the entry
+must appear in the file list. The entry keeps its directory in the archive.
+
+```tcl
+schema 1 entry ui/start.tcl files {ui/start.tcl ui/messages.tcl assets/help.txt}
+```
+
+```text
+machteld.exe pack app.dict -o app.machteld
+machteld.exe app.machteld
+```
+
 The full host recognizes the `.machteld` suffix case-insensitively and mounts
-the ZIP read-only for that process. A ZIP made by another tool can use the
-same layout. The host checks the entry's usual literal `package require
-machteld` declaration before evaluating it. The archive can use Tk and the
+the ZIP read-only for that process. The reserved root file
+`machteld-inventory.dict` contains a UTF-8 Tcl dictionary with keys `schema`
+(1), `entry` (the member path), and `files`. Each file record gives its byte
+count in `bytes` and lowercase SHA-256 in `sha256`. The inventory describes
+every application file and excludes itself. It accepts up to 10,000 files
+and 4 MiB of inventory text. At startup the host checks the pinned archive's
+members, sizes and hashes, then checks the entry's literal `package require
+machteld` declaration. The hashes detect corruption. Anyone who can rewrite
+the whole archive can also replace its inventory.
+
+An archive from the unpublished 22 baseline has no embedded inventory.
+Repack its original source directory using the current `pack` command.
+The archive can use Tk and the
 host's installed packages. Changes to application data belong in a writable
 native file.
 
 In the entry, `$argv0` is the absolute native pathname of the archive,
-`[info script]` names the mounted `main.tcl`, and `$argv` contains the
+`[info script]` names the mounted entry, and `$argv` contains the
 arguments after the archive name. The working directory is the caller's.
 Resolve assets relative to the entry. For example, an archive containing
 `lib/myapp/pkgIndex.tcl` can add its own package directory explicitly.

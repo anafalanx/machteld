@@ -71,8 +71,8 @@ if {$argv eq {finish}} {exit 37}
     try { set magic [binary encode hex [read $f 4]] } finally { close $f }
     set mount [zipfs mount $zip inspect-[pid]]
     try {
-        check "single-file archive is an ordinary ZIP containing only main.tcl" \
-            [expr {$magic eq "504b0304" && [glob -tails -directory $mount *] eq {main.tcl}}]
+        check "single-file archive contains the entry and its integrity inventory" \
+            [expr {$magic eq "504b0304" && [lsort [glob -tails -directory $mount *]] eq {machteld-inventory.dict main.tcl}}]
     } finally { zipfs unmount $mount }
     file delete $standalone
     set relative [file join {release files} {réunion.MACHTELD}]
@@ -163,10 +163,55 @@ puts [list [catalogueTitle] [binary encode hex $bytes] $refused]
         [expr {[host $caller 0 pack] eq "DIRECT-SCRIPT"}]
 }
 
+proc projectArchives {work} {
+    set project [file join $work project]
+    set moved [file join $work release]
+    file mkdir $project $moved
+    set body {package require machteld
+close [open entered w]
+set f [open [file join [file dirname [info script]] {résumé.bin}] rb]
+try { puts [binary encode hex [read $f]] } finally { close $f }
+}
+    writeScript [file join $project ui launch.tcl] $body
+    writeBytes [file join $project ui résumé.bin] [binary decode hex ff0017]
+    writeScript [file join $project private.txt] "excluded\n"
+    writeScript [file join $project app.dict] [dict create schema 1 entry ui/launch.tcl files {ui/launch.tcl ui/résumé.bin}]
+    host $project 0 pack app.dict -o app.machteld
+    set archive [file join $moved app.machteld]
+    file rename [file join $project app.machteld] $archive
+    check "a manifest entry can read its selected sibling after relocation" \
+        [expr {[host $moved 0 $archive] eq "ff0017" && [file exists [file join $moved entered]]}]
+    file delete [file join $moved entered]
+    set mount [zipfs mount $archive selected-[pid]]
+    set metadata [file join $project manifest-copy]
+    try {
+        check "the archive excludes the build manifest and unselected data" \
+            [expr {![file exists [file join $mount app.dict]] && ![file exists [file join $mount private.txt]]}]
+        file copy [file join $mount machteld-inventory.dict] $metadata
+    } finally { zipfs unmount $mount }
+    set entry [file join $project ui launch.tcl]
+    set asset [file join $project ui résumé.bin]
+    set counts [list $entry ui/launch.tcl $asset ui/résumé.bin $metadata machteld-inventory.dict]
+    foreach mode {extra missing altered legacy} {
+        set entries $counts
+        switch $mode {
+            extra { lappend entries [file join $project private.txt] extra.txt }
+            missing { set entries [lreplace $entries 2 3] }
+            altered { writeBytes $asset [binary decode hex f00017] }
+            legacy { set entries [list $entry main.tcl] }
+        }
+        set changed [file join $moved $mode.machteld]
+        zipfs lmkzip $changed $entries
+        host $moved failure $changed
+        check "$mode archive is rejected before application code runs" \
+            [expr {![file exists [file join $moved entered]]}]
+    }
+}
+
 set work [file tempdir]
 try {
     switch -- $argv {
-        {} { consoleArchives $work }
+        {} { consoleArchives $work; projectArchives $work }
         --tk { tkArchive $work }
         default { error "usage: archive_test.tcl ?--tk?" }
     }

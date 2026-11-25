@@ -550,7 +550,11 @@ select_archive_entry(Tcl_Interp *interp, Tcl_Obj *archive, Tcl_Obj *prefix)
                 Tcl_NewIntObj(0), TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
         return TCL_ERROR;
     }
-    Tcl_SetStartupScript(Tcl_NewStringObj("//zipfs:/machteld-app/main.tcl", -1), "utf-8");
+    /* ArchiveEntry only reads our immutable mount. It verifies the complete
+     * inventory before supplying the path that Tcl will evaluate. */
+    if (Tcl_EvalEx(interp, "::machteld::ArchiveEntry //zipfs:/machteld-app",
+                   -1, TCL_EVAL_GLOBAL) != TCL_OK) return TCL_ERROR;
+    Tcl_SetStartupScript(Tcl_GetObjResult(interp), "utf-8");
     return TCL_OK;
 }
 
@@ -559,18 +563,18 @@ capture_archive_entry(Tcl_Interp *interp, Tcl_Obj *entry, Tcl_Obj **script_out)
 {
     if (!startup_path_is_regular_file(entry)) {
         return Machteld_EntryError(interp, "notfound",
-            "the .machteld archive needs a main.tcl file at its root");
+            "the .machteld archive entry must be a regular file");
     }
     Tcl_Channel channel = Tcl_FSOpenFileChannel(interp, entry, "rb", 0);
     if (channel == NULL) {
-        return entry_detail_error(interp, "oserror", "cannot open archived main.tcl");
+        return entry_detail_error(interp, "oserror", "cannot open archived entry");
     }
     Tcl_Obj *contents = Tcl_NewObj();
     Tcl_IncrRefCount(contents);
     Tcl_Size count = Tcl_ReadChars(channel, contents, TCL_INDEX_NONE, 0);
     int status = Tcl_Close(interp, channel);
     if (count < 0 || status != TCL_OK) {
-        status = Machteld_EntryError(interp, "oserror", "cannot read archived main.tcl");
+        status = Machteld_EntryError(interp, "oserror", "cannot read archived entry");
     } else {
         Tcl_Size length;
         const unsigned char *bytes = Tcl_GetBytesFromObj(interp, contents, &length);
