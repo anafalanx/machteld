@@ -264,6 +264,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime integration "synchronous foreign calls" cffi_test.tcl $ffiFixture $ffiDependency
                 addStep steps integration "development cache" [list $driver [file join $test dev_cache_test.tcl] --msys $msys]
                 addLane steps $runtime integration process process_test.tcl $processFixture
+                addLane steps $runtime integration "child notifications" child_notifications_test.tcl $processFixture
                 addLane steps $runtime integration store store_test.tcl $lockFixture
                 addLane steps $runtime integration native native_test.tcl $httpFixture $processFixture
                 addLane steps $runtime integration "streaming bounds" streaming_bounds_test.tcl $processFixture

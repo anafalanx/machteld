@@ -52,12 +52,46 @@ static int sample(app_window *w) {
     return 1;
 }
 
-static BOOL CALLBACK consider(HWND hwnd, LPARAM data) {
-    window_search *search = (window_search *)data;
+static int ordinary_window(HWND hwnd) {
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     LONG_PTR extended = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    if ((style & WS_CHILD) || (extended & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) ||
-            (GetWindow(hwnd, GW_OWNER) && !(extended & WS_EX_APPWINDOW))) return TRUE;
+    return !(style & WS_CHILD) && !(extended & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) &&
+           (!GetWindow(hwnd, GW_OWNER) || (extended & WS_EX_APPWINDOW));
+}
+
+typedef struct {
+    wj_job *job;
+    unsigned posted;
+    int failed;
+} close_request;
+
+static BOOL CALLBACK request_close(HWND hwnd, LPARAM data) {
+    close_request *request = (close_request *)data;
+    if (!ordinary_window(hwnd)) return TRUE;
+    app_window w = { .window = hwnd };
+    w.tid = GetWindowThreadProcessId(hwnd, &w.pid);
+    if (!w.tid) return TRUE;
+    w.process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, w.pid);
+    if (!w.process) return TRUE;
+    if (still_owned(request->job, &w)) {
+        if (PostMessageW(hwnd, WM_CLOSE, 0, 0)) request->posted++;
+        else if (still_owned(request->job, &w)) request->failed = 1;
+    }
+    CloseHandle(w.process);
+    return TRUE;
+}
+
+int wj_request_close(wj_job *job, unsigned *posted) {
+    close_request request = { .job = job };
+    SetLastError(ERROR_SUCCESS);
+    BOOL ok = EnumDesktopWindows(GetThreadDesktop(GetCurrentThreadId()), request_close, (LPARAM)&request);
+    *posted = request.posted;
+    return (!ok && GetLastError() != ERROR_SUCCESS) || request.failed ? -1 : 0;
+}
+
+static BOOL CALLBACK consider(HWND hwnd, LPARAM data) {
+    window_search *search = (window_search *)data;
+    if (!ordinary_window(hwnd)) return TRUE;
     if (search->filter) {
         wchar_t name[256];
         if (!GetClassNameW(hwnd, name, 256) ||

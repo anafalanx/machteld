@@ -3,7 +3,7 @@ id: machteld/command/child
 type: command
 title: child
 summary: Own and supervise asynchronous process trees through opaque handles.
-commands: child, child start, child present, child wait, child kill, child info, child list, child close
+commands: child, child start, child present, child wait, child shutdown, child kill, child info, child list, child close
 ---
 
 # child
@@ -17,6 +17,7 @@ the same Job Object supervision used by `run`.
 child start ?launch options? ?--? command ?arg ...?
 child present token ?-class name?
 child wait token ?-timeout duration?
+child shutdown token
 child kill token ?exitCode?
 child info token
 child list
@@ -26,7 +27,8 @@ child close token
 ## Arguments and options
 
 Launch options are `-timeout`, `-mem`, `-cpu`, `-dir`, `-env`, `-arg0`,
-`-stdin`, `-channels`, `-console default|none`, and `-window default|normal`. The start-time `-timeout` is an
+`-stdin`, `-channels`, `-onexit commandPrefix`, `-console default|none`,
+and `-window default|visible|hidden|normal`. The start-time `-timeout` is an
 autonomous lifetime deadline. `-channels` exposes all three pipes. `-channels`
 and `-stdin` are mutually exclusive. Observation timeout belongs only to
 `child wait`.
@@ -95,7 +97,7 @@ timeout, and close do not roll back side effects.
 
 `child start ?-timeout d? ?-mem size? ?-cpu d? ?-dir path? ?-env dict?
 ?-arg0 word? ?-stdin bytes? ?-channels? ?-console default|none?
-?-window default|normal? ?--? command ?arg ...?`
+?-window default|visible|hidden|normal? ?-onexit commandPrefix? ?--? command ?arg ...?`
 
 #### Arguments and options
 
@@ -111,9 +113,26 @@ helper started by a GUI. Input, captured output, channel
 mode, and ownership of the process tree work as usual. A program can still
 create its own windows or console and choose how it launches descendants.
 
-`-window normal` requests a normal initial window and enables `child present`
-for this token. The default, `-window default`, uses the existing startup
-behavior. Both values work with either console setting.
+`-window visible` requests a normal initial window and enables `child present`
+for this token. `normal` is an alias for `visible`. Use `-window hidden` for
+a helper that should start with its first window hidden. The default,
+`-window default`, leaves the initial show state to the application. All
+settings work with either console setting. Windows passes the request to the
+launched process. The application controls later window changes and the
+initial state of processes it launches itself.
+
+With `-onexit`, the owning interpreter's event loop invokes
+`{*}$commandPrefix $token $result` once when the whole job exits and native
+capture has drained. The prefix must be a nonempty Tcl list. A normal
+completion supplies the same result as `child wait`. A native supervision or
+I/O failure supplies `status oserror` and a diagnostic in `message`.
+Callback errors go to Tcl's background error handler. A channel-mode caller
+continues to drain stdout and stderr through EOF, including bytes buffered in
+Tcl when the completion event arrived.
+
+An explicit wait leaves the notification queued. Closing the token or deleting
+its interpreter cancels a pending notification. The callback can close its own
+token. Run the normal Tcl or Tk event loop to receive notifications.
 
 #### Results
 
@@ -150,7 +169,7 @@ whole tree when elapsed.
 
 #### Arguments and options
 
-Pass a token returned by `child start -window normal`. The optional Windows
+Pass a token returned by `child start -window visible` (or `normal`). The optional Windows
 window class name is an exact, case-insensitive match. It accepts 1 to 255
 UTF-16 code units and excludes embedded NUL.
 
@@ -174,7 +193,7 @@ false. This also covers a supervised tree whose windows have all exited.
 #### Errors
 
 A closed or foreign token reports `CHILD nohandle`. A token started without
-`-window normal` or an invalid class value reports `CHILD badvalue`.
+`-window visible` or `normal`, or an invalid class value, reports `CHILD badvalue`.
 Malformed options report `CHILD usage`. Windows query errors can report
 `CHILD oserror`.
 
@@ -246,6 +265,59 @@ Waiting does not close the token.
 #### See also
 
 `machteld/command/wait`.
+
+<a id="shutdown"></a>
+### shutdown
+
+#### Synopsis
+
+`child shutdown token`
+
+#### Arguments and options
+
+Pass the token for a supervised child.
+
+#### Results
+
+Returns a dict. `windows` counts the ordinary top-level windows on the
+caller's desktop to which Machteld posted `WM_CLOSE`. They must belong to
+the token's job, including its descendants. `stdin` is true if Machteld
+closed the token's open channel-mode stdin. Closing follows Tcl's normal
+flushing rules. The stdout and stderr channels remain available.
+
+#### Errors
+
+A released or foreign token reports `CHILD nohandle`. Windows enumeration
+or message-delivery failures can report `CHILD oserror`. A channel transform
+can return its own error while closing stdin.
+
+#### Lifetime and timeouts
+
+Shutdown requests a cooperative exit. A GUI may ask the user to save or
+decline. A worker can finish its current request on stdin EOF. The token
+remains live for completion notification, wait and close. Repeated calls
+return the recorded request. If neither endpoint existed, a later call
+can retry after the application creates its window.
+
+#### Examples
+
+```tcl
+set request [child shutdown $c]
+if {[dict get [child wait $c -timeout 2s] status] eq "running"} {
+    child kill $c
+}
+```
+
+#### Constraints
+
+An existing start-time deadline still applies. An application with its own
+shutdown protocol can write its final request before closing stdin. Use
+`-onexit` and an `after` timer when a Tk application needs to remain
+responsive while waiting.
+
+#### See also
+
+`machteld/command/child#wait`, `machteld/command/child#kill`.
 
 <a id="kill"></a>
 ### kill

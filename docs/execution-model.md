@@ -88,7 +88,10 @@ try {
 
 A Tk application can use `$job start $command -console none` to launch a
 background helper without a Windows console. The worker still receives its
-standard pipes. The default is `-console default`.
+standard pipes. The default is `-console default`. Use `-window hidden`
+or `-window visible` when the helper should receive an initial show request.
+The job receives a native completion event after its process tree exits and
+delivers its final application callback after both output streams reach EOF.
 
 Call `$job cancel` to stop the current run. The object can start again after
 completion, failure, or cancellation. `start` returns 1 when the run is

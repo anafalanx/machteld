@@ -208,6 +208,13 @@ static DWORD WINAPI writer_thread(LPVOID arg) {
 
 /* ---- a supervised child ------------------------------------------------ */
 
+typedef struct {
+    Tcl_Event header;
+    struct child_s *child;
+} completion_event;
+
+static int child_completed(Tcl_Event *event, int flags);
+
 typedef struct child_s {
     char            token[24];   /* "child#N"; empty for a run's transient child */
     wj_job         *job;         /* per-command job (tree-kill + limits) */
@@ -220,6 +227,11 @@ typedef struct child_s {
     writer_t        wi;
     HANDLE          doneEv;      /* whole job exited and owned I/O drained */
     HANDLE          monitor;     /* enforces deadline without Tcl observation */
+    Tcl_ThreadId    owner;
+    Tcl_Interp     *interp;      /* accessed on the owner thread only */
+    Tcl_Obj        *onexit;      /* retained callback prefix */
+    completion_event *notification; /* queued once by the monitor */
+    const char     *reap_error;  /* static message, also returned on subsequent waits */
     int             stream;      /* callbacks pump output on interpreter thread */
     volatile LONG   monitor_failed;
     /* Names alone are not identities: Tcl can recycle a closed channel's name.
@@ -231,8 +243,11 @@ typedef struct child_s {
     char            chIn[24], chOut[24], chErr[24];
     Tcl_Channel     owned_channels[3]; /* live only until its close handler fires */
     ULONGLONG       deadline;    /* GetTickCount64() by which it must be done */
-    int             normal_window;
+    wj_window_mode  window;
     wj_presentation presentation;
+    unsigned        shutdown_windows;
+    int             shutdown_stdin;
+    int             shutdown_requested;
     int             reaped;      /* wait/reap already collected the exit + output */
     volatile LONG   killed;      /* was tree-killed by machteld (child kill) */
     volatile LONG   timeout;     /* specifically: killed because -timeout elapsed */
@@ -245,6 +260,7 @@ typedef struct child_s {
  * KILL_ON_JOB_CLOSE job containing the host would replace its intended process
  * exit status with the kernel's job-termination status. */
 typedef struct {
+    Tcl_Interp *interp;
     wj_job  *root;
     child_t *children;    /* singly-linked list of tracked children */
     int      counter;     /* child token sequence */
@@ -277,6 +293,7 @@ static child_t *registry_find(proc_ctx *ctx, const char *token) {
 }
 
 static void registry_remove(proc_ctx *ctx, child_t *c) {
+    c->interp = NULL; /* closing channels can reenter the Tcl event loop */
     child_t **pp = &ctx->children;
     while (*pp) {
         if (*pp == c) { *pp = c->next; c->next = NULL; return; }
@@ -296,7 +313,8 @@ typedef struct {
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
-    int                normal_window; /* -window normal: attended launch and presentation */
+    Tcl_Obj           *onexit;
+    wj_window_mode     window;
     int                no_console; /* -console none: start without a Windows console */
     int                channels;   /* -channels: hand the pipes over as Tcl channels */
     int                inherit;    /* -inherit: the child gets OUR stdio, not pipes */
@@ -317,7 +335,8 @@ enum {
     OPT_CHANNELS = 1u << 9,
     OPT_INHERIT  = 1u << 10,
     OPT_CONSOLE  = 1u << 11,
-    OPT_WINDOW   = 1u << 12
+    OPT_WINDOW   = 1u << 12,
+    OPT_ONEXIT   = 1u << 13
 };
 
 /* The domain names the public command, not the internal helper. */
@@ -543,9 +562,10 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
     o->env_block = NULL;
     o->onout = NULL;
     o->onerr = NULL;
+    o->onexit = NULL;
     o->channels = 0;
     o->no_console = 0;
-    o->normal_window = 0;
+    o->window = WJ_WINDOW_DEFAULT;
     /* Initialize every field because this structure lives on the stack. */
     o->inherit = 0;
     o->arg0 = NULL;
@@ -598,6 +618,15 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             i++;
             continue;
         }
+        if (strcmp(a, "-onexit") == 0) {
+            if (!(allowed & OPT_ONEXIT)) return mt_error(interp, dom, "usage", "-onexit is supported only by child start");
+            Tcl_Size length;
+            if (Tcl_ListObjLength(interp, value, &length) != TCL_OK || length == 0)
+                return mt_error(interp, dom, "badvalue", "-onexit expects a nonempty command prefix");
+            o->onexit = value;
+            i++;
+            continue;
+        }
         Tcl_Size vlen = 0;
         const char *v = Tcl_GetStringFromObj(value, &vlen);
         int has_nul = memchr(v, '\0', (size_t)vlen) != NULL;
@@ -608,9 +637,10 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             o->no_console = strcmp(v, "none") == 0;
         } else if (strcmp(a, "-window") == 0) {
             if (!(allowed & OPT_WINDOW)) return mt_error(interp, dom, "usage", "option is not supported by this command");
-            if (has_nul || (strcmp(v, "default") != 0 && strcmp(v, "normal") != 0))
-                return mt_error(interp, dom, "badvalue", "-window expects default or normal");
-            o->normal_window = strcmp(v, "normal") == 0;
+            if (!has_nul && strcmp(v, "default") == 0) o->window = WJ_WINDOW_DEFAULT;
+            else if (!has_nul && (strcmp(v, "visible") == 0 || strcmp(v, "normal") == 0)) o->window = WJ_WINDOW_VISIBLE;
+            else if (!has_nul && strcmp(v, "hidden") == 0) o->window = WJ_WINDOW_HIDDEN;
+            else return mt_error(interp, dom, "badvalue", "-window expects default, visible, hidden or normal");
         } else if (strcmp(a, "-timeout") == 0) {
             if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
@@ -746,6 +776,10 @@ static DWORD WINAPI child_monitor_thread(LPVOID arg) {
         Sleep(5);
     }
     SetEvent(c->doneEv);
+    if (c->notification != NULL) {
+        Tcl_ThreadQueueEvent(c->owner, &c->notification->header, TCL_QUEUE_TAIL);
+        Tcl_ThreadAlert(c->owner);
+    }
     return 0;
 }
 
@@ -832,9 +866,9 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     const char **largv = argv_with_arg0(o, cargc, cargv, err);
     if (largv == NULL) goto fail;
     wj_launch_mode mode = o->no_console ? WJ_NO_CONSOLE : WJ_SUPERVISED;
-    c->normal_window = o->normal_window;
+    c->window = o->window;
     int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io,
-                        mode, o->normal_window, o->env_block, &c->pid, &c->proc, err);
+                        mode, o->window, o->env_block, &c->pid, &c->proc, err);
     if (owns_argv) free((void *)largv);
     if (lrc != 0) goto fail;
     if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
@@ -885,6 +919,15 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
 
     c->doneEv = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (c->doneEv == NULL) { *err = "cannot create child completion event"; goto fail; }
+    if (o->onexit != NULL) {
+        c->owner = Tcl_GetCurrentThread();
+        c->interp = ctx->interp;
+        c->onexit = o->onexit;
+        Tcl_IncrRefCount(c->onexit);
+        c->notification = (completion_event *)Tcl_Alloc(sizeof(completion_event));
+        c->notification->header.proc = child_completed;
+        c->notification->child = c;
+    }
     c->monitor = CreateThread(NULL, 0, child_monitor_thread, c, 0, NULL);
     if (c->monitor == NULL) { *err = "cannot start child monitor thread"; goto fail; }
 
@@ -897,6 +940,9 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     return c;
 
 fail:
+    /* No failure path follows a successful CreateThread for the monitor. */
+    if (c->notification != NULL) Tcl_Free(c->notification);
+    if (c->onexit != NULL) Tcl_DecrRefCount(c->onexit);
     if (c->proc && c->job) (void)wj_job_terminate(c->job, 1);
     if (outW) CloseHandle(outW);
     if (errW) CloseHandle(errW);
@@ -999,7 +1045,7 @@ static void child_channels_free(Tcl_Interp *interp, child_t *c) {
 
 /* Wait for whole-job completion, then join and close all owned I/O. */
 static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
-    if (c->reaped) return 0;
+    if (c->reaped) { *err = c->reap_error; return c->reap_error ? -1 : 0; }
     DWORD w = WaitForSingleObject(c->doneEv, wait_ms);
     if (w == WAIT_TIMEOUT) return 1;
     if (w != WAIT_OBJECT_0) { *err = "waiting for child completion failed"; return -1; }
@@ -1023,6 +1069,7 @@ static int child_reap(child_t *c, unsigned wait_ms, const char **err) {
     if (c->errR) { CloseHandle(c->errR); c->errR = NULL; }
     if (c->doneEv) { CloseHandle(c->doneEv); c->doneEv = NULL; }
     c->reaped = 1;
+    c->reap_error = io_error;
     if (io_error != NULL) { *err = io_error; return -1; }
     return 0;
 }
@@ -1058,8 +1105,42 @@ static Tcl_Obj *child_dict(Tcl_Interp *interp, child_t *c) {
     return child_dict_ex(interp, c, 0);
 }
 
+static int child_completed(Tcl_Event *event, int flags) {
+    if (!(flags & TCL_FILE_EVENTS)) return 0;
+    child_t *c = ((completion_event *)event)->child;
+    Tcl_Interp *interp = c->interp;
+    if (interp == NULL || Tcl_InterpDeleted(interp)) return 1;
+    Tcl_Preserve(interp);
+    Tcl_InterpState state = Tcl_SaveInterpState(interp, TCL_OK);
+    const char *error = NULL;
+    int rc = child_reap(c, 0, &error);
+    Tcl_Obj *result = child_dict(interp, c);
+    if (rc < 0) {
+        Tcl_DictObjPut(interp, result, Tcl_NewStringObj("status", -1), Tcl_NewStringObj("oserror", -1));
+        Tcl_DictObjPut(interp, result, Tcl_NewStringObj("message", -1), Tcl_NewStringObj(error, -1));
+    }
+    Tcl_Obj *command = Tcl_DuplicateObj(c->onexit);
+    Tcl_IncrRefCount(command);
+    Tcl_ListObjAppendElement(interp, command, Tcl_NewStringObj(c->token, -1));
+    Tcl_ListObjAppendElement(interp, command, result);
+    Tcl_DecrRefCount(c->onexit);
+    c->onexit = NULL;
+    /* The callback can close the child or delete the interpreter. */
+    rc = Tcl_EvalObjEx(interp, command, TCL_EVAL_GLOBAL);
+    Tcl_DecrRefCount(command);
+    if (rc != TCL_OK && !Tcl_InterpDeleted(interp)) Tcl_BackgroundException(interp, rc);
+    Tcl_RestoreInterpState(interp, state);
+    Tcl_Release(interp);
+    return 1;
+}
+
+static int match_child_event(Tcl_Event *event, void *data) {
+    return event->proc == child_completed && ((completion_event *)event)->child == data;
+}
+
 static void child_free(child_t *c) {
     if (c == NULL) return;
+    c->interp = NULL;
     /* Interpreter deletion/process exit may reach us before Tcl closes its
      * channels. Leave those channels with Tcl, but remove callbacks into c. */
     for (int k = 0; k < 3; k++) {
@@ -1077,6 +1158,11 @@ static void child_free(child_t *c) {
              * cleanup path rather than freeing memory another thread may touch. */
             return;
         }
+    }
+    /* After the monitor joins it can no longer queue a notification. */
+    if (c->onexit != NULL) {
+        Tcl_DeleteEvents(match_child_event, c);
+        Tcl_DecrRefCount(c->onexit);
     }
     free(c->ro.buf);
     free(c->re.buf);
@@ -1338,8 +1424,8 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
 static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
-    static const char *const subs[] = { "start", "wait", "kill", "info", "list", "close", "present", NULL };
-    enum { START, WAIT, KILL, INFO, LIST, CLOSE, PRESENT };
+    static const char *const subs[] = { "start", "wait", "kill", "info", "list", "close", "present", "shutdown", NULL };
+    enum { START, WAIT, KILL, INFO, LIST, CLOSE, PRESENT, SHUTDOWN };
     int idx;
     if (objc < 2) {
         return mt_error(interp, "CHILD", "usage", "child subcommand ?arg ...?");
@@ -1350,7 +1436,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (idx == START) {
         run_opts o;
         unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
-                           OPT_STDIN | OPT_ENV | OPT_CHANNELS | OPT_CONSOLE | OPT_WINDOW;
+                           OPT_STDIN | OPT_ENV | OPT_CHANNELS | OPT_CONSOLE | OPT_WINDOW | OPT_ONEXIT;
         if (parse_opts(interp, "CHILD", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
         if (o.channels && o.stdin_obj != NULL) {
             return mt_error(interp, "CHILD", "usage",
@@ -1419,22 +1505,44 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
         }
         unsigned wait_ms = WJ_INFINITE;
         if (want >= 0) wait_ms = (unsigned)want;
-        if (!c->reaped) {
-            int w = child_reap(c, wait_ms, &err);
-            if (w == 1) {
-                Tcl_SetObjResult(interp, child_dict_ex(interp, c, 1));
-                return TCL_OK;
-            }
-            if (w < 0) return mt_error(interp, "CHILD", "oserror", err);
+        int w = child_reap(c, wait_ms, &err);
+        if (w == 1) {
+            Tcl_SetObjResult(interp, child_dict_ex(interp, c, 1));
+            return TCL_OK;
         }
+        if (w < 0) return mt_error(interp, "CHILD", "oserror", err);
         Tcl_SetObjResult(interp, child_dict(interp, c));
         return TCL_OK;
+    }
+    case SHUTDOWN: {
+        if (objc != 3) return mt_error(interp, "CHILD", "usage", "child shutdown token");
+        Tcl_Channel input = NULL;
+        if (!c->shutdown_requested && !c->reaped && WaitForSingleObject(c->doneEv, 0) == WAIT_TIMEOUT) {
+            if (wj_request_close(c->job, &c->shutdown_windows) < 0)
+                return mt_error(interp, "CHILD", "oserror", "could not request child window closure");
+            if (c->owned_channels[0] != NULL &&
+                    Tcl_GetChannel(interp, c->chIn, NULL) == c->owned_channels[0]) {
+                input = c->owned_channels[0];
+                c->shutdown_stdin = 1;
+            }
+            c->shutdown_requested = c->shutdown_windows != 0 || c->shutdown_stdin;
+        }
+        Tcl_Obj *result = Tcl_NewDictObj();
+        Tcl_IncrRefCount(result);
+        Tcl_DictObjPut(interp, result, Tcl_NewStringObj("windows", -1), Tcl_NewWideIntObj(c->shutdown_windows));
+        Tcl_DictObjPut(interp, result, Tcl_NewStringObj("stdin", -1), Tcl_NewBooleanObj(c->shutdown_stdin));
+        /* Unregistering a channel can evaluate a Tcl transform that closes
+         * this token. Keep the acknowledgement independent of c from here. */
+        int rc = input == NULL ? TCL_OK : Tcl_UnregisterChannel(interp, input);
+        if (rc == TCL_OK) Tcl_SetObjResult(interp, result);
+        Tcl_DecrRefCount(result);
+        return rc;
     }
     case PRESENT: {
         if (objc != 3 && (objc != 5 || strcmp(Tcl_GetString(objv[3]), "-class") != 0))
             return mt_error(interp, "CHILD", "usage", "child present token ?-class name?");
-        if (!c->normal_window)
-            return mt_error(interp, "CHILD", "badvalue", "presentation requires child start -window normal");
+        if (c->window != WJ_WINDOW_VISIBLE)
+            return mt_error(interp, "CHILD", "badvalue", "presentation requires child start -window visible or normal");
         Tcl_DString wide;
         Tcl_DStringInit(&wide);
         const wchar_t *filter = NULL;
@@ -1639,7 +1747,7 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
     if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
-                        WJ_BREAKAWAY, 0, o.env_block, &pid, &proch, &err);
+                        WJ_BREAKAWAY, WJ_WINDOW_DEFAULT, o.env_block, &pid, &proch, &err);
     if (owns_argv) free((void *)dargv);
     if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);
@@ -2611,6 +2719,7 @@ int Machteldproc_Init(Tcl_Interp *interp) {
         return TCL_ERROR;
     }
     ctx->root = root;
+    ctx->interp = interp;
 
     if (Tcl_Eval(interp, "namespace eval ::machteld {}") != TCL_OK ||
         Tcl_PkgProvide(interp, "machteld::proc", MACHTELD_VERSION) != TCL_OK) {

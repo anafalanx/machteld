@@ -6,7 +6,7 @@ package require machteld
 namespace eval ::machteld::job {}
 
 oo::class create ::machteld::job::Job {
-    variable callback state token streams generation timers buffer ended
+    variable callback state token streams generation timers buffer ended completion
 
     constructor {{onEvent {}}} {
         # Parse the prefix now so a malformed list cannot strand a child later.
@@ -19,6 +19,7 @@ oo::class create ::machteld::job::Job {
         set timers {}
         set buffer {}
         set ended {}
+        set completion {}
     }
 
     destructor { my release }
@@ -81,10 +82,10 @@ oo::class create ::machteld::job::Job {
     method start {argv args} {
         if {[dict get $state phase] in {running closed}} { return 0 }
         if {![llength $argv]} { error "empty child command" }
-        if {[llength $args] % 2} { error "expected option/value pairs for -timeout, -mem or -console" }
+        if {[llength $args] % 2} { error "expected option/value pairs for -timeout, -mem, -window or -console" }
         set options [dict create -timeout 30s -mem 128M]
         foreach {option value} $args {
-            if {$option ne "-console" && ![dict exists $options $option]} { error "unknown job option: $option" }
+            if {$option ni {-window -console} && ![dict exists $options $option]} { error "unknown job option: $option" }
             dict set options $option $value
         }
 
@@ -92,8 +93,9 @@ oo::class create ::machteld::job::Job {
         set stamp $generation
         set state [dict create phase running result {} error {} log {}]
         set ended [dict create stdout 0 stderr 0]
+        set completion {}
         try {
-            set token [::machteld::child start -channels {*}$options -- {*}$argv]
+            set token [::machteld::child start -channels -onexit [namespace code [list my completed $stamp]] {*}$options -- {*}$argv]
             set io [::machteld::child info $token]
             close [dict get $io stdin]
             foreach name {stdout stderr} {
@@ -105,7 +107,6 @@ oo::class create ::machteld::job::Job {
                 }
                 chan event $ch readable [namespace code [list my readable $stamp $name]]
             }
-            my later reap 25 [namespace code [list my poll $stamp]]
         } on error {message options} {
             my finish error "Could not start child: $message"
             return 1
@@ -141,8 +142,12 @@ oo::class create ::machteld::job::Job {
                 dict append state log $chunk
                 dict set state log [string range [dict get $state log] end-8191 end]
                 if {$chunk ne {}} { my emit stderr $chunk }
-                if {[info object isa object $object] && [my live $stamp] && ![dict get $ended stderr]} {
-                    my yield $stamp stderr [namespace code [list my rearm $stamp stderr]]
+                if {[info object isa object $object] && [my live $stamp]} {
+                    if {[dict get $ended stderr]} {
+                        my maybeFinish $stamp
+                    } else {
+                        my yield $stamp stderr [namespace code [list my rearm $stamp stderr]]
+                    }
                 }
             }
         } on error {message options} {
@@ -180,6 +185,7 @@ oo::class create ::machteld::job::Job {
                 error "protocol record exceeds 65536 bytes"
             } elseif {[dict get $ended stdout]} {
                 if {$buffer ne {}} { error "unterminated protocol record" }
+                my maybeFinish $stamp
             } else {
                 my yield $stamp stdout [namespace code [list my rearm $stamp stdout]]
             }
@@ -188,30 +194,28 @@ oo::class create ::machteld::job::Job {
         }
     }
 
-    method poll {stamp} {
+    method completed {stamp child result} {
         if {![my live $stamp]} { return }
-        set object [self]
-        try {
-            if {[dict get $ended stdout] && [dict get $ended stderr] && $buffer eq {} &&
-                    ![dict get [::machteld::child info $token] running]} {
-                set result [::machteld::child wait $token -timeout 0ms]
-                dict set state result $result
-                set status [dict get $result status]
-                set exit [dict get $result exit]
-                if {$status eq "ok" && $exit == 0} {
-                    my finish done
-                } else {
-                    my finish error "Child ended with status $status, exit $exit."
-                }
-            } else {
-                my later reap 25 [namespace code [list my poll $stamp]]
-            }
-        } on error {message options} {
-            if {[info object isa object $object] && [my live $stamp]} { my finish error $message }
+        set completion $result
+        my maybeFinish $stamp
+    }
+
+    method maybeFinish {stamp} {
+        if {![my live $stamp] || $completion eq {} || ![dict get $ended stdout] ||
+                ![dict get $ended stderr] || $buffer ne {}} { return }
+        dict set state result $completion
+        set status [dict get $completion status]
+        set exit [dict get $completion exit]
+        if {$status eq "ok" && $exit == 0} {
+            my finish done
+        } elseif {$status eq "oserror"} {
+            my finish error [dict get $completion message]
+        } else {
+            my finish error "Child ended with status $status, exit $exit."
         }
     }
 
-    unexport live emit later yield defer release finish readable rearm consume poll
+    unexport live emit later yield defer release finish readable rearm consume completed maybeFinish
 }
 
 package provide machteld::job 1.0

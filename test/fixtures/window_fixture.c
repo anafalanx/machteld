@@ -56,6 +56,15 @@ int
 wmain(int argc, wchar_t **argv)
 {
     if (argc != 4) return 2;
+    /* An isolated-desktop runner can demand a particular desktop. Check
+     * before creating a window, including in the handoff descendant. */
+    wchar_t expected[256], actual[256];
+    DWORD expected_length = GetEnvironmentVariableW(L"MACHTELD_TEST_EXPECT_DESKTOP", expected, 256);
+    if (expected_length) {
+        DWORD copied;
+        if (expected_length >= 256 || !GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()),
+                UOI_NAME, actual, sizeof(actual), &copied) || wcscmp(actual, expected)) return 3;
+    }
     if (wcscmp(argv[1], L"handoff") == 0) {
         wchar_t text[32];
         DWORD n = GetEnvironmentVariableW(L"MACHTELD_WINDOW_FIXTURE_PARENT_PID", text, 32);
@@ -88,7 +97,11 @@ wmain(int argc, wchar_t **argv)
     HWND w = CreateWindowExW(0, argv[2], L"Machteld window fixture", tiny ? WS_POPUP : WS_OVERLAPPEDWINDOW,
                              80, 80, tiny ? 4 : 420, tiny ? 4 : 260, NULL, NULL, instance, NULL);
     if (w == NULL) return 1;
-    ShowWindow(w, SW_SHOWNOACTIVATE);
+    int startup_mode = wcscmp(argv[3], L"startup") == 0;
+    STARTUPINFOW startup = { .cb = sizeof(startup) };
+    GetStartupInfoW(&startup);
+    ShowWindow(w, startup_mode && (startup.dwFlags & STARTF_USESHOWWINDOW)
+                     ? startup.wShowWindow : SW_SHOWNOACTIVATE);
     if (wcscmp(argv[3], L"iconic") == 0) {
         ShowWindow(w, SW_SHOWMINNOACTIVE);
     } else if (wcscmp(argv[3], L"hidden") == 0) {
@@ -96,7 +109,7 @@ wmain(int argc, wchar_t **argv)
     } else if (wcscmp(argv[3], L"offscreen") == 0) {
         int outside = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) + 256;
         if (!SetWindowPos(w, NULL, outside, 100, 420, 260, SWP_NOACTIVATE | SWP_NOZORDER)) return 1;
-    } else if (!tiny && wcscmp(argv[3], L"normal") != 0) {
+    } else if (!tiny && !startup_mode && wcscmp(argv[3], L"normal") != 0) {
         return 2;
     }
     if (!report(L"opened", w)) return 1;
@@ -107,6 +120,7 @@ wmain(int argc, wchar_t **argv)
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        if (!IsWindow(w)) return 0; /* DefWindowProc accepted WM_CLOSE. */
         if (DeleteFileW(L"minimize")) {
             ShowWindow(w, SW_SHOWMINNOACTIVE);
             if (!report(L"minimized", w)) return 1;

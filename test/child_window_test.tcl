@@ -1,7 +1,8 @@
 package require machteld
 
 # Starts real Win32 windows. Run on an interactive desktop with window_fixture.exe.
-if {[llength $argv] != 1} { error "usage: child_window_test.tcl window_fixture.exe" }
+set privateOnly [expr {[lrange $argv 1 end] eq {--startup-only}}]
+if {[llength $argv] != 1 && !$privateOnly} { error "usage: child_window_test.tcl window_fixture.exe ?--startup-only?" }
 set fixture [file normalize [lindex $argv 0]]
 set work [file tempdir]
 set tokens {}
@@ -67,6 +68,67 @@ try {
         ![dict get $launch showSet] && [catch {child present $standard} msg opts] &&
         [dict get $opts -errorcode] eq {MACHTELD CHILD badvalue}}]
     closeFixture $standard
+
+    lassign [startFixture other $class startup direct -window hidden] other otherPath ignored
+    signalFixture $otherPath open-window
+    reported $otherPath opened
+    foreach {policy show flag} {visible 1 1 hidden 0 0} {
+        lassign [startFixture $policy $class startup direct -console none -window $policy] token path launch
+        check "$policy startup passes the initial show state to the child" [expr {
+            [dict get $launch showSet] && [dict get $launch show] == $show}]
+        signalFixture $path open-window
+        check "$policy startup affects the fixture's first window" [expr {
+            [dict get [reported $path opened] visible] == $flag}]
+        if {$flag} {
+            check "visible opts into presentation" [expr {![catch {child present $token -class $class}]}]
+        } else {
+            check "hidden refuses presentation" [expr {
+                [catch {child present $token} msg opts] && [dict get $opts -errorcode] eq {MACHTELD CHILD badvalue}}]
+        }
+        set requested [child shutdown $token]
+        check "shutdown posts to the $policy fixture window ($requested)" [expr {
+            [dict get $requested windows] >= 1 && ![dict get $requested stdin]}]
+        set result [child wait $token -timeout 5s]
+        check "$policy startup preserves supervised exit reporting" [expr {
+            [dict get $result status] eq "ok" && [dict get $result pid] == [dict get $launch pid]}]
+        closeFixture $token
+    }
+    check "a matching window in another job survives both shutdowns" [expr {
+        [dict get [child info $other] running] && ![dict get [observe $otherPath] visible]}]
+    closeFixture $other
+
+    package require Tk
+    set panel .machteldChildTest
+    toplevel $panel
+    label $panel.progress -text waiting
+    pack $panel.progress
+    update
+    check "Tk mapped the test window" [winfo ismapped $panel]
+    set delivered 0
+    proc finished {token result} {
+        incr ::delivered
+        set ::completed [list $token [dict get $result status]]
+        child close $token
+    }
+    try {
+        lassign [startFixture responsive $class startup direct -window hidden -onexit finished] child path ignored
+        signalFixture $path open-window
+        reported $path opened
+        bind $panel <<ChildTest>> [list $panel.progress configure -text responsive]
+        after 0 [list event generate $panel <<ChildTest>> -when tail]
+        set finishTimer [after 100 [list child shutdown $child]]
+        set guard [after 10000 {set ::completed expired}]
+        try { vwait ::completed } finally {after cancel $finishTimer; after cancel $guard}
+        update
+        check "Tk handles a widget event while a supervised job is running" [expr {
+            [winfo ismapped $panel] && [$panel.progress cget -text] eq "responsive"}]
+        check "one callback receives the completed token and can release it" [expr {
+            $delivered == 1 && $completed eq [list $child ok] && $child ni [child list]}]
+    } finally {
+        destroy .
+    }
+
+    if {$privateOnly} { puts "ALL $checks STARTUP WINDOW CHECKS PASSED"; return }
 
     # The decoy has exactly the same class. It belongs to a separate child job.
     lassign [startFixture decoy $class iconic direct -window normal] decoy decoyPath launch

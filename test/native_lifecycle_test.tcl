@@ -147,15 +147,22 @@ try {
     # Repeated interpreter destruction while child jobs, Tcl channels, and a
     # watcher are live. No callback evaluation during native teardown is needed.
     set before [native_metrics]
+    set staleCompletions 0
+    proc staleCompletion {args} {incr ::staleCompletions}
     for {set n 0} {$n < 24} {incr n} {
         set slave [interp create]
         interp eval $slave {load {} machteldproc}
-        set token [interp eval $slave [list ::machteld::child start -channels -timeout 5s -- $FIXTURE hang 10000]]
+        interp alias $slave report {} staleCompletion
+        set token [interp eval $slave [list ::machteld::child start -onexit report -channels -timeout 5s -- $FIXTURE hang 10000]]
         set id [dict get [interp eval $slave [list ::machteld::child info $token]] pid]
         interp eval $slave [list ::machteld::watch start $WORK]
+        set done [interp eval $slave [list ::machteld::child start -onexit report -- $FIXTURE ok immediate]]
+        interp eval $slave [list ::machteld::child wait $done]
         interp delete $slave
         if {![dead $id]} {error "deleted interpreter left child $id alive"}
     }
+    update
+    check "24 interpreter deletions retire both running and queued callbacks" [expr {$staleCompletions == 0}]
     after 100
     set after [native_metrics]
     puts "LIFECYCLE interpreter-before $before"

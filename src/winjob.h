@@ -130,6 +130,10 @@ typedef struct {
 int wj_present(wj_job *job, const wchar_t *window_class, wj_presentation *history,
                wj_window_facts *facts, const char **err);
 
+/* Post WM_CLOSE to ordinary top-level windows owned by this job on the
+ * caller's desktop. The application decides whether to honor each request. */
+int wj_request_close(wj_job *job, unsigned *posted);
+
 /* ---- born-in-job launch (winjob_launch.c) ------------------------------ */
 
 /* The child's three standard handles. All must be non-NULL concrete handles;
@@ -146,6 +150,10 @@ typedef enum {
     WJ_BREAKAWAY
 } wj_launch_mode;
 
+typedef enum {
+    WJ_WINDOW_DEFAULT, WJ_WINDOW_VISIBLE, WJ_WINDOW_HIDDEN
+} wj_window_mode;
+
 /* Launch exe as a child born into the given jobs (root-first) at CreateProcess
  * time -- before its first thread runs, so nothing it spawns escapes those jobs.
  * exe is a resolved path (no PATH search), absolute when dir is set; argv is what
@@ -155,8 +163,8 @@ typedef enum {
  * On success sets *pid and *proc (a process HANDLE the caller waits then closes)
  * and returns 0; on failure returns -1 and sets *err. env_block is a UTF-16
  * "K=V\0...\0\0" environment block, or NULL to inherit machteld's environment.
- * normal_window requests SW_SHOWNORMAL and grants foreground permission before
- * the first thread runs. It is independent of console attachment.
+ * window selects the initial show request independently of console attachment.
+ * WJ_WINDOW_VISIBLE grants foreground permission before the first thread runs.
  * WJ_NO_CONSOLE starts the process without a console, with the same jobs and
  * explicit standard handles. WJ_BREAKAWAY requires zero jobs. It creates the
  * process suspended with CREATE_BREAKAWAY_FROM_JOB, verifies it belongs to no
@@ -164,7 +172,7 @@ typedef enum {
  * user code runs. */
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
-              wj_launch_mode mode, int normal_window, void *env_block, int *pid, void **proc, const char **err);
+              wj_launch_mode mode, wj_window_mode window, void *env_block, int *pid, void **proc, const char **err);
 
 /* ConPTY variant of wj_launch. The pseudoconsole supplies the child's stdio,
  * while the same born-in-job, UTF-8 conversion, custom environment, and safe

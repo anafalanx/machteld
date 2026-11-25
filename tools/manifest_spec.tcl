@@ -20,11 +20,12 @@ set ::machteld::manifest::native {
         kind c domain CHILD
         doc machteld/command/child
         codes {badvalue launch nohandle notfound oserror usage}
-        options {-arg0 -channels -class -console -cpu -dir -env -mem -stdin -timeout -window}
+        options {-arg0 -channels -class -console -cpu -dir -env -mem -onexit -stdin -timeout -window}
         subcommands {
-            start {options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout -window} doc machteld/command/child#start}
+            start {options {-arg0 -channels -console -cpu -dir -env -mem -onexit -stdin -timeout -window} doc machteld/command/child#start}
             present {options {-class} returns {cloaked foreground iconic onScreen status visible} doc machteld/command/child#present}
             wait  {options -timeout returns {err exit out pid status truncated} doc machteld/command/child#wait}
+            shutdown {options {} returns {stdin windows} doc machteld/command/child#shutdown}
             kill  {options {} doc machteld/command/child#kill}
             info  {options {} doc machteld/command/child#info}
             list  {options {} doc machteld/command/child#list}
