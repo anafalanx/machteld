@@ -682,7 +682,8 @@ proc ::boot::main {argv} {
         file copy -force [file join [file dirname $sqliteC] $name] [file join $cache sqlite $name]
     }
 
-    file copy -force [getDownload $binding] [file join $cache sqlite tclsqlite.c]
+    set upstreamBinding [getDownload $binding]
+    file copy -force $upstreamBinding [file join $cache sqlite tclsqlite.c]
     applyLockedFilePatch $lock $cache sqlite-tcl-parameters-profile
 
     # yyjson: the json command's reader core; one .c and .h and its license.
@@ -724,15 +725,17 @@ proc ::boot::main {argv} {
     buildCffi $msys $home $sourceRoot $prefix $archives
     buildGraphviz $msys $home $sourceRoot $prefix $archives $jobs
     # Only the offline manual generator loads this module. Use the same
-    # pinned core and upstream Tcl interface as the runtime, with Tcl stubs.
+    # pinned core and original upstream Tcl interface, with Tcl stubs. The
+    # runtime's patched binding uses parameter helpers from the native host.
     set sqliteDir [file join $cache sqlite]
     set include [shq [unixPath $msys [file join $prefix include]]]
     set stubs [shq [unixPath $msys [file join $prefix lib libtclstub.a]]]
     set output [shq [unixPath $msys [file join $prefix bin refsqlite.dll]]]
+    set referenceBinding [shq [unixPath $msys $upstreamBinding]]
     msysRun $msys $home $sqliteDir "gcc -O2 -shared -static-libgcc -DUSE_TCL_STUBS -DBUILD_sqlite \
         -DSQLITE_THREADSAFE=1 -DSQLITE_3_SUFFIX_ONLY -DSQLITE_ENABLE_FTS5 -DSQLITE_OMIT_LOAD_EXTENSION \
         -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE -I$include -I. \
-        tclsqlite.c sqlite3.c $stubs -Wl,--no-insert-timestamp -o $output"
+        $referenceBinding sqlite3.c $stubs -Wl,--no-insert-timestamp -o $output"
     # A cache made while the recipe or the toolchain changed is a mixture:
     # it is left unrecorded, so the next bootstrap makes it again.
     if {[stateHash $inputs $msys] ne $stateHash} {
