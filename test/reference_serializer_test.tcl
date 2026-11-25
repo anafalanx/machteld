@@ -124,6 +124,11 @@ puts SERIALIZER-SMOKE-OK
     file delete -force $work
 }
 
+set markdown [::ref::rewriteAuthoredLinks "## First\r\ncontent\n## Last\rline\r\n" reference]
+set lastSection [lindex [::ref::markdownSections $markdown headings] end]
+check {section character offsets refer to the published LF bytes even after a mixed checkout} [expr {
+    [string range $markdown [dict get $lastSection start] [expr {[dict get $lastSection end]-1}]] eq "## Last\nline\n"}]
+
 if {$failures} {
     puts stderr "$failures of $checks reference serializer checks failed"
     exit 1

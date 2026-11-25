@@ -159,6 +159,8 @@ proc ::ref::stripMarkdown {text} {
 }
 
 proc ::ref::rewriteAuthoredLinks {text sourceKind} {
+    # Section offsets must address the canonical LF text that ships.
+    set text [string map [list \r\n \n \r \n] $text]
     set out ""
     set at 0
     foreach {whole label target} [regexp -all -inline -indices {\[([^\]]+)\]\(([^)]+)\)} $text] {
