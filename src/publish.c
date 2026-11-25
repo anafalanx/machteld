@@ -822,6 +822,77 @@ PublishWriteCmd(void *client_data, Tcl_Interp *interp, int objc,
     return TCL_OK;
 }
 
+/* The verified reference tree is authored in one exclusively created sibling
+ * directory. Unlike Tcl's "file rename a b", publication must fail when b
+ * is an existing directory, without moving a beneath it. */
+static int
+DirectoryStageCmd(void *client_data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+{
+    (void)client_data;
+    int create = objc == 3 && strcmp(Tcl_GetString(objv[1]), "create") == 0;
+    if (!create && !(objc == 4 && strcmp(Tcl_GetString(objv[1]), "publish") == 0)) {
+        return publish_error(interp, "badvalue", "expected create path or publish staged destination");
+    }
+    NativePath stage = {0}, target = {0}, stage_parent = {0}, target_parent = {0};
+    PublishFileInfo src_parent, dst_parent, staged;
+    int result = TCL_ERROR;
+    if (native_path_from_obj(interp, objv[2], "staging directory", &stage) != TCL_OK ||
+            native_parent(interp, &stage, "staging directory", &stage_parent) != TCL_OK ||
+            check_parent(interp, &stage_parent, "staging parent", &src_parent) != TCL_OK) {
+        goto done;
+    }
+    if (create) {
+        if (CreateDirectoryW(stage.name, NULL)) {
+            result = TCL_OK;
+        } else {
+            DWORD e = GetLastError();
+            if (exists_error(e)) publish_error(interp, "exists", "staging directory already exists");
+            else publish_win_error(interp, "cannot create staging directory", e, NULL);
+        }
+        goto done;
+    }
+    if (native_path_from_obj(interp, objv[3], "directory destination", &target) != TCL_OK ||
+            native_parent(interp, &target, "directory destination", &target_parent) != TCL_OK ||
+            check_parent(interp, &target_parent, "destination parent", &dst_parent) != TCL_OK ||
+            check_parent(interp, &stage, "staging directory", &staged) != TCL_OK) {
+        goto done;
+    }
+    if (!same_identity(&src_parent, &dst_parent)) {
+        publish_error(interp, "badvalue", "staging and destination directories must be siblings");
+        goto done;
+    }
+    /* A transient file-scanner handle can briefly deny a directory rename.
+     * Recheck the source identity before each retry and never replace a name. */
+    for (int attempt = 0; ; attempt++) {
+        if (MoveFileExW(stage.name, target.name, 0)) {
+            result = TCL_OK;
+            break;
+        }
+        DWORD e = GetLastError();
+        if (exists_error(e) || GetFileAttributesW(target.name) != INVALID_FILE_ATTRIBUTES) {
+            publish_error(interp, "exists", "directory destination already exists");
+            break;
+        }
+        if (attempt == 4 || (e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED)) {
+            publish_win_error(interp, "cannot publish staged directory", e, NULL);
+            break;
+        }
+        Sleep(20U << attempt);
+        PublishFileInfo current;
+        if (check_parent(interp, &stage, "staging directory", &current) != TCL_OK) break;
+        if (!same_identity(&staged, &current)) {
+            publish_error(interp, "badvalue", "staging directory changed during publication");
+            break;
+        }
+    }
+done:
+    native_path_release(&target_parent);
+    native_path_release(&stage_parent);
+    native_path_release(&target);
+    native_path_release(&stage);
+    return result;
+}
+
 int
 Machteldpublish_Init(Tcl_Interp *interp)
 {
@@ -830,7 +901,9 @@ Machteldpublish_Init(Tcl_Interp *interp)
         return publish_error(interp, "oserror",
             "cannot create the machteld command namespace");
     }
-    if (Tcl_CreateObjCommand(interp, "::machteld::Publish", PublishCmd,
+    if (Tcl_CreateObjCommand(interp, "::machteld::DirectoryStage", DirectoryStageCmd,
+            NULL, NULL) == NULL ||
+        Tcl_CreateObjCommand(interp, "::machteld::Publish", PublishCmd,
             NULL, NULL) == NULL ||
             Tcl_CreateObjCommand(interp, "::machteld::PublishWrite", PublishWriteCmd,
             NULL, NULL) == NULL) {
