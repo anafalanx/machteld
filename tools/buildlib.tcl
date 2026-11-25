@@ -33,7 +33,7 @@ set ::machteld::build::SQLITE_FLAGS {
 set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}
 
 set ::machteld::build::SYSLIBS {
-    -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32 -liphlpapi
+    -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32 -liphlpapi -lsecur32 -lcrypt32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
     -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4 -lshlwapi -liphlpapi -lmfuuid -lavrt
     -ld3d11 -ldxgi -ldxguid -ld2d1 -ld3dcompiler

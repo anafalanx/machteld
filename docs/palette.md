@@ -131,6 +131,10 @@ The same package supplies IPv4 and IPv6 UDP sockets. Each receive returns
 one datagram and its sender. A readable callback runs in the Tcl or Tk
 event loop. [UDP sockets](reference/machteld/index.md#udp-sockets)
 
+`::machteld::network::nts sample $hostname` returns an authenticated UTC
+sample over TLS 1.3 and UDP. Use `nts start` for a cancellable background
+request. [Authenticated network time](reference/machteld/index.md#authenticated-network-time)
+
 ## Machine processes
 
 ```tcl

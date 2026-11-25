@@ -265,6 +265,10 @@ proc ::gate::plan {settings} {
                 set sqlite [file join $cache sqlite]
                 addStep steps integration "fixture http_fixture.c" [list $gcc {*}$strict -municode \
                     [file join $test fixtures http_fixture.c] -lws2_32 -o $httpFixture]
+                set ntsServer [file join $out nts_server.exe]
+                addStep steps integration "independent OpenSSL NTS peer" [list $gcc {*}$strict \
+                    [file join $test fixtures nts_server.c] -lssl -lcrypto -lws2_32 -o $ntsServer]
+                addLane steps $runtime integration "authenticated NTS time" nts_test.tcl $ntsServer
                 addStep steps integration "SQLite test object" [list $gcc -O2 -w -DSQLITE_THREADSAFE=1 \
                     -DSQLITE_OMIT_LOAD_EXTENSION -c [file join $sqlite sqlite3.c] -o $sqliteObject]
                 addStep steps integration "fixture sqlite_lock_fixture.c" [list $gcc {*}$strict -municode \

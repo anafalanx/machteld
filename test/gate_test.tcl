@@ -124,7 +124,7 @@ check {the fast group compiles nothing} [expr {[compiled [::gate::plan $fast]] e
 check {the fast group tests script and archive launch} [expr {"archive_test.tcl" in [scripts [::gate::plan $fast]]}]
 check {the integration group compiles its own fixtures and the process fixture} \
     [expr {[compiled [::gate::plan [settings {--group integration}]]] eq [list \
-        {fixture process_fixture.c} {fixture http_fixture.c} {SQLite test object} \
+        {fixture process_fixture.c} {fixture http_fixture.c} {independent OpenSSL NTS peer} {SQLite test object} \
         {fixture sqlite_lock_fixture.c} {fixture cmdline_test.c} \
         {fixture desktop_runner.c} {fixture window_fixture.c} {fixture desktop_catalog.c} \
         {fixture cffi_dependency.c} {fixture cffi_fixture.c}]}]
@@ -133,7 +133,7 @@ check {the packaging group compiles only the process fixture} \
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 10}]
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 12}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
 
@@ -214,10 +214,11 @@ foreach step $nvPlan {
     if {![string match {trapped *} [dict get $step label]] || [string match {*: compile} [dict get $step label]]} continue
     lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
 }
-check {the trapped drivers run the command line, allocation failures, Unicode, JSON, native, and hash boundaries} \
+check {the trapped drivers run the native, filesystem, encoding and networking boundaries} \
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
-        native-boundary-trap.exe hash-boundary-trap.exe files-provider-trap.exe udp-trap.exe network-trap.exe \
+        native-boundary-trap.exe hash-boundary-trap.exe files-provider-trap.exe \
+        nts-crypto-trap.exe nts-lifetime-trap.exe udp-trap.exe network-trap.exe \
         {encoding-trap.exe system} {encoding-trap.exe missing} {encoding-trap.exe incomplete}]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 set attended [lmap step $guiPlan {if {[dict get $step group] ne "interactive"} continue; set step}]

@@ -61,6 +61,13 @@ jobs:
             $packages += "$ucrt/$prefix-$component-14.0.0.r37.g2bfe61fba-1-any.pkg.tar.zst"
           }
           $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
+          # Independent loopback NTS test server. Neither packaged host links OpenSSL.
+          $fixture = (Get-Content tools/dependencies.lock.json -Raw | ConvertFrom-Json).testTools.ntsOpenSsl
+          $path = Join-Path "$env:MSYS2_ROOT/tmp" $fixture.file
+          Invoke-WebRequest -Uri $fixture.url -OutFile $path
+          if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $fixture.sha256) { throw 'NTS test OpenSSL digest mismatch' }
+          Invoke-WebRequest -Uri "$($fixture.url).sig" -OutFile "$path.sig"
+          $packages += "/tmp/$($fixture.file)"
           & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $manifest = & "$env:MSYS2_ROOT/ucrt64/bin/gcc.exe" '-print-file-name=default-manifest.o'

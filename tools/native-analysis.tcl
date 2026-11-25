@@ -134,12 +134,20 @@ proc ::na::trappedSteps {layout gcc out} {
         [file join $fixtures localfiles_driver.c] [file join $src wintext.c] {*}$tcl -o $fileBoundary]]
     lappend steps [dict create label "trapped cloud file transitions" argv [list $fileBoundary]]
     set udp [file join $out udp-trap.exe]
+    set nts [file join $out nts-crypto-trap.exe]
+    lappend steps [dict create label "trapped NTS AES-SIV: compile" argv [list $gcc {*}$flags \
+        [file join $fixtures nts_crypto.c] [file join $src nts_siv.c] -lbcrypt -o $nts]]
+    lappend steps [dict create label "trapped NTS AES-SIV" argv [list $nts]]
+    set ntlife [file join $out nts-lifetime-trap.exe]
+    lappend steps [dict create label "trapped NTS request lifetime: compile" argv [list $gcc {*}$flags \
+        [file join $fixtures nts_lifetime.c] [file join $src wintext.c] {*}[lsort [glob [file join $src nts_*.c]]] {*}$tcl -o $ntlife]]
+    lappend steps [dict create label "trapped NTS request lifetime" argv [list $ntlife]]
     lappend steps [dict create label "trapped UDP lifetime: compile" argv [list $gcc {*}$flags \
         [file join $fixtures udp_driver.c] {*}$tcl -o $udp]]
     lappend steps [dict create label "trapped UDP lifetime" argv [list $udp]]
     set net [file join $out network-trap.exe]
     lappend steps [dict create label "trapped network diagnostics: compile" argv [list $gcc {*}$flags \
-        [file join $fixtures network_driver.c] [file join $src wintext.c] [file join $src udp.c] {*}$tcl -o $net]]
+        [file join $fixtures network_driver.c] [file join $src wintext.c] [file join $src udp.c] {*}[lsort [glob [file join $src nts*.c]]] {*}$tcl -o $net]]
     lappend steps [dict create label "trapped network diagnostics" argv [list $net]]
     set charset [file join $out encoding-trap.exe]
     lappend steps [dict create label "trapped encoding detector: compile" argv [list $gcc {*}$flags \
@@ -309,6 +317,7 @@ proc ::na::main {argv} {
         foreach relative {
             tools/native-analysis.tcl tools/buildlib.tcl test/cmdline_test.c test/cmdline_alloc_test.c
             test/wintext_test.c test/hash_boundary_test.c test/fixtures/localfiles_driver.c test/fixtures/encoding_driver.c test/fixtures/network_driver.c test/fixtures/udp_driver.c
+            test/fixtures/nts_crypto.c test/fixtures/nts_lifetime.c test/fixtures/nts_server.c test/nts_test.tcl
             test/json_test.tcl test/native_adversarial_test.tcl
             test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c
             test/fixtures/native_boundary_driver.c test/fixtures/tk_index_format_test.c

@@ -123,6 +123,47 @@ $socket send 127.0.0.1 [dict get [$socket local] port] [binary decode hex 00ff]
 vwait ::done
 ```
 
+### Authenticated network time
+
+`::machteld::network::nts sample hostname ?-port port? ?-timeout ms?
+?-trustroot derBytes?` obtains one authenticated Network Time Security
+sample. The host name selects the TLS key-exchange server. Port defaults
+to 4460. The deadline covers resolution, TLS, key negotiation and the UDP
+exchange. It defaults to 5,000 ms and accepts 1 through 120,000 ms.
+
+The result contains `unixms`, the estimated UTC Unix time in milliseconds
+at receipt, `rttms`, the measured UDP round-trip time, and the authenticated
+server's `stratum`. Machteld converts the server's NTP time to the era
+nearest the local date. That calculation assumes the local clock is within
+68 years of the server. The application decides how to use the sample and
+when to request another one.
+
+Windows Schannel verifies the server's certificate and name. An optional
+`-trustroot` supplies one DER-encoded CA certificate as the exclusive root
+for that request. It is useful for private time services. Peer checks still
+include the certificate's validity, server authentication usage and name.
+NTS requires TLS 1.3, ALPN `ntske/1`, NTPv4 and AES-SIV-CMAC-256. A sample
+requires a response authenticated under the negotiated server key, bound to
+the request identifier and origin timestamp, from a synchronized server.
+Each request performs fresh key establishment and releases its session keys
+and cookies when it finishes. The client accepts up to 16 KiB of key-exchange
+records, 2 KiB per cookie and an 8 KiB UDP reply. There are no automatic retries.
+
+`::machteld::network::nts start hostname ?options?` starts the same
+exchange asynchronously and returns a request command. `$request status`
+returns `pending`, `ok`, `error`, `timeout` or `cancelled`. `$request result`
+retrieves the result immediately. `$request wait` waits for a terminal state,
+bounded by the original deadline. `$request cancel` cancels a pending request.
+`$request close` releases the command, cancelling unfinished work. Renaming
+the command to the empty string or deleting its interpreter also releases it.
+Tk programs can poll `status` with `after` while their window handles input.
+
+On timeout, cancellation or a premature result lookup, the error code is
+`MACHTELD NTS timeout`, `MACHTELD NTS cancelled` or `MACHTELD NTS pending`.
+Transport, certificate, protocol and authentication failures report
+`MACHTELD NTS failed stage code`. A successful sample contains no key or
+cookie material. The public API only reads the system clock.
+
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
 the language itself, rather than the Machteld palette, is the subject. Upstream

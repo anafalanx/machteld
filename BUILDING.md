@@ -49,6 +49,11 @@ ZIP before the current CI policy was adopted.
    the build PC it is `C:\dev\.z\r\msys2`: pass `--msys C:\dev\.z\r\msys2`, or
    set `MSYS2_ROOT` for `tools\dev.tcl`. bash runs only inside MSYS2, for
    Tcl/Tk's configure and make.
+   The integration gate additionally uses the UCRT64 OpenSSL development
+   package to compile its independent loopback NTS server. Its archive and
+   digest are under `testTools.ntsOpenSsl` in `tools/dependencies.lock.json`.
+   The server creates its certificates in memory. Machteld itself uses
+   Windows Schannel, CryptoAPI and CNG.
 3. **The pinned sources** include Tcl/Tk 9.0.4, SQLite 3.53.4, yyjson 0.12.0,
    cffi and its dependencies, Graphviz 16.1.2 and Expat 2.8.1. The bootstrap
    fetches their source archives and the matching upstream SQLite Tcl binding

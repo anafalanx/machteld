@@ -21,6 +21,13 @@
     "makeSha256": "701b0044dddeb40b02a9eaf20d35f8fca8dc06b0aa8a02a6e9c7ae5e5213a073",
     "zipSha256": "5df599bd0b4628939a26f1208bea4b761be98a4c8261b5fd409998c87834489a"
   },
+  "testTools": {
+    "ntsOpenSsl": {
+      "file": "mingw-w64-ucrt-x86_64-openssl-3.6.2-2-any.pkg.tar.zst",
+      "url": "https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-openssl-3.6.2-2-any.pkg.tar.zst",
+      "sha256": "4b919cc9ed46b55c465a39204bf5034f2d8be931840c6a62ae71b1554bbea9a5"
+    }
+  },
   "archives": [
     {
       "id": "graphviz",

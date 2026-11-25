@@ -250,6 +250,7 @@ Bundled material retains its own terms, including the verbatim
 The encoding detector adapts code from [Els](licenses/Els-MIT.txt). The Windows
 application catalog and icon conversion adapt code from [Ann](licenses/Ann-MIT.txt).
 Windows network diagnostics adapt code from [Airwave](licenses/Airwave-MIT.txt).
-UDP address parsing adapts code from [Lunar](licenses/Lunar-MIT.txt).
+UDP address parsing, NTS wire codecs, AES-SIV test vectors and Direct2D
+rendering adapt code from [Lunar](licenses/Lunar-MIT.txt).
 JSONTestSuite is test-only and retains
 [its own license](test/jsontestsuite/LICENSE).
