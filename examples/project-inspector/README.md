@@ -80,8 +80,7 @@ if it already exists; do not blindly delete or wrap the whole repository. Use
 `--console` instead for a console-subsystem executable. Reference documentation
 is omitted by default; explicitly add `--with-docs` to both commands if wanted.
 The executable is the complete Inspector deployment: no adjacent worker scripts
-or DLLs are required. It keeps the GUI host's Windows identity; an
-application's own name, version and icon come in 23.
+or DLLs are required. It keeps the GUI host's Windows identity.
 
 For automation without opening any window:
 

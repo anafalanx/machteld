@@ -15,8 +15,7 @@ The product sentence remains the decision filter:
 
 It is Vincent Vercauteren's own runtime, and it serves tools first. Other users
 are welcome, but growth in adoption is not the acceptance criterion for a
-feature. The repository remains private; integration with kuu is not current
-work.
+feature. The repository is public.
 
 It runs explicitly opted-in Tcl programs, exposes a small native/Tcl palette,
 and packages those programs without changing their API. A proposed feature must
@@ -52,9 +51,10 @@ command or migration layer. The current work is machteld 22, which contains the
 0.22 candidate's stabilization and is not yet released or signed; from 22 on the
 version is one natural number, and only a change to the runtime makes a new
 one. Explicit wrapper inventories and native hardening must not be attributed
-retroactively to the historical signed artifact; application identity for
-wrapped tools is not in 22, and comes in 23. Acceptance of 22 is current work;
-signing and publication require a separate decision.
+retroactively to the historical signed artifact. The [roadmap](roadmap.md)
+records the decision to retire wrapping and share one runtime across apps.
+Acceptance of 22 is current work. Signing and publication require a separate
+decision.
 
 Standing architectural decisions:
 

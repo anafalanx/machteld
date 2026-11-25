@@ -1,7 +1,7 @@
 ---
 type: roadmap
 title: Roadmap
-description: What machteld 22 contains while it is in preparation, its release gate, and preserved release history.
+description: Release 22 status, the delivery order for the shared runtime, acceptance checks, and release history.
 tags: [machteld, roadmap, windows]
 ---
 
@@ -44,9 +44,8 @@ bootstrap, the reference generator, the development loop, the release gate and
 every test driver are Tcl programs that run on the build runtime, and no
 PowerShell remains.
 
-Not in 22: application metadata and icons for wrapped tools, moved to 23 by
-the owner on 2026-10-30; the explicit file list (`--manifest`) and `--plan`
-stay.
+Version 22 keeps the explicit wrap inventory (`--manifest`) and preview
+(`--plan`). A wrapped executable inherits its host's Windows metadata and icon.
 
 Evidence and remaining limits of the stabilization are recorded in
 `tools/stabilization.json` in the source checkout; exact artifact receipts live
@@ -61,10 +60,123 @@ complete: freeze 22, reconstruct cleanly, compare with the matching incremental
 artifact, run the acceptance matrix including the approved brief GUI check, and
 prepare accurate release notes. Fresh evidence must distinguish verified
 targets from unavailable acceptance; earlier stabilization receipts do not
-automatically certify a new artifact. 22 remains unsigned until then. Signing
-and publication require a separate decision, the repository remains private,
-and the signed release must not be replaced. Kuu integration is not current
-work.
+automatically certify a new artifact. The owner signs the release and
+authorizes publication after acceptance.
+
+## Delivery order
+
+The target is one signed `machteld.exe` that runs Tcl scripts, creates
+application-only `.machteld` archives with `pack`, and runs those archives.
+The milestone numbers below identify work items. The first implementation
+in release 23 is the foreign-function interface, numbered 23.9.
+
+### Establish the signed baseline
+
+1. **Prepare and verify the source (22.0–22.2).** Settle the scope of the
+   historical cleanup, make and verify its recovery copies, and check the
+   result in an isolated repository. Publication requires the owner's approval.
+   Run the full test gate on the resulting baseline and add the pre-push
+   check. Demonstrate that the check catches a deliberately failing fixture.
+2. **Stabilize the runtime (22.4a, 22.3–22.8).** Set up a hidden desktop for
+   tests, suppress crash dialogs, and stop captured console children flashing
+   a window when the parent has no console. Correct the documentation and
+   build inputs, then fix the outstanding process, resource-lifetime and
+   packaging defects. Each regression gets a test that fails before the fix.
+3. **Ship signed 22 (22.9–22.10).** Compare two clean release builds for
+   byte identity, compare the incremental build, and run the release and
+   interactive checks. The owner signs a copy. Run the gate on those signed
+   bytes, record their SHA-256 and adopt the released executable for builds.
+
+Alongside this work, run an existing application's suite against signed 0.21
+with its current native extension (23.1). Record each failure and which side
+needs a change. Repeat on signed 22. Use the results to write a small runtime
+regression test. Open 23 by agreeing on the new command contracts, their
+limits, and the handling of binary data and text (23.0).
+
+### Build the shared application runtime
+
+1. **Windows DLL calls (23.9).** Add the optional, statically linked `cffi`
+   package for synchronous calls. Document ownership, text encoding and DLL
+   lookup. Test an allowed call, a refused load, and handling of a failing
+   call in a worker.
+2. **Supervised processes (23.2–23.3).** Deliver child completion through the
+   Tcl event loop. Support hidden helpers, attended windows and graceful
+   shutdown. Test that a Tk window keeps responding, a child receives one
+   completion notification, and a window can be found after a child hands
+   work to another process in its job.
+3. **One executable for development and delivery (23.4a, 23.4).** Keep
+   direct Tcl entry. Embed `consoleAllocationPolicy=detached` in the Windows
+   console-subsystem manifest. Implement `machteld.exe pack` and direct
+   archive launch. Verify the inventory before executing any application code.
+   Remove `wrap`, its Tcl and CLI entries, and both executable templates.
+   Build an example with only the runtime, project manifest, script and asset.
+   Run it in another directory containing only the runtime and archive.
+   Reject a damaged archive and attempts to write a mounted asset. Verify
+   replacement of the runtime and archive on a live network share. Test a
+   shortcut without a console flash on the development PC and a second PC
+   running the signed build. Test terminal input, redirection, waiting and
+   exit status. The archive options and manifest syntax are
+   design work within this milestone.
+4. **Full SQL (23.5).** Expose SQLite's query language and compile in FTS5.
+   Choose the binding, remaining features and application-level safeguards
+   here. Exercise typed parameters, joins, atomic imports, schema upgrades,
+   read-only access and checked backup and restore. Run a packaged example against a writable
+   database outside the application archive.
+5. **Graphviz for Tk, immediately after SQL (23.5a).** Embed the static
+   `dot` engine, orthogonal routing, HTML-like table labels and xdot drawing
+   instructions. Lay out a graph with named table ports, render it on a Tk
+   canvas and verify that selection still works. Measure the size against
+   the matching full-SQL executable.
+6. **Desktop and background work (23.6, 23.6b, 23.7, 23.8).** Add
+   cross-process locks, atomic file replacement, per-user storage and
+   reliable clipboard handling. Finish the process controls, then add
+   cancellable HTTP through the event loop and reusable archive workers.
+   Verify that the application's authenticated request succeeds through its
+   actual proxy before switching its transport. Test competing writers, UI
+   responsiveness and cancellation. A worker must reject an archive whose
+   digest differs from the parent's.
+7. **Qualify a real application (23.10).** Run its acceptance suite against
+   the shared runtime and packaged sources. Exercise the signed runtime and
+   archive from a user's desktop and share, including an application update
+   while an older session is open. Verify that the application builds and
+   runs with the shared runtime and its application files alone. Each
+   remaining application-specific native dependency needs the owner's
+   approval before the migration is complete.
+   The release gate includes clean reconstruction and checks on the signed
+   bytes before publication.
+
+### Compact offline reference for agents
+
+Ship an agent-facing reference in the shared executable. Keep a short
+bootstrap, stable page and section IDs, command aliases, signatures,
+arguments, results, errors, limits and runnable examples. Preserve the
+version-specific Tcl/Tk knowledge and applicable notices. An agent should
+be able to find a command offline and fetch one relevant section as bounded
+JSON. Use SQLite FTS5 for full-text search. Retire `search.dict`, its custom
+scorer, and the separate `catalog.dict` and `catalog.json` files. IDs,
+aliases, ordered sections and corpus identity remain ordinary database
+records. The build generates the FTS5 index once. Open the read-only database
+on the first docs query.
+
+The proposed text format is Markdown alone. Store each section once and point
+FTS5 at that text. Maintain Machteld's original Markdown and the reference
+generator in Git. For Tcl/Tk, keep the versioned source archives available
+in the dependency cache and their SHA-256 hashes in the lockfile. The build
+uses their original manuals and pinned converter to generate HTML and then
+Markdown. A clean build with the cached inputs must regenerate the reference
+database offline. Omit the generated HTML, its navigation pages and
+stylesheets, and the original upstream manpage files from the compact
+executable. Carry over any file-specific attribution found only in those
+sources. The current catalog has 468 Markdown pages and three license records
+served as text. Agents can still query exact IDs and export Markdown.
+Version the removal of HTML and raw-source retrieval and the change to the
+extracted file layout. Keep the machine-readable schema and integrity checks.
+
+Measure the final executable against a matching full-SQL build, along with
+first-query time and peak memory. Test ambiguous aliases, punctuation in
+options, short terms, error codes, natural-language searches and bounded
+JSON. Verify that every retained page and section resolves and that the
+corpus matches the runtime. Graphviz stays immediately after full SQL.
 
 ## Historical record
 
@@ -354,17 +466,12 @@ formats numbers, so nothing observable changes.
 
 ## Candidate studies
 
-- **Console control ownership**, a candidate for 23 (written up, with
-  working code, in `docs/proposals/console-ctrl/`). Two gaps about the
-  console a launch gets: an inherited child cannot own Ctrl-C, because the
-  host's default handler exits the host and the root job takes the child
-  tree with it; and a captured launch from a host that has no console pops
-  a visible empty console window per child. The first wants a `console
-  ctrl ignore|default` verb, with a bare `console ctrl` that reports the
-  mode in force, the second `CREATE_NO_WINDOW` on the pipe-and-NUL launch
-  paths only. A program that hands its console to another needs the first,
-  so that the child decides what Ctrl-C means. Nothing of it is in 22, and
-  like every candidate it must still pass the admission question.
+- **Console control ownership** remains a candidate for 23. A program
+  handing its console to a child needs a way to let that child handle
+  Ctrl-C. The proposal in `docs/proposals/console-ctrl/` describes
+  `console ctrl ignore|default` and a query for the current mode. The
+  separate child-window fix belongs to 22.4. Captured helpers started from
+  a host without a console use `CREATE_NO_WINDOW`.
 - The timeout selectivity study (cross-industry lineage,
   `study-cross-industry.md` in the z estate).
 

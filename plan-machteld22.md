@@ -131,9 +131,10 @@ release."
    Tcl/Tk, with C and C++ the only native languages. The tooling is Tcl too:
    no PowerShell, C#, Go, TypeScript or shell script remains, and bash runs
    only inside MSYS2, for Tcl/Tk's configure and make (since 306b38f).
-3. **The candidate's constraints** (`tools\stabilization.json`): the
-   repository stays private; released artifacts and wrap's documentation
-   opt-in are preserved; Tcl/Tk and native C/C++ only, with no engines, Lua or
+3. **The candidate's constraints** (`tools\stabilization.json`). The repository
+   was private when the candidate was prepared and is now public. Release 22
+   preserves the released artifacts and wrap's documentation opt-in. Its
+   languages are Tcl/Tk and native C/C++, with no engines, Lua or
    kuu integration; steps 4 to 7 change the retry defaults and add transport
    limits while keeping the public palette. So `pool` and `pmap` make one
    attempt by default, with retries an explicit opt-in for replay-safe work;
@@ -395,8 +396,8 @@ is.
    registration, the metadata facts in `--plan`, and their docs and tests; a
    manifest with `metadata` is refused as not part of this version.
    `--manifest` with `schema 1` and `files`, `--plan` and the whole-directory
-   default stay. The branch `app-identity` keeps bec1289; 23 reverts 0f62438
-   and adds tests with broken files (section 8). The poll had called
+   default stay. The branch `app-identity` keeps bec1289. The November
+   archive decision in section 8 supersedes the proposed revert. The poll had called
    `--manifest` a Windows manifest; it is machteld's own inventory file.
 2. **Runtime features: "None in 22".** *Why:* 22 is the stabilization's
    release and its release gate is not done; each feature needs a design, a
@@ -485,7 +486,8 @@ is.
     same-named script beside it. *Why:* "a signed front door for any
     environment" (the poll), and 22 is full. *Applied:* section 8.
 18. **A GUI twin of `machteld.exe`: no.** *Why:* Tk tools wrap with `--gui`.
-    *Applied:* rejected (section 8).
+    *Applied:* rejected. Section 8 records how a desktop app will launch
+    once `wrap` retires.
 
 ### 6.3. Still open
 
@@ -605,9 +607,10 @@ minute. (b) Port it to Tcl. *Rec: (a).*
 
 ## 8. For 23
 
-What the rulings put in 23; nothing of it is in 22. Each is designed then,
-and a new command still passes the admission question. The candidates of 4.3
-and the ledger's items deferred to 23 (4.2) are the rest of its input.
+The [roadmap's delivery order](docs/roadmap.md#delivery-order) gives the
+implementation sequence. The items below collect the design rulings by topic.
+New commands go through the admission questions. The candidates of 4.3
+and the ledger's deferred items (4.2) supply further design input.
 
 1. **The FFI, 23's first bundle** (rulings 3-5). cffi 2.0.3 (BSD-2, Ashok
    Nadkarni) on libffi 3.5.2 (MIT), static in both hosts and loaded only on
@@ -622,31 +625,77 @@ and the ledger's items deferred to 23 (4.2) are the rest of its input.
    promise and a wrong one is undefined behaviour; cffi's error codes; the
    loader rule; strict UTF-16 through W functions; no callbacks; who frees
    memory and handles; blocking and crashes, with calls that may crash
-   belonging in a pool worker; no application manifest), creed 8 gains one
-   sentence, and direction.md's placement list gains "one synchronous call
+   belonging in a pool worker). Update the manifest description at 23.4a.
+   Creed 8 gains one sentence, and direction.md's placement list gains
+   "one synchronous call
    into a Windows DLL with no lifetime beyond the call: declare it through
    cffi in the program". Its prerequisites, R26 and R29, land in 22.
-2. **Warm pool workers** (in place of Thread): a pool takes successive
+2. **Warm pool workers** (23.8): a pool takes successive
    batches and single calls and announces completion through the event loop,
-   with an opaque token; Job Object kill, deadlines and memory caps stay. A
-   change to `tcl\pool.tcl` only.
+   with an opaque token. Preserve Job Object termination, deadlines and
+   memory caps. Archive workers reopen the parent's archive and verify its
+   digest before running its code.
 3. **Evented natives** (in place of Thread): evented variants of the commands
    that block for long, whose native threads do the work and deliver
    completion with `Tcl_ThreadQueueEvent`, never evaluating Tcl off the main
-   thread, with cancellation points. `http` first (HTTPS has no non-blocking
-   path today: no tls package, and Tcl's http refuses https), then `hash
-   file` and `dirs`/`links`; readiness events for `child`, `watch` and `pty`
-   may follow, replacing polling.
-4. **The name route** (ruling 17): a renamed copy of `machteld.exe` runs the
-   same-named script beside it.
-5. **Application metadata and icons, restored** (ruling 1): `git revert
-   0f62438` brings back the manifest's `metadata`, the icon reading,
-   `src\resource.c` and its registration, the metadata facts in `--plan`, and
-   their docs, tests and gate steps; then tests that feed the icon and PE
-   readers deliberately broken files. The branch `app-identity` keeps the
-   state before the removal (bec1289).
+   thread, with cancellation points. Start with child completion at 23.2.
+   Cancellable HTTP follows at 23.7. Other candidates include `hash file`,
+   `dirs`/`links`, and readiness events for `watch` and `pty`.
+4. **One runtime for scripts and archives.** Run `machteld.exe app.tcl` or
+   `machteld.exe app.machteld`. A desktop shortcut uses the same command.
+   Keep the Windows console subsystem and embed `consoleAllocationPolicy`
+   with the value `detached` in the runtime manifest. Verify on the supported
+   Windows targets that a shortcut opens a Tk app without a console flash and
+   that a foreground launch from a terminal preserves standard streams,
+   redirection, shell waiting and exit status. Pass application arguments
+   through in both cases. Ruling 17 also allows a renamed copy of the signed
+   runtime to find its same-named script.
+5. **Retire `wrap` completely.** The archive delivery milestone (23.4)
+   removes the executable-producing CLI and Tcl command, its console and GUI
+   options, and both embedded executable templates. Migrate the help, examples
+   and tests to archive delivery. The release build still packages
+   the runtime's own Tcl/Tk libraries. Per-application Windows executable
+   resources retire with wrapping.
+
+   Build and run applications with the same signed `machteld.exe`. Its built-in
+   `pack` command reads a project manifest naming the Tcl entry point and the
+   files to include. The proposed arguments are illustrated by
+   `machteld.exe pack app.dict -o app.machteld`.
+   Use Tcl's bundled ZIP writer to create an application-only archive with
+   file sizes and hashes. Verify the result and publish it atomically.
+   Running `machteld.exe app.machteld` verifies the inventory, mounts the
+   archive separately from the runtime libraries and runs the entry script.
+
+   Test both commands in a clean directory containing only the release
+   executable, a project manifest, an entry script and a fixture asset.
+   Use the executable to create the archive, then run it away from the source
+   tree and read the bundled asset. Both commands must work without a
+   compiler, external ZIP program or separately installed Tcl/Tk. Also test
+   an archive worker. It checks the parent's archive digest and rejects a
+   replacement before running its code.
 6. **Console control** (4.3, item 3), with the console-control proposal,
    `docs\proposals\console-ctrl`, as its design input.
+7. **Full SQL.** Expose the full SQLite query language to Tcl programs.
+   Enable FTS5 for agent documentation search. The binding, remaining
+   SQLite features and application-level guardrails are design decisions
+   for this milestone.
+8. **Graphviz layout and drawing for Tk, immediately after full SQL.** Embed
+   the static Graphviz `dot` layout engine with orthogonal routing, HTML-like
+   table labels backed by static Expat, and xdot drawing instructions. A Tcl
+   program can obtain node positions and edge routes, and Tk can use the
+   drawing instructions to paint positioned text, borders and cell fills.
+   Pin the sources and include their notices in the runtime. Test a directed
+   graph with right-angle bends and a table with named cell ports. Verify the
+   drawing output and a Tk canvas example, run the layout in-process with
+   only the runtime installed, and record the packaged size against a matching
+   full-SQL build. The November 2026 prototype added 1.64 MiB with the
+   packaging used for 22.
+9. **Compact offline documentation for agents.** Keep one queryable reference
+   with stable IDs, sections and bounded JSON. Use FTS5 in a read-only
+   SQLite database for discovery and exact lookups for IDs and aliases.
+   Markdown alone is the proposed body format.
+   The [reference plan](docs/roadmap.md#compact-offline-reference-for-agents)
+   gives the size and retrieval checks for this decision.
 
 Rejected: Tcl's Thread package (2026-10-29) and a GUI twin of `machteld.exe`
 (ruling 18). Tcl stays 9.0.4 through 23 (ruling 9).

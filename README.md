@@ -29,9 +29,9 @@ released, and includes its changes:
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-One part of the candidate is not in 22: application identity, the metadata and
-icons it let `wrap` give a wrapped tool, which the owner moved to 23 on
-2026-10-30.
+The candidate could give a wrapped executable its own Windows metadata and
+icon. Version 22 omits that feature. The [roadmap](docs/roadmap.md) records
+the decision to retire `wrap` and run applications with a shared runtime.
 
 22 is **not a released or signed artifact**. Before it is released it must pass
 clean reconstruction, artifact comparison, and the acceptance matrix; signing
@@ -187,9 +187,8 @@ an executable. Without a manifest, directory wrapping includes all files,
 completed archive are checked before atomic publication, but sources must
 remain stable; this is not a hostile-filesystem snapshot or sandbox.
 
-A wrapped tool keeps its basekit's Windows identity, the version information
-of machteld's console or GUI host; a tool's own name, version, authorship and
-icon come in 23. Signing is never automatic. See [packaging](docs/packaging.md),
+A wrapped tool keeps the Windows identity of Machteld's console or GUI host.
+Signing is a separate step. See [packaging](docs/packaging.md),
 the [GUI example](examples/project-inspector/README.md), and the
 [adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
 

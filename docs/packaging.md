@@ -211,10 +211,9 @@ assets; do not perform a large wrap inside a responsive Tk callback.
 
 ## Application identity
 
-Application identity is not part of 22: the 0.22 candidate's manifest
-`metadata`, which gave a wrapped tool its own Windows name, version,
-description, authorship and icon, moved to 23 by the owner's ruling of
-2026-10-30. The explicit file list (`--manifest`) and `--plan` stay. A wrapped
+Version 22 omits the 0.22 candidate's manifest `metadata`, which gave a
+wrapped tool its own Windows name, version, description, authorship and icon.
+Version 22 keeps the explicit file list (`--manifest`) and `--plan`. A wrapped
 tool keeps its basekit's Windows resources, and its `app-info.dict` records no
 application metadata. `version` and `package require machteld` describe the
 runtime API, and the runtime's `build-info.dict` is copied unchanged when

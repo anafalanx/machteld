@@ -40,9 +40,8 @@ to its parent's console.
 The stage must not already exist. It contains `app/main.tcl` separately from
 `bundle/`, the directory to deploy. `app.dict` explicitly selects only
 `main.tcl`. Source code, the builder, and documentation are not embedded. The
-executable keeps the host's Windows identity; an application's own name,
-version and icon come in 23. On failure the stage is left for diagnosis;
-choose a fresh stage rather than overwriting a possibly valuable directory.
+executable keeps the host's Windows identity. On failure the stage is left
+for diagnosis. Choose a fresh stage for the next attempt.
 
 Ship the **entire** bundle, keeping these filenames and their relative location:
 
