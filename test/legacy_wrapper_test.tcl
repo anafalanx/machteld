@@ -19,7 +19,8 @@ puts [list [package provide machteld] $argv]}} finally {close $f}
     file mkdir $dir
     set previous [file join $dir previous.exe]
     set argvWords [list {two words} {} {--help}]
-    set result [run -timeout 2m -- $legacy wrap $src -o $previous --console]
+    # 0.21 embeds its entire reference in each executable.
+    set result [run -timeout 10m -- $legacy wrap $src -o $previous --console]
     if {[dict get $result status] ne "ok"} {error "0.21 packaging failed: $result"}
     file delete $src
     set result [run -dir $dir -timeout 10s -- $previous {*}$argvWords]

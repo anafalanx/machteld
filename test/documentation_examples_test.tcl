@@ -84,7 +84,8 @@ proc documentation_pages {directory {examples 0}} {
     return $pages
 }
 set examples [snippets [read_text [file join $ROOT README.md]]]
-check {all seven README code blocks are covered} [expr {[dict size $examples] == 7}]
+check {all documented README examples are covered} [expr {
+    [lsort [dict keys $examples]] eq {app archive direct docs supervise supervised}}]
 
 # File links are checked in authored sources, not the immutable release corpus.
 # The present authored inline links have no local fragments or escaped targets.
