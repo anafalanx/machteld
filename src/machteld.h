@@ -5,7 +5,7 @@
 #include <string.h>
 #include "tcl.h"
 
-#define MACHTELD_VERSION "22"
+#define MACHTELD_VERSION "30"
 /* Distribution milestone. The Tcl package version remains a natural number. */
 #define MACHTELD_BETA 1
 

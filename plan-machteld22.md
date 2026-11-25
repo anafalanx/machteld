@@ -12,8 +12,8 @@ relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
 ## 0. How to read this
 
 **Deliver 0.30 directly after signed 0.21.** The owner closed 0.22 as an
-unsigned development milestone on 2026-11-25. The current checkout reports
-`22`. The first 0.30 runtime feature commit advances it to `30`. The
+unsigned development milestone on 2026-11-25. The 0.30 development checkout reports
+`30`. The
 existing signed 0.21 executable builds and tests every 0.30 candidate,
 including the signed release copy. Work-item numbers such as 30.4 identify
 milestones. October's records used the earlier number 23 for the successor.
@@ -55,6 +55,8 @@ FILE bugs` (or `ports`, `features`, `critic`, or `area tools`, `tcl`,
 its paths and names are zef's; its account of what each change does, of each
 finding and of how each PowerShell tool translates to Tcl holds here, with
 machteld's names and without `core\`.
+
+<!-- machteld-version-history: begin -->
 
 ## 1. The owner's rulings (2026-10-29)
 
@@ -378,6 +380,8 @@ The original remaining phases were as follows.
 zef's phases for its verbs (its phase 5), zef on the build PC (7), the work
 PC's swap (8) and its projects standing alone (9) are the environment's, and
 are dropped.
+
+<!-- machteld-version-history: end -->
 
 ## 6. Rulings
 

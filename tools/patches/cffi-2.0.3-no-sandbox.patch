@@ -1,0 +1,33 @@
+--- a/tcl-cffi-2.0.3/generic/tclCffi.c
++++ b/tcl-cffi-2.0.3/generic/tclCffi.c
+@@ -216,21 +216,6 @@
+ }
+ 
+ 
+-static CffiResult
+-CffiSandboxObjCmd(ClientData cdata,
+-                  Tcl_Interp *ip,
+-                  int objc,
+-                  Tcl_Obj *const objv[])
+-{
+-    int ret;
+-    Tcl_WideInt wide;
+-    ret = Tclh_ObjToWideInt(ip, objv[1], &wide);
+-    if (ret == TCL_OK) {
+-        Tcl_SetObjResult(ip, Tcl_NewWideIntObj(wide));
+-    }
+-    return ret;
+-}
+-
+ #ifdef CFFI_HAVE_CALLBACKS
+ static int
+ CffiClosureDeleteEntry(Tcl_HashTable *htP, Tcl_HashEntry *heP, ClientData unused)
+@@ -403,8 +388,6 @@
+         ip, CFFI_NAMESPACE "::arena", CffiArenaObjCmd, ipCtxP, NULL);
+     Tcl_CreateObjCommand(
+         ip, CFFI_NAMESPACE "::savederrors", CffiSavedErrorsObjCmd, ipCtxP, NULL);
+-    Tcl_CreateObjCommand(
+-        ip, CFFI_NAMESPACE "::sandbox", CffiSandboxObjCmd, NULL, NULL);
+ 
+     Tcl_CallWhenDeleted(ip, CffiFinit, ipCtxP);
+ 

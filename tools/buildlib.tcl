@@ -35,7 +35,7 @@ set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}
 set ::machteld::build::SYSLIBS {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
-    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi
+    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4
 }
 
 # Prelude parts in sourcing order: machteld.tcl first (it defines Fail,
@@ -109,6 +109,8 @@ proc ::machteld::build::paths {cache} {
         include [file join $prefix include] \
         sqlite [file join $cache sqlite] \
         yyjson [file join $cache yyjson] \
+        cffilib [first_existing "static cffi" [list [file join $prefix lib libcffi.a]]] \
+        ffilib [first_existing "static libffi" [list [file join $prefix lib libffi.a]]] \
         tclsh [first_existing "static tclsh" [list \
             [file join $prefix bin tclsh90s.exe] [file join $prefix bin tclsh90.exe]]] \
         tcllib [first_existing "static Tcl library" [list \
@@ -162,6 +164,7 @@ proc ::machteld::build::link_host {gcc strip subsystem mainobj resobj objects sq
     set flags [list -municode -static-libgcc -Wl,--gc-sections]
     if {$subsystem eq "gui"} { lappend flags -mwindows }
     run $gcc {*}$flags $mainobj $resobj {*}$objects $sqliteobj $yyjsonobj \
+        [dict get $paths cffilib] [dict get $paths ffilib] \
         [dict get $paths tklib] [dict get $paths tcllib] [dict get $paths tclstub] \
         {*}$SYSLIBS -o $output
     if {$strip ne "" && [file exists $strip]} { run $strip $output }

@@ -1,0 +1,144 @@
+--- a/tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhEncodingImpl.c
++++ b/tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhEncodingImpl.c
+@@ -660,7 +660,7 @@
+                                      enc,
+                                      (char *)wsP,
+                                      numChars < 0 ? -1 : numChars * sizeof(WCHAR),
+-                                     TCL_ENCODING_PROFILE_REPLACE,
++                                     TCL_ENCODING_PROFILE_STRICT,
+                                      &ds,
+                                      NULL);
+     /* If we don't have a tclhCtxP, we need to release the encoding */
+@@ -668,7 +668,7 @@
+         Tcl_FreeEncoding(enc);
+     }
+     if (ret != TCL_OK) {
+-        /* Should not really happen */
++        /* A Windows API can return an unpaired surrogate. */
+         Tcl_DStringFree(&ds);
+         return NULL;
+     }
+@@ -696,7 +696,7 @@
+                              srcP,
+                              srcLen,
+ #ifdef TCLH_TCL87API
+-                             TCL_ENCODING_PROFILE_REPLACE |
++                             TCL_ENCODING_PROFILE_STRICT |
+ #endif
+                                  TCL_ENCODING_START | TCL_ENCODING_END,
+                              NULL,
+@@ -735,16 +735,15 @@
+                                  fromP,
+                                  fromLen,
+ #ifdef TCLH_TCL87API
+-                                 TCL_ENCODING_PROFILE_REPLACE,
++                                 TCL_ENCODING_PROFILE_STRICT,
+ #else
+                                      0,
+ #endif
+                                  (char **) &wsP,
+                                  &numBytes,
+                                  NULL);
+-    TCLH_ASSERT(ret == TCL_OK); /* Because REPLACE profile => no encoding errors
+-                                   and ckalloc => no memory alloc errors */
+     if (ret != TCL_OK) {
++        if (wsP != NULL) Tcl_Free((char *)wsP);
+         return NULL;
+     }
+     if (numCharsP)
+@@ -775,7 +774,7 @@
+                                  fromP,
+                                  fromLen,
+ #ifdef TCLH_TCL87API
+-                                 TCL_ENCODING_PROFILE_REPLACE,
++                                 TCL_ENCODING_PROFILE_STRICT,
+ #else
+                                  0,
+ #endif
+@@ -783,8 +782,6 @@
+                                  (char **)&wsP,
+                                  &numBytes,
+                                  NULL);
+-    TCLH_ASSERT(ret == TCL_OK); /* Because REPLACE profile => no encoding errors
+-                                   and Lifo allocation => no memory alloc errors */
+     if (ret != TCL_OK) {
+         return NULL;
+     }
+@@ -810,7 +807,7 @@
+                                           memLifoP,
+                                           objP,
+ #ifdef TCLH_TCL87API
+-                                          TCL_ENCODING_PROFILE_REPLACE,
++                                          TCL_ENCODING_PROFILE_STRICT,
+ #else
+                                           0,
+ #endif
+@@ -842,8 +839,12 @@
+             /* Zero-length string - end of multi-sz */
+             break;
+         }
+-        Tcl_ListObjAppendElement(
+-            NULL, listObj, Tclh_ObjFromWinChars(tclhCtxP, s, (Tcl_Size) (lpcw - s)));
++        Tcl_Obj *element = Tclh_ObjFromWinChars(tclhCtxP, s, lpcw - s);
++        if (element == NULL) {
++            Tcl_DecrRefCount(listObj);
++            return NULL;
++        }
++        Tcl_ListObjAppendElement(NULL, listObj, element);
+         ++lpcw;            /* Point beyond this string, possibly beyond end */
+     }
+ 
+--- a/tcl-cffi-2.0.3/generic/tclCffiFunction.c
++++ b/tcl-cffi-2.0.3/generic/tclCffiFunction.c
+@@ -2134,6 +2134,7 @@
+                         resultObj = Tclh_ObjFromWinChars(
+                             ipCtxP->tclhCtxP, (WCHAR *)pointer, -1);
+                     }
++                    if (resultObj == NULL) ret = TCL_ERROR;
+                 }
+                 else
+                     resultObj = Tcl_NewObj();
+--- a/tcl-cffi-2.0.3/generic/tclCffiMemory.c
++++ b/tcl-cffi-2.0.3/generic/tclCffiMemory.c
+@@ -543,8 +543,9 @@
+         return Tclh_ErrorInvalidValue(
+             ip, NULL, "Negative offsets are not allowed for safe pointers.");
+     }
+-    Tcl_SetObjResult(
+-        ip, Tclh_ObjFromWinChars(ipCtxP->tclhCtxP, off + (WCHAR *)pv, -1));
++    Tcl_Obj *text = Tclh_ObjFromWinChars(ipCtxP->tclhCtxP, off + (WCHAR *)pv, -1);
++    if (text == NULL) return TCL_ERROR;
++    Tcl_SetObjResult(ip, text);
+     return TCL_OK;
+ }
+ #endif
+--- a/tcl-cffi-2.0.3/generic/tclCffiTypes.c
++++ b/tcl-cffi-2.0.3/generic/tclCffiTypes.c
+@@ -1955,7 +1955,6 @@
+                                                  &ipCtxP->memlifo,
+                                                  valueObj,
+                                                  &num);
+-                    CFFI_ASSERT(wsP);
+                 }
+                 if (wsP == NULL) {
+                     return Tclh_ErrorInvalidValue(
+@@ -2311,6 +2310,7 @@
+             valueObj = Tclh_ObjFromWinChars(
+                 ipCtxP->tclhCtxP, *(indx + (WCHAR **)valueBaseP), -1);
+         }
++        if (valueObj == NULL) return TCL_ERROR;
+         break;
+ #endif
+     case CFFI_K_TYPE_UUID:
+@@ -2445,8 +2445,9 @@
+                 Tclh_ObjFromWinCharsMulti(ipCtxP->tclhCtxP, (WCHAR *)valueP, count);
+         else
+             *valueObjP =
+-                Tclh_ObjFromWinChars(ipCtxP->tclhCtxP, (WCHAR *)valueP, -1);
+-        return TCL_OK;
++                Tclh_ObjFromWinChars(ipCtxP->tclhCtxP, (WCHAR *)valueP,
++                                     wcsnlen((WCHAR *)valueP, count));
++        return *valueObjP == NULL ? TCL_ERROR : TCL_OK;
+ #endif
+     case CFFI_K_TYPE_BYTE_ARRAY:
+         CFFI_ASSERT(count > 0);

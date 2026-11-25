@@ -35,7 +35,8 @@ intent does not add an API.
 8. **One language boundary.** Tcl owns program control and Tk owns graphical
    interfaces. Native C/C++ facilities appear only as Tcl-shaped commands;
    external software is started, questioned, supervised, and stopped as an
-   ordinary process.
+   ordinary process. An application can declare a synchronous Windows DLL
+   call in Tcl through the bundled cffi package.
 9. **Ownership is not isolation.** Explicit lifetimes, inventories, and limits
    make trusted programs easier to manage. They do not sandbox Tcl, loaded DLLs,
    or the user's subprocesses.

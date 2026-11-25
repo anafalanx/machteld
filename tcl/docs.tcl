@@ -139,8 +139,8 @@ proc ::machteld::DocsLoad {} {
     if {[catch {llength [dict get $catalog auxiliary]} auxiliaryCount] || $auxiliaryCount > 100000} {
         DocsFail corrupt "docs: catalog auxiliary field is not a list"
     }
-    if {[lsort [dict keys [dict get $catalog products]]] ne {machteld tcl tk}} {
-        DocsFail corrupt "docs: catalog products must be exactly machteld, tcl, and tk"
+    if {[lsort [dict keys [dict get $catalog products]]] ne {cffi machteld tcl tk}} {
+        DocsFail corrupt "docs: catalog products must be exactly cffi, machteld, tcl, and tk"
     }
     dict for {product facts} [dict get $catalog products] {
         if {[catch {DocsUniqueDict $facts "product $product"}] ||
@@ -160,6 +160,9 @@ proc ::machteld::DocsLoad {} {
             set expectedVersion [::machteld::version]
         } elseif {$product eq "tcl"} {
             set expectedVersion [info patchlevel]
+        } elseif {$product eq "cffi"} {
+            # Checking the embedded manual must not initialize the FFI.
+            set expectedVersion 2.0.3
         } else {
             set expectedVersion $::machteld::tk_patchlevel
         }
@@ -185,8 +188,8 @@ proc ::machteld::DocsLoad {} {
     }
 
     set ids {}
-    set productCounts [dict create machteld 0 tcl 0 tk 0]
-    set manualCounts [dict create machteld 0 tcl 0 tk 0]
+    set productCounts [dict create cffi 0 machteld 0 tcl 0 tk 0]
+    set manualCounts $productCounts
     set represented {}
     dict for {id record} [dict get $catalog documents] {
         if {$id eq "" || $id ne [string tolower $id] ||

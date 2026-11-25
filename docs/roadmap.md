@@ -7,7 +7,7 @@ tags: [machteld, roadmap, windows]
 
 # Roadmap
 
-## 22 — Unsigned development baseline
+## 30 — Development
 
 **The next public release is 0.30, directly after signed 0.21.** On
 2026-11-25 the owner closed 0.22 as an unsigned development milestone.
@@ -19,16 +19,15 @@ locks. The desktop changes cover metadata-only path inspection, quiet workers,
 attended child windows and process-scoped clipboard ownership. The beta also
 corrected Tcl control flow through `scope`. [Beta 1 scope and release checklist](https://github.com/anafalanx/machteld/blob/e0db215ede968d3255415613d86c66abda210249/docs/releases/0.22-beta.1.md)
 
-The current source and Tcl package report `22`. The first runtime feature
-change for 0.30 advances both to `30`. For the baseline, the header declares `"22"`,
-the prelude declares `22`, and the fixed Windows file version is `22.0.0.0`.
-A Tcl program can request `package require machteld 22-` to accept later
-versions, or `package require machteld 22-30` to require review before it
-runs on 0.30. Tcl excludes the upper bound. Signed 0.21 drives builds and
+The source and Tcl package report `30`, and the fixed Windows file version
+is `30.0.0.0`. An existing entry with a requirement of `22-` accepts 30.
+An entry with `22-30` excludes it. Signed 0.21 drives builds and
 tests through acceptance of the signed 0.30 copy. Identify baseline artifacts by their
 hashes, verification receipts, `manifest`, and embedded reference.
 
-22 begins as the 0.22 candidate (commit 8bcc1ec), the stabilization of
+### Unsigned development baseline
+
+The 22 baseline began as the 0.22 candidate (commit 8bcc1ec), the stabilization of
 2026-09-30 to 2026-10-02, which was never released. Its completed steps 1
 through 11 include:
 
@@ -52,7 +51,7 @@ The release build, dependency bootstrap, reference generator, development
 loop and release gate are Tcl programs. Hosted Windows CI can invoke those
 tools and exercise the candidate within its verification job.
 
-Version 22 keeps the explicit wrap inventory (`--manifest`), preview
+The 22 baseline retained the explicit wrap inventory (`--manifest`), preview
 (`--plan`) and optional custom Windows metadata and icons for console and GUI
 wrappers. A wrapper without a custom identity uses the host's resources.
 

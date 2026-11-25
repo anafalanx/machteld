@@ -6,6 +6,7 @@
 #include "tk.h"
 
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
+extern int Cffi_Init(Tcl_Interp *interp);
 
 #ifdef MACHTELD_STATIC_SQLITE
 #include "sqlite3.h"
@@ -240,6 +241,12 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
             PayloadRootCmd, NULL, NULL) == NULL) {
         return Machteld_EntryError(interp, "state",
             "cannot register the trusted payload accessor");
+    }
+
+    Tcl_StaticLibrary(NULL, "Cffi", Cffi_Init, NULL);
+    if (Tcl_EvalEx(interp, "package ifneeded cffi 2.0.3 {load {} Cffi}",
+                   -1, TCL_EVAL_GLOBAL) != TCL_OK) {
+        return TCL_ERROR;
     }
 
 #ifdef MACHTELD_STATIC_SQLITE

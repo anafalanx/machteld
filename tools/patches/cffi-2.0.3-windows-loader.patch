@@ -1,0 +1,158 @@
+--- a/tcl-cffi-2.0.3/generic/tclCffiInt.h
++++ b/tcl-cffi-2.0.3/generic/tclCffiInt.h
+@@ -437,7 +437,7 @@
+ 
+ /* Context for dll commands. */
+ #ifdef CFFI_USE_TCLLOAD
+-typedef Tcl_LoadHandle CffiLoadHandle;
++typedef HMODULE CffiLoadHandle;
+ #else
+ typedef DLLib *CffiLoadHandle;
+ #endif
+--- a/tcl-cffi-2.0.3/generic/tclCffiLoad.c
++++ b/tcl-cffi-2.0.3/generic/tclCffiLoad.c
+@@ -12,7 +12,7 @@
+     if (ctxP->nRefs <= 1) {
+         /* Note ctxP->ipCtxP is interp-specific and not to be deleted here. */
+ #ifdef CFFI_USE_TCLLOAD
+-        Tcl_FSUnloadFile(NULL, ctxP->libH);
++        FreeLibrary(ctxP->libH);
+ #else
+         dlFreeLibrary(ctxP->libH);
+ #endif
+@@ -43,8 +43,7 @@
+ {
+     void *addr;
+ #ifdef CFFI_USE_TCLLOAD
+-    addr = Tcl_FindSymbol(ip, libH, Tcl_GetString(symbolObj));
+-    /* Error message already set but rewrite below for consistency */
++    addr = (void *)GetProcAddress(libH, Tcl_GetString(symbolObj));
+ #else
+     addr = dlFindSymbol(libH, Tcl_GetString(symbolObj));
+ #endif
+@@ -62,59 +61,68 @@
+  * pathObj - path to the shared library
+  * ctxPP - location to store pointer to allocated context.
+  *
+- * If *pathObj* is NULL or contains an empty string, it is interpreted
+- * as the path to the executable as returned by the Tcl
+- * *info nameofexecutable* command.
+- *
+  * Returns:
+  * A Tcl return code.
+  */
+ CffiResult CffiLibLoad(Tcl_Interp *ip, Tcl_Obj *pathObj, CffiLibCtx **ctxPP)
+ {
+     CffiLibCtx *ctxP;
+-    CffiLoadHandle dlH;
+-    const char *pathP = NULL;
++    Tclh_LibContext *tclhCtxP;
++    WCHAR *path, *systemPath = NULL;
++    HMODULE dlH;
++    DWORD flags = LOAD_LIBRARY_SEARCH_SYSTEM32;
++    DWORD error;
++    Tcl_Size length;
+ 
+-    if (pathObj) {
+-        pathP = Tcl_GetString(pathObj);
+-        if (*pathP == '\0') {
+-            pathObj = NULL;
+-            pathP   = NULL;
++    if (pathObj == NULL || Tcl_GetCharLength(pathObj) == 0)
++        return Tclh_ErrorInvalidValue(ip, pathObj, "Expected a DLL name or absolute path.");
++    CHECK(Tclh_LibInit(ip, &tclhCtxP));
++    path = Tclh_ObjToWinCharsAlloc(tclhCtxP, pathObj, &length);
++    if (path == NULL)
++        return TCL_ERROR;
++    for (Tcl_Size i = 0; i < length; ++i) {
++        if (path[i] == 0) {
++            Tcl_Free((char *)path);
++            return Tclh_ErrorInvalidValue(ip, pathObj, "Embedded NUL in DLL path.");
+         }
+-    }
+-    if (pathP == NULL) {
+-        pathP = Tcl_GetNameOfExecutable();
+-        if (pathP == NULL) {
+-            /* Should not happen unless invoked at Tcl initialization time */
+-            return Tclh_ErrorNotFound(
+-                ip, "Shared library", pathObj, "Empty library file path and could not retrieve executable name.");
+-        }
+-        pathObj = Tcl_NewStringObj(pathP, -1);
++        if (path[i] == L'/') path[i] = L'\\';
+     }
+ 
+-    CFFI_ASSERT(pathObj);
+-    CFFI_ASSERT(pathP);
++    if (wcspbrk(path, L"\\:") == NULL) {
++        /* An absolute system path also disambiguates equal module basenames
++         * previously loaded into this process from different directories. */
++        UINT needed = GetSystemDirectoryW(NULL, 0);
++        if (needed == 0) {
++            error = GetLastError();
++            Tcl_Free((char *)path);
++            return Tclh_ErrorWindowsError(ip, error, "Cannot locate System32.");
++        }
++        systemPath = (WCHAR *)Tcl_Alloc(((size_t)needed + length + 1) * sizeof(WCHAR));
++        UINT used = GetSystemDirectoryW(systemPath, needed);
++        if (used == 0 || used >= needed) {
++            error = used ? ERROR_INSUFFICIENT_BUFFER : GetLastError();
++            Tcl_Free((char *)systemPath);
++            Tcl_Free((char *)path);
++            return Tclh_ErrorWindowsError(ip, error, "Cannot locate System32.");
++        }
++        systemPath[used++] = L'\\';
++        memcpy(systemPath + used, path, (length + 1) * sizeof(WCHAR));
++    } else if (Tcl_GetPathType(Tcl_GetString(pathObj)) == TCL_PATH_ABSOLUTE &&
++               ((length >= 3 && path[1] == L':' && path[2] == L'\\') ||
++                (length >= 3 && path[0] == L'\\' && path[1] == L'\\'))) {
++        flags |= LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR;
++    } else {
++        Tcl_Free((char *)path);
++        return Tclh_ErrorInvalidValue(ip, pathObj, "Expected a System32 DLL name or absolute DLL path.");
++    }
++    dlH = LoadLibraryExW(systemPath ? systemPath : path, NULL, flags);
++    error = dlH ? ERROR_SUCCESS : GetLastError();
++    if (systemPath) Tcl_Free((char *)systemPath);
++    Tcl_Free((char *)path);
++    if (dlH == NULL)
++        return Tclh_ErrorWindowsError(ip, error, "Could not load DLL or one of its dependencies.");
+ 
+-    /* Tcl_LoadFile does not like objects with refcount > 0 */
+     Tcl_IncrRefCount(pathObj);
+-
+-#ifdef CFFI_USE_TCLLOAD
+-    if (Tcl_LoadFile(ip, pathObj, NULL, 0, NULL, &dlH) != TCL_OK)
+-        dlH = NULL;
+-#else
+-    dlH = dlLoadLibrary(pathP);
+-#endif
+-
+-    if (dlH == NULL) {
+-        Tcl_Obj *errorObj;
+-        errorObj =
+-            Tcl_ObjPrintf("Shared library \"%s\" or its dependency not found.",
+-                          Tcl_GetString(pathObj));
+-        Tcl_SetObjResult(ip, errorObj);
+-        Tcl_DecrRefCount(pathObj);
+-        return TCL_ERROR;
+-    }
+-
+     ctxP          = ckalloc(sizeof(*ctxP));
+     ctxP->ipCtxP  = NULL;
+     ctxP->libH     = dlH;
+--- a/tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhBaseImpl.c
++++ b/tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhBaseImpl.c
+@@ -522,12 +522,11 @@
+         LocalFree(winErrorMessagePtr);
+     } else if (moduleHandle == NULL && (winError & 0xF0000000) == 0xD0000000) {
+         /* HRESULT wrapping NTSTATUS */
+-        HANDLE ntdllH = LoadLibrary("NTDLL.DLL");
++        HANDLE ntdllH = GetModuleHandleW(L"NTDLL.DLL");
+         if (ntdllH) {
+             /* Turn off 0x10000000 to map HRESULT to NTSTATUS and recurse */
+             objPtr =
+                 TclhMapWindowsError(winError & ~0x10000000, ntdllH, msgPtr);
+-            FreeLibrary(ntdllH);
+         }
+     }
+     if (objPtr == NULL) {

@@ -57,6 +57,7 @@ proc verify_loaded_recipes {} {
 load_recipe [Rp tools dev.tcl] 0
 load_recipe [Rp tools buildlib.tcl]
 load_recipe [Rp tools devcache.tcl]
+load_recipe [Rp tools cffi-build.tcl]
 load_recipe [Rp tools bootstrap.tcl]
 # Global `run` is buildlib's streaming exec; the runtime's own run stays
 # reachable as ::machteld::run.
@@ -246,7 +247,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     set bareGui [file join $::DEV machteld-bare-gui.exe]
     foreach kind {console gui} main [list $consoleObj $guiObj] resource [list $consoleVersionObj $guiVersionObj] output [list $bare $bareGui] {
         set inputs [list $main $resource {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
-        foreach name {tcllib tklib tclstub} { lappend inputs [dict get $::PATHS $name] }
+        foreach name {tcllib tklib tclstub cffilib ffilib} { lappend inputs [dict get $::PATHS $name] }
         set spec [dict create files $inputs values [list $kind $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
         ::machteld::devcache::ensure $output.record $spec $output [list link_candidate $kind $main $resource $objects $sqliteObj $yyjsonObj]
     }

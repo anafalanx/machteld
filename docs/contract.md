@@ -10,8 +10,8 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-This contract describes the unpublished development baseline, which reports
-runtime version `22`. Signed 0.21 is the public release and 0.30 is the
+This contract describes the 0.30 development source, which reports
+runtime version `30`. Signed 0.21 is the public release and 0.30 is the
 next delivery target. Consult the selected executable's embedded reference
 and artifact identity for the commands it actually provides. [Roadmap](roadmap.md)
 
@@ -33,16 +33,15 @@ file. A `.machteld` archive uses its root `main.tcl` as the entry.
 
 ```tcl
 package require machteld
-package require machteld 22-
-package require machteld 22-30
-package require -exact machteld 22
+package require machteld 30-
+package require -exact machteld 30
 ```
 
 The unpublished 0.22 candidate and planned 0.30 release correspond to Tcl
 package versions `22` and `30`. Tcl treats each whole number as a major
 version. A request for `22` accepts only major version 22. The range
 `22-` accepts 22 and all later runtimes. Use `22-30` for a program that
-must be reviewed before the next release. Its upper bound excludes 30.
+must be reviewed before running on 30. Its upper bound excludes 30.
 Only a runtime change advances the package version.
 
 The words must be simple literals; substitutions are not an opt-in. A UTF-8 BOM
@@ -57,7 +56,7 @@ by its absolute native path, `info script` identifies the mounted entry, and
 `argv` holds the program arguments. The caller's working directory is preserved.
 [Packaging guide](packaging.md)
 
-Once loaded, `package require machteld` returns `22`. All palette commands
+Once loaded, `package require machteld` returns `30`. All palette commands
 have fully qualified names in `::machteld`. At top level, use their short
 names or the qualified-only `::machteld::clipboard`. A nested namespace can
 add `namespace path ::machteld::palette` to use the same short names.
@@ -207,7 +206,7 @@ transaction state and busy timeout. Programs can open an existing SQLite file or
 create one without deploying a driver or DLL.
 
 ```tcl
-package require machteld 22-
+package require machteld 30-
 package require sqlite3
 sqlite3 db :memory:
 try {
@@ -293,10 +292,35 @@ is synchronous and `run` line callbacks execute on the calling Tcl thread.
 - Prefer pull: a readiness callback receives only the opaque handle, and the
   application explicitly asks for data.
 
+## Foreign calls
+
+Trusted Tcl programs can use `package require cffi 2.0.3` for synchronous
+calls into Windows DLLs. The package is unavailable in safe interpreters.
+It exposes upstream `::cffi` commands and preserves their error codes. See
+`docs get cffi/manual/intro` and `docs get cffi/manual/commands` for the
+upstream syntax. The following rules apply to the bundled build.
+
+- Give a Windows system DLL's bare filename, or an absolute path to the
+  application's DLL. A bare name loads from System32. For an absolute
+  filename, Windows searches the DLL's directory and System32 for imports.
+- Match every declaration to its native prototype, including the calling
+  convention, integer widths, pointer types, buffer sizes and direction.
+  A wrong declaration has undefined behavior and can terminate the process.
+- For Windows text APIs, use the wide (`W`) function and the UTF-16 type.
+  Invalid UTF-16 is an error. Keep binary buffers as bytes.
+- Follow the called API's ownership rules. Keep borrowed buffers and the DLL
+  alive for as long as native code uses them. Release owned memory with the
+  allocator specified by the API and close owned handles with the matching
+  Windows function. Tcl garbage collection cannot infer either obligation.
+- The calling interpreter waits until the native function returns. Run calls
+  that may hang or crash in a supervised worker with a deadline. Callbacks
+  from native code into Tcl and the upstream debug sandbox are unavailable
+  in this build.
+
 ## Compatibility
 
 The executable, wrapped console host, and wrapped GUI host all provide Machteld
-22 and the same process, terminal, filesystem, network, data, and Tcl
+30 and the same process, terminal, filesystem, network, data, and Tcl
 composition commands, including `package require Tk` and static `store`. The
 distribution includes the complete exact-version reference corpus. Wrapped
 tools omit it by default; `wrap --with-docs` includes the verified complete

@@ -310,6 +310,18 @@ proc ::et::entryTests {versionRe version} {
         [expr {[dict get $result exit] == 0 && [regexp "(?n)^ENTRY-EXACT:$versionRe\r?$" [dict get $result out]]}] \
         [dict get $result text]
 
+    # Exercise the actual entry gate and Tcl package resolver on scripts from
+    # the unpublished baseline. A rejected requirement must stop the body.
+    set legacy [file join $work baseline-version.tcl]
+    foreach {requirement accepts} {{machteld 22-} 1 {machteld 22-30} 0 {-exact machteld 22} 0} {
+        writeText $legacy "package require $requirement\nputs ENTRY-BASELINE-BODY\n"
+        set result [host $legacy]
+        set entered [string match *ENTRY-BASELINE-BODY* [dict get $result out]]
+        check "entry requirement $requirement on $version" \
+            [expr {$entered == $accepts && ([dict get $result exit] == 0) == $accepts}] \
+            [dict get $result text]
+    }
+
     # The retired engine switch has no direct-host dispatch. With no selected
     # startup script, the ordinary host path fails closed on redirected stdin,
     # here an empty pipe.

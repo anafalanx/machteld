@@ -7,7 +7,7 @@ loading boundary, not a claim that ordinary arithmetic needs a native extension.
 
 These commands use the release gate's `out/machteld.exe`. After an
 incremental build, use `out/dev/machteld.exe` in its place. Both report
-runtime version `22` and support the wrap manifest and application metadata.
+runtime version `30` and support the wrap manifest and application metadata.
 
 The application loads an absolute DLL filename beside its executable. It does
 not resolve dependencies, use `auto_path`, search the current directory or PATH

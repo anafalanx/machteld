@@ -46,7 +46,7 @@ proc carries_runtime_notices {image} {
     try {
         foreach notice {
             Apache-2.0.txt Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt
-            LibTomMath-1.3.0.txt yyjson-0.12.0.txt
+            LibTomMath-1.3.0.txt yyjson-0.12.0.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt
         } {
             set expected [file join //zipfs:/app/licenses $notice]
             set embedded [file join //zipfs:/$mount/licenses $notice]

@@ -8,8 +8,8 @@ commands: docs, docs status, docs schema, docs verify, docs list, docs get, docs
 
 # docs
 
-`docs` is the stable agent-oriented interface to the exact Machteld, Tcl 9, and
-Tk 9 reference corpus carried by the running executable. It never consults the
+`docs` is the stable agent-oriented interface to the Machteld, Tcl 9, Tk 9
+and cffi reference corpus carried by the running executable. It never consults the
 network or a machine-wide documentation installation.
 
 The Machteld distribution always includes the complete corpus. Wrapped tools
@@ -60,7 +60,7 @@ requirements are unchanged.
   lowercases, trims, and collapses whitespace; a canonical ID always wins.
   The compact bootstrap/index IDs are `machteld/agent` and `machteld/index`;
   each product also has a stable two-part `product/license` ID.
-- `-scope` is the exact product `machteld`, `tcl`, or `tk`; empty or `all` means
+- `-scope` is the exact product `machteld`, `tcl`, `tk` or `cffi`. Empty or `all` means
   unfiltered. `-type` matches an exact catalog type such as `command`, `guide`,
   `c-api`, or `application`; empty or `all` is unfiltered.
 - For `list` and `search`, `-offset` defaults to `0`; `-limit` defaults to `50`

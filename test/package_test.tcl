@@ -91,6 +91,9 @@ proc ::pt::packageTests {} {
         zlib-1.3.2.txt e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2
         LibTomMath-1.3.0.txt 2fa64b163659f41965c9815882a8296d3d03ff546b76153e11445f9bdecf955a
         yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
+        cffi-2.0.3.txt cdff44ed75ce0f7c9625165bdb86cc4221fab9479eeda359f9d8268db2a9591d
+        tclh-6afd306.txt 5f1172dc3b77b33f1e856cf7a6f9fafa427e914e3e1b2e300ca1eb766d4e1c76
+        libffi-3.5.2.txt d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366
     }
 
     set result [runPackage --unknown value]
@@ -237,10 +240,11 @@ proc ::pt::validatePackage {image apache licenses reference} {
         foreach relative {
             tcl_library/init.tcl tcl_library/clock.tcl tcl_library/package.tcl tcl_library/tm.tcl
             tcl_library/tclIndex tcl_library/encoding/cp1252.enc tcl_library/msgs/nl.msg
-            tcl_library/machteld-job/pkgIndex.tcl tcl_library/machteld-job/job.tcl
+            tcl_library/machteld-job/pkgIndex.tcl tcl_library/machteld-job/job.tcl tcl_library/cffi/pkgIndex.tcl
             tcl_library/tzdata/Europe/Brussels tcl9/9.0/msgcat-1.7.1.tm tk_library/tk.tcl
             licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/zlib-1.3.2.txt
             licenses/LibTomMath-1.3.0.txt licenses/yyjson-0.12.0.txt
+            licenses/cffi-2.0.3.txt licenses/libffi-3.5.2.txt licenses/tclh-6afd306.txt
             reference/catalog.dict reference/catalog.json reference/search.dict reference/manifest.sha256
             reference/schema.json reference/START-HERE.md reference/AGENTS.md reference/markdown/machteld/agent.md
         } {
@@ -254,7 +258,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
         if {[file exists $base/licenses/UNTRACKED-SENTINEL.txt]} {
             return "packaging copied a notice outside its explicit allowlist"
         }
-        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt} {
+        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt} {
             if {[readBytes $base/licenses/$notice] ne [readBytes [file join $licenses $notice]]} {
                 return "packaging changed license bytes: $notice"
             }

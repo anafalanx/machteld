@@ -439,7 +439,7 @@ proc ::machteld::devcache::immutable {recordPath spec parent commandPrefix {forc
 # patches; its state and artifact manifests name what it holds.
 proc ::machteld::devcache::dependency_spec {root cache} {
     set files {}
-    foreach name {dependencies.lock.json bootstrap.tcl} {
+    foreach name {dependencies.lock.json bootstrap.tcl cffi-build.tcl} {
         lappend files [file join $root tools $name]
     }
     lappend files [file join $cache lock.sha256] [file join $cache artifacts.sha256]
@@ -528,7 +528,10 @@ proc ::machteld::devcache::reference_spec {root cache tclsh} {
     set version [reference_version $root]
     set files [list $tclsh [file join $root LICENSE] [info nameofexecutable]]
     foreach name {reference.tcl dependencies.lock.json} { lappend files [file join $root tools $name] }
-    foreach name {Tcl-9.0.4.txt Tk-9.0.4.txt} { lappend files [file join $root licenses $name] }
+    foreach name {Tcl-9.0.4.txt Tk-9.0.4.txt cffi-2.0.3.txt} { lappend files [file join $root licenses $name] }
+    foreach name {cffi.3tcl cffi-cffi.3tcl cffi-Concepts.3tcl cffi-Cookbook.3tcl} {
+        lappend files [file join $cache cffi-doc $name]
+    }
     # The generator currently requires these exact pinned archive names.
     foreach name {tcl904-src.zip tk904-src.zip} { lappend files [file join $cache downloads $name] }
     return [dict create values [list runtime_version $version] runtime_version_guard [list $root $version] \
@@ -539,7 +542,7 @@ proc ::machteld::devcache::package_spec {root paths prelude bare bareGui referen
     set prefix [dict get $paths prefix]
     set files [list $prelude $bare $bareGui [dict get $paths tclsh] [file join $prefix bin wish90s.exe] [file join $root LICENSE]]
     foreach name {package.tcl build_identity.tcl} { lappend files [file join $root tools $name] }
-    set trees [list [file join $root licenses] [file join $root packages machteld-job] $reference]
+    set trees [list [file join $root licenses] [file join $root packages] $reference]
     foreach name {lib/tcl9.0 tcl_library lib/tcl9 tcl9 lib/tk9.0 tk_library} {
         lappend trees [file join $prefix {*}[split $name /]]
     }

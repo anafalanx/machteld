@@ -1,7 +1,7 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for machteld 22.
+description: Current product boundary and decision rules for machteld 30.
 tags: [machteld, direction, scope]
 ---
 
@@ -102,11 +102,13 @@ Where a new capability lives is decided by these questions, in order:
    in Tcl.
 2. Is it graphical application structure or ordinary desktop UI? Use Tk and
    Tcl.
-3. Does it require a Windows API, a bundled native library, or measured native
+3. Is it one synchronous call into a Windows DLL with no lifetime beyond
+   the call? Declare the function through cffi in the application.
+4. Does it require a Windows API, a bundled native library, or measured native
    performance? Expose the smallest useful Tcl-shaped command implemented in C
    or C++.
-4. Is it an independently useful executable? Launch and supervise it with the
+5. Is it an independently useful executable? Launch and supervise it with the
    existing process commands and define its data protocol in the program.
-5. Can a native operation run indefinitely or block inside foreign code? Give
+6. Can a native operation run indefinitely or block inside foreign code? Give
    it cancellation points or place the operation in an ordinary supervised
    process; do not make the host event loop hostage to it.

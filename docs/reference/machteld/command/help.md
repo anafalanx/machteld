@@ -18,7 +18,7 @@ help ?query ...?
 
 With no query, returns the short agent/human documentation bootstrap. When the
 reference pack is present, its first screen identifies the complete offline
-Machteld 22, Tcl 9.0.4, and Tk 9.0.4 references carried by the executable.
+Machteld 30, Tcl 9.0.4, and Tk 9.0.4 references carried by the executable.
 Without the pack, it explains the omission and points to the full same-version
 Machteld executable, `wrap --with-docs`, `manifest`, and `docs schema`.
 

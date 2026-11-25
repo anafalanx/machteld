@@ -56,6 +56,42 @@
       "file": "yyjson-0.12.0.tar.gz",
       "url": "https://github.com/ibireme/yyjson/archive/refs/tags/0.12.0.tar.gz",
       "sha256": "b16246f617b2a136c78d73e5e2647c6f1de1313e46678062985bdcf1f40bb75d"
+    },
+    {
+      "id": "cffi",
+      "version": "2.0.3",
+      "file": "cffi-2.0.3.tar.gz",
+      "url": "https://codeload.github.com/apnadkarni/tcl-cffi/tar.gz/refs/tags/v2.0.3",
+      "sha256": "f2707786f06cb1c32a0e654930899a22392b4a9405687d71be354cdd04f66394",
+      "directory": "tcl-cffi-2.0.3",
+      "notice": {
+        "file": "cffi-2.0.3.txt",
+        "sha256": "cdff44ed75ce0f7c9625165bdb86cc4221fab9479eeda359f9d8268db2a9591d"
+      }
+    },
+    {
+      "id": "tclh",
+      "version": "6afd30630d13404cfe5ea49de7018f2c30dd9e30",
+      "file": "tclh-6afd306.tar.gz",
+      "url": "https://codeload.github.com/apnadkarni/tclh/tar.gz/6afd30630d13404cfe5ea49de7018f2c30dd9e30",
+      "sha256": "13f92561c029bf752afc434b3d42befa554d0a01161ea6eaf4bd7e378e1d18e0",
+      "directory": "tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30",
+      "notice": {
+        "file": "tclh-6afd306.txt",
+        "sha256": "5f1172dc3b77b33f1e856cf7a6f9fafa427e914e3e1b2e300ca1eb766d4e1c76"
+      }
+    },
+    {
+      "id": "libffi",
+      "version": "3.5.2",
+      "file": "libffi-3.5.2.tar.gz",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz",
+      "sha256": "f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc",
+      "directory": "libffi-3.5.2",
+      "notice": {
+        "file": "libffi-3.5.2.txt",
+        "sha256": "d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366"
+      }
     }
   ],
   "bundledNotices": [
@@ -87,6 +123,125 @@
       "target": "tcl9.0.4/win/tclWinFile.c",
       "beforeSha256": "7f331af6c728b0608f2fd78575ba08c1ab915416bda1da6d6fd0a3113ddb48e4",
       "afterSha256": "e11debfcf3a5ff6cdb75b9d3fc54f9b0120c5fa8e1a0b6dc8313551c3a404094"
+    },
+    {
+      "id": "cffi-no-callbacks",
+      "appliesTo": "cffi@2.0.3",
+      "kind": "machteld",
+      "reason": "Compile out native-to-Tcl callbacks, including closure allocation and interpreter teardown.",
+      "regression": "test/cffi_test.tcl",
+      "file": "patches/cffi-2.0.3-no-callbacks.patch",
+      "sha256": "eae4bf8bb78d8c95d4f62f35492f14f6d81438fb0072435e156eb84c5b00377a",
+      "targets": [
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiInt.h",
+          "beforeSha256": "3b96624439f33b2ca1ca4aea30e1f19d7d4d07d395b7e1dbaa4203315a784179",
+          "afterSha256": "7d559247da66ea5967ad1b7645a4bbe565ab513aca1dde2d7a99724f143b88f3"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffi.c",
+          "beforeSha256": "cd538db2784945d210590af38573b259a67d3c61f30ea1932e66a5a912ebd893",
+          "afterSha256": "a130b04416df823911edec5533c1c168e87bddae21a1c53adf77bd06646eb408"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiLibffi.c",
+          "beforeSha256": "ccfeee134b6a8214c5a64f2cd225f857b3873b31b2d0e61ed893fefd1da2eaf2",
+          "afterSha256": "cc40fa310c0418d041ceb5cc93e3bc47ae3a803eebe12c5bd9c616b09f939236"
+        },
+        {
+          "target": "libffi-3.5.2/src/types.c",
+          "beforeSha256": "bfa6c93acd555bf70d3d5c293240b2e3fa378e2908902b67fd0b38c0a1609fc3",
+          "afterSha256": "e89bc4b912b68657472ef7824730c6a8cc2982c53e469793a2f06feaaaa9be39"
+        },
+        {
+          "target": "libffi-3.5.2/src/x86/ffitarget.h",
+          "beforeSha256": "45e4fd2585aaed711e4fa3d1377b70c8e54dcdc56bdf402fa23a8816d19cc58a",
+          "afterSha256": "3a2124061e24bdcba8abc628fee349def727d1346fec7cf8e98762f16bc9ab67"
+        },
+        {
+          "target": "libffi-3.5.2/src/x86/ffiw64.c",
+          "beforeSha256": "2c31bfeaf808f694433edb0c6c1a45901c1cc48bac784aeb6f4fbd6ca05f33ca",
+          "afterSha256": "695151f325f023e43a22ca4724bc266f100cb10fedf48f20ab62a39c8d9106c3"
+        },
+        {
+          "target": "libffi-3.5.2/src/x86/win64.S",
+          "beforeSha256": "456f93fb44eb8a669baf615db1043d57721191d801c5c5ccbdab05dae085de82",
+          "afterSha256": "4370935a1cb6bdce17823e8e19a40fc2483e1b624f78a2a9b05b4be305b1c2db"
+        }
+      ]
+    },
+    {
+      "id": "cffi-no-sandbox",
+      "appliesTo": "cffi@2.0.3",
+      "kind": "machteld",
+      "reason": "Remove the development-only sandbox command and its implementation.",
+      "regression": "test/cffi_test.tcl",
+      "file": "patches/cffi-2.0.3-no-sandbox.patch",
+      "sha256": "afac0f34281e4bbf49f43c680e8edc67467e45c360dea32f1f370f0960d91239",
+      "targets": [
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffi.c",
+          "beforeSha256": "a130b04416df823911edec5533c1c168e87bddae21a1c53adf77bd06646eb408",
+          "afterSha256": "af4b63aae060844d2ba00d9b8113a222a4ac3caf6571c259e1f1fcd8c768925e"
+        }
+      ]
+    },
+    {
+      "id": "cffi-windows-loader",
+      "appliesTo": "cffi@2.0.3",
+      "kind": "machteld",
+      "reason": "Resolve a bare DLL name against System32; load an absolute file with only its directory and System32 for dependencies.",
+      "regression": "test/cffi_test.tcl",
+      "file": "patches/cffi-2.0.3-windows-loader.patch",
+      "sha256": "86af41839ab88acf8f6aad3f988ce2b1649c25526204c9894d68fded7e9289ce",
+      "targets": [
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiInt.h",
+          "beforeSha256": "7d559247da66ea5967ad1b7645a4bbe565ab513aca1dde2d7a99724f143b88f3",
+          "afterSha256": "5a655deefbf5cbf51acb57d3058d1c676573cb6ce9c2af94a8c2920e11e358fa"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiLoad.c",
+          "beforeSha256": "28117e6d582e1b58dc775aa2547933285c69ee693c6735b47225f43a47690337",
+          "afterSha256": "8313934f1840ce10af81b002d76e40e5816d8ec16f23ad21313ee6b33f248c60"
+        },
+        {
+          "target": "tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhBaseImpl.c",
+          "beforeSha256": "1963e6a50317d72112ad4d752d1a3d8d51e712859345245657199a81d1f3a940",
+          "afterSha256": "2c85710b3d3c9ae0efded5d22cd35e32d325022e6d67edd1aebdf9bfb666b266"
+        }
+      ]
+    },
+    {
+      "id": "cffi-strict-utf16",
+      "appliesTo": "cffi@2.0.3",
+      "kind": "machteld",
+      "reason": "Reject invalid UTF-16 in both directions, including array, MULTI_SZ and memory APIs; propagate conversion errors to Tcl.",
+      "regression": "test/cffi_test.tcl",
+      "file": "patches/cffi-2.0.3-strict-utf16.patch",
+      "sha256": "8a25ad58bba119d062a698ca2f6185a2619160484882193e2bba327afd2a901a",
+      "targets": [
+        {
+          "target": "tclh-6afd30630d13404cfe5ea49de7018f2c30dd9e30/include/tclhEncodingImpl.c",
+          "beforeSha256": "f35c44bb349950ff874a1dd379e466cdf476bf127ece3b7703595bc3a7470e99",
+          "afterSha256": "d253300d3730c66bc862246d90806581b5cdaffe48c340bf7509de51784b7deb"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiFunction.c",
+          "beforeSha256": "be2bc3f886025e35ae4f50e66ead6a5ad2ca02a9a6f0fbc5c784d639ebc624ae",
+          "afterSha256": "fe523838117e99a6568524805e0c410338c4c39ca627e6f0fd3b6691581e6031"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiMemory.c",
+          "beforeSha256": "87ef093a62f5a3122a5c789c0c2e4725b0d4573380a91f45f47a4d8e21af5f7e",
+          "afterSha256": "b8ac3337519ac924acd2bc43bcbb19b1641fcbeb52abd2587718b62b33f6f0bd"
+        },
+        {
+          "target": "tcl-cffi-2.0.3/generic/tclCffiTypes.c",
+          "beforeSha256": "dc133fd6ec073762d052584545d997a8c3bea6650ce7bf1651a67e84a14dab9c",
+          "afterSha256": "bcdee0f76d94dbe79497a95a0a835169adef524da66b5956932ea50bba980f2d"
+        }
+      ]
     }
   ]
 }

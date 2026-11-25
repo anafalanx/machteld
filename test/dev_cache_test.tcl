@@ -452,11 +452,11 @@ try {
         yyjson [file join $::fixtureCache yyjson] \
         tclsh [file join $prefix bin tclsh90s.exe]]
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch tools/buildlib.tcl
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
         tools/reference.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
-        tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
-        LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
+        tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
+        LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/cffi-2.0.3.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
         docs/reference/machteld/command/help.md staged/prelude.tcl
         staged/console.exe staged/gui.exe staged/reference/manifest.sha256
@@ -468,6 +468,7 @@ try {
     write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 22}
     foreach relative {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
+        cffi-doc/cffi.3tcl cffi-doc/cffi-cffi.3tcl cffi-doc/cffi-Concepts.3tcl cffi-doc/cffi-Cookbook.3tcl
         prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
         prefix/lib/tcl9.0/init.tcl prefix/lib/tcl9/9.0/msgcat.tm
         prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h sqlite/tclsqlite.c yyjson/yyjson.h
@@ -475,7 +476,7 @@ try {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"
     }
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/patches/dependency.patch
     } {
         spec_tracks dependencies [file join $::fixtureRoot {*}[split $relative /]]
     }
@@ -515,11 +516,14 @@ try {
     foreach relative {
         LICENSE tools/reference.tcl
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
-        docs/overview.md docs/reference/machteld/command/help.md
+        licenses/cffi-2.0.3.txt docs/overview.md docs/reference/machteld/command/help.md
     } {
         spec_tracks reference [file join $::fixtureRoot {*}[split $relative /]]
     }
-    foreach relative {prefix/bin/tclsh90s.exe downloads/tcl904-src.zip downloads/tk904-src.zip} {
+    foreach relative {
+        prefix/bin/tclsh90s.exe downloads/tcl904-src.zip downloads/tk904-src.zip
+        cffi-doc/cffi.3tcl cffi-doc/cffi-cffi.3tcl cffi-doc/cffi-Concepts.3tcl cffi-doc/cffi-Cookbook.3tcl
+    } {
         spec_tracks reference [file join $::fixtureCache {*}[split $relative /]]
     }
     # tools/reference.tcl runs on the build runtime; its bytes are an input.
@@ -567,7 +571,7 @@ try {
 
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl
-        packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
+        packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
         tools/build_identity.tcl staged/prelude.tcl staged/console.exe staged/gui.exe
         staged/reference/manifest.sha256 staged/reference/markdown/page.md
     } {
@@ -635,13 +639,13 @@ try {
     # A child interpreter has no runtime package of its own: it is given this
     # runtime's version and the commands the coordinator's helpers call.
     set startupRoot [file join $work coordinator-fixture]
-    set recipes {dev.tcl buildlib.tcl devcache.tcl bootstrap.tcl}
+    set recipes {dev.tcl buildlib.tcl devcache.tcl cffi-build.tcl bootstrap.tcl}
     foreach name $recipes {
         write_bytes [file join $startupRoot tools $name] \
             [read_bytes [file join $repo tools $name]]
     }
     foreach relative {
-        prefix/lib/libtcl90.a prefix/lib/libtcl9tk90.a prefix/lib/libtclstub.a
+        prefix/lib/libtcl90.a prefix/lib/libtcl9tk90.a prefix/lib/libtclstub.a prefix/lib/libcffi.a prefix/lib/libffi.a
         sqlite/sqlite3.c yyjson/yyjson.c
     } {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"

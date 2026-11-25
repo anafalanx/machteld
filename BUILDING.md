@@ -7,8 +7,8 @@ publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
 0.30 is the next public release after signed 0.21. The unpublished 0.22
-candidate supplies the starting source for implementation. Its CLI and Tcl
-package both report `22`. The earlier Beta 1 run produced an unsigned test
+candidate supplies the starting source. The current CLI and Tcl package
+both report `30`. The earlier Beta 1 run produced an unsigned test
 ZIP before the current CI policy was adopted.
 [Beta 1 results](docs/releases/0.22-beta.1.md) ·
 [Implementation and release gates in the release plan](plan-machteld22.md)
@@ -157,8 +157,7 @@ the signed file's SHA-256 and obtain the owner's publication decision.
    objects and whole reference generations by content in `.cache\dev`.
    A documentation edit regenerates the reference, which takes about a minute
    on the build PC. An unchanged reference reuses its cached generation.
-2. The unpublished baseline uses runtime number `22`. Advance the runtime
-   to `30` with the first 0.30 implementation change. Keep
+2. The development source uses runtime number `30`. Keep
    `MACHTELD_VERSION` in `src\machteld.h`, `variable version` in
    `tcl\machteld.tcl`, and the current-runtime heading in `docs\roadmap.md`
    consistent. The gate checks these values with `tools\check_version.tcl`.

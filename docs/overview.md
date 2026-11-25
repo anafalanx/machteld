@@ -7,7 +7,7 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-machteld 22, in preparation, is a compact Windows runtime for Tcl/Tk 9
+machteld 30, in preparation, is a compact Windows runtime for Tcl/Tk 9
 programs. It is strongest at what tools do: supervised processes and
 terminals, files, HTTP, JSON, hashing and SQLite, in one executable that
 installs nothing. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY,
@@ -18,7 +18,7 @@ trap-able codes.
 It is Vincent Vercauteren's own runtime, and it serves tools first. Use by
 others is welcome, but adoption, a plugin marketplace, and integration with
 another agent platform are not current product goals. This checkout contains
-22 in preparation, with the 0.22 candidate's stabilization work, not a
+30 in preparation, with the 0.22 candidate's stabilization work, not a
 completed release. The historical signed release is preserved separately.
 Build identities, artifact hashes, and verification receipts distinguish
 artifacts that share a version while the release gate is in progress.
@@ -28,7 +28,7 @@ activity recorder, or replacement shell. It does not guess that an arbitrary Tcl
 The program declares that dependency as its first executable command:
 
 ```tcl
-package require machteld 22-
+package require machteld 30-
 
 set tree [dirs C:/work -depth 2 -prune {.git node_modules}]
 puts "[dict get $tree dirs] directories"

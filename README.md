@@ -11,11 +11,10 @@ are no compute engines, `macht`, or Lua. Development environments built with
 machteld live in their own repositories on the machines that use them; this
 repository holds the runtime only.
 
-## 22 — development baseline for 0.30
+## 30 — in development
 
 **0.30 is the next public release after signed 0.21.** Development starts
-from the unpublished 0.22 candidate. This checkout's CLI and Tcl package
-report `22`. The first 0.30 implementation work will advance both to `30`.
+from the unpublished 0.22 candidate. The CLI and Tcl package in this checkout both report `30`.
 The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
 [Build guide](BUILDING.md)
@@ -42,7 +41,7 @@ locked inputs. The runtime and packaged examples must pass acceptance,
 including attended checks of user-visible behavior. The owner signs a copy,
 the gate checks those signed bytes, and the owner decides when to publish.
 
-The rest of this README and the current guides describe **22**, unless
+The rest of this README and the current guides describe **30**, unless
 explicitly marked as history. Different builds can share that version:
 incremental builds embed `build-info.dict` with source/input and reference
 identities; clean reconstruction omits that development-only record. Compare
@@ -89,7 +88,7 @@ opts into Machteld; the `.tcl` extension is conventional, not required.
 
 <!-- machteld-example: app -->
 ```tcl
-package require machteld 22-
+package require machteld 30-
 puts "Hello, [lindex $argv 0]!"
 ```
 
@@ -103,9 +102,9 @@ machteld`, an optional literal version, or `package require -exact machteld
 <version>`. Generic Tcl scripts without that declaration are refused.
 
 Tcl treats each whole-number runtime version as a major version.
-`package require machteld 22-` accepts 22 and later runtimes, including the
-planned 30. Use `package require machteld 22-30` to require a compatibility
-review before running on 30. Tcl excludes the upper bound.
+An existing entry with the requirement `22-` accepts 30. An entry with
+`22-30` fails on 30 because Tcl excludes the upper bound. Use
+`package require -exact machteld 30` to pin an entry to this version.
 
 For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
 and run it with the distribution executable. This is a direct-script example:
@@ -115,7 +114,7 @@ controller needs explicit worker-role dispatch, as demonstrated by the
 
 <!-- machteld-example: supervise -->
 ```tcl
-package require machteld 22-
+package require machteld 30-
 set result [run -timeout 5s -- [info nameofexecutable] \
     [file join [file dirname [info script]] app.tcl] world]
 if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
@@ -169,7 +168,7 @@ describe composition and limits, including retries and cancellation.
 
 ## Application archives
 
-To distribute an application to someone who already has Machteld 22, put its
+To distribute an application to someone who already has Machteld 30, put its
 opted-in `main.tcl` and assets in a staging directory. The full host can pack
 that tree into a plain ZIP and run it with the usual program arguments.
 
@@ -261,7 +260,7 @@ The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
 [ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
 versions, source hashes, and the backport identity are recorded in
 [the lock](tools/dependencies.lock.json). Machteld's Windows file/product
-version is exactly `22`, and 22.0.0.0 as Windows' fixed version; its author,
+version is exactly `30`, and 30.0.0.0 as Windows' fixed version; its author,
 publisher, and copyright holder are Vincent Vercauteren. Build paths are
 scrubbed from the packaged runtime.
 

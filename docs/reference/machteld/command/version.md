@@ -20,7 +20,7 @@ Takes no arguments or options.
 
 ## Results
 
-Returns `22`, the same value returned by `package require machteld` in this <!-- machteld-version-current -->
+Returns `30`, the same value returned by `package require machteld` in this <!-- machteld-version-current -->
 tree. The version is one natural number, and only a change to the runtime
 makes a new one.
 
@@ -35,7 +35,7 @@ Pure constant query with no retained state or timeout.
 ## Examples
 
 ```tcl
-package require machteld 22-
+package require machteld 30-
 puts "Machteld [version]"
 ```
 
@@ -43,7 +43,7 @@ puts "Machteld [version]"
 
 This reports Machteld, not Tcl, Tk, SQLite, Windows, or documentation-schema
 versions. Use `docs status` and `store version` for related exact versions.
-Machteld 22, in preparation, is unsigned and distinct from the previously signed
+Machteld 30, in preparation, is unsigned and distinct from the previously signed
 `dist/0.21` release. A version number does not identify the exact source state,
 prove that a build passed acceptance, or authenticate a publisher. Use
 artifact hashes and verification receipts, the executable's own `manifest`, and

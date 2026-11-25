@@ -31,6 +31,14 @@ check {status inventories exact Tcl/Tk manuals} [expr {
     [dict get $status products tcl manual_pages] == 249 &&
     [dict get $status products tk manual_pages] == 177}]
 
+set cffiManual [docs get cffi/manual/cookbook -section {defining-a-function} -all 1]
+check {the bundled cffi manual preserves upstream declarations, with the original source available} [expr {
+    [dict get $status products cffi version] eq [lindex [package versions cffi] 0] &&
+    [dict get $status products cffi manual_pages] == 4 &&
+    [string first {WINAPI DWORD GetCurrentProcessId(void);} [dict get $cffiManual text]] >= 0 &&
+    [string first {.TH "Cookbook"} [dict get [docs get cffi/manual/cookbook -format source -limit 200] text]] >= 0 &&
+    [dict get [docs get cffi/license -limit 16] id] eq "cffi/license"}]
+
 set schema [docs schema]
 check {schema describes all operations and bounded retrieval} [expr {
     [dict get $schema schema] == 1 && [dict get $schema catalog_schema] == 1 &&

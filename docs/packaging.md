@@ -9,9 +9,9 @@ tags: [machteld, pack, wrap, zipfs, deployment]
 
 Machteld runs an opted-in Tcl entry from a file, a shared-runtime application archive, or a wrapped executable.
 
-The workflow below describes machteld 22, in preparation and not yet released.
+The workflow below describes machteld 30, in preparation and not yet released.
 Application archives, wrapper inventories, packaging plans, and application
-identity are features of the 22 development runtime. Check the selected
+identity are features of the 30 development runtime. Check the selected
 executable’s artifact identity when selecting packaging options.
 
 ## Direct entry
@@ -64,7 +64,7 @@ Resolve assets relative to the entry. For example, an archive containing
 `lib/myapp/pkgIndex.tcl` can add its own package directory explicitly.
 
 ```tcl
-package require machteld 22-
+package require machteld 30-
 set here [file dirname [info script]]
 lappend auto_path [file join $here lib]
 package require myapp
@@ -200,7 +200,7 @@ assets; `app-info.dict` is beside it at the runtime archive root.
 A wrapped executable contains:
 
 - the selected console or GUI basekit;
-- the full Machteld 22 prelude and public palette;
+- the full Machteld 30 prelude and public palette;
 - the Tcl and Tk script libraries;
 - Machteld's Apache 2.0 license and the required Tcl, Tk, zlib, LibTomMath, and
   yyjson distribution notices under `licenses/`;
@@ -209,7 +209,7 @@ A wrapped executable contains:
   Tcl's bundled zlib/LibTomMath code, and MIT-licensed yyjson reader.
 
 There is no prelude-free or reduced runtime option. `package require
-machteld` inside a wrapped tool returns 22, `manifest` describes the same API,
+machteld` inside a wrapped tool returns 30, `manifest` describes the same API,
 and binary-safe `store` has the same behavior and five-second busy timeout.
 Wrapping does not change the programmatic API.
 
@@ -234,7 +234,7 @@ Basekits are distribution-only: a wrapped tool cannot run `wrap` again, with or
 without the reference pack.
 
 The main Machteld host carries Windows VERSIONINFO derived from its canonical
-version: product and file version `22` (22.0.0.0 as Windows' fixed version),
+version: product and file version `30` (30.0.0.0 as Windows' fixed version),
 the Machteld product identity, and Vincent Vercauteren as author, publisher,
 and copyright holder. Wrapped programs inherit that basekit metadata unless
 they explicitly supply application metadata as described below. Tcl's embedded configuration points to the self-mounted
@@ -247,7 +247,7 @@ startup in a GUI tool; requiring it explicitly keeps source portable between the
 two:
 
 ```tcl
-package require machteld 22-
+package require machteld 30-
 package require Tk
 ```
 

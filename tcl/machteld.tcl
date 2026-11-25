@@ -3,7 +3,7 @@
 # Sourced by the C host from zipfs before Tcl_Main evaluates an entry file.
 
 namespace eval ::machteld {
-    variable version 22
+    variable version 30
     # MANIFEST is appended to this prelude at build time by tools/genmanifest.tcl
     # from the explicit native specification, after checking its command set
     # against src/*.c. Declared empty here so an unpackaged prelude never invents

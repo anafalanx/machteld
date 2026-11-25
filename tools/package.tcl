@@ -114,6 +114,9 @@ file mkdir $packageTarget
 foreach name {pkgIndex.tcl job.tcl} {
     file copy [file join $packageSource $name] [file join $packageTarget $name]
 }
+set cffiIndex [file join [file dirname $packageSource] cffi pkgIndex.tcl]
+file mkdir [file join $stage tcl_library cffi]
+file copy $cffiIndex [file join $stage tcl_library cffi pkgIndex.tcl]
 
 # Tcl 9 installs script modules separately from the core script library. Core
 # services such as clock require msgcat from this sibling tree; keeping its
@@ -162,7 +165,7 @@ if {![file isdirectory $opt(--licenses)]} {
 }
 set requiredNotices {
     Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt
-    yyjson-0.12.0.txt
+    yyjson-0.12.0.txt cffi-2.0.3.txt tclh-6afd306.txt libffi-3.5.2.txt
 }
 foreach notice $requiredNotices {
     if {![file isfile [file join $opt(--licenses) $notice]]} {

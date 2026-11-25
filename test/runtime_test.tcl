@@ -117,6 +117,9 @@ foreach {notice expected} {
     zlib-1.3.2.txt e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2
     LibTomMath-1.3.0.txt 2fa64b163659f41965c9815882a8296d3d03ff546b76153e11445f9bdecf955a
     yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
+    cffi-2.0.3.txt cdff44ed75ce0f7c9625165bdb86cc4221fab9479eeda359f9d8268db2a9591d
+    tclh-6afd306.txt 5f1172dc3b77b33f1e856cf7a6f9fafa427e914e3e1b2e300ca1eb766d4e1c76
+    libffi-3.5.2.txt d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366
 } {
     set path [file join //zipfs:/app/licenses $notice]
     if {![file isfile $path]} {

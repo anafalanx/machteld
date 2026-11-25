@@ -273,3 +273,14 @@ wait inside a real read and gives the test a reliable point to cancel or close
 the window.
 
 <!-- machteld-version-history: end -->
+
+### 2026-11-25 · 0.30 development · Codex, build and foreign calls
+
+The old hosted executable could be reproduced on the build PC by changing
+only the manifest object selected by GCC. The build now checks that object's
+digest and tests the resource that Windows reads from the resulting executable.
+
+The cffi command reference, concepts, cookbook and introduction come from
+four manuals in the pinned source archive. Comparing the raw manual digests
+before generation lets a reader retrieve the upstream declarations alongside
+the Windows loader and ownership rules that apply in this runtime.

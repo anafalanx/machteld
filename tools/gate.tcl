@@ -254,6 +254,14 @@ proc ::gate::plan {settings} {
                 addStep steps integration "fixture cmdline_test.c" [list $gcc {*}$strict -I [file join $root src] \
                     [file join $test cmdline_test.c] [file join $root src winjob_cmdline.c] -o $cmdline]
                 addStep steps integration "command-line golden vectors" [list $cmdline]
+                set ffiDependency [file join $out machteld_cffi_dependency.dll]
+                set ffiFixture [file join $out machteld_cffi_fixture.dll]
+                set ffiImport [file join $out libmachteld_cffi_dependency.a]
+                addStep steps integration "fixture cffi_dependency.c" [list $gcc {*}$strict -shared \
+                    [file join $test fixtures cffi_dependency.c] -Wl,--out-implib,$ffiImport -o $ffiDependency]
+                addStep steps integration "fixture cffi_fixture.c" [list $gcc {*}$strict -shared \
+                    [file join $test fixtures cffi_fixture.c] $ffiImport -o $ffiFixture]
+                addLane steps $runtime integration "synchronous foreign calls" cffi_test.tcl $ffiFixture $ffiDependency
                 addStep steps integration "development cache" [list $driver [file join $test dev_cache_test.tcl] --msys $msys]
                 addLane steps $runtime integration process process_test.tcl $processFixture
                 addLane steps $runtime integration store store_test.tcl $lockFixture

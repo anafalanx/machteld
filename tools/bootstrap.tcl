@@ -38,6 +38,9 @@ namespace eval ::boot {
 if {[info commands ::machteld::devcache::toolchain_digest] eq ""} {
     source -encoding utf-8 [file join [file dirname $::boot::script] devcache.tcl]
 }
+if {[info commands ::boot::stageCffi] eq ""} {
+    source -encoding utf-8 [file join [file dirname $::boot::script] cffi-build.tcl]
+}
 
 proc ::boot::fail {message} {
     return -code error -errorcode {BOOTSTRAP fail} "bootstrap: $message"
@@ -209,7 +212,7 @@ proc ::boot::artifactManifest {} {
     variable prefix
     set relatives {}
     foreach tree [list [file join $prefix include] [file join $prefix lib tcl9] [file join $prefix lib tcl9.0] \
-            [file join $prefix lib tk9.0] [file join $cache yyjson]] {
+            [file join $prefix lib tk9.0] [file join $cache yyjson] [file join $cache cffi-doc]] {
         if {![file isdirectory $tree]} {
             fail "dependency cache is missing artifact tree: [file nativename $tree]"
         }
@@ -223,6 +226,7 @@ proc ::boot::artifactManifest {} {
     }
     foreach file [list [file join $prefix bin tclsh90s.exe] [file join $prefix bin wish90s.exe] \
             [file join $prefix lib libtcl90.a] [file join $prefix lib libtcl9tk90.a] [file join $prefix lib libtclstub.a] \
+            [file join $prefix lib libffi.a] [file join $prefix lib libcffi.a] \
             [file join $cache sqlite sqlite3.c] [file join $cache sqlite sqlite3.h] \
             [file join $cache sqlite tclsqlite.c]] {
         if {![file isfile $file]} {
@@ -552,7 +556,12 @@ proc ::boot::main {argv} {
     # What the cache is made from: the lock, this program, the patches and the
     # notices, with the toolchain and SOURCE_DATE_EPOCH (stateHash). Any change
     # rebuilds it.
-    set inputs [concat [list $lockPath $script] $patchPaths $noticePaths]
+    foreach entry [dict get $lock archives] {
+        if {[dict exists $entry notice]} {
+            lappend noticePaths [file join $root licenses [dict get $entry notice file]]
+        }
+    }
+    set inputs [concat [list $lockPath $script [file join $root tools cffi-build.tcl]] $patchPaths $noticePaths]
     variable prefix [file join $cache prefix]
     set sourceRoot [file join $cache src]
     variable downloads [file join $cache downloads]
@@ -588,7 +597,7 @@ proc ::boot::main {argv} {
     # A stale or interrupted cache is never configured in place: downloaded
     # archives stay (their hashes are checked again), every derived tree is
     # made again from an empty directory.
-    foreach derived [list $prefix $sourceRoot [file join $cache sqlite] [file join $cache yyjson]] {
+    foreach derived [list $prefix $sourceRoot [file join $cache sqlite] [file join $cache yyjson] [file join $cache cffi-doc]] {
         assertUnderCache $derived
         if {[file exists $derived]} {
             foreach file [filesBelow $derived] {
@@ -683,10 +692,12 @@ proc ::boot::main {argv} {
         file delete -force $yyjsonExtract
     }
 
+    stageCffi $sourceRoot $archives [dict get $lock patches]
     if {$sourcesOnly} {
         say "dependency sources ready in [file nativename $cache] (Tcl/Tk not built; no state written)"
         return
     }
+    buildCffi $msys $home $sourceRoot $prefix $archives
     # A cache made while the recipe or the toolchain changed is a mixture:
     # it is left unrecorded, so the next bootstrap makes it again.
     if {[stateHash $inputs $msys] ne $stateHash} {

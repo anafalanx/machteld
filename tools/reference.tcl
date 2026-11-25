@@ -1084,6 +1084,7 @@ proc ::ref::productVersion {product version} {
     if {$product eq "machteld"} {
         return $version
     }
+    if {$product eq "cffi"} { return 2.0.3 }
     return 9.0.4
 }
 
@@ -1509,6 +1510,75 @@ proc ::ref::uniqueName {} {
     binary encode hex [hash random 16]
 }
 
+# The four Ruff-generated manuals in the pinned cffi release use this small
+# roff vocabulary. Unknown directives fail the build so an upstream layout
+# change cannot silently remove part of a manual.
+proc ::ref::cffiMarkdown {source title} {
+    set text "# $title\n\n"
+    append text {Upstream cffi 2.0.3 manual. The Foreign calls section of the [runtime contract](machteld/guide/contract) describes the bundled DLL search, text conversion and callback rules.} \n
+    set escapes [list {\\} \\ {\&} {} {\fB} {} {\fR} {} {\fI} {} {\fP} {}]
+    set literal 0
+    set bullet 0
+    foreach line [split $source \n] {
+        if {[string range $line 0 2] eq {'\"}} continue
+        if {[string index $line 0] eq "."} {
+            regexp {^(\S+)\s*(.*)$} $line -> directive arg
+            switch -exact -- $directive {
+                .TH - .RS - .RE { continue }
+                .SH - .SS {
+                    set heading [string map $escapes [string trim $arg \"]]
+                    set level [expr {$directive eq ".SH" ? "##" : "###"}]
+                    append text "\n$level $heading\n\n"
+                }
+                .PP - .TP { append text \n }
+                .br { append text "  \n" }
+                .nf { set literal 1; append text "\n~~~\n" }
+                .fi { set literal 0; append text "~~~\n\n" }
+                default { fail "unsupported cffi manual directive $directive" }
+            }
+            continue
+        }
+        if {!$literal && $line eq {\(bu}} {
+            set bullet 1
+            continue
+        }
+        if {$bullet} { append text "- "; set bullet 0 }
+        append text [string map $escapes $line] \n
+    }
+    if {$literal || $bullet} { fail "unfinished cffi manual block in $title" }
+    return $text
+}
+
+proc ::ref::addCffiManuals {cache candidate documentsVar aliasesVar} {
+    upvar 1 $documentsVar documents $aliasesVar aliases
+    foreach {slug file title digest} {
+        intro cffi.3tcl {Introduction to cffi} 5c108421ac08ddfeca3aa90b8b9c85962386af848c92d9c1602509983e44bac5
+        commands cffi-cffi.3tcl {cffi commands and classes} cbd3f3eabc13486e0eeccbc2fd0fbc88bb1e8c533adf29d795c416d3564b13c7
+        concepts cffi-Concepts.3tcl {cffi concepts} d16e09e5a3af3400d09c658c922251c3ab286c5d85b1a39d592d7576f421e9f6
+        cookbook cffi-Cookbook.3tcl {cffi cookbook} 7ffb566e20403f56be2293f79ad83ddb634206ff6c7bc3975dff35e504d80312
+    } {
+        set id cffi/manual/$slug
+        set srcRel source/cffi/$file
+        set mdRel markdown/cffi/manual/$slug.md
+        set from [file join $cache cffi-doc $file]
+        set sourcePath [file join $candidate $srcRel]
+        copyBytes $from $sourcePath
+        assertArchive $sourcePath $digest $file
+        set source [readUtf8Strict $sourcePath]
+        set markdown [cffiMarkdown $source $title]
+        writeUtf8Lf [file join $candidate $mdRel] $markdown
+        set sections [markdownSections $markdown $id]
+        set formats [D markdown [formatRecord $candidate $mdRel $sections] \
+            source [formatRecord $candidate $srcRel [sourceSections $source $file]]]
+        dict set documents $id [D id [S $id] product [S cffi] version [S 2.0.3] type [S manual] \
+            title [S $title] summary [S "$title from the upstream cffi 2.0.3 reference."] names [Ls [list $title]] \
+            sections [sectionsDict $sections 0] formats $formats path [S $mdRel] raw_path [S $srcRel] \
+            source_file [S $file] content_sha256 [S [get $formats markdown sha256]] \
+            source_sha256 [S $digest] bytes [N [get $formats markdown bytes]]]
+        foreach alias [list $id "cffi $slug" $title] { addUnique aliases [normalizeSearch $alias] $id }
+    }
+}
+
 # ---- the whole reference ----
 
 proc ::ref::main {argv} {
@@ -1777,9 +1847,11 @@ proc ::ref::main {argv} {
             }
         }
 
+        addCffiManuals $cache $candidate documents aliases
         # A standalone extracted reference is itself a distribution.
         foreach {product file from title} [list \
                 machteld Apache-2.0.txt [file join $root LICENSE] "Machteld Apache License 2.0" \
+                cffi cffi-2.0.3.txt [file join $root licenses cffi-2.0.3.txt] "cffi 2.0.3 license" \
                 tcl Tcl-9.0.4.txt [file join $root licenses Tcl-9.0.4.txt] "Tcl 9.0.4 license" \
                 tk Tk-9.0.4.txt [file join $root licenses Tk-9.0.4.txt] "Tk 9.0.4 license"] {
             set rel licenses/$file
@@ -1802,8 +1874,8 @@ proc ::ref::main {argv} {
         set bootstrap [join {
             "# Machteld embedded reference: start here"
             ""
-            "This directory is the complete offline reference for the exact Machteld, Tcl,"
-            "and Tk versions that carried it.  The canonical query interface is `machteld"
+            "This directory contains the offline reference for the exact Machteld, Tcl,"
+            "Tk and cffi versions in this build. The canonical query interface is `machteld"
             "docs`; read `markdown/machteld/agent.md` for the compact agent workflow."
             ""
             "`tcl/application/tclsh` and `tk/application/wish` reproduce upstream shell"
@@ -1830,7 +1902,7 @@ proc ::ref::main {argv} {
                 encoding [S "catalog.dict is inert canonical Tcl dict/list data; catalog.json is an equivalent JSON view"] \
                 fields [Ls {aliases auxiliary corpus_sha256 documents fragments generator inventory machteld_version products schema search}] \
                 document [S "id, product, version, type, title, summary, names, sections, formats; each format has path, sha256, bytes, and character-offset sections"] \
-                ids [S "Canonical IDs are lowercase. Ordinary pages use product/type/name; Tcl/Tk names are lowercased source basenames. The only special two-part IDs are machteld/agent, machteld/index, machteld/license, tcl/license, and tk/license. Original spelling remains in names, aliases, and representation paths. Lowercased collisions fail generation."] \
+                ids [S "Canonical IDs are lowercase. Ordinary pages use product/type/name. Tcl/Tk names are lowercased source basenames. Two-part IDs are machteld/agent, machteld/index and each product/license. Original spelling remains in names, aliases, and representation paths. Lowercased collisions fail generation."] \
                 aliases [S "Unicode-lowercased, whitespace-collapsed keys map to ordered candidate ID lists; ambiguity is explicit and never silently resolved"]] \
             integrity [D \
                 meaning [S "consistency and provenance identity, not cryptographic authenticity; there is no separately trusted compiled root hash"] \
@@ -1907,7 +1979,7 @@ proc ::ref::main {argv} {
             fail "document/auxiliary partition does not exactly cover inventory"
         }
         set productCounts [dict create]
-        foreach product {machteld tcl tk} {
+        foreach product {machteld tcl tk cffi} {
             set catalogCount 0
             set manualCount 0
             dict for {id record} $documents {
@@ -1918,7 +1990,8 @@ proc ::ref::main {argv} {
                     }
                 }
             }
-            if {($product eq "tcl" && $manualCount != 249) || ($product eq "tk" && $manualCount != 177)} {
+            if {($product eq "tcl" && $manualCount != 249) || ($product eq "tk" && $manualCount != 177) ||
+                    ($product eq "cffi" && $manualCount != 4)} {
                 fail "$product manual page count drifted to $manualCount"
             }
             dict set productCounts $product [D version [S [productVersion $product $version]] \
