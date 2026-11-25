@@ -131,7 +131,8 @@ static int failed(Tcl_Interp *ip, const char *code, const char *msg) {
     Tcl_SetObjResult(ip, Tcl_NewStringObj(msg, -1)); return TCL_ERROR;
 }
 static int result(Tcl_Interp *ip, NtsJob *j, int wait) {
-    if (wait && job_state(j) == NTS_PENDING) WaitForSingleObject(j->completed, nts_remaining(j));
+    if (wait && job_state(j) == NTS_PENDING && nts_wait(j, 1, &j->completed) == WAIT_FAILED)
+        return failed(ip,"oserror","cannot wait for NTS request completion");
     switch (job_state(j)) {
     case NTS_OK: {
         Tcl_Obj *d = Tcl_NewDictObj();

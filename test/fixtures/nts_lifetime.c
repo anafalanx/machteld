@@ -2,11 +2,37 @@
  * its command, deleting the owning interpreter, and an autonomous deadline. */
 #include "../../src/nts.c"
 static void require(int ok, const char *msg) {if (!ok) {fprintf(stderr,"%s\n",msg); exit(1);}}
+static int simulated, calls;
+static ULONGLONG ticks;
+static DWORD requested[2], second_result;
+static ULONGLONG WINAPI test_ticks(void) {return simulated ? ticks : GetTickCount64();}
+static DWORD WINAPI test_wait(DWORD count, const HANDLE *handles, BOOL all, DWORD timeout) {
+    if (!simulated) return WaitForMultipleObjects(count, handles, all, timeout);
+    require(calls < 2, "too many simulated waits");
+    requested[calls++] = timeout;
+    if (calls == 1) {ticks = 98; return WAIT_TIMEOUT;}
+    ticks = 100;
+    return second_result;
+}
+#define GetTickCount64 test_ticks
+#define WaitForMultipleObjects test_wait
+#include "../../src/nts_io.c"
+#undef GetTickCount64
+#undef WaitForMultipleObjects
+static void check_deadline(DWORD end) {
+    NtsJob j = {0};
+    j.deadline = 100; ticks = 91; simulated = 1; calls = 0; second_result = end;
+    HANDLE event = NULL;
+    require(nts_wait(&j,1,&event)==end, "early timeout lost final event or deadline");
+    require(calls==2 && requested[0]==9 && requested[1]==2,"absolute deadline accounting");
+    simulated=0;
+}
 static const char *eval(Tcl_Interp *ip, const char *str) {
     require(Tcl_Eval(ip,str) == TCL_OK, Tcl_GetStringResult(ip)); return Tcl_GetStringResult(ip);
 }
 int main(int argc,char **argv) {
     (void)argc;
+    check_deadline(WAIT_TIMEOUT); check_deadline(WAIT_OBJECT_0);
     Tcl_FindExecutable(argv[0]);
     WSADATA w; require(WSAStartup(MAKEWORD(2,2),&w)==0,"Winsock");
     SOCKET server=socket(AF_INET,SOCK_STREAM,0);

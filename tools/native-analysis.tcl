@@ -140,7 +140,8 @@ proc ::na::trappedSteps {layout gcc out} {
     lappend steps [dict create label "trapped NTS AES-SIV" argv [list $nts]]
     set ntlife [file join $out nts-lifetime-trap.exe]
     lappend steps [dict create label "trapped NTS request lifetime: compile" argv [list $gcc {*}$flags \
-        [file join $fixtures nts_lifetime.c] [file join $src wintext.c] {*}[lsort [glob [file join $src nts_*.c]]] {*}$tcl -o $ntlife]]
+        [file join $fixtures nts_lifetime.c] [file join $src wintext.c] \
+        {*}[lmap unit {nts_ef.c nts_ke.c nts_siv.c nts_tls.c} {file join $src $unit}] {*}$tcl -o $ntlife]]
     lappend steps [dict create label "trapped NTS request lifetime" argv [list $ntlife]]
     lappend steps [dict create label "trapped UDP lifetime: compile" argv [list $gcc {*}$flags \
         [file join $fixtures udp_driver.c] {*}$tcl -o $udp]]

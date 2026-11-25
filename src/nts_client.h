@@ -26,6 +26,7 @@ typedef struct {SOCKET fd; WSAEVENT event; NtsJob *job;} NtsSocket;
 typedef struct {NtsKeResponse ke; uint8_t c2s[32], s2c[32];} NtsKeys;
 
 DWORD nts_remaining(NtsJob *);
+DWORD nts_wait(NtsJob *, DWORD, const HANDLE *);
 int nts_fail(NtsJob *, const char *, DWORD);
 int nts_connect(NtsJob *, const wchar_t *, unsigned short, int type, NtsSocket *);
 int nts_send(NtsSocket *, const void *, size_t);

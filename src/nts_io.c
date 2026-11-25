@@ -12,12 +12,22 @@ DWORD nts_remaining(NtsJob *job) {
     ULONGLONG now = GetTickCount64();
     return job->deadline > now ? (DWORD)(job->deadline - now) : 0;
 }
+DWORD nts_wait(NtsJob *job, DWORD count, const HANDLE *handles) {
+    /* Windows' relative wait can expire a scheduler tick before the absolute
+     * GetTickCount64 deadline. Keep waiting for cancellation/completion during
+     * the remainder. All synchronous and transport waits use the same clock. */
+    DWORD rc;
+    do {
+        rc = WaitForMultipleObjects(count, handles, FALSE, nts_remaining(job));
+    } while (rc == WAIT_TIMEOUT && nts_remaining(job));
+    return rc;
+}
 int nts_fail(NtsJob *job, const char *stage, DWORD err) {
     job->stage = stage; job->error = err; return 0;
 }
 static int ready(NtsJob *job, HANDLE event) {
     HANDLE targets[2] = {job->cancel, event};
-    DWORD rc = WaitForMultipleObjects(2, targets, FALSE, nts_remaining(job));
+    DWORD rc = nts_wait(job, 2, targets);
     if (rc == WAIT_OBJECT_0 + 1) return 1;
     return nts_fail(job, rc == WAIT_OBJECT_0 ? "cancelled" : "timeout",
                     rc == WAIT_OBJECT_0 ? ERROR_CANCELLED : rc == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError());
