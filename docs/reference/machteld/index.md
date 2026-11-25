@@ -25,6 +25,21 @@ and the qualified name `::machteld::clipboard`. Tk supplies the global
 `clipboard` command when loaded. Nested namespaces can use fully qualified
 names or add `::machteld::palette` to their namespace path for the short names.
 
+## Interpreter scope
+
+The host initializes the main interpreter for each entry script or archive.
+A supervised worker launched through `app launch` receives its own initialized
+main interpreter, including the palette and the `machteld` and `sqlite3`
+package registrations.
+
+Plain `interp create` creates a Tcl child interpreter in the same process.
+It starts without the full palette, and `package require machteld` and
+`package require sqlite3` fail in a fresh child with its default package
+paths. Some optional packages are independently loadable there, including
+`cffi`, `machteld::files`, `machteld::network` and `machteld::encoding`
+in an ordinary trusted child. Choose a supervised worker for code that
+expects the full application runtime, and open its database connection there.
+
 ## Command groups
 
 - Process control: `run`, `child`, `wait`, `scope`, and `detach`.

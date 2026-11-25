@@ -21,6 +21,11 @@ commands: sqlite3, package require sqlite3, sqlite3 eval, sqlite3 eval -paramete
 
 `sqlite3 -version` and `sqlite3 -sourceid` identify the engine. `sqlite3 -has-codec` returns 0. `db config enable_fkey` and `db config defensive` report the effective safeguards.
 
+The host registers `sqlite3` in the initialized script or archive interpreter
+and in each supervised worker. A plain `interp create` child starts without
+this registration. Run database work in an initialized interpreter and open
+its connection there.
+
 ## Query and bind
 
 `db eval ?-parameters bindings? ?-asdict? ?-withoutnulls? sql ?rowName? ?script?` returns a flat Tcl list in row and column order when there is no script. A row script runs in its caller's context. Give a name for a row array, or combine a row name with `-asdict` for a dictionary. `-withoutnulls` omits SQL NULL fields in a row callback. `db onecolumn sql` returns the first column of the first row. `db exists sql` reports whether SQL produced a row.
