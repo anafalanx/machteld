@@ -274,7 +274,9 @@ the window.
 
 <!-- machteld-version-history: end -->
 
-### 2026-11-25 · 0.30 development · Codex, build and foreign calls
+### Build inputs and foreign calls
+
+2026-11-25 · Codex · 0.30 development
 
 The old hosted executable could be reproduced on the build PC by changing
 only the manifest object selected by GCC. The build now checks that object's
