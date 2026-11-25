@@ -146,6 +146,14 @@ incremental build separately and account for its development-only
 `build-info.dict`. The existing hosted workflow also checks a second build
 in a clean checkout on the same runner.
 
+To diagnose a mismatch, run `dist\0.21\machteld.exe tools\repro_report.tcl out\machteld.exe`
+on the build PC and compare its output with the hosted job's unsigned
+executable hash inventory. The report separates the native Windows image,
+the raw ZIP container and each uncompressed file. Matching file hashes
+with different container hashes point to entry order, compression or
+ZIP metadata. A different `reference/reference.db` hash identifies a
+documentation build difference.
+
 Substituting the hosted `default-manifest.o` on the build PC reproduced the
 original hosted executable hash. CI now installs the locked manifest package
 and records the SHA-256 of the object selected by GCC. The resource tests

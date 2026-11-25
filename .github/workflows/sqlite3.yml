@@ -95,6 +95,17 @@ jobs:
           & .\out\machteld.exe test/clipboard_test.tcl --hosted-clipboard
           exit $LASTEXITCODE
 
+      - name: Record native and embedded file hashes for the build PC comparison
+        if: github.ref_name == 'main' && !cancelled()
+        run: |
+          if (Test-Path -LiteralPath out/machteld.exe) {
+            Write-Output '::group::Unsigned executable hash inventory'
+            & .\dist\0.21\machteld.exe tools/repro_report.tcl out/machteld.exe
+            $reportExit = $LASTEXITCODE
+            Write-Output '::endgroup::'
+            exit $reportExit
+          }
+
       - name: Check out an independent copy of the same source
         if: github.ref_name == 'main'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,7 +129,12 @@ jobs:
           "Commit: $env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
           "Gated executable SHA-256: $gated" >> $env:GITHUB_STEP_SUMMARY
           "Independent executable SHA-256: $rebuilt" >> $env:GITHUB_STEP_SUMMARY
-          if ($gated -ne $rebuilt) { throw "Unsigned executable hashes differ: $gated and $rebuilt" }
+          if ($gated -ne $rebuilt) {
+            Write-Output '::group::Independent executable hash inventory'
+            & "$env:GITHUB_WORKSPACE/dist/0.21/machteld.exe" tools/repro_report.tcl out/candidate/machteld.exe
+            Write-Output '::endgroup::'
+            throw "Unsigned executable hashes differ: $gated and $rebuilt"
+          }
 
       - name: Build the candidate on the SQLite development branches
         if: github.ref_name != 'main'

@@ -228,6 +228,7 @@ proc ::gate::plan {settings} {
                 addStep steps fast "version consistency" [list $tclsh [file join $root tools check_version.tcl]]
                 addStep steps fast "version-check regressions" [list $tclsh [file join $test check_version_test.tcl]]
                 addStep steps fast "build identity" [list $tclsh [file join $test build_identity_test.tcl]]
+                addStep steps fast "build hash diagnostics" [list $driver [file join $test repro_report_test.tcl]]
                 addStep steps fast "reference serializer" [list $driver [file join $test reference_serializer_test.tcl] --tclsh $tclsh]
                 addStep steps fast "gate groups and environment" [list $driver [file join $test gate_test.tcl]]
                 addLane steps $runtime fast filesystem filesystem_test.tcl
