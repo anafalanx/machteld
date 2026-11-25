@@ -312,6 +312,7 @@ proc ::gate::plan {settings} {
                 addStep steps packaging "package and publication" [list $driver [file join $test package_test.tcl] --tclsh $tclsh]
                 addStep steps packaging VERSIONINFO [list $driver [file join $test version_resource_test.tcl] $runtime --cache $cache]
                 addLane steps $runtime packaging "legacy application compatibility" legacy_wrapper_test.tcl $driver
+                addLane steps $runtime packaging "relocated Tcl application profile upgrade and recovery" application_qualification_test.tcl
 
                 addLane steps $runtime packaging "archive inventory" pack_inventory_test.tcl
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
