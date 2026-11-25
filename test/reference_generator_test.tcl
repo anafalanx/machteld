@@ -59,6 +59,101 @@ proc ::rgt::generate {cache tclsh output} {
     }
 }
 
+proc ::rgt::sourceNames {lines file} {
+    set start [lsearch -exact $lines {.SH NAME}]
+    if {$start < 0} {fail "$file has no upstream NAME field"}
+    set field ""
+    foreach line [lrange $lines [expr {$start+1}] end] {
+        if {[string match .* $line]} break
+        append field { } $line
+        set at [string first { \- } $field]
+        if {$at >= 0} {
+            return [lmap name [split [string range $field 0 $at-1] ,] {
+                string trim [regsub -all {\s+} $name { }]
+            }]
+        }
+    }
+    fail "unsupported upstream NAME in $file"
+}
+
+proc ::rgt::checkManualSections {id product file lines body totalsVar} {
+    upvar 1 $totalsVar totals
+    set headings [fixture eval {SELECT heading FROM section WHERE id=$id ORDER BY start}]
+    set next 0
+    set standardOptions 0
+    foreach line $lines {
+        if {[regexp {^\.(?:SH|SS)\s+(.+)$} $line -> title]} {
+            set title [string trim [string trim $title] {"}]
+            set found [lsearch -start $next -nocase -exact $headings $title]
+            if {$found < 0} {fail "$file lost or reordered upstream heading $title"}
+            set next [expr {$found+1}]
+            dict incr totals headings
+        }
+        if {$product ne "tk"} continue
+        if {[regexp {^\.SO(?:\s|$)} $line]} {set standardOptions 1; continue}
+        if {$line eq {.SE}} {set standardOptions 0; continue}
+        if {$standardOptions || [string match {.OP *} $line]} {
+            # A quoted .OP may also name a short option, such as -bg.
+            foreach escaped [regexp -all -inline {\\-[A-Za-z][[:alnum:]-]*} $line] {
+                set flag [string range $escaped 1 end]
+                if {![regexp -- "$flag\\M" $body]} {fail "$file lost widget option $flag"}
+                dict incr totals options
+            }
+        }
+    }
+}
+
+# Read the pinned archive's actual man sources independently of the HTML
+# converter. An unchanged total cannot detect two swapped pages, a lost alias
+# inside a large C manual, or a section title damaged during conversion.
+proc ::rgt::checkCoreManuals {cache} {
+    set checked {}
+    set totals [dict create names 0 headings 0 options 0]
+    foreach {product archive} {tcl tcl904-src.zip tk tk904-src.zip} {
+        set mount [zipfs mount [file join $cache downloads $archive] rgt-$product-[pid]]
+        try {
+            set directory $mount/${product}9.0.4/doc
+            foreach path [lsort [glob -types f -directory $directory -- *.1 *.3 *.n]] {
+                set file [file tail $path]
+                set base [string tolower [file rootname $file]]
+                set section [string range [file extension $file] 1 end]
+                set kind [dict get {1 application 3 c-api n command} $section]
+                set id $product/$kind/$base
+                lappend checked $id
+                set row [fixture eval {SELECT names,body FROM page WHERE id=$id AND kind=$kind AND version='9.0.4'}]
+                if {[llength $row] != 2} {fail "missing pinned $product 9.0.4 manual $file ($id)"}
+                lassign $row dbNames body
+                set source [readUtf8 $path]
+                set lines [split [string map {\r\n \n} $source] \n]
+                set names [sourceNames $lines $file]
+                if {$names ne $dbNames} {fail "$file NAME field changed during conversion"}
+                set aliases [list $file]
+                foreach name $names {
+                    lappend aliases $name "$product:$name" "${name}($section)"
+                    dict incr totals names
+                }
+                if {$kind eq "application"} {lappend aliases ${base}9.0 ${base}90.exe ${base}90s.exe}
+                foreach alias $aliases {
+                    set alias [string tolower $alias]
+                    if {![fixture exists {SELECT 1 FROM alias WHERE name=$alias AND id=$id}]} {
+                        fail "$file lost lookup alias $alias"
+                    }
+                }
+                set phrase "names:\"[lindex $names 0]\""
+                if {![fixture exists {SELECT 1 FROM search WHERE search MATCH $phrase AND rowid=(SELECT rowid FROM page WHERE id=$id)}]} {
+                    fail "$file is missing from the FTS5 index"
+                }
+                checkManualSections $id $product $file $lines $body totals
+            }
+        } finally {zipfs unmount $mount}
+    }
+    set published [fixture eval {SELECT id FROM page WHERE product IN ('tcl','tk') AND kind IN ('application','c-api','command') ORDER BY id}]
+    if {[lsort $checked] ne $published || $totals ne {names 1249 headings 3204 options 795}} {
+        fail "published manuals differ from the pinned 9.0.4 sources: $totals"
+    }
+    puts "matched [llength $checked] upstream manuals, [dict get $totals names] names, [dict get $totals headings] headings and [dict get $totals options] Tk option declarations"
+}
+
 proc ::rgt::main {argv} {
     variable root
     set cache ""
@@ -125,6 +220,7 @@ proc ::rgt::main {argv} {
         try {
             if {[fixture eval {SELECT name,documents,manual_pages FROM product WHERE name IN ('tcl','tk','cffi') ORDER BY name}]
                     ne {cffi 5 4 tcl 250 249 tk 178 177}} {fail "unexpected upstream manual counts"}
+            checkCoreManuals $cache
             foreach required {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/agent machteld/license tcl/license tk/license} {
                 if {![fixture exists {SELECT 1 FROM page WHERE id=$required}]} {fail "missing stable page $required"}
             }

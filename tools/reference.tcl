@@ -154,7 +154,9 @@ proc ::ref::stripMarkdown {text} {
     regsub -all -nocase {<a id="[^"]+"></a>} $text { } text
     regsub -all {!\[([^\]]*)\]\([^)]*\)} $text {\1} text
     regsub -all {\[([^\]]+)\]\([^)]*\)} $text {\1} text
-    regsub -all {[`*_#>|]} $text { } text
+    # The upstream converter emits emphasis with asterisks. Underscores
+    # within C identifiers are part of the documented names.
+    regsub -all {[`*#>|]} $text { } text
     collapse $text
 }
 
@@ -710,16 +712,10 @@ proc ::ref::page::flushPendingBullet {text} {
     if {$pendingBullet eq ""} {
         return $text
     }
-    # .NET '^\s*(\S.*)$': '.' stops at a newline, and '$' matches at the end
-    # or before a final newline.
-    set S $::ref::S
-    set NS $::ref::NS
-    if {![regexp "^${S}*(${NS}\[^\n\]*)\n?\$" $text -> rest]} {
-        return ""
-    }
-    appendInline "$pendingBullet$rest"
-    set pendingBullet ""
-    return ""
+    set rest [string trimleft $text $::ref::ws]
+    if {$rest eq ""} {return ""}
+    flushPendingBulletMarkup
+    return $rest
 }
 
 proc ::ref::page::flushPendingBulletMarkup {} {
@@ -922,6 +918,9 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
             }
             h3 - h4 {
                 if {!$closing} {
+                    # An empty terminal list item in upstream HTML must not
+                    # donate its bullet or number to the following heading.
+                    set page::pendingBullet ""
                     page::break 2
                     foreach section $sections {
                         if {[dict get $section tokenStart] == $i} {
@@ -938,6 +937,8 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
             }
             pre {
                 if {!$closing} {
+                    # Code following a list or definition is a separate block.
+                    set page::pendingBullet ""
                     if {[string match -nocase */c-api/* $id]} {
                         set language c
                     } elseif {[string match -nocase */application/* $id]} {
@@ -966,6 +967,7 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
                     lappend lists $name
                     page::cellBreak 1
                 } else {
+                    set page::pendingBullet ""
                     if {[llength $lists]} {
                         set lists [lrange $lists 0 end-1]
                     }
@@ -982,7 +984,7 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
                 set page::pendingBullet "$indent$bullet"
             }
             dl {
-                if {$closing} {page::cellBreak 2} else {page::cellBreak 1}
+                if {$closing} {set page::pendingBullet ""; page::cellBreak 2} else {page::cellBreak 1}
             }
             dt - dd {
                 if {!$closing} {
@@ -1078,7 +1080,43 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
             fail "$htmlRelative normalization lost per-page notice: $notice"
         }
     }
+    checkRenderedManual $inspection $markdown $htmlRelative
     return $markdown
+}
+
+# Confirm all visible upstream words occur in the same order. Markdown adds
+# link targets, fence languages and anchors between words. Punctuation is
+# ignored for this prose check, while preformatted examples must match exactly.
+proc ::ref::checkRenderedManual {inspection markdown label} {
+    set searchable [regsub -all {[^[:alnum:]]} $markdown {}]
+    set position 0
+    set blocks [fencedCodeBlocks $markdown $label]
+    set block 0
+    set inPre 0
+    foreach token [lrange [dict get $inspection tokens] [dict get $inspection contentToken] end] {
+        if {[isTag $token pre]} {
+            if {![dict get $token closing]} {
+                set inPre 1
+                set original ""
+            } else {
+                if {![string match *\n $original]} {append original \n}
+                if {$block >= [llength $blocks] || [dict get [lindex $blocks $block] content] ne $original} {
+                    fail "$label changed preformatted example [expr {$block+1}]"
+                }
+                incr block
+                set inPre 0
+            }
+        } elseif {[dict get $token kind] eq "text"} {
+            set text [dict get $token text]
+            if {$inPre} {append original $text}
+            foreach word [regexp -all -inline {[[:alnum:]]+} $text] {
+                set found [string first $word $searchable $position]
+                if {$found < 0} {fail "$label lost or reordered upstream text near '$word'"}
+                set position [expr {$found + [string length $word]}]
+            }
+        }
+    }
+    if {$inPre || $block != [llength $blocks]} {fail "$label preformatted block count changed"}
 }
 
 # A product's version, as text: machteld's natural number, Tcl's and Tk's 9.0.4.
@@ -1444,15 +1482,22 @@ proc ::ref::extractControlledSources {archive rootName product destination withT
     try {
         set base //zipfs:/$mount/$rootName
         set docs {}
-        foreach path [zipfs list //zipfs:/$mount/*] {
-            set relative [string range $path [string length //zipfs:/$mount/] end]
-            if {[regexp -nocase "^[regexAnyEscape $rootName]/doc/\[A-Za-z0-9_\]\[A-Za-z0-9_.-\]*\\.(?:1|3|n)\$" $relative]} {
-                lappend docs $relative
+        # These are the three inventories installed by the pinned upstream
+        # Unix makefiles. Check the complete source globs before validating
+        # individual paths so an unsupported filename cannot disappear.
+        set inventory [dict get {tcl {1 1 3 108 n 140} tk {1 1 3 87 n 89}} $product]
+        dict for {section expected} $inventory {
+            set files [glob -nocomplain -types f -directory $base/doc -- *.$section]
+            if {[llength $files] != $expected} {
+                fail "$product section $section has [llength $files] upstream manuals, expected $expected"
             }
-        }
-        set expected [expr {$product eq "tcl" ? 249 : 177}]
-        if {[llength $docs] != $expected} {
-            fail "$product archive core manual inventory is [llength $docs], expected $expected"
+            foreach path $files {
+                set name [file tail $path]
+                if {![regexp {^[A-Za-z0-9_][A-Za-z0-9_.-]*$} $name]} {
+                    fail "unsupported $product manual filename $name"
+                }
+                lappend docs $rootName/doc/$name
+            }
         }
         set wanted $docs
         foreach relative {doc/man.macros doc/license.terms README.md} {
@@ -1488,10 +1533,6 @@ proc ::ref::extractControlledSources {archive rootName product destination withT
     if {[file isdirectory [file join $destination $rootName pkgs]]} {
         fail "$product controlled source unexpectedly contains extension packages"
     }
-}
-
-proc ::ref::regexAnyEscape {text} {
-    regsub -all {[][\\.^$*+?(){}|]} $text {\\&}
 }
 
 proc ::ref::addUnique {mapVar key value} {
@@ -1767,7 +1808,17 @@ proc ::ref::main {argv} {
                 sections [sectionsDict $mdSections 0] formats $formats path [S $mdRel] raw_path [S $srcRel] \
                 source_file [S $sourceName] content_sha256 [S [get $formats markdown sha256]] \
                 source_sha256 [S [get $formats source sha256]] bytes [N [get $formats markdown bytes]]]
-            foreach alias [concat [list $id $base] $names [list "$product:[lindex $names 0]" "$product [lindex $names 0]"]] {
+            set section [string range [file extension $sourceName] 1 end]
+            set pageAliases [list $id $base $sourceName "$product [lindex $names 0]"]
+            foreach name $names {
+                lappend pageAliases $name "$product:$name" "${name}($section)"
+            }
+            if {$type eq "application"} {
+                # The Unix install names and the Windows shared/static shell
+                # names all refer to the same upstream program manual.
+                lappend pageAliases ${base}9.0 ${base}90.exe ${base}90s.exe
+            }
+            foreach alias $pageAliases {
                 addUnique aliases [normalizeSearch $alias] $id
             }
             dict for {old slug} [dict get $inspect anchors] {
