@@ -61,19 +61,25 @@ static HWND create_window(HINSTANCE instance, const wchar_t *class_name, int tin
         tiny ? 4 : 420, tiny ? 4 : 260, NULL, NULL, instance, NULL);
 }
 
-/* Use the existing Windows shortcut association to dispatch to this silent
- * fixture. No default application or registry entry is changed by the test. */
-static int create_document(const wchar_t *link_path, const wchar_t *directory)
+/* Create real Windows shell links without changing any association. */
+static int create_shortcut(const wchar_t *link_path, const wchar_t *directory,
+                           const wchar_t *target, const wchar_t *arguments)
 {
     wchar_t self[32768];
-    DWORD n = GetModuleFileNameW(NULL, self, 32768);
-    if (!n || n >= 32768 || FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED))) return 1;
+    int hide_archive = target != NULL;
+    if (!target) {
+        DWORD n = GetModuleFileNameW(NULL, self, 32768);
+        if (!n || n >= 32768) return 1;
+        target = self;
+    }
+    if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED))) return 1;
     IShellLinkW *link = NULL;
     IPersistFile *persist = NULL;
     HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
                                       &IID_IShellLinkW, (void **)&link);
-    if (SUCCEEDED(result)) result = IShellLinkW_SetPath(link, self);
-    if (SUCCEEDED(result)) result = IShellLinkW_SetArguments(link, L"--record-open");
+    if (SUCCEEDED(result)) result = IShellLinkW_SetPath(link, target);
+    if (SUCCEEDED(result)) result = IShellLinkW_SetArguments(link, arguments);
+    if (SUCCEEDED(result) && hide_archive) result = IShellLinkW_SetShowCmd(link, SW_HIDE);
     if (SUCCEEDED(result)) result = IShellLinkW_SetWorkingDirectory(link, directory);
     if (SUCCEEDED(result)) result = IShellLinkW_QueryInterface(link, &IID_IPersistFile, (void **)&persist);
     if (SUCCEEDED(result)) result = IPersistFile_Save(persist, link_path, TRUE);
@@ -87,7 +93,10 @@ int
 wmain(int argc, wchar_t **argv)
 {
     if (argc == 2 && wcscmp(argv[1], L"--record-open") == 0) return report(L"shell-opened", NULL) ? 0 : 1;
-    if (argc == 4 && wcscmp(argv[1], L"--make-document") == 0) return create_document(argv[2], argv[3]);
+    if (argc == 4 && wcscmp(argv[1], L"--make-document") == 0)
+        return create_shortcut(argv[2], argv[3], NULL, L"--record-open");
+    if (argc == 6 && wcscmp(argv[1], L"--make-archive-link") == 0)
+        return create_shortcut(argv[2], argv[3], argv[4], argv[5]);
     if (argc != 4) return 2;
     /* An isolated-desktop runner can demand a particular desktop. Check
      * before creating a window, including in the handoff descendant. */

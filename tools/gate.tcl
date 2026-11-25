@@ -291,6 +291,8 @@ proc ::gate::plan {settings} {
                     [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
                 addStep steps integration "isolated browser lifecycle" [list $privateRunner $runtime \
                     [file join $test browser_test.tcl]] timeout 120s
+                addStep steps integration "isolated shortcut to a relocated archive" [list $privateRunner $runtime \
+                    [file join $test archive_shortcut_test.tcl] $windowFixture] timeout 90s
                 set ffiDependency [file join $out machteld_cffi_dependency.dll]
                 set ffiFixture [file join $out machteld_cffi_fixture.dll]
                 set ffiImport [file join $out libmachteld_cffi_dependency.a]

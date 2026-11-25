@@ -17,7 +17,7 @@ static HANDLE inherit_stream(DWORD stream, DWORD access) {
 }
 
 int wmain(int argc, wchar_t **argv) {
-    if (argc != 3 && argc != 5) return 2;
+    if (argc < 3 || argc > 5) return 2;
     /* All dynamic arguments are Windows file paths. A valid file name cannot
      * contain a quote or end in a directory separator. */
     size_t count = 32;
@@ -32,6 +32,8 @@ int wmain(int argc, wchar_t **argv) {
     if (!line) return 2;
     if (argc == 5)
         swprintf(line, count, L"\"%ls\" \"%ls\" --windows \"%ls\" \"%ls\"", argv[1], argv[2], argv[3], argv[4]);
+    else if (argc == 4)
+        swprintf(line, count, L"\"%ls\" \"%ls\" \"%ls\"", argv[1], argv[2], argv[3]);
     else
         swprintf(line, count, L"\"%ls\" \"%ls\"", argv[1], argv[2]);
 

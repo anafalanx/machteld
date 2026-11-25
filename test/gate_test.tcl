@@ -139,6 +139,10 @@ check {the reference-generator group compiles nothing} \
 
 set releasePlan [::gate::plan [settings {}]]
 set releaseLabels [labels $releasePlan]
+set shortcutStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated shortcut to a relocated archive}]]
+check {the relocated archive shortcut runs exclusively through the private desktop runner} [expr {
+    [lmap arg [dict get $shortcutStep argv] {file tail $arg}] eq
+    {desktop_runner.exe machteld.exe archive_shortcut_test.tcl window_fixture.exe}}]
 check {release compiles the process fixture once, first} \
     [expr {[lsearch -all $releaseLabels {fixture process_fixture.c}] eq {0}}]
 check {release plans the groups in order} \
