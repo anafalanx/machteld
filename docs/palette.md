@@ -122,6 +122,11 @@ For text input, `package require machteld::encoding` makes
 label and confidence estimate, or an explicit no-match or unavailable status.
 [Encoding detection](reference/machteld/index.md)
 
+Load `machteld::network` to query the connected Wi-Fi network, signal
+quality and negotiated rates for each wireless adapter, or to send a
+single source-selected IPv4 echo.
+[Windows network diagnostics](reference/machteld/index.md#windows-network-diagnostics)
+
 ## Machine processes
 
 ```tcl

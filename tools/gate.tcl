@@ -236,6 +236,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "XXH3-64 catalog checksums" xxh3_test.tcl
                 addLane steps $runtime fast "Directory metadata and local-only reads" localfiles_test.tcl
                 addLane steps $runtime fast "Text encoding detector" encoding_test.tcl
+                addLane steps $runtime fast "Windows network diagnostics" network_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl

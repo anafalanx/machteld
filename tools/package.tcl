@@ -111,6 +111,7 @@ foreach {package files} {
     machteld-sqlite {pkgIndex.tcl sqlite.tcl}
     machteld-files {pkgIndex.tcl}
     machteld-encoding {pkgIndex.tcl}
+    machteld-network {pkgIndex.tcl}
 } {
     set target [file join $stage tcl_library $package]
     file mkdir $target
@@ -168,6 +169,7 @@ set requiredNotices {
     graphviz-16.1.2.txt graphviz-ellipse.txt expat-2.8.1.txt
     Els-MIT.txt
     Ann-MIT.txt
+    Airwave-MIT.txt
 }
 foreach notice $requiredNotices {
     if {![file isfile [file join $opt(--licenses) $notice]]} {

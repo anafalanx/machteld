@@ -133,6 +133,10 @@ proc ::na::trappedSteps {layout gcc out} {
     lappend steps [dict create label "trapped cloud file transitions: compile" argv [list $gcc {*}$flags \
         [file join $fixtures localfiles_driver.c] [file join $src wintext.c] {*}$tcl -o $fileBoundary]]
     lappend steps [dict create label "trapped cloud file transitions" argv [list $fileBoundary]]
+    set net [file join $out network-trap.exe]
+    lappend steps [dict create label "trapped network diagnostics: compile" argv [list $gcc {*}$flags \
+        [file join $fixtures network_driver.c] [file join $src wintext.c] {*}$tcl -o $net]]
+    lappend steps [dict create label "trapped network diagnostics" argv [list $net]]
     set charset [file join $out encoding-trap.exe]
     lappend steps [dict create label "trapped encoding detector: compile" argv [list $gcc {*}$flags \
         [file join $fixtures encoding_driver.c] {*}$tcl -o $charset]]
@@ -297,7 +301,7 @@ proc ::na::main {argv} {
         set inputs [lsort [concat [glob -directory [file join $root src] *.c] [glob -directory [file join $root src] *.h]]]
         foreach relative {
             tools/native-analysis.tcl tools/buildlib.tcl test/cmdline_test.c test/cmdline_alloc_test.c
-            test/wintext_test.c test/hash_boundary_test.c test/fixtures/localfiles_driver.c test/fixtures/encoding_driver.c
+            test/wintext_test.c test/hash_boundary_test.c test/fixtures/localfiles_driver.c test/fixtures/encoding_driver.c test/fixtures/network_driver.c
             test/json_test.tcl test/native_adversarial_test.tcl
             test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c
             test/fixtures/native_boundary_driver.c test/fixtures/tk_index_format_test.c

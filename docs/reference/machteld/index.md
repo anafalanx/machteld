@@ -53,6 +53,32 @@ does not provide the required ICU entry points, detection returns
 The detector examines up to the first 1 MiB and preserves the supplied bytes.
 Applications choose their confidence threshold and Tcl decoder.
 
+### Windows network diagnostics
+
+`package require machteld::network 1.0` loads these commands in a trusted interpreter.
+
+- `::machteld::network::wifi` returns a dictionary containing `status`
+  (`ok`, `restricted`, or `unavailable`), `winerror`, `addresserror` and
+  `adapters`. Each adapter reports its `guid`, `description`, `state`,
+  `details`, `winerror` and preferred `ipv4` address list. When Windows
+  IP Helper matches the interface it also supplies the friendly `name`.
+  An `addresserror` explains a failure to enumerate IP addresses.
+  With `details ok`, `ssid` contains the original network-name bytes,
+  `quality` is a percentage, and `rxkbps` and `txkbps` are the negotiated
+  receive and transmit rates in kilobits per second. Other detail states
+  are `disconnected`, `restricted` and `unavailable`. A location permission
+  restriction leaves the adapter identity available and omits the private
+  measurements. An empty adapter list with `status ok` means that Windows
+  enumerated zero interfaces.
+- `::machteld::network::ping sourceIPv4 destinationIPv4 ?timeoutMs?`
+  sends one IPv4 echo using the supplied preferred address of an active
+  local interface. Both arguments are numeric IPv4 literals. The deadline
+  defaults to 1,000 ms and accepts 1 through 60,000 ms. A result with
+  `status ok` supplies `rttms` and `winerror 0`. A `timeout` or `error`
+  supplies the Windows/IP status in `winerror`. The call waits for its
+  result. Use a worker for Tk applications that need to remain responsive
+  during the wait.
+
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
 the language itself, rather than the Machteld palette, is the subject. Upstream
