@@ -55,7 +55,7 @@ archive name are passed to its entry.
   The compact bootstrap/index IDs are `machteld/agent` and `machteld/index`;
   each product also has a stable two-part `product/license` ID.
 - `-scope` is the exact product `machteld`, `tcl`, `tk` or `cffi`. Empty or `all` means
-  unfiltered. `-type` matches an exact catalog type such as `command`, `guide`,
+  unfiltered. `-type` matches an exact catalog type such as `command`, `package`, `guide`,
   `c-api`, or `application`; empty or `all` is unfiltered.
 - For `list` and `search`, `-offset` defaults to `0`; `-limit` defaults to `50`
   and is from `1` through `200` records.
@@ -90,7 +90,8 @@ All Tcl subcommands return dicts.
   `names`, `format`, `section`, `path`, `sha256`, `bytes`, `text`, `total`,
   `returned`, `truncated`, and `next`.
 - `outline`: exact `id`, `title`, and indexed `sections`.
-- `extract`: normalized output `path`, `files`, `bytes`, and `corpus_sha256`.
+- `extract` returns the normalized directory `path`, `files 1`, `bytes` and
+  `corpus_sha256`. The directory contains exactly `reference.db`.
 
 `next` is the next offset or empty when complete. Corpus and page SHA-256 values
 identify the packaged provenance and detect inconsistency; they are not a
@@ -132,8 +133,19 @@ puts [dict get $page text]
 # Export exactly one page as Markdown.
 # Run from a shell: machteld.exe docs get tcl/command/dict --all 1 --output dict.md
 
-# Export the searchable database, schema, bootstrap, and notices.
+# Export the searchable database and look up a license from its Markdown rows.
 set exported [docs extract C:/work/machteld-reference]
+package require sqlite3
+sqlite3 corpus [file join [dict get $exported path] reference.db] -readonly 1 -create 0
+try {
+    puts [corpus onecolumn {SELECT body FROM page WHERE id = 'machteld/license'}]
+    set query {worker}
+    puts [corpus eval {
+        SELECT p.id FROM search JOIN page AS p ON p.rowid = search.rowid
+        WHERE search MATCH $query AND p.product = 'machteld'
+        ORDER BY bm25(search), p.id LIMIT 5
+    }]
+} finally {corpus close}
 ```
 
 ## Constraints
@@ -172,7 +184,7 @@ Missing/damaged catalog reports `unsupported` or `corrupt`.
 
 #### Lifetime and timeouts
 
-Validates packaged state locally and retains nothing.
+The first call opens the reference database. Later calls reuse that interpreter's read-only connection.
 
 #### Examples
 
@@ -234,7 +246,7 @@ Takes no arguments.
 
 #### Results
 
-Returns `schema 1`, `catalog_schema 1`, command/subcommand grammar, identifier
+Returns `schema 2`, `catalog_schema 2`, command/subcommand grammar, identifier
 rules, pagination rules, supported content representations and host output
 formats, and the structured `{MACHTELD DOCS code}` error pattern.
 
@@ -272,9 +284,9 @@ Takes no arguments.
 
 #### Results
 
-Validates the strict full-pack manifest and exact file set, then recomputes
-cataloged representation hashes, byte sizes, and corpus identity. It returns
-`ok 1`, document/file/byte counts, and `corpus_sha256`.
+Recomputes the SHA-256 of `reference.db`, compares it with the embedded
+digest, and runs SQLite integrity and foreign-key checks. It returns `ok 1`,
+`documents`, `files 1`, `bytes` and `corpus_sha256`.
 
 #### Errors
 
@@ -283,7 +295,7 @@ malformed content within a reference pack reports `DOCS corrupt`.
 
 #### Lifetime and timeouts
 
-Reads the complete local corpus synchronously and retains nothing.
+Reads the database synchronously and reuses its read-only connection.
 
 #### Examples
 
@@ -326,7 +338,7 @@ representation is `unsupported`; hash/content mismatch is `corrupt`.
 
 #### Lifetime and timeouts
 
-One local read with no retained state.
+Reads from the interpreter's reference connection.
 
 #### Examples
 
@@ -334,8 +346,8 @@ One local read with no retained state.
 
 #### Constraints
 
-Different representations have different hashes and byte counts. Follow
-`next` until empty unless `-all` was intentionally requested.
+The page hash and byte count describe the complete Markdown page. Follow
+`next` to read successive character ranges.
 
 #### See also
 
@@ -385,8 +397,9 @@ Section slugs are document-local; request them with the canonical ID.
 
 #### Arguments and options
 
-`query` is text; filters and pagination match `list`. Every normalized search
-term must contain at least two characters. Exact shorter names belong in `get`.
+`query` accepts up to 4,096 Tcl characters containing 1 through 64 alphanumeric
+terms. Each term matches a token prefix. All terms must match. Filters and
+pagination follow `list`.
 
 #### Results
 
@@ -427,17 +440,18 @@ There are no options.
 
 #### Results
 
-Returns published path, file/byte counts, and corpus hash.
+Returns the new directory path, `files 1`, the database byte count and its SHA-256.
 
 #### Errors
 
-Unsafe/existing target reports `exists` or `badvalue`; staging/publish failures
-report `oserror`; damaged source reports `corrupt`.
+An existing destination reports `exists`, a missing parent reports `notfound`,
+and an unsafe path reports `badvalue`. Staging or publication failures report
+`oserror`. Damaged source data reports `corrupt`.
 
 #### Lifetime and timeouts
 
-Stages under a random sibling name, verifies the complete tree, then publishes
-it with one same-volume rename.
+Stages `reference.db` in a sibling directory, verifies its bytes and publishes
+the directory with one same-volume rename.
 
 #### Examples
 

@@ -31,8 +31,10 @@ sequence in a rolling playlist, or an application callback failure.
 ## Lifetime and timeouts
 
 The session owns its request and reload timer. Use `$session stop` to
-cancel both, `$session status` to inspect progress, and `$session close`
-to release it.
+cancel both. `$session status` returns `state` (`running`, `done`, `stopped`
+or `error`), `sequence` (initially -1) and the current playlist `url`.
+`$session close` releases the object. Stop and close are safe inside the
+segment callback.
 
 ## Examples
 
@@ -87,6 +89,8 @@ minimum interval of 500 milliseconds.
 #### Constraints
 
 Master playlists select the variant with the highest advertised bandwidth.
+Up to four nested master playlists are followed. A playlist response is
+limited to 1 MiB and each segment response to 16 MiB.
 Select an audio rendition URL directly when the master supplies separate
 renditions. Native demultiplexing expects a supported audio stream in the
 selected MPEG-TS segments.

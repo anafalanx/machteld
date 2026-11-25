@@ -38,9 +38,8 @@ set section [docs get tcl/command/chan -section description]
 # 4. Enumerate predictably with pagination.
 set page [docs list -scope machteld -type command -offset 0 -limit 50]
 
-# 5. Export when filesystem search is more effective.
-docs extract C:/work/machteld-reference
-# Optional integrity audit:
+# 5. Export a read-only research copy for direct SQLite queries.
+set exported [docs extract C:/work/machteld-reference]
 docs verify
 ```
 
@@ -56,6 +55,32 @@ machteld.exe --docs extract C:\work\machteld-reference
 Host JSON is always enveloped as `{ok:true,result:...}` or
 `{ok:false,error:{domain:"DOCS",code:...,message:...}}`; test `ok` before reading
 `result`. Use `--output FILE` for an atomic file result.
+
+## Query the extracted database
+
+`docs extract directory` creates the directory and puts exactly one file,
+`reference.db`, inside it. The `path` field names that directory. Open its
+database with SQLite's read-only option. `page.body` contains Markdown,
+including the product license pages. `notice` contains any additional
+page-specific upstream attribution. The FTS5 table `search` shares row IDs
+with `page`.
+
+```tcl
+package require sqlite3
+sqlite3 corpus [file join [dict get $exported path] reference.db] -readonly 1 -create 0
+try {
+    set query {trigram}
+    puts [corpus eval {
+        SELECT p.id, p.title FROM search JOIN page AS p ON p.rowid = search.rowid
+        WHERE search MATCH $query ORDER BY bm25(search), p.id LIMIT 5
+    }]
+    puts [corpus onecolumn {SELECT body FROM page WHERE id = 'tcl/license'}]
+} finally {corpus close}
+```
+
+For runtime packages, use `docs list -scope machteld -type package`.
+For example, `docs get machteld/package/sqlite3` describes typed parameters
+and `docs get machteld/package/network` describes UDP and authenticated time.
 
 An archive uses the shared runtime’s documentation. The arguments following
 its filename belong to the application. Invoke `machteld.exe --docs` directly

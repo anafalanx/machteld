@@ -129,6 +129,15 @@ foreach path [lsort [glob -nocomplain -directory $REFDIR *.md]] {
     }
     dict set anchors $wantId $pageAnchors
     set lines [split $text \n]
+    set options [dict getdef $expected $verb options {}]
+    dict for {sub facts} [dict getdef $expected $verb subcommands {}] {
+        lappend options {*}[dict getdef $facts options {}]
+    }
+    foreach option [lsort -unique $options] {
+        if {![regexp -- [format {(^|[^[:alnum:]_-])%s([^[:alnum:]_-]|$)} $option] $text]} {
+            fail "$path omits public option $option"
+        }
+    }
     foreach section $requiredSections {
         if {[lsearch -exact $lines "## $section"] < 0} {
             fail "$path lacks mandatory section {$section}"
@@ -189,6 +198,50 @@ foreach special {index.md agent.md} {
     if {[dict get $fm id] ne $expectedId} { fail "$specialPath id is not $expectedId" }
 }
 dict for {id text} $pageText { dict set valid $id 1 }
+set hostPage [file join [file dirname $REFDIR] host.md]
+set host [front_matter $hostPage [read_utf8_lf $hostPage]]
+if {[dict get $host id] ne "machteld/application/host" || [dict get $host type] ne "application"} {
+    fail "$hostPage must identify the Machteld application host"
+}
+dict set valid [dict get $host id] 1
+# The sqlite3 binding is registered by the native host. Each other optional
+# package has a packaged pkgIndex.tcl. Exact aliases make these load points
+# discoverable even when a caller knows only the package name.
+set packages {sqlite3}
+foreach index [glob -directory [file join $ROOT packages] */pkgIndex.tcl] {
+    if {![regexp {(?m)^\s*package ifneeded ([^[:space:]]+)} [read_utf8_lf $index] -> name]} {
+        fail "cannot identify public package in $index"
+    }
+    lappend packages $name
+}
+set packagePages {}
+foreach path [glob -directory [file dirname $REFDIR] pkg-*.md] {
+    set fm [front_matter $path [read_utf8_lf $path]]
+    set slug [string range [file rootname [file tail $path]] 4 end]
+    set id "machteld/package/$slug"
+    if {[dict get $fm type] ne "package" || [dict get $fm id] ne $id} { fail "$path must declare $id as a package" }
+    dict set valid $id 1
+    dict set packagePages $slug [comma_list [dict get $fm commands]]
+}
+set expectedSlugs {}
+foreach name $packages {
+    set slug [namespace tail $name]
+    lappend expectedSlugs $slug
+    if {$name ni [dict getdef $packagePages $slug {}]} { fail "package $name needs an exact reference alias on machteld/package/$slug" }
+}
+if {[lsort $expectedSlugs] ne [lsort [dict keys $packagePages]]} { fail "reference package inventory differs from the runtime packages" }
+set packageCommands {
+    cffi {::cffi::Wrapper} encoding {::machteld::encoding::detect}
+    files {::machteld::files::entries ::machteld::files::openlocal}
+    httpd {::machteld::httpd::listen} job {::machteld::job::Job}
+    network {::machteld::network::wifi ::machteld::network::ping ::machteld::network::udp ::machteld::network::nts}
+    sqlite {::machteld::sqlite::backup}
+}
+dict for {slug commands} $packageCommands {
+    foreach name $commands {
+        if {$name ni [dict get $packagePages $slug]} { fail "missing exact $name lookup on machteld/package/$slug" }
+    }
+}
 foreach guide [glob -nocomplain -directory [file join $ROOT docs] *.md] {
     dict set valid "machteld/guide/[file rootname [file tail $guide]]" 1
 }
@@ -196,7 +249,7 @@ set referenceFiles [concat [glob -nocomplain -directory [file join $ROOT docs re
     [glob -nocomplain -directory $REFDIR *.md]]
 foreach path $referenceFiles {
     set text [read_utf8_lf $path]
-    foreach ref [regexp -all -inline {machteld/(?:command/[a-z][a-z0-9-]*(?:#[a-z][a-z0-9-]*)?|guide/[a-z][a-z0-9-]*|agent|index)} $text] {
+    foreach ref [regexp -all -inline {machteld/(?:command/[a-z][a-z0-9-]*(?:#[a-z][a-z0-9-]*)?|(?:application|package|guide)/[a-z][a-z0-9-]*|agent|index)} $text] {
         lassign [split $ref #] base fragment
         if {![dict exists $valid $base]} { fail "$path links to missing ID $base" }
         if {$fragment ne "" && (![dict exists $anchors $base] ||
@@ -206,4 +259,4 @@ foreach path $referenceFiles {
     }
 }
 
-puts "check_reference: [dict size $seen] command pages cover every public command and subcommand"
+puts "check_reference: [dict size $seen] command pages and [dict size $packagePages] package pages cover public commands, subcommands, options and package entry points"

@@ -43,126 +43,53 @@ names or add `::machteld::palette` to their namespace path for the short names.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
 - Runtime and distribution: `app`, `version`, `manifest`, `docs` and `help`.
 
-For text-file bytes, `package require machteld::encoding 1.0` exposes
-`::machteld::encoding::detect $bytes`. Supply a bytearray, such as the
-result of `read` on a binary channel. The dictionary contains `status`,
-`encoding`, `confidence` and `samplebytes`. A `match` supplies an ICU
-encoding label and its estimate from 1 to 100. Empty or printable ASCII
-samples can have many source encodings and return `nomatch`. Other samples
-for which the detector finds no match also return `nomatch`. When Windows
-does not provide the required ICU entry points, detection returns
-`unavailable`. Both results carry an empty label and zero confidence.
-The detector examines up to the first 1 MiB and preserves the supplied bytes.
-Applications choose their confidence threshold and Tcl decoder.
+## Find a runtime capability
+
+Use `docs list -scope machteld -type command` for the palette and `docs list -scope machteld -type package` for optional packages. `docs get` accepts the exact IDs below. Plain Tcl and Tk commands, widgets and C APIs have their own product scopes.
+
+| Capability | Reference ID |
+| --- | --- |
+| Browser profiles, navigation and readiness | `machteld/command/browser` |
+| Initial visibility of supervised children | `machteld/command/child#start` |
+| Windows on the desktop and foreground activation | `machteld/command/desktop#windows`, `machteld/command/desktop#activate` |
+| Installed applications, shortcuts, icons and launch targets | `machteld/command/desktop#apps`, `machteld/command/desktop#icon`, `machteld/command/desktop#launch` |
+| Explorer file drops on a Tk widget | `machteld/command/desktop#drop` |
+| Opening local documents in their associated application | `machteld/command/desktop#open` |
+| Typed numbered SQLite parameters, foreign-key and defensive settings, FTS5 trigram search | `machteld/package/sqlite3` |
+| Create-only verified database backups | `machteld/package/sqlite` |
+| Confirmed file replacement and flush outcomes | `machteld/command/publish` |
+| Bulk directory entries and local-only cloud file reads | `machteld/package/files` |
+| Text encoding and confidence | `machteld/package/encoding` |
+| Seed-zero XXH3-64 checksums | `machteld/command/hash` |
+| Streaming HTTP, bounded reads and cancellation | `machteld/command/http#stream` |
+| Loopback HTTP server | `machteld/package/httpd` |
+| Wi-Fi details, source-address ping, UDP sockets and authenticated network time | `machteld/package/network` |
+| PCM output, MP3, AAC and HE-AAC decoding | `machteld/command/audio` |
+| Live HLS audio playlists and MPEG-TS | `machteld/command/hls`, `machteld/command/audio#demux` |
+| Direct2D sprites and Direct3D 11 shaders in Tk | `machteld/command/surface` |
+
+Other runtime facilities include `machteld/package/job` for supervised background jobs, `machteld/package/cffi` for synchronous Windows DLL calls, `machteld/command/graphviz` for layout and rendering, `machteld/command/app` for per-user data paths and application relaunch, and `machteld/application/host` for entry scripts and application archives.
 
 ### Windows network diagnostics
 
-`package require machteld::network 1.0` loads these commands in a trusted interpreter.
-
-- `::machteld::network::wifi` returns a dictionary containing `status`
-  (`ok`, `restricted`, or `unavailable`), `winerror`, `addresserror` and
-  `adapters`. Each adapter reports its `guid`, `description`, `state`,
-  `details`, `winerror` and preferred `ipv4` address list. When Windows
-  IP Helper matches the interface it also supplies the friendly `name`.
-  An `addresserror` explains a failure to enumerate IP addresses.
-  With `details ok`, `ssid` contains the original network-name bytes,
-  `quality` is a percentage, and `rxkbps` and `txkbps` are the negotiated
-  receive and transmit rates in kilobits per second. Other detail states
-  are `disconnected`, `restricted` and `unavailable`. A location permission
-  restriction leaves the adapter identity available and omits the private
-  measurements. An empty adapter list with `status ok` means that Windows
-  enumerated zero interfaces.
-- `::machteld::network::ping sourceIPv4 destinationIPv4 ?timeoutMs?`
-  sends one IPv4 echo using the supplied preferred address of an active
-  local interface. Both arguments are numeric IPv4 literals. The deadline
-  defaults to 1,000 ms and accepts 1 through 60,000 ms. A result with
-  `status ok` supplies `rttms` and `winerror 0`. A `timeout` or `error`
-  supplies the Windows/IP status in `winerror`. The call waits for its
-  result. Use a worker for Tk applications that need to remain responsive
-  during the wait.
+Load `machteld::network` to enumerate wireless adapters with `::machteld::network::wifi`.
+Use `::machteld::network::ping sourceIPv4 destinationIPv4` to select the sending
+adapter by its preferred address. `docs get machteld/package/network` describes
+the result fields, privacy restrictions and timeout outcomes.
 
 ### UDP sockets
 
-`::machteld::network::udp open address port` creates a nonblocking,
-interpreter-owned socket and returns its command. Use `127.0.0.1` or
-`::1` for loopback. Use port `0` to let Windows choose an available port.
-Addresses are numeric IPv4 or IPv6 literals. An IPv6 link-local address may
-include a numeric scope, for example `fe80::1%12`.
-
-- `$socket local` returns the bound `address` and `port`.
-- `$socket send address port value` sends one datagram to an address
-  of the same family and returns its byte count. Bytearrays retain every
-  byte. Other values are encoded as UTF-8. An empty value sends an empty
-  datagram. Maximum payloads are 65,507 bytes for IPv4 and 65,527 for IPv6.
-- `$socket receive` takes one complete datagram from the kernel queue
-  and returns `address`, `port` and a `bytes` bytearray. An empty result
-  means the queue is empty. An empty *datagram* still has a sender and a
-  `bytes` field. UDP preserves datagram boundaries. Delivery and network
-  arrival order depend on the network.
-- `$socket readable commandPrefix` calls the prefix with the socket
-  command as its final argument when a datagram is ready. It runs through
-  the owning Tcl event loop. Receive at least one datagram in the handler
-  to rearm notification on further queued data. The no-argument form
-  returns the installed prefix. Supply `{}` to cancel pending notifications.
-  A handler error disables its registration and goes through Tcl's
-  background error handling.
-- `$socket close` cancels pending callbacks and releases the socket.
-  Deleting its command or interpreter does the same. A callback can close
-  its own socket. Windows errors raise `MACHTELD UDP oserror number`.
-
-```tcl
-package require machteld::network 1.0
-set socket [::machteld::network::udp open 127.0.0.1 0]
-$socket readable [list apply {{s} {
-    set packet [$s receive]
-    puts [list [dict get $packet address] [dict get $packet port] [dict get $packet bytes]]
-    $s close
-    set ::done 1
-}}]
-$socket send 127.0.0.1 [dict get [$socket local] port] [binary decode hex 00ff]
-vwait ::done
-```
+`::machteld::network::udp open address port` returns a datagram socket.
+Use its `readable` callback to receive data in the Tcl event loop and `close`
+to release it. Retrieve `machteld/package/network` for the socket methods,
+payload limits and a binary loopback example.
 
 ### Authenticated network time
 
-`::machteld::network::nts sample hostname ?-port port? ?-timeout ms?
-?-trustroot derBytes?` obtains one authenticated Network Time Security
-sample. The host name selects the TLS key-exchange server. Port defaults
-to 4460. The deadline covers resolution, TLS, key negotiation and the UDP
-exchange. It defaults to 5,000 ms and accepts 1 through 120,000 ms.
-
-The result contains `unixms`, the estimated UTC Unix time in milliseconds
-at receipt, `rttms`, the measured UDP round-trip time, and the authenticated
-server's `stratum`. Machteld converts the server's NTP time to the era
-nearest the local date. That calculation assumes the local clock is within
-68 years of the server. The application decides how to use the sample and
-when to request another one.
-
-Windows Schannel verifies the server's certificate and name. An optional
-`-trustroot` supplies one DER-encoded CA certificate as the exclusive root
-for that request. It is useful for private time services. Peer checks still
-include the certificate's validity, server authentication usage and name.
-NTS requires TLS 1.3, ALPN `ntske/1`, NTPv4 and AES-SIV-CMAC-256. A sample
-requires a response authenticated under the negotiated server key, bound to
-the request identifier and origin timestamp, from a synchronized server.
-Each request performs fresh key establishment and releases its session keys
-and cookies when it finishes. The client accepts up to 16 KiB of key-exchange
-records, 2 KiB per cookie and an 8 KiB UDP reply. There are no automatic retries.
-
-`::machteld::network::nts start hostname ?options?` starts the same
-exchange asynchronously and returns a request command. `$request status`
-returns `pending`, `ok`, `error`, `timeout` or `cancelled`. `$request result`
-retrieves the result immediately. `$request wait` waits for a terminal state,
-bounded by the original deadline. `$request cancel` cancels a pending request.
-`$request close` releases the command, cancelling unfinished work. Renaming
-the command to the empty string or deleting its interpreter also releases it.
-Tk programs can poll `status` with `after` while their window handles input.
-
-On timeout, cancellation or a premature result lookup, the error code is
-`MACHTELD NTS timeout`, `MACHTELD NTS cancelled` or `MACHTELD NTS pending`.
-Transport, certificate, protocol and authentication failures report
-`MACHTELD NTS failed stage code`. A successful sample contains no key or
-cookie material. The public API only reads the system clock.
+`::machteld::network::nts sample hostname` returns an authenticated time
+sample. The `start` form provides a cancellable request for event-driven
+applications. `machteld/package/network` documents result fields, certificate
+validation and errors.
 
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
