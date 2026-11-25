@@ -386,9 +386,13 @@ proc ::machteld::devcache::publish_cache {candidate output} {
     replace $candidate $output {^\.machteld-cache-[0-9a-f]{32}}
 }
 
-proc ::machteld::devcache::record {path key outputs} {
+proc ::machteld::devcache::record {path key outputs {save ::machteld::devcache::write_record}} {
     foreach output $outputs { if {![file exists $output]} { error "cannot record absent output: $output" } }
     set data [dict create schema 1 input $key outputs $outputs output [fingerprint [output_spec $outputs]]]
+    {*}$save $path $data
+}
+
+proc ::machteld::devcache::write_record {path data} {
     set fresh [cache_candidate $path]
     try {
         set ch [open $fresh {WRONLY CREAT EXCL}]
@@ -400,7 +404,7 @@ proc ::machteld::devcache::record {path key outputs} {
 
 # commandPrefix is invoked with an ABSENT candidate appended. Publication is
 # after successful generation and a second content check of all direct inputs.
-proc ::machteld::devcache::ensure {recordPath spec output commandPrefix} {
+proc ::machteld::devcache::ensure {recordPath spec output commandPrefix {save ::machteld::devcache::write_record}} {
     set key [fingerprint $spec]
     if {[current $recordPath $key [list $output]]} { return 0 }
     set executable [expr {[string equal -nocase [file extension $output] .exe]}]
@@ -410,7 +414,7 @@ proc ::machteld::devcache::ensure {recordPath spec output commandPrefix} {
         if {![file isfile $fresh]} { error "development stage produced no output: $fresh" }
         if {$key ne [fingerprint $spec]} { error "development inputs changed during stage; previous output preserved" }
         if {$executable} { publish $fresh $output } else { publish_cache $fresh $output }
-        record $recordPath $key [list $output]
+        record $recordPath $key [list $output] $save
     } finally { if {[file exists $fresh]} { file delete $fresh } }
     return 1
 }

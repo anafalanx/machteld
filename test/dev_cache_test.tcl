@@ -751,6 +751,7 @@ try {
         interp alias $startup edit_verified_header {} write_bytes $input edited-after-verification
         interp eval $startup {
             proc run args {edit_verified_header}
+            rename cc retained_cc
             proc cc args {error "fixture reached compilation"}
         }
         set stopped [catch {interp eval $startup dev_build_unlocked} message]
@@ -776,6 +777,46 @@ try {
         }
         check {restoring loaded recipe bytes restores verification} \
             [expr {![catch {interp eval $startup verify_loaded_recipes}]}]
+
+        # A compiler may already have produced an object with a changed
+        # header when the build is rejected. Restoring the original header
+        # must not turn those bytes into a cache hit on the next build.
+        interp alias $startup write_bytes {} write_bytes
+        interp alias $startup read_bytes {} read_bytes
+        interp eval $startup {
+            rename cc {}
+            rename retained_cc cc
+            set header [file join $OBJ restored.h]
+            set source [file join $OBJ uses-header.c]
+            set object [file join $OBJ uses-header.o]
+            write_bytes $header original
+            write_bytes $source fixture
+            set headerSpec [dict create files [list $header]]
+            proc dev_build_unlocked {forceRef} {
+                set ::HEADERS_KEY [::machteld::devcache::fingerprint $::headerSpec]
+                set ::didCompile [cc $::object $::source {} fixture]
+                ::machteld::devcache::verify_guard $::HEADERS_KEY [list set ::headerSpec]
+            }
+            proc compile_candidate {src flags label candidate} {
+                if {$::duringCompile} {write_bytes $::header changed}
+                write_bytes $candidate [read_bytes $::header]
+            }
+            set duringCompile 1
+        }
+        set rejected [catch {interp eval $startup dev_build} message]
+        check {a late shared-header change rejects the build after compiling its object} \
+            [expr {$rejected && [string match {*development inputs changed*} $message] &&
+                [interp eval $startup {read_bytes $object}] eq "changed"}] $message
+        interp eval $startup {
+            write_bytes $header original
+            set duringCompile 0
+            dev_build
+        }
+        check {restored header rebuilds the object produced by the rejected build} \
+            [interp eval $startup {expr {$didCompile && [read_bytes $object] eq "original"}}]
+        interp eval $startup dev_build
+        check {the next unchanged build reuses the verified object} \
+            [interp eval $startup {expr {!$didCompile && [read_bytes $object] eq "original"}}]
     } finally {
         interp delete $startup
         foreach name $startupEnvNames {

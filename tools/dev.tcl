@@ -120,6 +120,12 @@ proc compile_candidate {src flags label candidate} {
     }
 }
 
+# The .verified.record suffix leaves older, immediately written records
+# ineligible for use after upgrading.
+proc remember_record {path data} {
+    dict set ::PENDING_RECORDS $path $data
+}
+
 proc cc {obj src flags label {shared 1}} {
     set spec [dict create files [list $src [Rp tools buildlib.tcl]] \
         values [list flags $flags toolchain $::TOOLCHAIN_KEY dependencies $::DEPS_KEY environment $::BUILD_ENV]]
@@ -128,7 +134,8 @@ proc cc {obj src flags label {shared 1}} {
     } else {
         dict set spec trees [list [file dirname $src]]
     }
-    return [::machteld::devcache::ensure $obj.record $spec $obj [list compile_candidate $src $flags $label]]
+    return [::machteld::devcache::ensure $obj.verified.record $spec $obj \
+        [list compile_candidate $src $flags $label] remember_record]
 }
 
 proc resource_candidate {candidate} {
@@ -142,7 +149,7 @@ proc resource_candidate {candidate} {
 proc version_resource {obj} {
     set spec [dict create files [list [Rp src machteld.h] [Rp src machteld.manifest] [Rp tools generate-version-resource.tcl] \
         [Rp tools buildlib.tcl] $::TCLSH] values [list $::TOOLCHAIN_KEY $::BUILD_ENV]]
-    return [::machteld::devcache::ensure $obj.record $spec $obj resource_candidate]
+    return [::machteld::devcache::ensure $obj.verified.record $spec $obj resource_candidate remember_record]
 }
 
 proc link_candidate {main resource objects sqlite yyjson candidate} {
@@ -195,7 +202,20 @@ proc dev_build {{forceRef 0}} {
     if {[catch {::machteld::devcache::lock $lock} reason]} {
         error "development cache is in use by another build: $reason"
     }
-    try { dev_build_unlocked $forceRef } finally { catch {::machteld::devcache::unlock $lock} }
+    # Intermediate stages reuse shared input snapshots. Their output bytes
+    # may be complete even when a later guard rejects the build. Keep their
+    # record data in memory until that guard passes, including the digest at
+    # stage completion. An interrupted build cannot create a trusted record.
+    set ::PENDING_RECORDS {}
+    try {
+        dev_build_unlocked $forceRef
+        dict for {path data} $::PENDING_RECORDS {
+            ::machteld::devcache::write_record $path $data
+        }
+    } finally {
+        unset ::PENDING_RECORDS
+        catch {::machteld::devcache::unlock $lock}
+    }
 }
 
 proc dev_build_unlocked {{forceRef 0}} {
@@ -246,14 +266,15 @@ proc dev_build_unlocked {{forceRef 0}} {
     set inputs [list $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
     foreach name {tcllib tklib tclstub cffilib ffilib graphvizlib} { lappend inputs [dict get $::PATHS $name] }
     set spec [dict create files $inputs values [list console $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
-    ::machteld::devcache::ensure $bare.record $spec $bare [list link_candidate $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj]
+    ::machteld::devcache::ensure $bare.verified.record $spec $bare \
+        [list link_candidate $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj] remember_record
 
     # Manifest + prelude: unchanged builds invoke neither generator.
     set staged [file join $::OBJ prelude.tcl]
     set inputs [list $::TCLSH [Rp tools genmanifest.tcl] [Rp tools manifest_spec.tcl] [Rp tools buildlib.tcl]]
     foreach name $::machteld::build::PRELUDE_PARTS { lappend inputs [Rp tcl $name] }
     set spec [dict create files $inputs trees [list [Rp src]]]
-    ::machteld::devcache::ensure $staged.record $spec $staged prelude_candidate
+    ::machteld::devcache::ensure $staged.verified.record $spec $staged prelude_candidate remember_record
 
     set ::REF [::machteld::devcache::immutable [file join $::DEV reference.record] \
         [::machteld::devcache::reference_spec $::ROOT $::CACHE $::TCLSH] \
