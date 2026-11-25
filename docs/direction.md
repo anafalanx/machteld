@@ -24,8 +24,8 @@ policy, or command names is not runtime work.
 
 Current decisions:
 
-- A direct program file beginning with parsed `package require machteld` is the
-  only general program entry; `.tcl` is conventional, not required.
+- Programs begin with a parsed `package require machteld`. The full host runs
+  direct Tcl files and the root `main.tcl` of a `.machteld` application archive.
 - `wrap` is subordinate deployment machinery and accepts the same opt-in.
 - Every full or wrapped host exposes one Machteld version and the same palette,
   including static SQLite `store`. The distribution includes the complete
@@ -50,9 +50,9 @@ the engine-bound column library were removed. They leave no compatibility
 command or migration layer. The current work is machteld 22, which contains the
 0.22 candidate's stabilization and is not yet released or signed; from 22 on the
 version is one natural number, and only a change to the runtime makes a new
-one. Explicit wrapper inventories and native hardening must not be attributed
-retroactively to the historical signed artifact. The [roadmap](roadmap.md)
-records the decision to retire wrapping and share one runtime across apps.
+one. The 0.22 source includes explicit wrapper inventories, optional Windows
+metadata and icons for wrapped applications, and native hardening. The
+[roadmap](roadmap.md) schedules wrapper retirement for 0.30.
 Acceptance of 22 is current work. Signing and publication require a separate
 decision.
 

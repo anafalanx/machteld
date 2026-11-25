@@ -42,6 +42,12 @@ foreach component [list $version 0 0 0] {
     lappend numeric $number
 }
 set fixed [join $numeric ,]
+set flags 0
+set milestone {}
+if {[regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text -> beta]} {
+    set flags 2
+    set milestone [list Comments "Machteld $version Beta $beta"]
+}
 
 if {$kind eq "console"} {
     set description "machteld runtime"
@@ -61,7 +67,7 @@ try {
     puts $channel " FILEVERSION $fixed"
     puts $channel " PRODUCTVERSION $fixed"
     puts $channel { FILEFLAGSMASK 0x3fL}
-    puts $channel { FILEFLAGS 0x0L}
+    puts $channel [format { FILEFLAGS 0x%xL} $flags]
     puts $channel { FILEOS 0x00040004L}
     puts $channel { FILETYPE 0x1L}
     puts $channel { FILESUBTYPE 0x0L}
@@ -79,7 +85,7 @@ try {
             LegalCopyright "Copyright 2026 Vincent Vercauteren" \
             OriginalFilename $originalFilename \
             ProductName Machteld \
-            ProductVersion $version] {
+            ProductVersion $version {*}$milestone] {
         puts $channel "            VALUE \"$name\", \"$value\\0\""
     }
     puts $channel {        END}

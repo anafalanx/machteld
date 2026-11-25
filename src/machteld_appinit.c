@@ -8,7 +8,9 @@
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
 
 #ifdef MACHTELD_STATIC_SQLITE
+#include "sqlite3.h"
 extern int Machteldstore_Init(Tcl_Interp *interp); /* src/store.c */
+extern int Sqlite3_Init(Tcl_Interp *interp);      /* SQLite's Tcl binding */
 #endif
 #ifdef MACHTELD_PROC
 extern int Machteldproc_Init(Tcl_Interp *interp); /* src/proc.c */
@@ -29,6 +31,9 @@ extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
 extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
 #endif
 extern int Machteldpublish_Init(Tcl_Interp *interp); /* src/publish.c */
+extern int Machteldlock_Init(Tcl_Interp *interp); /* src/lock.c */
+extern int Machteldclipboard_Init(Tcl_Interp *interp); /* src/clipboard.c */
+extern int Machteldresource_Init(Tcl_Interp *interp); /* src/resource.c */
 
 static void
 payload_root_delete(void *client_data, Tcl_Interp *interp)
@@ -238,11 +243,17 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     }
 
 #ifdef MACHTELD_STATIC_SQLITE
-    /* Purpose-built SQLite bridge; no generic sqlite command or loadable DLL. */
     if (Machteldstore_Init(interp) == TCL_ERROR) {
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldstore", Machteldstore_Init, NULL);
+    /* A NULL interpreter registers the binding without marking it loaded.
+     * Its sqlite3 command is created when the program requires the package. */
+    Tcl_StaticLibrary(NULL, "Sqlite3", Sqlite3_Init, NULL);
+    if (Tcl_EvalEx(interp, "package ifneeded sqlite3 " SQLITE_VERSION
+                            " {load {} Sqlite3}", -1, TCL_EVAL_GLOBAL) != TCL_OK) {
+        return TCL_ERROR;
+    }
 #endif
 
 #ifdef MACHTELD_PROC
@@ -295,6 +306,18 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldpublish", Machteldpublish_Init, NULL);
+    if (Machteldlock_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldlock", Machteldlock_Init, NULL);
+    if (Machteldclipboard_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldclipboard", Machteldclipboard_Init, NULL);
+    if (Machteldresource_Init(interp) == TCL_ERROR) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldresource", Machteldresource_Init, NULL);
 
     /* The prelude registers `package require Tk` against the statically
      * linked Tk. It reads the library's own patch level from this variable,

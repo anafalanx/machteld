@@ -1,0 +1,57 @@
+name: Background job on Windows
+
+on:
+  push:
+    branches:
+      - dev/22-background-job
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Source package on signed Machteld 0.21
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the pinned build runtime
+        id: runtime
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'machteld.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $runtime
+          $expected = '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7'
+          $actual = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Runtime SHA-256 mismatch: $actual" }
+          Write-Host "Machteld 0.21 SHA-256 $actual"
+
+      - name: Exercise the background-job source package
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld.exe" test\job_test.tcl --source-package
+          exit $LASTEXITCODE
+
+      - name: Exercise the project inspector model and event-loop fairness
+        if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld.exe" test\gui_model_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Exercise keyboard input, cancellation and rendering in Tk
+        if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld.exe" test\gui_widget_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Verify background job discovery in a packaged image
+        if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\machteld.exe" test\package_test.tcl --build-runtime
+          exit $LASTEXITCODE

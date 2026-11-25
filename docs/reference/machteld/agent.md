@@ -85,8 +85,9 @@ Operational rules:
 
 The upstream Tcl/Tk `application` pages document upstream `tclsh` and `wish`
 hosts. They are language-distribution reference, not Machteld host-option
-promises. For program entry, `--docs`, wrapping, and reserved host routes, use
-the Machteld command and packaging references.
+promises. The full Machteld host can run a Tcl file, run a `.machteld` archive,
+or create one with `machteld.exe pack INPUT -o OUTPUT.machteld`. See
+`machteld/guide/packaging` for the entry layout, argument handling and wrapping.
 
 ## When the palette is not enough
 

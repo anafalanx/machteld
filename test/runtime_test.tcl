@@ -32,7 +32,7 @@ if {![regexp -line {^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"} $headerText -
     error "src/machteld.h has no canonical MACHTELD_VERSION"
 }
 
-set expected {canon child cli detach dirs docs hash help http json links log manifest mtps pmap pool pty run scope store version wait watch worker wrap}
+set expected {app canon child cli clipboard detach dirs docs hash help http json links lock log manifest mtps pmap pool pty publish run scope store version wait watch worker wrap}
 check "package version matches machteld.h" [expr {[package require machteld] eq $expectedVersion}]
 # The version is one natural number, which Tcl reads as a major version: a
 # floor accepts this runtime and every later one, and an upper bound, which
@@ -49,6 +49,18 @@ check "manifest exposes the compact runtime surface" [expr {
 check "retired macht command is absent" [expr {
     [info commands ::machteld::macht] eq "" && ![dict exists [manifest] macht]}]
 set metadata [manifest]
+set missing {}
+foreach verb $expected {
+    if {$verb ne "clipboard" && [namespace which -command $verb] eq {}} { lappend missing $verb }
+}
+check "all public bare commands resolve before Tk loads and clipboard requires qualification" [expr {
+    $missing eq {} && [package provide Tk] eq {} && [namespace which -command clipboard] eq {} &&
+    [dict get $metadata clipboard qualified_only] && [string is boolean -strict [::machteld::clipboard owned]]}]
+check "manifest distinguishes launch-window and presentation options" [expr {
+    "-window" in [dict get $metadata child subcommands start options] &&
+    "-class" ni [dict get $metadata child subcommands start options] &&
+    [dict get $metadata child subcommands present options] eq {-class} &&
+    [dict get $metadata child subcommands present returns] eq {cloaked foreground iconic onScreen status visible}}]
 check "wrap manifest advertises explicit documentation opt-in" [expr {
     [dict get $metadata wrap options] eq {--console --entry --gui --manifest --plan --with-docs -o}}]
 set pty_map [namespace ensemble configure ::machteld::pty -map]

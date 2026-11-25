@@ -5,11 +5,9 @@ progress, bounded diagnostics, cancellation, and recovery after an error. It
 inspects one directory, not a recursive project database, and never executes
 commands found in the selected directory or changes its files.
 
-Use the current executable in `out/`, machteld 22 in preparation, not the older
-signed `dist/0.21` artifact. It reports runtime version `22`; the manifest-
-selected packaging shown here is unavailable in the older release. Build it
-using the repository README before running this example; acceptance of 22 is
-still in progress.
+The commands use the release gate's `out/machteld.exe`. After an incremental
+build, use `out/dev/machteld.exe` in its place. Both report runtime version
+`22` and support the wrap manifest and application metadata shown here.
 
 From the repository root in PowerShell:
 
@@ -30,8 +28,9 @@ the error and retained log tail, independently of text selection.
 
 ## Pattern and limits
 
-- `model.tcl` has no Tk dependency. Its `Job` owns one supervised child and all
-  its channels/timers. A repeated start while running is rejected, never queued.
+- `model.tcl` interprets progress, rows and completion records. It uses the
+  `machteld::job` Tcl package to own the child, drain its channels and cancel
+  its timers. Both run headlessly. A repeated start while running returns 0.
 - `inspect.tcl` performs filesystem work in that child. stdout carries strict
   UTF-8 JSON lines; stderr carries diagnostics. The GUI drains both streams.
 - `view.tcl` contains widgets and bindings. It coalesces model notifications into
@@ -45,25 +44,36 @@ the error and retained log tail, independently of text selection.
   memory limit (`-mem 128M`), not a cap on the GUI's heap or total process-tree
   RSS. Directory enumeration itself occurs there and can fail on
   inaccessible, disappearing, very large, or slow directories. The GUI reports
-  that failure and remains usable. These limits are application choices, not
-  new runtime defaults.
+  that failure and remains usable. The inspector uses the job package's
+  defaults for both child limits.
 - Generation checks reject stale callbacks. Cancel/close remove channel
   handlers, cancel timers, and release the child token. A failed observer stops
   the child and leaves an error in the model snapshot, without recursively
   calling the failed observer.
 
-`launch.tcl` owns the entry roles. A source launch starts
-`machteld.exe main.tcl --worker ...`; a wrapped launch starts its own executable
-with `--worker ...`. The child never opens the view or recursively launches the
-GUI. Both routes use the same controller and protocol. Supervision is lifetime
+`launch.tcl` owns the entry roles. It appends `--worker` to the command prefix
+from `app launch` in all three deployment forms. An archive worker uses the
+version already open in the controller, even after an update. Each child
+enters the same headless controller. Supervision is lifetime
 ownership, not an authority sandbox: the trusted child retains the user's
 filesystem permissions. Cancellation stops its work but is not a general
 rollback mechanism; this particular worker is deliberately read-only.
 
+## Run as an application archive
+
+From the repository root, pack the example and run its headless inspection
+against a local directory.
+
+```powershell
+.\out\machteld.exe pack .\examples\project-inspector -o .\out\inspector.machteld
+.\out\machteld.exe .\out\inspector.machteld --headless .\examples
+```
+
 ## Package deliberately
 
 Use a new dedicated stage containing only the five listed payload files. The
-manifest is inert data outside that stage; it selects exactly those files.
+manifest is inert data outside that stage; it selects those files and declares
+the application's Windows identity independently from the Machteld runtime.
 The README, test scripts, and manifest itself are not executable payloads.
 
 ```powershell
@@ -80,7 +90,7 @@ if it already exists; do not blindly delete or wrap the whole repository. Use
 `--console` instead for a console-subsystem executable. Reference documentation
 is omitted by default; explicitly add `--with-docs` to both commands if wanted.
 The executable is the complete Inspector deployment: no adjacent worker scripts
-or DLLs are required. It keeps the GUI host's Windows identity.
+or DLLs are required. Application metadata is not an Authenticode signature.
 
 For automation without opening any window:
 

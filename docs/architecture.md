@@ -16,14 +16,16 @@ The product has three layers:
    `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs`, `help`,
    and `wrap`, then provides package `machteld 22`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
-   `argv` and resolves palette commands through `::machteld` on the global
-   namespace path.
+   `argv` and resolves the public short names through `::machteld::palette`
+   on the global namespace path. Clipboard ownership is queried through the
+   fully qualified `::machteld::clipboard` command.
 
 Startup registers the native commands, loads the embedded prelude, and applies
 the entry gate before Tcl evaluates a program. The gate parses the first command
 without evaluating it. Interactive startup is still available when no file is
-selected; `--help`, `--version`, `--docs`, and the subordinate `wrap` route are
-handled by the host.
+selected; `--help`, `--version`, `--docs`, `pack`, and `wrap` are handled by the host.
+The full host mounts a `.machteld` application ZIP read-only and applies the
+same entry gate to its root `main.tcl`.
 
 For a native startup file, the host captures the file once, checks that decoded
 value, and evaluates the same value; a second path read cannot substitute a
@@ -73,11 +75,11 @@ and signature separately. `version` continues to report the runtime API version.
 
 Wrapped applications additionally carry an inert `app-info.dict`. It describes
 the selected application files and their hashes, host kind, reference choice,
-and the runtime that wrapped them. `wrap --plan` returns that record before
-packaging. A wrapped tool keeps its basekit's Windows resources (application
-identity is not part of 22); the completed payload is checked before atomic
-publication. Neither this record nor VERSIONINFO is a signature or an
-authority boundary.
+and explicit application metadata, separately from the runtime identity.
+`wrap --plan` returns that record before packaging. Optional Windows resources
+are stamped on a disposable bare-host copy before the ZIP payload is attached;
+the completed payload is checked before atomic publication. Neither this record
+nor VERSIONINFO is a signature or an authority boundary.
 
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`

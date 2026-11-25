@@ -58,6 +58,9 @@ entry_detail_error(Tcl_Interp *interp, const char *code, const char *message)
     return TCL_ERROR;
 }
 
+static int decode_startup(Tcl_Interp *interp, const unsigned char *bytes,
+                          size_t byte_count, Tcl_Obj **script_out);
+
 /* Read a native startup file once while writers and renames are excluded.
  * Validation and evaluation then consume the same decoded value. */
 static int
@@ -145,6 +148,16 @@ capture_native_startup(Tcl_Interp *interp, Tcl_Obj *path,
             "cannot close the captured startup program", error);
     }
 
+    int status = decode_startup(interp, bytes, byte_count, script_out);
+    free(bytes);
+    return status;
+}
+
+/* Bare and archived entries use the same UTF-8 and Tcl source rules. */
+static int
+decode_startup(Tcl_Interp *interp, const unsigned char *bytes,
+               size_t byte_count, Tcl_Obj **script_out)
+{
     /* Tcl's source contract ignores a UTF-8 BOM and treats ^Z as EOF. */
     for (size_t i = 0; i < byte_count; i++) {
         if (bytes[i] == 0x1a) {
@@ -157,7 +170,6 @@ capture_native_startup(Tcl_Interp *interp, Tcl_Obj *path,
 
     Tcl_Encoding encoding = Tcl_GetEncoding(interp, "utf-8");
     if (encoding == NULL) {
-        free(bytes);
         return entry_detail_error(interp, "encoding",
             "cannot load the UTF-8 decoder for the startup program");
     }
@@ -169,7 +181,6 @@ capture_native_startup(Tcl_Interp *interp, Tcl_Obj *path,
         TCL_ENCODING_START | TCL_ENCODING_END | TCL_ENCODING_PROFILE_STRICT,
         &decoded, &error_location);
     Tcl_FreeEncoding(encoding);
-    free(bytes);
     if (status != TCL_OK) {
         Tcl_DStringFree(&decoded);
         return entry_detail_error(interp, "encoding",
@@ -295,7 +306,8 @@ validate_file(Tcl_Interp *interp, Tcl_Obj *path)
         Tcl_SetErrorCode(interp, "MACHTELD", "ENTRY", "notfound", NULL);
         return TCL_ERROR;
     }
-    if (Tcl_SetChannelOption(interp, channel, "-encoding", "utf-8") != TCL_OK) {
+    if (Tcl_SetChannelOption(interp, channel, "-encoding", "utf-8") != TCL_OK ||
+            Tcl_SetChannelOption(interp, channel, "-profile", "strict") != TCL_OK) {
         Tcl_Close(NULL, channel);
         return TCL_ERROR;
     }
@@ -307,8 +319,13 @@ validate_file(Tcl_Interp *interp, Tcl_Obj *path)
     Tcl_Obj *script = Tcl_NewObj();
     Tcl_IncrRefCount(script);
     Tcl_Size count = Tcl_ReadChars(channel, script, -1, 0);
-    int close_status = Tcl_Close(interp, channel);
-    if (count < 0 || close_status != TCL_OK) {
+    if (count < 0) {
+        Tcl_Close(NULL, channel);
+        Tcl_DecrRefCount(script);
+        return entry_detail_error(interp, "encoding",
+            "cannot read the startup program as UTF-8");
+    }
+    if (Tcl_Close(interp, channel) != TCL_OK) {
         Tcl_DecrRefCount(script);
         return TCL_ERROR;
     }
@@ -499,10 +516,75 @@ startup_path_is_regular_file(Tcl_Obj *path)
     return Tcl_FSStat(path, &info) == 0 && S_ISREG(info.st_mode);
 }
 
+/* argv0 continues to identify the public archive even when this launch
+ * attached to an older generation after the published path was replaced. */
+static int
+select_archive_entry(Tcl_Interp *interp, Tcl_Obj *archive, Tcl_Obj *prefix)
+{
+    Tcl_Obj *path;
+    if (host_mode == MACHTELD_HOST_GENERATION) {
+        Tcl_Obj *args = Tcl_GetVar2Ex(interp, "argv", NULL, TCL_GLOBAL_ONLY);
+        Tcl_Obj **words;
+        Tcl_Size count;
+        if (args == NULL || Tcl_ListObjGetElements(interp, args, &count, &words) != TCL_OK ||
+                count < 2 || Tcl_FSGetPathType(words[0]) != TCL_PATH_ABSOLUTE) {
+            return Machteld_EntryError(interp, "usage", "invalid application generation arguments");
+        }
+        path = words[0];
+        if (Machteld_MountApp(interp, path, words[1], prefix) != TCL_OK) return TCL_ERROR;
+        /* prefix now retains path independently of the old argv list. */
+        Tcl_Obj *tail = Tcl_NewListObj(count - 2, words + 2);
+        if (!Tcl_SetVar2Ex(interp, "argv", NULL, tail, TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) ||
+                !Tcl_SetVar2Ex(interp, "argc", NULL, Tcl_NewWideIntObj(count - 2),
+                    TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) return TCL_ERROR;
+    } else {
+        path = Tcl_FSGetNormalizedPath(interp, archive);
+        if (path == NULL || Tcl_FSGetNativePath(path) == NULL || !startup_path_is_regular_file(path)) {
+            return Machteld_EntryError(interp, "notfound", "the .machteld archive must be a file on disk");
+        }
+        if (Machteld_MountApp(interp, path, NULL, prefix) != TCL_OK) return TCL_ERROR;
+    }
+    if (Tcl_SetVar2Ex(interp, "argv0", NULL, path,
+                TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL ||
+            Tcl_SetVar2Ex(interp, "::tcl::zipfs::wrmax", NULL,
+                Tcl_NewIntObj(0), TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
+        return TCL_ERROR;
+    }
+    Tcl_SetStartupScript(Tcl_NewStringObj("//zipfs:/machteld-app/main.tcl", -1), "utf-8");
+    return TCL_OK;
+}
+
+static int
+capture_archive_entry(Tcl_Interp *interp, Tcl_Obj *entry, Tcl_Obj **script_out)
+{
+    if (!startup_path_is_regular_file(entry)) {
+        return Machteld_EntryError(interp, "notfound",
+            "the .machteld archive needs a main.tcl file at its root");
+    }
+    Tcl_Channel channel = Tcl_FSOpenFileChannel(interp, entry, "rb", 0);
+    if (channel == NULL) {
+        return entry_detail_error(interp, "oserror", "cannot open archived main.tcl");
+    }
+    Tcl_Obj *contents = Tcl_NewObj();
+    Tcl_IncrRefCount(contents);
+    Tcl_Size count = Tcl_ReadChars(channel, contents, TCL_INDEX_NONE, 0);
+    int status = Tcl_Close(interp, channel);
+    if (count < 0 || status != TCL_OK) {
+        status = Machteld_EntryError(interp, "oserror", "cannot read archived main.tcl");
+    } else {
+        Tcl_Size length;
+        const unsigned char *bytes = Tcl_GetBytesFromObj(interp, contents, &length);
+        status = bytes == NULL ? TCL_ERROR :
+            decode_startup(interp, bytes, (size_t)length, script_out);
+    }
+    Tcl_DecrRefCount(contents);
+    return status;
+}
+
 int
 Machteld_EntryGate(Tcl_Interp *interp)
 {
-    /* `wrap` calls the same parser used by direct startup.  Keeping this as a
+    /* The packers call the same parser used by direct startup. Keeping this as a
      * private, capitalized command avoids a second grammar-sensitive checker. */
     if (Tcl_CreateObjCommand(interp, "::machteld::EntryCheck", EntryCheckCmd,
             NULL, NULL) == NULL) {
@@ -558,6 +640,10 @@ Machteld_EntryGate(Tcl_Interp *interp)
             !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::wrap", 1);
     }
+    if (strcmp(selected, "pack") == 0 &&
+            !startup_path_is_regular_file(startup)) {
+        dispatch_command(interp, "::machteld::PackArchive", 1);
+    }
     /* `machteld docs ...` is the readable counterpart of the reserved
      * `--docs` route.  As with `wrap`, a real program file named docs wins. */
     if (strcmp(selected, "docs") == 0 &&
@@ -572,9 +658,33 @@ Machteld_EntryGate(Tcl_Interp *interp)
     }
 
     Tcl_Obj *captured = NULL;
-    if (capture_native_startup(interp, startup, &captured) != TCL_OK) {
+    const char *extension = strrchr(selected, '.');
+    Tcl_Obj *exe = Tcl_NewStringObj(Tcl_GetNameOfExecutable(), -1);
+    Tcl_Obj *prefix = Tcl_NewListObj(1, &exe);
+    Tcl_IncrRefCount(prefix);
+    if (host_mode == MACHTELD_HOST_GENERATION ||
+            (extension != NULL && _stricmp(extension, ".machteld") == 0)) {
+        if (select_archive_entry(interp, startup, prefix) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+        startup = Tcl_GetStartupScript(NULL);
+        if (capture_archive_entry(interp, startup, &captured) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+    } else if (capture_native_startup(interp, startup, &captured) != TCL_OK) {
         Machteld_Fatal(interp);
     }
+    if (captured != NULL && Tcl_FSGetNativePath(startup) != NULL) {
+        Tcl_Obj *absolute = Tcl_FSGetNormalizedPath(interp, startup);
+        if (absolute == NULL || Tcl_ListObjAppendElement(interp, prefix, absolute) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+    }
+    if (!Tcl_SetVar2Ex(interp, "::machteld::launchPrefix", NULL, prefix,
+            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG)) {
+        Machteld_Fatal(interp);
+    }
+    Tcl_DecrRefCount(prefix);
     if (captured != NULL) {
         if (has_opt_in(interp, captured) != TCL_OK) {
             Tcl_DecrRefCount(captured);

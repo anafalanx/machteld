@@ -19,6 +19,10 @@ links root ?-depth nonnegativeInteger? ?-prune patterns? ?-hardlinks?
 `root`, `-depth`, and `-prune` follow the `dirs` contract. `-hardlinks` also
 opens ordinary files to report those whose hard-link count exceeds one.
 Name-surrogate reparse points are inventoried but never followed below the root.
+At depth `0`, root inspection uses metadata access and works when the root's
+ACL denies directory listing. A root junction appears in `links`. To check
+for every observed kind of root reparse tag, read the `links` decision rows
+from `dirs $root -depth 0`.
 
 ## Results
 

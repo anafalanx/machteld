@@ -1,10 +1,15 @@
 # Building machteld
 
-`machteld.exe` is built and signed on the build PC, the owner's machine with
-this repository at `C:\dev\machteld`. Unsigned builds run there only, and only
-for building and testing; every other machine runs signed releases only.
-Signing is the owner's step. Everything below runs from the repository root in
-PowerShell.
+The owner builds and signs releases on the build PC with the repository at
+`C:\dev\machteld`. Hosted Windows CI may build and run an unsigned candidate
+and its console and GUI wraps. Keep those executables inside the job. CI can
+publish test results and checksums. Run the commands below from the repository
+root in PowerShell.
+
+The Beta 1 run produced an unsigned test ZIP before this policy was adopted.
+Its Windows version information carried a prerelease flag and beta number.
+The CLI and Tcl package version for 0.22 are both `22`.
+[Beta 1 results and release checklist](docs/releases/0.22-beta.1.md)
 
 ## What the build stands on
 
@@ -19,8 +24,8 @@ PowerShell.
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
      `dev.tcl`, `reference.tcl` (the reference generator) and
      `native-analysis.tcl`, and the driver tests: entry, package and
-     publication, VERSIONINFO, reference generator and serializer, the
-     development cache and the gate's own;
+     publication, VERSIONINFO, wrapped application identity, reference
+     generator and serializer, the development cache and the gate's own;
    - the dependency cache's static Tcl, `.cache\deps\prefix\bin\tclsh90s.exe`,
      runs `tools\build.tcl`, which compiles, links and packages both hosts
      (with `buildlib.tcl`, `package.tcl`, `genmanifest.tcl` and
@@ -41,11 +46,10 @@ PowerShell.
    set `MSYS2_ROOT` for `tools\dev.tcl`. bash runs only inside MSYS2, for
    Tcl/Tk's configure and make.
 3. **The pinned sources:** Tcl/Tk 9.0.4, SQLite 3.53.4 and yyjson 0.12.0. The
-   bootstrap fetches a missing archive into `.cache\deps\downloads` with
-   Windows' own `curl.exe` and checks each by SHA-256; an archive already
-   there with the right hash is used as it is, so the build PC, whose
-   downloads folder holds all four, needs no network. Later builds reuse
-   `.cache\deps`.
+   bootstrap fetches the four source archives and the matching upstream
+   SQLite Tcl binding into `.cache\deps\downloads` with Windows' own
+   `curl.exe`. It verifies each file by SHA-256 and reuses matching cached
+   downloads. Later builds reuse `.cache\deps`.
 
 ## Build and test
 
@@ -73,9 +77,11 @@ PowerShell.
    - `--group NAME`, repeatable, runs just those groups and builds nothing,
      on `out\machteld.exe` or on `--runtime FILE`; the fast group needs no
      MSYS2.
-   - Off by default, and the owner's to run: `--public-tls` (it reaches public
-     hosts), `--interactive-pty` (console input and output) and
-     `--interactive-gui` (it opens windows).
+   - Optional lanes include `--public-tls` (public hosts),
+     `--interactive-pty` (console input and output) and
+     `--interactive-gui` (opens windows and compiles a Win32 window fixture).
+     The beta's disposable Windows runner also exercises clipboard ownership
+     while a second process uses the same clipboard.
 2. When the dependency cache is cold or invalidated, build it alone first; Tcl
    and Tk are configured and built in MSYS2's bash, which takes several
    minutes:
@@ -101,6 +107,17 @@ PowerShell.
 Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
+
+When preparing the final release commit, remove the `MACHTELD_BETA`
+definition from `src/machteld.h`. Before signing, make two independent
+clean builds of that commit, each with a fresh dependency cache. Give both
+builds the same locked inputs and `SOURCE_DATE_EPOCH`. The GitHub workflow
+uses the commit timestamp from `git show -s --format=%ct HEAD`.
+Verify the Windows file version is 22.0.0.0 and the prerelease flag is clear.
+The SHA-256 hashes of the two complete unsigned executables must match.
+Record the hashes, source commit, epoch and toolchain receipt. Compare the
+incremental build separately, accounting for its development-only
+`build-info.dict`.
 
 Run the runtime checks and packaged sample applications for 0.22. Automate
 repeatable GUI checks on an isolated desktop. Before release, verify

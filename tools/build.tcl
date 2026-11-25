@@ -67,6 +67,10 @@ set sqliteObj [file join $OBJDIR sqlite3.o]
 puts "cc   sqlite3.c (pinned amalgamation)"
 run $GCC {*}$::machteld::build::SQLITE_FLAGS \
     -c [file join [dict get $PATHS sqlite] sqlite3.c] -o $sqliteObj
+set bindingObj [file join $OBJDIR tclsqlite.o]
+puts "cc   tclsqlite.c (pinned SQLite Tcl binding)"
+run $GCC {*}[::machteld::build::sqlite_binding_flags $PATHS] \
+    -c [file join [dict get $PATHS sqlite] tclsqlite.c] -o $bindingObj
 set yyjsonObj [file join $OBJDIR yyjson.o]
 puts "cc   yyjson.c (pinned reader core)"
 run $GCC {*}$::machteld::build::YYJSON_FLAGS \
@@ -74,7 +78,7 @@ run $GCC {*}$::machteld::build::YYJSON_FLAGS \
 
 set consoleMain [Rp src machteld_main.c]
 set guiMain [Rp src machteld_gui_main.c]
-set objects {}
+set objects [list $bindingObj]
 foreach source [lsort [glob -directory [Rp src] *.c]] {
     if {$source eq $consoleMain || $source eq $guiMain} continue
     set object [file join $OBJDIR [file rootname [file tail $source]].o]

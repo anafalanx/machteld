@@ -18,8 +18,9 @@ Implemented and pinned dependencies (see `tools/dependencies.lock.json`):
   libraries and distribution notices.
 - Tcl's static core incorporates its bundled zlib 1.3.2 and LibTomMath 1.3.0;
   their exact upstream notices are pinned and shipped in every host.
-- The public-domain SQLite 3.53.4 amalgamation is statically linked behind
-  `store`, a key/value interface rather than a general SQL command.
+- The public-domain SQLite 3.53.4 amalgamation serves both the key/value
+  `store` command and the matching upstream Tcl `sqlite3` package. Both are
+  statically linked into every host.
 - MIT-licensed yyjson 0.12.0 is statically linked behind JSON decoding and typed
   values, including their writer; its notice is carried in every host. The
   plain-mode emitter remains authored Machteld code.
@@ -37,7 +38,7 @@ Admission policy, not additional bundled capabilities:
   cover the current palette's HTTP and terminal needs, but are not compatible
   replacements for those packages' APIs.
 
-An upstream library's vocabulary never becomes Machteld's contract. The palette
-is the compatibility boundary, and wrapped tools receive the same pinned runtime.
+The palette defines Machteld’s commands. The separate `sqlite3` package follows
+the upstream SQLite Tcl API. Wrapped tools receive the same pinned runtime.
 The selected application may bring additional explicitly deployed dependencies;
 the [external libraries guide](extensions.md) separates those from the built-ins.

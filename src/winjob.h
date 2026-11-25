@@ -111,6 +111,25 @@ int wj_job_allow_breakaway(wj_job *j, const char **err);
  * the process is in ANY job; useful for diagnosing born-in-job membership. */
 int wj_in_job(void *process_handle, void *job_handle);
 
+/* A job can be closed concurrently by its deadline monitor. Check membership
+ * while holding the job's handle lock, so a recycled handle cannot match. */
+int wj_job_contains(wj_job *job, void *process_handle);
+
+/* Per-child presentation history; windows and processes themselves remain
+ * owned by Windows. No handles escape to the Tcl caller. */
+typedef struct {
+    void *prepared_window;
+    unsigned long prepared_pid, prepared_tid;
+    int show_requested, placement_requested, attention_requested;
+} wj_presentation;
+
+typedef struct {
+    int visible, iconic, cloaked, on_screen, foreground;
+} wj_window_facts;
+
+int wj_present(wj_job *job, const wchar_t *window_class, wj_presentation *history,
+               wj_window_facts *facts, const char **err);
+
 /* ---- born-in-job launch (winjob_launch.c) ------------------------------ */
 
 /* The child's three standard handles. All must be non-NULL concrete handles;
@@ -121,6 +140,12 @@ typedef struct {
     void *err;
 } wj_stdio;
 
+typedef enum {
+    WJ_SUPERVISED,
+    WJ_NO_CONSOLE,
+    WJ_BREAKAWAY
+} wj_launch_mode;
+
 /* Launch exe as a child born into the given jobs (root-first) at CreateProcess
  * time -- before its first thread runs, so nothing it spawns escapes those jobs.
  * exe is a resolved path (no PATH search), absolute when dir is set; argv is what
@@ -130,12 +155,16 @@ typedef struct {
  * On success sets *pid and *proc (a process HANDLE the caller waits then closes)
  * and returns 0; on failure returns -1 and sets *err. env_block is a UTF-16
  * "K=V\0...\0\0" environment block, or NULL to inherit machteld's environment.
- * want_breakaway is the detach path: njobs must be zero, the process is created
- * suspended with CREATE_BREAKAWAY_FROM_JOB, verified to belong to no job, then
- * resumed. If an enclosing job retains it, launch fails before user code runs. */
+ * normal_window requests SW_SHOWNORMAL and grants foreground permission before
+ * the first thread runs. It is independent of console attachment.
+ * WJ_NO_CONSOLE starts the process without a console, with the same jobs and
+ * explicit standard handles. WJ_BREAKAWAY requires zero jobs. It creates the
+ * process suspended with CREATE_BREAKAWAY_FROM_JOB, verifies it belongs to no
+ * job, then resumes it. If an enclosing job retains it, launch fails before
+ * user code runs. */
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
-              int want_breakaway, void *env_block, int *pid, void **proc, const char **err);
+              wj_launch_mode mode, int normal_window, void *env_block, int *pid, void **proc, const char **err);
 
 /* ConPTY variant of wj_launch. The pseudoconsole supplies the child's stdio,
  * while the same born-in-job, UTF-8 conversion, custom environment, and safe

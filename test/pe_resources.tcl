@@ -4,8 +4,8 @@
 # type, then name, then language, to the data entry and its bytes; and parse
 # VS_VERSIONINFO's fixed part and its 040904B0 string table.
 #
-# Sourced by test/version_resource_test.tcl. Plain Tcl 9: no runtime command
-# is used.
+# Sourced by test/version_resource_test.tcl and test/app_identity_test.tcl.
+# Plain Tcl 9: no runtime command is used.
 
 namespace eval ::pe {}
 
@@ -138,6 +138,21 @@ proc ::pe::resource {data type {name ""} {language ""}} {
     set dataEntry [expr {$base + $target}]
     set at [offset $sections [u32 $data $dataEntry]]
     string range $data $at [expr {$at + [u32 $data [expr {$dataEntry + 4}]] - 1}]
+}
+
+# The names (ids) of every resource of one type, in directory order.
+proc ::pe::names {data type} {
+    set layout [layout $data]
+    if {$layout eq ""} {
+        return {}
+    }
+    lassign $layout base sections
+    foreach {id target} [entries $data $base $base] {
+        if {[same $id $type] && ($target & 0x80000000)} {
+            return [dict keys [entries $data $base [expr {$base + ($target & 0x7fffffff)}]]]
+        }
+    }
+    return {}
 }
 
 # The VS_VERSIONINFO block of a PE file: its first RT_VERSION resource.

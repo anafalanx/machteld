@@ -17,7 +17,7 @@ package require machteld 0.21
 #                        claims and their regressions, build identity, the
 #                        reference serializer, this gate's own test, and the
 #                        runtime lanes that need no fixture (filesystem,
-#                        runtime services, protocol, GUI model, embedded
+#                        runtime services, protocol, background jobs, app archives, GUI model, embedded
 #                        reference, README examples, JSONTestSuite, native
 #                        adversarial inputs and filesystem boundaries)
 #   integration          the C fixtures, the command-line golden vectors, the
@@ -25,7 +25,8 @@ package require machteld 0.21
 #                        streaming-bounds lanes
 #   packaging            the runtime's build identity, entry, package and
 #                        publication, VERSIONINFO, wrap and basekits, the README
-#                        examples wrapped, wrap inventory, the examples packaged
+#                        examples wrapped, wrap inventory, application identity,
+#                        the examples packaged
 #   native-validation    the candidate's group: native lifetime with the
 #                        telemetry probe; bounded worker scaling (every child
 #                        live and closed, 128 ordered pool replies and the
@@ -35,7 +36,8 @@ package require machteld 0.21
 #                        canary, each under a deadline: command line and its
 #                        allocation failures, Unicode, the JSON corpus and
 #                        adversarial inputs, the native filesystem and SQLite
-#                        boundaries, and the hash boundary; and last the
+#                        boundaries, the hash boundary, and the identity
+#                        primitives on the runtime's basekits; and last the
 #                        full harness of tools/native-analysis.tcl: GCC's
 #                        analyzer over src/*.c, the sanitizer probes, the
 #                        trapped drivers again, the Tk index formatter and
@@ -49,8 +51,8 @@ package require machteld 0.21
 #   --public-tls         (integration or release) the native lane's public TLS
 #                        checks, which reach the network
 #   --interactive-pty    (integration or release) the process lane's console I/O
-#   --interactive-gui    gui_widget_test, and the wrapped fixture's own window:
-#                        both open windows, so this is the owner's check only
+#   --interactive-gui    the Tk archive, GUI widgets, the SQLite lookup and the
+#                        wrapped fixture open windows, so this is the owner's check only
 #
 # The drivers run on the build runtime (this one), the lanes on the runtime
 # under test, the Tcl-only checks on the dependency cache's static tclsh. The
@@ -159,7 +161,8 @@ proc ::gate::needs {settings what} {
             expr {[dict get $settings gui] || [anyOf {fast integration packaging native-validation} $chosen]}
         }
         msys {
-            expr {[dict get $settings build] || [anyOf {integration packaging native-validation} $chosen]}
+            expr {[dict get $settings build] || [dict get $settings gui] ||
+                [anyOf {integration packaging native-validation} $chosen]}
         }
         tclsh {
             anyOf {fast packaging reference-generator} $chosen
@@ -222,6 +225,13 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast filesystem filesystem_test.tcl
                 addLane steps $runtime fast "runtime services" runtime_test.tcl
                 addLane steps $runtime fast protocol protocol_test.tcl
+                addLane steps $runtime fast "background jobs" job_test.tcl
+                addLane steps $runtime fast "Tcl scripts and app archives" archive_test.tcl
+                addLane steps $runtime fast "same-application workers and archive replacement" app_launch_test.tcl
+                addLane steps $runtime fast "atomic file publication" publish_test.tcl
+                addLane steps $runtime fast "cross-process file locks" lock_test.tcl
+                addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
+                addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl
@@ -260,6 +270,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging wrap/basekits wrap_test.tcl
                 addLane steps $runtime packaging "README examples wrapped" documentation_examples_test.tcl --packaging
                 addLane steps $runtime packaging "wrap inventory" wrap_inventory_test.tcl
+                addStep steps packaging "application identity" [list $driver [file join $test app_identity_test.tcl] $runtime]
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
             }
             native-validation {
@@ -272,7 +283,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
                 # Its checks gate; only its timings are observations.
                 addLane steps $runtime native-validation "native scaling" native_scaling_test.tcl $probe $processFixture
-                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out] {
+                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
                     addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
                 }
                 # The whole harness, as the candidate's group ran it: it runs
@@ -288,6 +299,12 @@ proc ::gate::plan {settings} {
         }
     }
     if {[dict get $settings gui]} {
+        set windowFixture [file join $out window_fixture.exe]
+        addStep steps interactive "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
+            [file join $test fixtures window_fixture.c] -luser32 -o $windowFixture]
+        addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
+        addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
+        addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
     }
     return $steps
@@ -399,8 +416,8 @@ proc ::gate::execute {step runtime identity} {
     puts "PASS $label ([seconds $started]s)"
 }
 
-# Copies files out of the runtime's own payload: the packaged console basekit,
-# which the entry test's payload refusal uses bare.
+# Copies files out of the runtime's own payload: the packaged basekits, which
+# the entry test's payload refusal and the trapped identity driver use bare.
 proc ::gate::extract {runtime pairs} {
     set mount gate-payload-[pid]
     zipfs mount $runtime $mount

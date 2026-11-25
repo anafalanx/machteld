@@ -203,7 +203,7 @@ proc ::boot::filesBelow {dir} {
 }
 
 # Every file in the compiler header and packaged script-library trees, and the
-# exact static binaries, libraries and SQLite amalgamation the build reads.
+# exact static binaries, libraries and SQLite sources the build reads.
 proc ::boot::artifactManifest {} {
     variable cache
     variable prefix
@@ -223,7 +223,8 @@ proc ::boot::artifactManifest {} {
     }
     foreach file [list [file join $prefix bin tclsh90s.exe] [file join $prefix bin wish90s.exe] \
             [file join $prefix lib libtcl90.a] [file join $prefix lib libtcl9tk90.a] [file join $prefix lib libtclstub.a] \
-            [file join $cache sqlite sqlite3.c] [file join $cache sqlite sqlite3.h]] {
+            [file join $cache sqlite sqlite3.c] [file join $cache sqlite sqlite3.h] \
+            [file join $cache sqlite tclsqlite.c]] {
         if {![file isfile $file]} {
             fail "dependency cache is missing artifact: [file nativename $file]"
         }
@@ -266,9 +267,9 @@ proc ::boot::assertArtifactManifest {} {
     }
 }
 
-# The archive in downloads\, its hash checked; fetched first when missing,
+# A locked source file in downloads\, its hash checked; fetched first when missing,
 # with Windows' own curl.exe, as before.
-proc ::boot::getArchive {entry} {
+proc ::boot::getDownload {entry} {
     variable downloads
     file mkdir $downloads
     set target [file join $downloads [dict get $entry file]]
@@ -590,8 +591,8 @@ proc ::boot::main {argv} {
     }
     file delete $statePath $manifestPath
 
-    set tclArchive [getArchive [dict get $archives tcltk]]
-    set tkArchive [getArchive [dict get $archives tk]]
+    set tclArchive [getDownload [dict get $archives tcltk]]
+    set tkArchive [getDownload [dict get $archives tk]]
     set extract [file join $sourceRoot tcltk-9.0.4]
     set temp [file join $sourceRoot .tcltk-extract-[binary encode hex [hash random 16]]]
     assertUnderCache $temp
@@ -634,7 +635,11 @@ proc ::boot::main {argv} {
     }
 
     set sqlite [dict get $archives sqlite]
-    set sqliteArchive [getArchive $sqlite]
+    set binding [dict get $sqlite tclBinding]
+    if {[dict get $binding version] ne [dict get $sqlite version]} {
+        fail "SQLite amalgamation and Tcl binding versions must agree"
+    }
+    set sqliteArchive [getDownload $sqlite]
     set sqliteExtract [file join $sourceRoot sqlite-[dict get $sqlite version]]
     assertUnderCache $sqliteExtract
     file delete -force $sqliteExtract
@@ -648,9 +653,11 @@ proc ::boot::main {argv} {
         file copy -force [file join [file dirname $sqliteC] $name] [file join $cache sqlite $name]
     }
 
+    file copy -force [getDownload $binding] [file join $cache sqlite tclsqlite.c]
+
     # yyjson: the json command's reader core; one .c and .h and its license.
     set yyjson [dict get $archives yyjson]
-    set yyjsonArchive [getArchive $yyjson]
+    set yyjsonArchive [getDownload $yyjson]
     set yyjsonExtract [file join $sourceRoot .yyjson-extract-[binary encode hex [hash random 16]]]
     assertUnderCache $yyjsonExtract
     try {

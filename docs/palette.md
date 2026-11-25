@@ -7,7 +7,9 @@ tags: [machteld, api, tcl, windows]
 
 # Command palette
 
-All commands are in `::machteld` and resolve as bare names in a top-level entry.
+All commands are in `::machteld`. The palette supplies short names at top
+level. Use the qualified name `::machteld::clipboard owned` to query Windows
+clipboard ownership. Tk supplies its global `clipboard` command when loaded.
 This page is a composition tour. The [complete reference](reference/machteld/index.md)
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
@@ -37,7 +39,7 @@ detach -dir C:/service -- daemon.exe
 | Command | Contract |
 |---|---|
 | `run` | Launch and wait. Captures stdout/stderr by default; `-inherit` gives the child the terminal, `-onout/-onerr` stream lines, and `-stdin` supplies input. Supports `-arg0`, `-cpu`, `-mem`, `-dir`, `-env`, and `-timeout`. |
-| `child` | `start`, `wait`, `kill`, `info`, `list`, and `close` for supervised asynchronous children. `start -channels` exposes stdin/stdout/stderr channels through `child info`; the caller must close stdin when the child expects EOF. |
+| `child` | `start`, `wait`, `kill`, `info`, `list`, and `close` manage supervised process trees. `start -channels` exposes stdin/stdout/stderr channels through `child info`. For an attended GUI, use `start -window normal`, then `present` to check window readiness or request attention. |
 | `wait` | Wait for child or filesystem-watch handles; `-any` returns when the first is ready. |
 | `scope` | Evaluate a Tcl body and close every child born inside it, even when the body errors. |
 | `detach` | Launch an independent daemon and return its PID. Success is verified outside every Windows job; an enclosing policy that denies breakaway raises `{MACHTELD DETACH launch}`. |
@@ -109,7 +111,7 @@ canon C:/work/a-junction
 | `watch` | Live directory events through `start`, `read`, `info`, `list`, and `close`. `read` returns immediately unless given `-timeout`; `-raw` keeps the OS event stream while the default coalesces it. `info` reports token, directory, recursive/armed state, pending/dropped/failed counts, and `win32` (zero unless the watch failed) without consuming events. |
 | `dirs` | Deterministic depth-first directory walk. `-depth` bounds descent and `-prune` accepts case-insensitive glob names. Returns counts, ordered paths, link decisions, errors, and completeness facts. |
 | `links` | Walk reparse points without following name surrogates; `-hardlinks` also reports files with shared storage. It uses the same depth/prune policy as `dirs`. |
-| `canon` | Resolve a path through reparse points to its canonical target; a dangling target is a structured error. |
+| `canon` | Resolve a path through reparse points to its canonical target. Metadata access can suffice even when file reads or directory listings are denied. A dangling target raises a structured error. |
 
 ## Machine processes
 
@@ -129,6 +131,28 @@ hidden in a report. Tree mode is a best-effort snapshot of machine processes;
 descendants born afterward and PID reuse can race it. Use `child kill` for a
 tree launched and owned by Machteld, where the Job Object provides the stronger
 lifetime boundary.
+
+## Saving files and coordinating writers
+
+For a settings file, `publish bytes $path $value` stages and replaces the
+file in one operation. For larger output, write and close a temporary file
+beside the target, then call `publish file $path $staged`. Applications that
+perform a read-modify-write operation can also coordinate across processes.
+
+```tcl
+set token [lock try [file join $directory settings.lock]]
+if {$token eq ""} { return busy }
+try {
+    # Read the latest settings and compute the new value under this lock.
+    set updated [updateSettings $path]
+    publish bytes $path [encoding convertto utf-8 $updated]
+} finally {
+    lock release $token
+}
+```
+
+Participants use the same coordination file and leave it in place. Windows
+releases the lock if the holder exits. [File publication](reference/machteld/command/publish.md) · [File locks](reference/machteld/command/lock.md)
 
 ## HTTP, JSON, hashes, and storage
 
@@ -246,7 +270,8 @@ internal modified UTF-8 representation.
 `get` always returns a bytearray and raises `STORE notfound` for absence; `del` returns 0/1. `open`
 without a path creates an in-memory store; `open path` creates or opens a durable
 database. Both use a five-second busy timeout. `version` reports the SQLite version. See the
-[contract](contract.md) for the cross-host guarantee.
+[contract](contract.md) for the cross-host guarantee. For SQL, use the
+built-in [`sqlite3` Tcl package](contract.md).
 
 These commands are synchronous. HTTP's phase timeouts and SQLite's busy timeout
 are not general cancellation or total GUI-response guarantees. Directory walks,
@@ -366,10 +391,11 @@ Application documentation and assets are unaffected. Basekits are not copied
 recursively, so a wrapped tool cannot perform another wrap. See
 [packaging](packaging.md).
 
-A wrapped tool keeps its basekit's VERSIONINFO, with Vincent Vercauteren's
-Machteld identity. No automatic signing or dependency
-resolution is performed; inventories and VERSIONINFO are descriptive, not
-proof of a trusted publisher.
+Manifest metadata can set the application's Windows name, version, description,
+authorship fields, and icon without a compiler. It stays separate from the
+runtime version and Vincent Vercauteren's Machteld identity. No automatic signing
+or dependency resolution is performed; inventories and VERSIONINFO are
+descriptive, not proof of a trusted publisher.
 
 ## Complete verb list
 

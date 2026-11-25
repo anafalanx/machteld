@@ -455,7 +455,8 @@ try {
         tools/dependencies.lock.json tools/bootstrap.tcl tools/patches/dependency.patch tools/buildlib.tcl
         tools/reference.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
-        tcl/pool.tcl LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
+        tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
+        LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
         docs/reference/machteld/command/help.md staged/prelude.tcl
         staged/console.exe staged/gui.exe staged/reference/manifest.sha256
@@ -469,7 +470,7 @@ try {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
         prefix/include/tcl.h prefix/bin/tclsh90s.exe prefix/bin/wish90s.exe
         prefix/lib/tcl9.0/init.tcl prefix/lib/tcl9/9.0/msgcat.tm
-        prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h yyjson/yyjson.h
+        prefix/lib/tk9.0/tk.tcl sqlite/sqlite3.h sqlite/tclsqlite.c yyjson/yyjson.h
     } {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"
     }
@@ -486,6 +487,7 @@ try {
     }
     spec_tracks native [file join $prefix include tcl.h]
     spec_tracks native [file join $::fixtureCache sqlite sqlite3.h]
+    spec_tracks native [file join $::fixtureCache sqlite tclsqlite.c]
     spec_tracks native [file join $::fixtureCache yyjson yyjson.h]
     set before [production_key native]
     set additionalHeader [file join $::fixtureRoot src added.h]
@@ -565,6 +567,7 @@ try {
 
     foreach relative {
         LICENSE licenses/yyjson-0.12.0.txt tools/package.tcl
+        packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl
         tools/build_identity.tcl staged/prelude.tcl staged/console.exe staged/gui.exe
         staged/reference/manifest.sha256 staged/reference/markdown/page.md
     } {
@@ -907,8 +910,11 @@ try {
         set launch [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir \
             "[::boot::shq $shellUnix] [::boot::shq $sourceArgument] [::boot::shq $prefixArgument] 3"]]
         set seen [run -timeout 2m {*}[::boot::msysCommand $realMsys $shellHome $shellDir $probe]]
-        # Red/green: the launch that failed, the script started by name from a
-        # -c line. Its words carry no apostrophe, so what fails is the #! line.
+        # The old launcher lets /usr/bin/env choose bash from the caller's PATH.
+        # System32 may itself contain a WSL bash.exe. Put our exit-97 fixture
+        # first so this check proves which interpreter the shebang selected.
+        file copy $fakeExe [file join $fakeDir bash.exe]
+        set ::env(PATH) "[file nativename $fakeDir];$::env(PATH)"
         set old [run -timeout 2m -- [file join $realMsys usr bin bash.exe] --noprofile --norc -c \
             "[::boot::shq $shellUnix] [::boot::shq /plain-source] [::boot::shq /plain-prefix] 3"]
     } finally {
@@ -929,8 +935,8 @@ try {
             [string match /ucrt64/bin:/usr/bin:/* [lindex $seenLines 10]] &&
             [llength [split [lindex $seenLines 10] :]] == 4}] $seenLines
     set oldText [encoding convertfrom utf-8 [dict get $old err]][encoding convertfrom utf-8 [dict get $old out]]
-    check {former indirect bash launch fails at its env shebang under a System32-only PATH} \
-        [expr {[dict get $old exit] != 0 && [string match {*env*bash*} $oldText]}] $oldText
+    check {former indirect bash launch selects the caller's bash at the env shebang} \
+        [expr {[dict get $old status] eq "error" && [dict get $old exit] == 97}] $oldText
 
     # Exercise the actual bootstrap verifier in its read-only mode. A stale
     # dependency state must fail, never bootstrap or consume an unverified prefix.

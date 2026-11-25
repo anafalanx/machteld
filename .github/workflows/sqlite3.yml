@@ -1,0 +1,139 @@
+name: Verify the Windows runtime
+
+on:
+  push:
+    branches:
+      - main
+      - dev/22-sqlite3
+      - dev/22-sqlite-gui
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Pin both builds to the source commit and its timestamp
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) { throw "Unexpected checkout $actual" }
+          if ((Test-Path .cache/deps) -or (Test-Path out)) { throw 'Expected a clean checkout' }
+          $epoch = git show -s --format=%ct HEAD
+          if ($LASTEXITCODE -ne 0 -or $epoch -notmatch '^\d+$') { throw 'Missing source timestamp' }
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+
+      - name: Set up MSYS2
+        id: msys
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: UCRT64
+          update: true
+          cache: false
+
+      - name: Install the locked UCRT64 build tools
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $lock = (Get-Content tools/dependencies.lock.json -Raw | ConvertFrom-Json).toolchain
+          $mirror = 'https://repo.msys2.org'
+          $ucrt = "$mirror/mingw/ucrt64"
+          $prefix = 'mingw-w64-ucrt-x86_64'
+          $packages = @(
+            "$ucrt/$($lock.gccPackage)-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$prefix-gcc-libs-$($lock.gccPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.binutilsPackage)-$($lock.binutilsPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.makePackage)-$($lock.makePackageVersion)-any.pkg.tar.zst"
+            "$mirror/msys/x86_64/$($lock.zipPackage)-$($lock.zipPackageVersion)-x86_64.pkg.tar.zst"
+          )
+          # Match the GCC package's .BUILDINFO for the runtime, headers and ISL ABI.
+          foreach ($component in 'crt','headers','libwinpthread','winpthreads') {
+            $packages += "$ucrt/$prefix-$component-14.0.0.r37.g2bfe61fba-1-any.pkg.tar.zst"
+          }
+          $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
+          & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "MSYS2_ROOT=$env:MSYS2_ROOT" >> $env:GITHUB_ENV
+
+      - name: Install the pinned build runtime
+        run: |
+          $dir = New-Item -ItemType Directory -Path dist/0.21 -Force
+          $driver = Join-Path $dir.FullName 'machteld.exe'
+          Invoke-WebRequest -Uri 'https://github.com/anafalanx/machteld/releases/download/v0.21/machteld.exe' -OutFile $driver
+          $expected = '1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7'
+          $actual = (Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Build runtime SHA-256 mismatch: $actual" }
+
+      - name: Run the full gate and desktop tests on main
+        if: github.ref_name == 'main'
+        run: |
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & .\dist\0.21\machteld.exe tools/gate.tcl --msys $env:MSYS2_ROOT --interactive-gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\out\machteld.exe test/clipboard_test.tcl --hosted-clipboard
+          exit $LASTEXITCODE
+
+      - name: Check out an independent copy of the same source
+        if: github.ref_name == 'main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: repro
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Compare two independent clean unsigned builds
+        if: github.ref_name == 'main'
+        working-directory: repro
+        run: |
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) { throw "Unexpected comparison checkout $actual" }
+          if ((Test-Path .cache/deps) -or (Test-Path out)) { throw 'Expected a fresh second build and dependency cache' }
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & "$env:GITHUB_WORKSPACE/dist/0.21/machteld.exe" tools/release.tcl --msys $env:MSYS2_ROOT --cache .cache/deps --output out/candidate/machteld.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $gated = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:GITHUB_WORKSPACE/out/machteld.exe").Hash
+          $rebuilt = (Get-FileHash -Algorithm SHA256 -LiteralPath out/candidate/machteld.exe).Hash
+          "Commit: $env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
+          "Gated executable SHA-256: $gated" >> $env:GITHUB_STEP_SUMMARY
+          "Independent executable SHA-256: $rebuilt" >> $env:GITHUB_STEP_SUMMARY
+          if ($gated -ne $rebuilt) { throw "Unsigned executable hashes differ: $gated and $rebuilt" }
+
+      - name: Build the candidate on the SQLite development branches
+        if: github.ref_name != 'main'
+        id: dev
+        run: |
+          & .\dist\0.21\machteld.exe tools/release.tcl --msys $env:MSYS2_ROOT --output out/candidate/machteld.exe
+          exit $LASTEXITCODE
+
+      - name: Run the fast gate including the SQLite and background job tests
+        if: steps.dev.outcome == 'success'
+        run: |
+          & .\dist\0.21\machteld.exe tools/gate.tcl --group fast --runtime out/candidate/machteld.exe
+          exit $LASTEXITCODE
+
+      - name: Exercise relocated console and GUI wraps
+        if: ${{ !cancelled() && steps.dev.outcome == 'success' }}
+        run: |
+          & .\out\candidate\machteld.exe test/wrap_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Exercise the wrapped SQLite lookup GUI
+        if: ${{ !cancelled() && steps.dev.outcome == 'success' && github.ref_name == 'dev/22-sqlite-gui' }}
+        run: |
+          & .\out\candidate\machteld.exe test/sqlite_lookup_gui_test.tcl
+          exit $LASTEXITCODE
+
+      - name: Check development cache invalidation
+        if: ${{ !cancelled() && steps.dev.outcome == 'success' }}
+        run: |
+          & .\dist\0.21\machteld.exe test/dev_cache_test.tcl --msys $env:MSYS2_ROOT
+          exit $LASTEXITCODE

@@ -7,6 +7,7 @@ package require machteld 0.21
 # beside it and nowhere else.
 #
 #     machteld.exe test/package_test.tcl --tclsh EXE
+#     machteld.exe test/package_test.tcl --build-runtime
 #
 # EXE is the static tclsh90s package.tcl runs on. The Tcl port (2026-10-28)
 # of test/package_test.ps1 and test/build_publication_test.ps1. Not checked:
@@ -17,7 +18,13 @@ namespace eval ::pt {
     variable root [file dirname [file dirname [file normalize [info script]]]]
     variable failures 0
     variable work ""
-    variable tclsh ""
+    variable packager {}
+    variable wrapper ""
+}
+if {[lindex $argv 0] eq "--run-packager"} {
+    set argv [lrange $argv 1 end]
+    source -encoding utf-8 [file join $::pt::root tools package.tcl]
+    exit 0
 }
 source -encoding utf-8 [file join $::pt::root tools release.tcl]
 
@@ -52,9 +59,12 @@ proc ::pt::uniqueName {prefix} {
 }
 
 proc ::pt::runPackage {args} {
-    variable root
-    variable tclsh
-    set result [run -timeout 5m -- $tclsh [file join $root tools package.tcl] {*}$args]
+    return [runPackageInZone UTC0 {*}$args]
+}
+
+proc ::pt::runPackageInZone {zone args} {
+    variable packager
+    set result [run -timeout 5m -env [dict create TZ $zone] -- {*}$packager {*}$args]
     dict create exit [dict get $result exit] text \
         [encoding convertfrom -profile replace utf-8 [dict get $result out][dict get $result err]]
 }
@@ -74,7 +84,7 @@ proc ::pt::noWorkPaths {} {
 proc ::pt::packageTests {} {
     variable root
     variable work
-    variable tclsh
+    variable wrapper
     set licenseHashes {
         Tcl-9.0.4.txt c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16
         Tk-9.0.4.txt 2cde822b93ca16ae535c954b7dfe658b4ad10df2a193628d1b358f1765e8b198
@@ -98,9 +108,10 @@ proc ::pt::packageTests {} {
     set tclLibrary [file join $prefix lib tcl9.0]
     set tclModules [file join $prefix lib tcl9 9.0]
     writeText [file join $tclLibrary init.tcl] "set ::fixture_tcl 1"
-    foreach name {clock.tcl package.tcl tm.tcl tclIndex} {
+    foreach name {clock.tcl package.tcl tm.tcl} {
         writeText [file join $tclLibrary $name] "# fixture $name"
     }
+    writeText [file join $tclLibrary tclIndex] "# Tcl autoload index file, version 2.0\n"
     writeText [file join $tclLibrary encoding cp1252.enc] "fixture encoding"
     writeText [file join $tclLibrary msgs nl.msg] "fixture catalog"
     writeText [file join $tclLibrary tzdata Europe Brussels] "fixture timezone"
@@ -113,7 +124,7 @@ proc ::pt::packageTests {} {
     }
     writeText [file join $reference markdown machteld agent.md] "# Fixture agent reference\n"
     set apache [file join $root LICENSE]
-    set common [list --prefix $prefix --prelude $prelude --wrapper $tclsh]
+    set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper]
 
     set existing [file join $work [uniqueName .machteld-build-].exe]
     writeText $existing prior-release
@@ -123,7 +134,7 @@ proc ::pt::packageTests {} {
     check "existing-output refusal creates no work paths" [noWorkPaths]
 
     set out [file join $work [uniqueName .machteld-build-].exe]
-    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $tclsh \
+    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $wrapper \
         --licenses $licenses --apache-license $apache --reference $reference --out $out]
     check "failed packaging does not publish a partial output" \
         [expr {[dict get $result exit] != 0 && ![file exists $out]}] [dict get $result text]
@@ -197,6 +208,19 @@ proc ::pt::packageTests {} {
         [expr {$problem eq ""}] $problem
 
     set packaged [hash file sha256 $out]
+    # A new checkout can give identical input different mtimes. Read-only
+    # files must stay read-only at their source when the packager stages them.
+    set later 1285714800
+    file mtime $prelude $later
+    file attributes $prelude -readonly 1
+    set rebuilt [file join $work [uniqueName .machteld-build-].exe]
+    set result [runPackageInZone PST8PDT {*}$common --licenses $packagingLicenses \
+        --apache-license $apache --reference $reference --out $rebuilt]
+    check "identical package bytes across source timestamps and build time zones" \
+        [expr {[dict get $result exit] == 0 && [hash file sha256 $rebuilt] eq $packaged}] [dict get $result text]
+    check "packaging preserves input timestamps and read-only attributes" \
+        [expr {[file mtime $prelude] == $later && [file attributes $prelude -readonly]}]
+    file attributes $prelude -readonly 0
     set result [runPackage {*}$common --licenses $licenses --apache-license $apache --reference $reference --out $out]
     check "a packaged candidate cannot be reused or replaced" \
         [expr {[refused $result {output already exists}] && [hash file sha256 $out] eq $packaged}] [dict get $result text]
@@ -213,6 +237,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
         foreach relative {
             tcl_library/init.tcl tcl_library/clock.tcl tcl_library/package.tcl tcl_library/tm.tcl
             tcl_library/tclIndex tcl_library/encoding/cp1252.enc tcl_library/msgs/nl.msg
+            tcl_library/machteld-job/pkgIndex.tcl tcl_library/machteld-job/job.tcl
             tcl_library/tzdata/Europe/Brussels tcl9/9.0/msgcat-1.7.1.tm tk_library/tk.tcl
             licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/zlib-1.3.2.txt
             licenses/LibTomMath-1.3.0.txt licenses/yyjson-0.12.0.txt
@@ -242,6 +267,21 @@ proc ::pt::validatePackage {image apache licenses reference} {
                 return "packaging changed reference bytes: $relative"
             }
         }
+        set savedPath $::auto_path
+        try {
+            set ::auto_path [list $base/tcl_library [info library]]
+            set version [package require -exact machteld::job 1.0]
+            set script [lindex [package ifneeded machteld::job $version] end]
+            if {$script ne "$base/tcl_library/machteld-job/job.tcl"} {
+                return "background job loaded from outside the packaged image: $script"
+            }
+            set job [::machteld::job::Job new]
+            try {
+                if {[dict get [$job snapshot] phase] ne "idle"} {
+                    return "packaged background job did not start idle"
+                }
+            } finally { $job destroy }
+        } finally { set ::auto_path $savedPath }
         return ""
     } finally {
         zipfs unmount $mount
@@ -346,14 +386,23 @@ proc ::pt::publicationTests {} {
 }
 
 proc ::pt::main {argv} {
+    variable root
     variable work
-    variable tclsh
+    variable wrapper
+    variable packager
     variable failures
-    if {[llength $argv] != 2 || [lindex $argv 0] ne "--tclsh"} {
-        puts stderr "usage: package_test.tcl --tclsh EXE"
+    if {$argv eq "--build-runtime"} {
+        # The signed runtime supplies Tcl/zipfs and a bare console PE for the
+        # fixture image. Its entry gate requires the opted-in test as driver.
+        set wrapper [file join [::machteld::PayloadRoot] basekit console.exe]
+        set packager [list [info nameofexecutable] [file normalize [info script]] --run-packager]
+    } elseif {[llength $argv] == 2 && [lindex $argv 0] eq "--tclsh"} {
+        set wrapper [file normalize [lindex $argv 1]]
+        set packager [list $wrapper [file join $root tools package.tcl]]
+    } else {
+        puts stderr "usage: package_test.tcl --tclsh EXE | --build-runtime"
         exit 2
     }
-    set tclsh [file normalize [lindex $argv 1]]
     set work [file join [file normalize $::env(TEMP)] [uniqueName machteld-package-test-[pid]-]]
     file mkdir $work
     try {

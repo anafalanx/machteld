@@ -57,7 +57,7 @@ static char *comspec_path(const char **err) {
 
 int wj_launch(const char *exe, int argc, const char *const *argv, const char *dir,
               void *const *job_handles, int njobs, const wj_stdio *io,
-              int want_breakaway, void *env_block, int *pid, void **proc, const char **err) {
+              wj_launch_mode mode, int normal_window, void *env_block, int *pid, void **proc, const char **err) {
     if (exe == NULL || exe[0] == '\0') { *err = "empty exe"; return -1; }
     if (argc <= 0 || argv == NULL) { *err = "empty argv"; return -1; }
     if (io == NULL || io->in == NULL || io->out == NULL || io->err == NULL) {
@@ -65,7 +65,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         return -1;
     }
     if (njobs < 0 || (njobs > 0 && job_handles == NULL) ||
-        (njobs == 0 && !want_breakaway) || (want_breakaway && njobs != 0)) {
+        (njobs == 0) != (mode == WJ_BREAKAWAY)) {
         *err = "a supervised launch requires at least one job";
         return -1;
     }
@@ -167,6 +167,10 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     ZeroMemory(&six, sizeof(six));
     six.StartupInfo.cb = sizeof(six);
     six.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    if (normal_window) {
+        six.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+        six.StartupInfo.wShowWindow = SW_SHOWNORMAL;
+    }
     six.StartupInfo.hStdInput = dups[0];
     six.StartupInfo.hStdOutput = dups[1];
     six.StartupInfo.hStdError = dups[2];
@@ -175,7 +179,11 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
     DWORD flags = EXTENDED_STARTUPINFO_PRESENT;
-    if (want_breakaway) flags |= CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED;
+    if (mode == WJ_BREAKAWAY) flags |= CREATE_BREAKAWAY_FROM_JOB;
+    if (mode == WJ_BREAKAWAY || normal_window) flags |= CREATE_SUSPENDED;
+    /* DETACHED_PROCESS controls console attachment only. Explicit pipes and
+     * both Job Objects still belong to the supervised launch. */
+    if (mode == WJ_NO_CONSOLE) flags |= DETACHED_PROCESS;
     if (env_block) flags |= CREATE_UNICODE_ENVIRONMENT; /* a UTF-16 env block was supplied */
     BOOL ok = CreateProcessW(wApp, wCmd, NULL, NULL, TRUE, flags, env_block, wDir, &six.StartupInfo, &pi);
     if (!ok) {
@@ -184,7 +192,7 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
         *err = cpErr;
         goto done;
     }
-    if (want_breakaway) {
+    if (mode == WJ_BREAKAWAY) {
         BOOL inJob = FALSE;
         if (!IsProcessInJob(pi.hProcess, NULL, &inJob) || inJob) {
             TerminateProcess(pi.hProcess, 1);
@@ -195,6 +203,11 @@ int wj_launch(const char *exe, int argc, const char *const *argv, const char *di
                          : "cannot verify process breakaway";
             goto done;
         }
+    }
+    /* Windows may deny foreground permission. Launch is still successful:
+     * an attended child can be used without taking the user's focus. */
+    if (normal_window) (void)AllowSetForegroundWindow(pi.dwProcessId);
+    if (flags & CREATE_SUSPENDED) {
         if (ResumeThread(pi.hThread) == (DWORD)-1) {
             TerminateProcess(pi.hProcess, 1);
             WaitForSingleObject(pi.hProcess, INFINITE);

@@ -119,8 +119,10 @@ try {
         wrap $stage -o $image --manifest $manifest --$host
         set info [inspect_image $image $assets]
         check "$host: committed inventory matches package plan" [expr {$info eq $plan}]
-        check "$host: the record names the runtime and carries no application metadata" [expr {
-            ![dict exists $info metadata] && [dict get $info runtime name] eq "Machteld"}]
+        check "$host: app identity and runtime identity stay separate" [expr {
+            [dict get $info metadata name] eq "Project Inspector" &&
+            [dict get $info metadata version] eq "1.0" &&
+            [dict get $info runtime name] eq "Machteld"}]
         dict set images $host $image
     }
     # Remove the original staging pathname as an available dependency; the

@@ -8,7 +8,7 @@ namespace eval ::machteld::manifest {}
 
 # Internal commands are registered for cooperation with the Tcl prelude, but
 # are intentionally absent from the public manifest.
-set ::machteld::manifest::private {EntryCheck PayloadRoot Publish}
+set ::machteld::manifest::private {EntryCheck PayloadRoot Publish PublishWrite StampIdentity ValidateIdentity}
 
 set ::machteld::manifest::native {
     canon {
@@ -20,14 +20,22 @@ set ::machteld::manifest::native {
         kind c domain CHILD
         doc machteld/command/child
         codes {badvalue launch nohandle notfound oserror usage}
-        options {-arg0 -channels -cpu -dir -env -mem -stdin -timeout}
+        options {-arg0 -channels -class -console -cpu -dir -env -mem -stdin -timeout -window}
         subcommands {
-            start {options {-arg0 -channels -cpu -dir -env -mem -stdin -timeout} doc machteld/command/child#start}
+            start {options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout -window} doc machteld/command/child#start}
+            present {options {-class} returns {cloaked foreground iconic onScreen status visible} doc machteld/command/child#present}
             wait  {options -timeout returns {err exit out pid status truncated} doc machteld/command/child#wait}
             kill  {options {} doc machteld/command/child#kill}
             info  {options {} doc machteld/command/child#info}
             list  {options {} doc machteld/command/child#list}
             close {options {} doc machteld/command/child#close}
+        }
+    }
+    clipboard {
+        kind c domain CLIPBOARD codes {usage} options {} qualified_only 1
+        doc machteld/command/clipboard
+        subcommands {
+            owned {options {} doc machteld/command/clipboard#owned}
         }
     }
     detach {
@@ -87,6 +95,14 @@ set ::machteld::manifest::native {
         doc machteld/command/links
         options {-depth -hardlinks -prune}
         returns {depthlimited dirs entered errors files links maxdepth multilinked pruned root}
+    }
+    lock {
+        kind c domain LOCK codes {badvalue nohandle oserror usage} options {}
+        doc machteld/command/lock
+        subcommands {
+            try {options {} doc machteld/command/lock#try}
+            release {options {} doc machteld/command/lock#release}
+        }
     }
     mtps {
         kind c domain MTPS codes {badvalue denied notfound oserror usage}

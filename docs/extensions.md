@@ -49,11 +49,9 @@ the working directory or a developer's installed environment.
 ## The precedence rule
 
 Prefer the palette and ordinary Tcl when they already meet the requirement.
-An extension should address a concrete gap rather than create a second contract
-for the same operation. For example, `store` deliberately exposes key/value
-operations, not general SQL. An independently selected `sqlite3` extension would
-be a separate binding and deployment choice; it does not unlock an existing
-Machteld SQL API or share the `store` command's database handle.
+The built-in `store` covers key/value operations. For general SQL, load the
+embedded Tcl binding with `package require sqlite3` and open a connection.
+Both interfaces use the same SQLite library.
 
 ## Delivery policy, not packager enforcement
 
@@ -75,9 +73,8 @@ development-only packages, drivers, credentials, or PATH entries.
 
 ## Database scope
 
-Only SQLite through `store` is built in and covered by Machteld's database
-contract. TDBC/ODBC, PostgreSQL, MySQL/MariaDB, Office drivers, and a full-SQL Tcl
-SQLite binding are not bundled or verified integrations. They require their own
+The [database contract](contract.md) covers both SQLite interfaces in
+Machteld. TDBC/ODBC, PostgreSQL, MySQL/MariaDB and Office drivers require their own
 compatibility, authentication, license, and deployment review for a real use
 case. The tiny arithmetic extension proves the loading pattern, not any database
 binding's availability or suitability. No driver or installed application

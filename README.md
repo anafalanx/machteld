@@ -11,32 +11,35 @@ are no compute engines, `macht`, or Lua. Development environments built with
 machteld live in their own repositories on the machines that use them; this
 repository holds the runtime only.
 
-## 22 — in preparation
+## 22 — preparing release 0.22
 
-The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21)
-is preserved, and its release notes describe that artifact, not everything now
-in this checkout; on the build PC its executable is the build runtime,
-`dist/0.21/machteld.exe`, which git ignores ([BUILDING.md](BUILDING.md)). This
-checkout is preparing release **0.22**. Its CLI and Tcl package report
-`22`. The following release is **0.30** and will report `30`. Only a runtime
-change advances that number. The original 0.22 stabilization candidate
-contributed the following changes.
+This checkout prepares release **0.22**. Its CLI and Tcl package report
+`22`. The next public release is **0.30** and will report `30`. The build
+tools use the signed 0.21 executable at `dist/0.21/machteld.exe`.
+[Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
+[Build guide](BUILDING.md)
+
+The 0.22 scope includes the Beta 1 features. Tk applications can run
+cancellable jobs and SQL queries in supervised workers. Workers started
+from a running archive keep using its version after an update. The runtime
+also supports atomic file replacement, process-owned locks, attended child
+windows and clipboard ownership queries. The exact Beta 1 revision passed
+72 release and desktop steps. [Beta 1 results and checklist](docs/releases/0.22-beta.1.md)
 
 | Behavior | Signed 0.21 release | 22, in preparation |
 | --- | --- | --- |
 | Reference corpus in wrapped tools | Always included | Omitted unless `--with-docs` |
-| Explicit wrap inventory | Not available | `--manifest` and `--plan` |
+| Explicit wrap inventory and application branding | Not available | `--manifest`, `--plan`, optional application name, version and icon |
+| Application archives | Direct Tcl files and wrapped tools | Also runs and creates `.machteld` archives for the shared runtime |
+| Database access | Key/value `store` | `store` and the built-in Tcl `sqlite3` package |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-The candidate could give a wrapped executable its own Windows metadata and
-icon. Version 22 omits that feature. The [roadmap](docs/roadmap.md) records
-the decision to retire `wrap` and run applications with a shared runtime.
-
-22 is **not a released or signed artifact**. Before it is released it must pass
-clean reconstruction, artifact comparison, and the acceptance matrix; signing
-and publication are a separate decision, and the signed release remains
-untouched.
+Before signing 0.22, two independent clean builds of the same source and
+locked inputs must produce unsigned executables with identical SHA-256
+hashes. The runtime and packaged examples must pass acceptance, including
+attended checks of user-visible behavior. The owner signs a copy, the gate
+checks those signed bytes, and the owner decides when to publish.
 
 The rest of this README and the current guides describe **22**, unless
 explicitly marked as history. Different builds can share that version:
@@ -48,9 +51,9 @@ for what 22 contains, its history, and the remaining release gate.
 
 ## The plan and the commentary
 
-The plan for 22 is [plan-machteld22.md](plan-machteld22.md): the owner's
-rulings, what 22 contains, the bug ledger, the phases that remain and the
-decisions that wait on the owner.
+The [release plan](plan-machteld22.md) records the owner's decisions, the
+runtime and build findings, and the remaining acceptance work. The
+[roadmap](docs/roadmap.md) tracks delivery through 0.30.
 
 Agents: what you find in the runtime while you use it or work on it, good or
 bad, goes in [commentary.md](commentary.md), as an entry of your own at its
@@ -67,14 +70,16 @@ declaration, not an authorization boundary.
 
 The support contract is x64 Windows 11 25H2 (build 26200) and Windows Server
 2025 (build 26100), or newer. Windows 10, Server 2022/2019, and ARM64 are not
-targets. Current stabilization checks ran on Windows 11 Pro build 26200; that
-is not a fresh Server acceptance result. Lower-level ConPTY availability on
+targets. Stabilization checks ran on Windows 11 Pro build 26200, and Beta 1
+passed its Windows Server 2025 acceptance run. Record fresh results for the
+reconciled candidate on the supported targets. Lower-level ConPTY availability on
 older Windows does not extend the support contract.
 
-Machteld deliberately retains a narrow key/value `store`, synchronous commands,
-and manually provisioned external extensions. It is not a general database or
-an automatic dependency manager. See [execution](docs/execution-model.md),
-[the contract](docs/contract.md), and [external libraries](docs/extensions.md).
+Use `store` for key/value data and `package require sqlite3` for SQL queries,
+transactions and backups. Both use the same embedded SQLite engine, including
+in wrapped programs. Database calls are synchronous. External extensions are
+provisioned manually. See [database access](docs/contract.md),
+[execution](docs/execution-model.md), and [external libraries](docs/extensions.md).
 
 ## A first program
 
@@ -98,8 +103,8 @@ machteld`, an optional literal version, or `package require -exact machteld
 
 Tcl treats each whole-number runtime version as a major version.
 `package require machteld 22-` accepts 22 and later runtimes, including the
-planned 30. Use `package require machteld 22-30` to run on 22 and require
-a compatibility review before running on 30. Tcl excludes the upper bound.
+planned 30. Use `package require machteld 22-30` to require a compatibility
+review before running on 30. Tcl excludes the upper bound.
 
 For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
 and run it with the distribution executable. This is a direct-script example:
@@ -140,6 +145,7 @@ use event-driven `child -channels` composition for responsive tools.
 - Machine observation: `watch`, `mtps`, `dirs`, `links`, and `canon`.
 - Data and network: `store`, `json`, `hash`, and `http`.
 - Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
+- Application support: `app launch` for workers, `publish` for atomic file replacement, and `lock` for exclusive use of a resource across processes.
 - Runtime support: `version`, `manifest`, `docs`, `help`, and `wrap`.
 
 Commands live in `::machteld`; the prelude adds it to the global command path.
@@ -159,6 +165,22 @@ Plain JSON uses Tcl representations and cannot preserve every JSON distinction;
 use typed JSON when string/number, boolean, null, and container identity matter.
 The [palette](docs/palette.md) and [exact reference](docs/reference/machteld/index.md)
 describe composition and limits, including retries and cancellation.
+
+## Application archives
+
+To distribute an application to someone who already has Machteld 22, put its
+opted-in `main.tcl` and assets in a staging directory. The full host can pack
+that tree into a plain ZIP and run it with the usual program arguments.
+
+<!-- machteld-example: archive -->
+```text
+machteld.exe pack myapp -o myapp.machteld
+machteld.exe myapp.machteld world
+```
+
+The archive carries the application files. The host supplies Tcl/Tk and the
+runtime. A single-file program can be packed directly with
+`machteld.exe pack app.tcl -o app.machteld`. [Packaging guide](docs/packaging.md)
 
 ## Standalone tools
 
@@ -186,23 +208,26 @@ an executable. Without a manifest, directory wrapping includes all files,
 completed archive are checked before atomic publication, but sources must
 remain stable; this is not a hostile-filesystem snapshot or sandbox.
 
-A wrapped tool keeps the Windows identity of Machteld's console or GUI host.
-Signing is a separate step. See [packaging](docs/packaging.md),
+Optional metadata sets the application's name, version, description,
+authorship, and icon without a compiler. Application identity is separate from
+Machteld's runtime identity; a publisher string is not an Authenticode
+signature, and signing is never automatic. See [packaging](docs/packaging.md),
 the [GUI example](examples/project-inspector/README.md), and the
 [adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
 
 ## Building and testing
 
-[BUILDING.md](BUILDING.md) says how `machteld.exe` is built, tested and
-signed, and where: on the build PC, where unsigned builds run only for
-building and testing; every other machine runs signed releases only. In short:
+Unsigned candidates can run on the build PC and in a hosted Windows CI job.
+The unsigned executable and its wrappers stay inside the CI job. The owner
+signs release executables on the build PC. [Build guide](BUILDING.md)
 
 Every build and test tool is a Tcl program that runs on the build runtime,
 `dist/0.21/machteld.exe`, the signed 0.21 release, and finds MSYS2 through
 `--msys` (which the development loop does not take), `MSYS2_ROOT`, or
 `C:\msys64`. `tools/bootstrap.tcl` provisions the pinned build dependencies;
 `tools/dev.tcl build` writes the incremental executable to
-`out/dev/machteld.exe`. The release gate,
+`out/dev/machteld.exe`. A standalone clean build with `tools/release.tcl`
+defaults to `out/candidate/machteld.exe`. The release gate,
 `tools/gate.tcl`, builds `out/machteld.exe` and runs every test group on it;
 `--skip-build` tests the executable as it is. `--group fast`,
 `integration`, `packaging`, `native-validation`, or `reference-generator`,

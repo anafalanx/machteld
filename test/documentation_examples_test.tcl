@@ -60,13 +60,13 @@ proc snippets {text} {
         }
     }
     if {$active ne {} || $pending ne {}} { error "unterminated README example" }
-    if {[lsort [dict keys $found]] ne {app direct docs supervise supervised wrap}} {
+    if {[lsort [dict keys $found]] ne {app archive direct docs supervise supervised wrap}} {
         error "update documentation acceptance for changed README examples: [dict keys $found]"
     }
     foreach name {app supervise} {
         if {[dict get $found $name language] ne {tcl}} { error "expected Tcl example: $name" }
     }
-    foreach name {direct docs supervised wrap} {
+    foreach name {archive direct docs supervised wrap} {
         if {[dict get $found $name language] ne {text}} { error "expected command example: $name" }
     }
     return $found
@@ -101,7 +101,7 @@ proc documentation_pages {directory {examples 0}} {
     return $pages
 }
 set examples [snippets [read_text [file join $ROOT README.md]]]
-check {all six README code blocks are covered} [expr {[dict size $examples] == 6}]
+check {all seven README code blocks are covered} [expr {[dict size $examples] == 7}]
 
 # File links are checked in authored sources, not the immutable release corpus.
 # The present authored inline links have no local fragments or escaped targets.
@@ -173,6 +173,13 @@ try {
         [expr {![inherited_provenance provenance-source.dict provenance-changed.dict]}]
     write_text app.tcl [dict get $examples app body]
     write_text supervise.tcl [dict get $examples supervise body]
+    file mkdir myapp
+    file copy app.tcl myapp/main.tcl
+    set lines [split [dict get $examples archive body] \n]
+    check {two archive invocations are covered} [expr {[llength $lines] == 2}]
+    command [lindex $lines 0]
+    check {archived README app prints the documented greeting} [expr {
+        [string trimright [command [lindex $lines 1]] \r\n] eq {Hello, world!}}]
     foreach name {direct supervised} {
         set lines [split [dict get $examples $name body] \n]
         check "$name has one invocation" [expr {[llength $lines] == 1}]

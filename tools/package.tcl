@@ -106,6 +106,15 @@ foreach candidate [list [file join $TC lib tcl9.0] [file join $TC tcl_library]] 
 if {$tclLib eq ""} { error "tcl_library not found under dependency prefix: $TC" }
 copy_tree $tclLib [file join $stage tcl_library]
 
+# Tcl looks for package indexes in the children of its library directory.
+# Both wrapped hosts copy this tree, including these opt-in script packages.
+set packageSource [file join [file dirname [file dirname [file normalize [info script]]]] packages machteld-job]
+set packageTarget [file join $stage tcl_library machteld-job]
+file mkdir $packageTarget
+foreach name {pkgIndex.tcl job.tcl} {
+    file copy [file join $packageSource $name] [file join $packageTarget $name]
+}
+
 # Tcl 9 installs script modules separately from the core script library. Core
 # services such as clock require msgcat from this sibling tree; keeping its
 # canonical `tcl9/9.0/*.tm` layout also lets tm.tcl discover the modules from
@@ -226,6 +235,14 @@ if {$opt(--embed-console) ne "" || $opt(--embed-gui) ne ""} {
 
     set entries [zip_entries $stage]
     if {![llength $entries]} { error "package stage is empty: $stage" }
+    # zipfs writes each input's local DOS timestamp into both ZIP headers.
+    # Use the same wall time on every builder, regardless of checkout times
+    # or UTC offset. These are invocation-owned copies, including the basekits.
+    set archiveTime [clock scan 2000-01-01T12:00:00 -format %Y-%m-%dT%H:%M:%S -timezone :localtime]
+    foreach {path name} $entries {
+        if {[file attributes $path -readonly]} { file attributes $path -readonly 0 }
+        file mtime $path $archiveTime
+    }
     zipfs lmkimg $outputCandidate $entries {} $WRAP
     # Both paths are in outputDir. The destination was absent at entry and this
     # non-replacing rename also refuses a path that appears during packaging.

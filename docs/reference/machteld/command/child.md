@@ -3,7 +3,7 @@ id: machteld/command/child
 type: command
 title: child
 summary: Own and supervise asynchronous process trees through opaque handles.
-commands: child, child start, child wait, child kill, child info, child list, child close
+commands: child, child start, child present, child wait, child kill, child info, child list, child close
 ---
 
 # child
@@ -15,6 +15,7 @@ the same Job Object supervision used by `run`.
 
 ```tcl
 child start ?launch options? ?--? command ?arg ...?
+child present token ?-class name?
 child wait token ?-timeout duration?
 child kill token ?exitCode?
 child info token
@@ -25,8 +26,8 @@ child close token
 ## Arguments and options
 
 Launch options are `-timeout`, `-mem`, `-cpu`, `-dir`, `-env`, `-arg0`,
-`-stdin`, and `-channels`. They follow `run` except that `-timeout` is an
-autonomous lifetime deadline and `-channels` exposes all three pipes. `-channels`
+`-stdin`, `-channels`, `-console default|none`, and `-window default|normal`. The start-time `-timeout` is an
+autonomous lifetime deadline. `-channels` exposes all three pipes. `-channels`
 and `-stdin` are mutually exclusive. Observation timeout belongs only to
 `child wait`.
 
@@ -36,6 +37,8 @@ and `-stdin` are mutually exclusive. Observation timeout belongs only to
 result dict. `info` returns at least `token`, `pid`, and `running`, plus `exit`
 after reap and `stdin`, `stdout`, and `stderr` channel names in channel mode.
 `list` returns owned tokens. `kill` and `close` return the empty value.
+`present` returns a snapshot of a window owned by the child or one of its
+supervised descendants.
 
 ## Errors
 
@@ -91,7 +94,8 @@ timeout, and close do not roll back side effects.
 #### Synopsis
 
 `child start ?-timeout d? ?-mem size? ?-cpu d? ?-dir path? ?-env dict?
-?-arg0 word? ?-stdin bytes? ?-channels? ?--? command ?arg ...?`
+?-arg0 word? ?-stdin bytes? ?-channels? ?-console default|none?
+?-window default|normal? ?--? command ?arg ...?`
 
 #### Arguments and options
 
@@ -99,6 +103,17 @@ The process options match `run`; defaults are inherited directory/environment,
 no deadline or resource cap, captured output, and stdin connected to `NUL`.
 `-channels` creates binary Tcl channels; otherwise output capture is bounded to
 1 MiB per stream.
+
+`-console default` (the default) uses ordinary Windows console attachment.
+`-console none` starts the target without attaching or allocating a console.
+Windows calls this creation mode `DETACHED_PROCESS`. Use it for a console
+helper started by a GUI. Input, captured output, channel
+mode, and ownership of the process tree work as usual. A program can still
+create its own windows or console and choose how it launches descendants.
+
+`-window normal` requests a normal initial window and enables `child present`
+for this token. The default, `-window default`, uses the existing startup
+behavior. Both values work with either console setting.
 
 #### Results
 
@@ -125,6 +140,74 @@ whole tree when elapsed.
 #### See also
 
 `machteld/command/run`, `machteld/command/scope`.
+
+<a id="present"></a>
+### present
+
+#### Synopsis
+
+`child present token ?-class name?`
+
+#### Arguments and options
+
+Pass a token returned by `child start -window normal`. The optional Windows
+window class name is an exact, case-insensitive match. It accepts 1 to 255
+UTF-16 code units and excludes embedded NUL.
+
+#### Results
+
+The result contains `status` (`pending` or `ready`) and five booleans.
+
+| Key | Meaning |
+|---|---|
+| `visible` | Windows marks the selected window visible. |
+| `iconic` | The window is minimized. |
+| `cloaked` | The desktop compositor has cloaked the window. |
+| `onScreen` | At least 32 by 24 pixels intersect a monitor's work area. |
+| `foreground` | The selected window is the foreground window. |
+
+A visible, restored, uncloaked window with usable on-screen geometry is
+`ready`. It can be ready while another application has foreground focus.
+When no eligible window is found, the result is `pending` with all five flags
+false. This also covers a supervised tree whose windows have all exited.
+
+#### Errors
+
+A closed or foreign token reports `CHILD nohandle`. A token started without
+`-window normal` or an invalid class value reports `CHILD badvalue`.
+Malformed options report `CHILD usage`. Windows query errors can report
+`CHILD oserror`.
+
+#### Lifetime and timeouts
+
+Each call checks the current input desktop once. For an eligible, uncloaked
+window, presentation may request a restore, move an off-screen window onto
+its nearest monitor, and request foreground attention. A GUI can poll from an
+`after` callback while the application creates its first window. Once a
+presentation attempt is complete, later calls on that token observe the
+window, respecting any subsequent action by the user.
+
+#### Examples
+
+```tcl
+set c [child start -window normal -- editor.exe document.txt]
+set view [child present $c]
+if {[dict get $view status] eq "pending"} {
+    puts "Waiting for the editor window"
+}
+```
+
+#### Constraints
+
+Selection is limited to ordinary top-level application windows in this
+token's Windows Job Object. By default the window must already be visible.
+An explicit class can also select a hidden application window. A cloaked
+window is reported as observed on the current desktop. Windows controls
+foreground activation and may signal attention through the taskbar.
+
+#### See also
+
+`machteld/command/child#start`, `machteld/command/child#info`.
 
 <a id="wait"></a>
 ### wait

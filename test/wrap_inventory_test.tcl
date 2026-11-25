@@ -55,8 +55,8 @@ try {
     check "plan names selected entry, subsystem and docs policy" [expr {
         [dict get $plan schema] == 1 && [dict get $plan entry] eq "app/main.tcl" &&
         [dict get $plan host] eq "console" && ![dict get $plan with_docs]}]
-    check "plan records schema, entry, host, docs policy, runtime and files, and no application metadata" [expr {
-        [dict keys $plan] eq {schema entry host with_docs runtime files} && [dict get $plan runtime] eq
+    check "default plan separates runtime authorship from absent app metadata" [expr {
+        [dict get $plan metadata] eq {} && [dict get $plan runtime] eq
         [dict create name Machteld version [version] author {Vincent Vercauteren}]}]
     dict for {name facts} [dict get $plan files] {
         check "plan has exact size/hash for $name" [expr {
@@ -95,18 +95,13 @@ try {
             "missing files" {schema 1} \
             "empty files" {schema 1 files {}} \
             "invalid files list" "schema 1 files \{" \
-            "application metadata" {schema 1 files main.tcl metadata {name Demo version 1}} \
-            "empty application metadata" {schema 1 files main.tcl metadata {}}] {
+            "unknown metadata key" {schema 1 files main.tcl metadata {name Demo version 1 surprise yes}} \
+            "duplicate metadata key" {schema 1 files main.tcl metadata {name Demo name Again version 1}} \
+            "missing metadata name" {schema 1 files main.tcl metadata {version 1}} \
+            "missing metadata version" {schema 1 files main.tcl metadata {name Demo}}] {
         write_bytes $MANIFEST $data
         expect_code "manifest rejects $label" {wrap $APP --manifest $MANIFEST -o $OUT --plan} badvalue
     }
-    # Application metadata (a wrapped tool's own name, version and icon) is
-    # not part of 22: the key is refused like any unknown one, and says so.
-    write_bytes $MANIFEST {schema 1 files main.tcl metadata {name Demo version 1}}
-    set refused [catch {wrap $APP --manifest $MANIFEST -o $OUT} message]
-    check "a manifest's metadata key is refused as not part of this version" [expr {$refused &&
-        [string match "*unknown manifest key metadata*application metadata is not part of this version*" $message]}]
-    preserved "application metadata refusal"
     write_bytes $MANIFEST [binary format H* ff]
     expect_code "manifest rejects malformed UTF-8" {wrap $APP --manifest $MANIFEST -o $OUT --plan} badvalue
     write_bytes $MANIFEST [string repeat x 1048577]
@@ -204,8 +199,16 @@ try {
     set sourceInventory [::machteld::_wrap_inventory $APP $selected [dict get $sourceFacts path]]
     write_bytes [file join $APP secret-fixture.env] UNSELECTED-CHANGED
     check "explicit selection ignores changes to unrelated files" [expr {![catch {
-        ::machteld::_wrap_verify_inputs $APP [::machteld::_canon_key $sourceFacts] $selected $sourceInventory 0 {}
+        ::machteld::_wrap_verify_inputs $APP [::machteld::_canon_key $sourceFacts] $selected $sourceInventory 0 {} {}
     }]}]
+    set iconProbe [file join $ROOT icon-input.bin]
+    write_bytes $iconProbe ORIGINAL-ICON-BYTES
+    set iconSnapshot [::machteld::_wrap_snapshot $iconProbe]
+    write_bytes $iconProbe MODIFIED-ICON-BYTES
+    expect_code "final input validation detects changed external icon bytes" {
+        ::machteld::_wrap_verify_inputs $APP [::machteld::_canon_key $sourceFacts] $selected $sourceInventory 0 {} $iconSnapshot
+    } badvalue
+    preserved "icon input mutation refusal"
 
     # Four images exercise explicit selection across both subsystems and docs
     # policies. Inspect GUI archives only; do not start a GUI process.

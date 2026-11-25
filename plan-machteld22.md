@@ -4,8 +4,8 @@ title: machteld 22
 status: DRAFT, updated 2026-11-25. zef's plan for zef 22 (plan-zef22.md on zef's
   zef-22 branch, f741ffe), revised for a runtime-only machteld 22 after the
   owner's rulings of 2026-10-29, then with the owner's rulings of 2026-10-30
-  on the decisions poll. Section 6 records those rulings. Section 8 uses the
-  successor release number 0.30.
+  on the decisions poll. Section 6.3 records the November release decisions.
+  Section 8 uses the successor release number 0.30.
 relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
   docs/direction.md, docs/creed.md, tools/stabilization.json
 ---
@@ -23,10 +23,11 @@ On 2026-11-25, the Windows acceptance run passed 72 release and desktop
 steps on unsigned Beta 1, built from `e0db215`. This candidate adds
 supervised Tcl jobs, the upstream SQLite binding, script and archive launch,
 atomic file publication, process-owned locks and Windows desktop services.
-It also retains wrapped applications' custom Windows metadata and icons.
-The test result applies to that candidate. The final 0.22 feature set and
-the treatment of wrapper identity on `main` remain open. The October
-scope below records the earlier stabilization plan.
+The owner selected all those features for 0.22, including wrapped
+applications' custom Windows metadata and icons. The 72-step result
+applies to that beta. The reconciled source needs its own acceptance,
+two byte-identical clean unsigned builds and a gate run after signing.
+Section 6.3 records the release decisions that supersede the October scope.
 [Beta 1 and release checklist](https://github.com/anafalanx/machteld/pull/5) ·
 [Windows acceptance run](https://github.com/anafalanx/machteld/actions/runs/45597853161)
 
@@ -37,9 +38,9 @@ Four kinds of statement appear here:
   and the rulings in force before (section 3).
 - **Proposals**: the plan's substance, each grounded in what was read or
   measured, with its date.
-- **November decisions** (section 6.3) record the chosen build paths and
-  reference cache, the required runtime acceptance, and how the reconciled
-  source reaches GitHub `main`.
+- **November decisions** (section 6.3) cover release scope, unsigned CI,
+  reproducibility, build paths, the reference cache, required runtime
+  acceptance, and how the reconciled source reaches GitHub `main`.
 - **The log** (section 7): a dated line per commit on `machteld-22`, with its
   gate result.
 
@@ -140,12 +141,12 @@ release."
 
 1. **The version** (c9cbff2): one natural number. Programs ask for `package
    require machteld 22-`; a program that must be read again before it runs on
-   a newer runtime names an upper bound, which Tcl excludes (`22-24`). The
+   a newer runtime names an upper bound, which Tcl excludes (`22-30`). The
    build tools keep running on the signed 0.21 until a signed 22 exists.
-2. **The creed and the direction** (`docs\creed.md`, `docs\direction.md`):
-   Tcl/Tk, with C and C++ the only native languages. The tooling is Tcl too:
-   no PowerShell, C#, Go, TypeScript or shell script remains, and bash runs
-   only inside MSYS2, for Tcl/Tk's configure and make (since 306b38f).
+2. **The creed and the direction** (`docs\creed.md`, `docs\direction.md`).
+   The runtime uses Tcl/Tk with native C and C++. Tcl drives the build and
+   tests. The hosted Windows workflows can use PowerShell to set up the
+   runner and invoke the project's tools.
 3. **The candidate's constraints** (`tools\stabilization.json`). The repository
    was private when the candidate was prepared and is now public. Release 22
    preserves the released artifacts and wrap's documentation opt-in. Its
@@ -163,17 +164,18 @@ release."
    until the unsigned build is prepared and tested; publication is not
    authorized, and the signed 0.21 is preserved. The ruling of 2026-10-29
    replaced the candidate's chosen version with 22.
-5. **Two machines** (zef's BUILDING.md of 2026-10-28, which called the build
-   PC "the owner's other machine"; BUILDING.md here): `machteld.exe` is built
-   and signed on the build PC, where unsigned builds run only for building and
-   testing; other machines run signed releases only. Signing is the owner's
-   step.
+5. **Unsigned builds and signing.** The build PC and hosted CI may build and
+   test unsigned executables. Hosted CI keeps those executables inside the
+   verification job. The owner signs a release copy on the build PC. Other
+   machines run signed releases. Section 6.3 records the revision to the
+   October two-machine policy.
 
 ## 4. The October scope for 0.22
 
 The October plan called for the candidate's stabilization, the build in
 Tcl and the ledger's remaining fixes in one signed `machteld.exe`.
-Ruling 2 limited that scope to stabilization.
+Ruling 2 limited that scope to stabilization. The November vote adopted the
+full Beta 1 scope and custom wrapper identity for the release.
 
 ### 4.1. What it contains
 
@@ -207,11 +209,10 @@ Ruling 2 limited that scope to stabilization.
   editor, the agents' homes, backup, the work PC, its verbs and its namespace.
 - **Not ported from the candidate:** the reference stage cache, with its
   PowerShell and C# serializers (D5).
-- **Not in 22, by the owner's rulings** (section 6): the candidate's
-  application identity, a wrapped tool's own metadata and icons
-  (`src\resource.c`), removed in 0f62438 and kept on the branch
-  `app-identity` (ruling 1); every new runtime feature (ruling 2, 4.3); the
-  FFI (ruling 3). Section 8 records the plans for 0.30.
+- **October deferrals.** Commit 0f62438 removed custom wrapper metadata and
+  icons under ruling 1. The `app-identity` branch preserved the implementation.
+  Section 6.3 brings this feature and the cumulative Beta 1 runtime additions
+  into 0.22. Ruling 3 places the FFI in 0.30.
 
 ### 4.2. The bug ledger
 
@@ -222,6 +223,13 @@ The consolidation re-checked R16 on 2026-10-30, and its gate runs and review
 added B15-B17 and the GUI host's wording. The other items stand as mapped
 until each is fixed or checked again. Each new fix lands with a regression
 test that fails before it.
+
+The table records the October assessment. Beta 1 fixed `scope` propagation
+(R1) and the ACL fixture's PATH-dependent tool lookup (B15). It also added
+metadata-only path queries and quiet, supervised workers. Recheck the
+remaining items on the reconciled source. The locked-file, default console
+and detach paths need their own evidence. Record a regression result or
+an explicit deferral for every outstanding item before signing.
 
 | Fixed in the candidate (8bcc1ec), carried | R2 help, R3 json NUL, R4 typed null, R10 key leaks, R18 interp cleanup, S2 pool stderr eof; json bytearray as Latin-1; typed depth; recycled channel names; reentrant child close; pool close in callback; store leaks; NUL paths; hash counter |
 |---|---|
@@ -274,8 +282,11 @@ The newer items, in full:
 
 ### 4.3. Candidates for 0.30 and later
 
-None of these is in 22: asked twice, the owner ruled "None in 22" (ruling 2).
-They came from zef's verbs (zef's plan, its section 4.3; the commentary's
+The October poll deferred these proposals under ruling 2. The November
+vote admitted the beta's quiet-worker option, `lock try` and `lock release`,
+and `publish bytes` and `publish file`. These implemented APIs supersede
+the October sketches for the corresponding operations. The remaining
+candidates came from zef's verbs (zef's plan, its section 4.3; the commentary's
 entries of 2026-10-28), and machteld builds no development environment, so
 none is admitted for that reason: each must still pass direction.md's first
 admission question, whether it strengthens what machteld is strongest at, for
@@ -321,7 +332,8 @@ merged with the limits write) and the crash containment for children.
 
 ## 5. Phases
 
-The October plan assigned no feature phase to 0.22 (ruling 2).
+The October plan assigned no feature phase to 0.22. The November vote
+added Beta 1 to the source that must pass phases 3–5.
 
 0. **Preserve** - done: the candidate's read-only snapshot,
    `C:\dev\.preserve\2026-10-28-machteld-0.22-candidate` (verified when made);
@@ -344,10 +356,12 @@ What remains:
    and the reference are read against 22 as built, and the release notes are
    written.
 5. **The release, on the build PC:** the roadmap's release gate, the
-   candidate's step 12. Freeze 22; gate from a fresh clone and a fresh
-   dependency cache; compare the clean build with the matching incremental
-   one; the owner's tests run before the release, each on the owner's word
-   (ruling 12): `--public-tls`, `--interactive-pty`, `--interactive-gui`, and
+   candidate's step 12. Freeze the source and produce two independent clean
+   unsigned builds. Require matching SHA-256 hashes, compare the matching
+   incremental build, and run the full gate on the candidate. Automate repeatable
+   desktop checks in isolation and verify user-visible behavior in an attended
+   session. Arrange the remaining owner tests before release (ruling 12):
+   `--public-tls`, `--interactive-pty`, `--interactive-gui`, and
    the detach success path from a shell outside any job that forbids
    breakaway; the owner signs a copy at a release path, never
    `out\machteld.exe` (BUILDING.md); the gate on the signed bytes
@@ -396,7 +410,10 @@ in this plan, "ruling N" is the poll's ruling N (6.2).
 
 ### 6.2. 2026-10-30: the decisions poll
 
-Numbered as in the poll, which the owner answered on 2026-10-30. Ruling 2 was
+This section records the October answers. Section 6.3 supersedes the October
+answers on release features, wrapper identity, unsigned CI, desktop
+acceptance and integration into `main`. The November vote also admits the
+SQLite binding under ruling 8. Ruling 2 was
 asked again, because the multi-select had not come through, and ruling 1 was
 completed in the morning, after the owner asked what application identity
 is.
@@ -522,8 +539,26 @@ for zef's verbs (D5), zef's own namespace (D6), the runtime range in
 of the eight decisions. Rulings 1, 2, 10, 11, 12 and 15 covered D1, D2,
 D3, D6, D7 and D8 respectively. The November poll settled D4 and D5.
 
-The following numbers match questions 5–10 of the November poll.
+The following numbers match the November release poll.
 
+1. **Release scope.** Ship the cumulative Beta 1 feature set. It includes
+   `machteld::job`, the upstream SQLite binding, direct Tcl entry, `pack`
+   and archive launch, same-generation archive workers, publication and locks,
+   quiet and attended child windows, metadata-only path queries, clipboard
+   ownership and corrected `scope` control flow. Freeze and gate the
+   reconciled source before release.
+2. **Wrapper identity.** Keep console and GUI `wrap`, explicit file lists,
+   `--plan` and optional Windows metadata and icons for 0.22. The 0.30
+   roadmap covers migration to archive delivery and retiring the wrappers.
+3. **Unsigned builds.** The build PC and hosted CI may run unsigned builds.
+   CI executables remain inside the job. Record results and checksums
+   without distributing the unsigned binaries. The owner signs release
+   copies on the build PC for use elsewhere.
+4. **Clean-build reproducibility.** Require two clean unsigned builds of the
+   final source to yield byte-identical executables before signing. In Beta 1,
+   the PE prefix and the contents of all 2,306 archive entries matched while
+   the ZIP container bytes differed. Compare complete executable hashes on
+   the release candidate and retain the clean versus incremental comparison.
 5. **Build outputs (D4, B10).** Incremental builds and their tests use
    `out\dev\machteld.exe`. Reserve `out\machteld.exe` for the release gate.
    Standalone clean builds default to `out\candidate\machteld.exe`. The
@@ -656,17 +691,20 @@ and the ledger's deferred items (4.2) supply further design input.
 2. **Warm pool workers** (30.8): a pool takes successive
    batches and single calls and announces completion through the event loop,
    with an opaque token. Preserve Job Object termination, deadlines and
-   memory caps. Archive workers reopen the parent's archive and verify its
-   digest before running its code.
+   memory caps. The existing `app launch` prefix pins the running archive
+   generation across updates. Extend this guarantee to reusable workers
+   and check the expected digest before executing application code.
 3. **Evented natives** (in place of Thread): evented variants of the commands
    that block for long, whose native threads do the work and deliver
    completion with `Tcl_ThreadQueueEvent`, never evaluating Tcl off the main
-   thread, with cancellation points. Start with child completion at 30.2.
+   thread, with cancellation points. The 0.22 `machteld::job` package already
+   delivers worker records through the event loop. Milestone 30.2 covers
+   native child-completion notifications.
    Cancellable HTTP follows at 30.7. Other candidates include `hash file`,
    `dirs`/`links`, and readiness events for `watch` and `pty`.
-4. **One runtime for scripts and archives.** Run `machteld.exe app.tcl` or
-   `machteld.exe app.machteld`. A desktop shortcut uses the same command.
-   Keep the Windows console subsystem and embed `consoleAllocationPolicy`
+4. **One runtime for scripts and archives.** Both `machteld.exe app.tcl` and
+   `machteld.exe app.machteld` run in 0.22. For desktop shortcuts in 0.30,
+   keep the Windows console subsystem and embed `consoleAllocationPolicy`
    with the value `detached` in the runtime manifest. Verify on the supported
    Windows targets that a shortcut opens a Tk app without a console flash and
    that a foreground launch from a terminal preserves standard streams,
@@ -680,28 +718,29 @@ and the ledger's deferred items (4.2) supply further design input.
    the runtime's own Tcl/Tk libraries. Per-application Windows executable
    resources retire with wrapping.
 
-   Build and run applications with the same signed `machteld.exe`. Its built-in
-   `pack` command reads a project manifest naming the Tcl entry point and the
-   files to include. The proposed arguments are illustrated by
+   Build and run applications with the same signed `machteld.exe`. In 0.22,
+   `pack` takes a directory with a root `main.tcl` or a single Tcl script.
+   Extend it to accept a project manifest naming the entry point and
+   selected files. The proposed arguments are illustrated by
    `machteld.exe pack app.dict -o app.machteld`.
    Use Tcl's bundled ZIP writer to create an application-only archive with
    file sizes and hashes. Verify the result and publish it atomically.
-   Running `machteld.exe app.machteld` verifies the inventory, mounts the
-   archive separately from the runtime libraries and runs the entry script.
+   On archive launch, add verification of that inventory before running
+   the entry script from the mounted archive.
 
    Test both commands in a clean directory containing only the release
    executable, a project manifest, an entry script and a fixture asset.
    Use the executable to create the archive, then run it away from the source
    tree and read the bundled asset. Both commands must work without a
    compiler, external ZIP program or separately installed Tcl/Tk. Also test
-   an archive worker. It checks the parent's archive digest and rejects a
-   replacement before running its code.
+   an archive worker accessing its pinned generation after replacement.
+   Verify that it detects a mismatch before running another generation's code.
 6. **Console control** (4.3, item 3), with the console-control proposal,
    `docs\proposals\console-ctrl`, as its design input.
-7. **Full SQL.** Expose the full SQLite query language to Tcl programs.
-   Enable FTS5 for agent documentation search. The binding, remaining
-   SQLite features and application-level guardrails are design decisions
-   for this milestone.
+7. **SQLite full-text search.** The 0.22 runtime already exposes SQL through
+   the upstream Tcl `sqlite3` binding, sharing the pinned engine with `store`.
+   Enable FTS5 for documentation search. Applications own their query
+   policies, schemas, migrations and backup guarantees.
 8. **Graphviz layout and drawing for Tk, immediately after full SQL.** Embed
    the static Graphviz `dot` layout engine with orthogonal routing, HTML-like
    table labels backed by static Expat, and xdot drawing instructions. A Tcl

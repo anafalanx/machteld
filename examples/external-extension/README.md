@@ -5,10 +5,9 @@ Windows x64 Tcl 9 extension. `examplemath.dll` provides one checked native comma
 `examplemath::add signed32 signed32`. Its exact 64-bit result illustrates the
 loading boundary, not a claim that ordinary arithmetic needs a native extension.
 
-These commands target the current executable in `out/`, machteld 22 in
-preparation, not the older signed `dist/0.21` artifact. Runtime version `22`
-and its inventory packaging differ from that release. Build it using the
-repository README first; acceptance of 22 is still in progress.
+These commands use the release gate's `out/machteld.exe`. After an
+incremental build, use `out/dev/machteld.exe` in its place. Both report
+runtime version `22` and support the wrap manifest and application metadata.
 
 The application loads an absolute DLL filename beside its executable. It does
 not resolve dependencies, use `auto_path`, search the current directory or PATH
@@ -38,10 +37,10 @@ subsystem; an unredirected GUI-subsystem launch should not be expected to print
 to its parent's console.
 
 The stage must not already exist. It contains `app/main.tcl` separately from
-`bundle/`, the directory to deploy. `app.dict` explicitly selects only
-`main.tcl`. Source code, the builder, and documentation are not embedded. The
-executable keeps the host's Windows identity. On failure the stage is left
-for diagnosis. Choose a fresh stage for the next attempt.
+`bundle/`, the directory to deploy. `app.dict` explicitly selects only `main.tcl`
+and provides application identity. Source code, the builder, and documentation
+are not embedded. On failure the stage is left for diagnosis; choose a fresh
+stage rather than overwriting a possibly valuable directory.
 
 Ship the **entire** bundle, keeping these filenames and their relative location:
 
@@ -78,5 +77,5 @@ This checks the Inspector source/console/GUI worker routes and both extension
 host forms without opening windows. It verifies exact embedded and adjacent
 inventories, hashes, license content, Unicode/space deployment paths, execution
 from an unrelated directory, native argument bounds, and missing-DLL behavior.
-Documentation opt-in combinations are also covered by the wrapper's dedicated
-acceptance suites.
+Application PE identity and documentation opt-in combinations are also covered
+by the wrapper's dedicated acceptance suites.
