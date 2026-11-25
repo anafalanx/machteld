@@ -337,19 +337,21 @@ proc ::machteld::PoolReadable {tok c} {
     if {[string first \n $buffer] < 0} {
         append buffer [read $ch [expr {min(65536, $maxframe + 1 - [string length $buffer])}]]
     }
+    set start 0
+    set end [string length $buffer]
     set records 0
     while {$records < 64} {
-        set lf [string first \n $buffer]
+        set lf [string first \n $buffer $start]
         if {$lf >= 0} {
-            set frame [string range $buffer 0 $lf-1]
-            set buffer [string range $buffer $lf+1 end]
-        } elseif {[string length $buffer] > $maxframe} {
+            set frame [string range $buffer $start $lf-1]
+            set start [expr {$lf + 1}]
+        } elseif {$end - $start > $maxframe} {
             PoolAbort $tok limit "worker reply exceeds -maxframe ($maxframe bytes)"
             return
-        } elseif {[eof $ch] && $buffer ne ""} {
+        } elseif {[eof $ch] && $start < $end} {
             # Like gets, accept the final complete JSON value without LF.
-            set frame $buffer
-            set buffer ""
+            set frame [string range $buffer $start end]
+            set start $end
         } else {
             break
         }
@@ -384,6 +386,9 @@ proc ::machteld::PoolReadable {tok c} {
         PoolFeed $tok $c
         if {$c ni [dict get $POOL $tok workers]} return
     }
+    # Discard the processed prefix once per event. Removing it once per
+    # record repeatedly copied the same unread bytes during a line flood.
+    if {$start > 0} { set buffer [string range $buffer $start end] }
     dict set POOL $tok readers $c $buffer
     if {[eof $ch] && $buffer eq ""} { PoolDied $tok $c ; return }
     PoolCheckDone $tok
