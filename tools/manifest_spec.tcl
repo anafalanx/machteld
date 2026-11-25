@@ -11,6 +11,14 @@ namespace eval ::machteld::manifest {}
 set ::machteld::manifest::private {AppDataRoot BrowserPeer BrowserStart BrowserStartupOwner DirectoryStage EntryCheck PayloadRoot Publish PublishWrite}
 
 set ::machteld::manifest::native {
+    surface {
+        kind c domain SURFACE codes {device format limit shader size} options {-driver -height -scale -width}
+        doc machteld/command/surface
+        subcommands {
+            d2d {options {-driver -height -scale -width} doc machteld/command/surface#d2d}
+            d3d {options {-driver -height -width} doc machteld/command/surface#d3d}
+        }
+    }
     audio {
         kind c domain AUDIO codes {device format limit oserror state unavailable unsupported} options {}
         doc machteld/command/audio

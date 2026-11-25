@@ -34,8 +34,9 @@ extern int Machtelddirs_Init(Tcl_Interp *interp); /* src/dirs.c */
 #endif
 #ifdef MACHTELD_HTTP
 extern int Machteldhttp_Init(Tcl_Interp *interp); /* src/http.c */
-extern int Machteldaudio_Init(Tcl_Interp *interp);
 #endif
+extern int Machteldaudio_Init(Tcl_Interp *interp);
+extern int Machteldsurface_Init(Tcl_Interp *interp);
 extern int Machteldpublish_Init(Tcl_Interp *interp); /* src/publish.c */
 extern int Machteldlock_Init(Tcl_Interp *interp); /* src/lock.c */
 extern int Machteldclipboard_Init(Tcl_Interp *interp); /* src/clipboard.c */
@@ -323,9 +324,11 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldhttp", Machteldhttp_Init, NULL);
+#endif
     if (Machteldaudio_Init(interp) != TCL_OK) return TCL_ERROR;
     Tcl_StaticLibrary(interp, "machteldaudio", Machteldaudio_Init, NULL);
-#endif
+    if (Machteldsurface_Init(interp) != TCL_OK) return TCL_ERROR;
+    Tcl_StaticLibrary(interp, "machteldsurface", Machteldsurface_Init, NULL);
     if (Machteldpublish_Init(interp) == TCL_ERROR) {
         return TCL_ERROR;
     }

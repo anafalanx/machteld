@@ -497,7 +497,7 @@ proc ::machteld::devcache::with_native_environment {msys script} {
 proc ::machteld::devcache::native_shared_spec {root paths toolchainKey} {
     set files [list [file join $root tools buildlib.tcl]]
     lappend files {*}[lsort [glob -nocomplain -directory [file join $root src] *.h]]
-    foreach directory {media vendor} {
+    foreach directory {graphics media vendor} {
         lappend files {*}[lsort [glob -nocomplain -directory [file join $root src $directory] *.h]]
     }
     set trees [list [dict get $paths include]]

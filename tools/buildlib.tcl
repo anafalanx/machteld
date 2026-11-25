@@ -36,6 +36,7 @@ set ::machteld::build::SYSLIBS {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32 -liphlpapi
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
     -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4 -lshlwapi -liphlpapi -lmfuuid -lavrt
+    -ld3d11 -ldxgi -ldxguid -ld2d1 -ld3dcompiler
 }
 
 # Prelude parts in sourcing order: machteld.tcl first (it defines Fail,
@@ -51,7 +52,11 @@ proc ::machteld::build::werror {} {
 
 proc ::machteld::build::native_sources {root} {
     set src [file join $root src]
-    return [lsort [concat [glob -directory $src *.c] [glob -nocomplain -directory [file join $src media] *.c]]]
+    set sources [glob -directory $src *.c]
+    foreach directory {graphics media} {
+        lappend sources {*}[glob -nocomplain -directory [file join $src $directory] *.c]
+    }
+    return [lsort $sources]
 }
 
 # The flags for one authored translation unit.

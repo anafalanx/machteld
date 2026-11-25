@@ -303,7 +303,7 @@ proc ::na::main {argv} {
         requireOk $version
         dict set report compiler_version [list S [string trim [dict get $version text]]]
         set inputs [lsort [concat [glob -directory [file join $root src] *.c] [glob -directory [file join $root src] *.h]]]
-        foreach directory {media vendor} {
+        foreach directory {graphics media vendor} {
             lappend inputs {*}[lsort [glob -nocomplain -directory [file join $root src $directory] *.h *.c]]
         }
         foreach relative {
@@ -328,7 +328,8 @@ proc ::na::main {argv} {
             fail "GCC's analyzer did not detect the required use-after-free canary"
         }
         dict set capabilities gcc_analyzer {S {supported; negative use-after-free canary detected}}
-        foreach file [lsort [glob -directory [file join $root src] *.c]] {
+        foreach file [lsort [concat [glob -directory [file join $root src] *.c] \
+                                    [glob -directory [file join $root src graphics] *.c]]] {
             set base [file rootname [file tail $file]]
             runOk analyzer-$base [list $gcc {*}$flags -O0 -fanalyzer -fdiagnostics-path-format=separate-events \
                 -c $file -o [file join $output $base.analysis.o]]

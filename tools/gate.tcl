@@ -351,6 +351,12 @@ proc ::gate::plan {settings} {
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
         addLane steps $runtime interactive "WASAPI device lifecycle (silence)" audio_test.tcl --device
+        addLane steps $runtime interactive "Direct2D and Direct3D Tk rendering and pre-present readback" surface_test.tcl
+        set displays [file join $out surface_displays.exe]
+        addStep steps interactive "fixture surface_displays.c" [list $gcc {*}$strict \
+            [file join $test fixtures surface_displays.c] -luser32 -lshcore -o $displays]
+        addLane steps $runtime interactive "Tk graphics on each connected monitor" surface_dpi_test.tcl $displays
+        addLane steps $runtime interactive "per-monitor-aware Tk graphics" surface_dpi_test.tcl $displays --per-monitor
         addLane steps $runtime interactive "HLS through a Windows audio endpoint (silence)" hls_test.tcl --device
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
