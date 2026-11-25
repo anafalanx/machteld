@@ -21,7 +21,8 @@ package require machteld 0.21
 #
 # It verifies the dependency cache (bootstrap --verify-only: nothing is
 # rebuilt or installed), hashes its inputs and refuses a result whose sources
-# changed under it, runs GCC's -fanalyzer over every src/*.c once a
+# changed under it, runs GCC's -fanalyzer over every production native
+# translation unit, including graphics and media, once a
 # use-after-free canary shows that the analyzer reports, probes the ASan and
 # UBSan runtimes (reported unsupported where the pinned toolchain has none),
 # runs the trapped drivers, links the real pinned Tk index formatter and runs
@@ -282,7 +283,10 @@ proc ::na::main {argv} {
             {JSON reader/emitter/typed-tree ownership with yyjson}
             {filesystem length/capacity boundaries}
             {SQLite result cleanup and HTTP header-key ownership}
-            {hash token sequence exhaustion}}] \
+            {hash token sequence exhaustion}
+            {Cloud Files provider outcomes and encoding detector availability}
+            {UDP lifetime and Windows network adapter errors}
+            {authenticated time cryptographic vectors, deadlines and worker lifetime}}] \
         limits [strings {
             {GCC analyzer is heuristic, not a proof.}
             {Undefined-behavior traps do not detect all heap errors, leaks, or Win32 HANDLE misuse.}
@@ -338,8 +342,7 @@ proc ::na::main {argv} {
             fail "GCC's analyzer did not detect the required use-after-free canary"
         }
         dict set capabilities gcc_analyzer {S {supported; negative use-after-free canary detected}}
-        foreach file [lsort [concat [glob -directory [file join $root src] *.c] \
-                                    [glob -directory [file join $root src graphics] *.c]]] {
+        foreach file [::machteld::build::native_sources $root] {
             set base [file rootname [file tail $file]]
             runOk analyzer-$base [list $gcc {*}$flags -O0 -fanalyzer -fdiagnostics-path-format=separate-events \
                 -c $file -o [file join $output $base.analysis.o]]
