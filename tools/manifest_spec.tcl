@@ -50,6 +50,14 @@ set ::machteld::manifest::native {
         options {-depth -prune}
         returns {depthlimited dirs errors links maxdepth paths pruned root}
     }
+    graphviz {
+        kind c domain GRAPHVIZ codes {input layout usage} options {}
+        doc machteld/command/graphviz
+        subcommands {
+            layout {options {} returns {edges nodes origin size} doc machteld/command/graphviz#layout}
+            xdot   {options {} doc machteld/command/graphviz#xdot}
+        }
+    }
     hash {
         kind c domain HASH codes {badvalue nohandle notfound oserror usage}
         doc machteld/command/hash

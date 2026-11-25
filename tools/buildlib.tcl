@@ -110,6 +110,7 @@ proc ::machteld::build::paths {cache} {
         sqlite [file join $cache sqlite] \
         yyjson [file join $cache yyjson] \
         cffilib [first_existing "static cffi" [list [file join $prefix lib libcffi.a]]] \
+        graphvizlib [first_existing "static Graphviz" [list [file join $prefix lib libmachteldgraphviz.a]]] \
         ffilib [first_existing "static libffi" [list [file join $prefix lib libffi.a]]] \
         tclsh [first_existing "static tclsh" [list \
             [file join $prefix bin tclsh90s.exe] [file join $prefix bin tclsh90.exe]]] \
@@ -174,7 +175,7 @@ proc ::machteld::build::link_host {gcc strip mainobj resobj objects sqliteobj yy
             error "GCC did not select the Machteld application manifest"
         }
         run $gcc {*}$flags $mainobj {*}$objects $sqliteobj $yyjsonobj \
-            [dict get $paths cffilib] [dict get $paths ffilib] \
+            [dict get $paths cffilib] [dict get $paths ffilib] [dict get $paths graphvizlib] \
             [dict get $paths tklib] [dict get $paths tcllib] [dict get $paths tclstub] \
             {*}$SYSLIBS -o $output
     } finally {

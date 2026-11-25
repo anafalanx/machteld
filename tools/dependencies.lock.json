@@ -23,6 +23,30 @@
   },
   "archives": [
     {
+      "id": "graphviz",
+      "version": "16.1.2",
+      "file": "graphviz-16.1.2.tar.xz",
+      "url": "https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/16.1.2/graphviz-16.1.2.tar.xz",
+      "sha256": "9780938f03659e2effbbfbbaec94940108e794199b73196fa339ca911890e8c9",
+      "directory": "graphviz-16.1.2",
+      "notice": {
+        "file": "graphviz-16.1.2.txt",
+        "sha256": "0becf16567beb77fa252b7664631dd177c8f9a1889e48995b45379c7130e5303"
+      }
+    },
+    {
+      "id": "expat",
+      "version": "2.8.1",
+      "file": "expat-2.8.1.tar.xz",
+      "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_1/expat-2.8.1.tar.xz",
+      "sha256": "10b195ee78160a908388180a8fe3603d4e9a12f4755fbf5f3816b23a9d750da0",
+      "directory": "expat-2.8.1",
+      "notice": {
+        "file": "expat-2.8.1.txt",
+        "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+      }
+    },
+    {
       "id": "tcltk",
       "version": "9.0.4",
       "file": "tcl904-src.zip",

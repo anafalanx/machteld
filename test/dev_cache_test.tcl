@@ -451,7 +451,7 @@ try {
         yyjson [file join $::fixtureCache yyjson] \
         tclsh [file join $prefix bin tclsh90s.exe]]
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/graphviz-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
         tools/reference.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h tcl/machteld.tcl
         tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
@@ -475,7 +475,7 @@ try {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"
     }
     foreach relative {
-        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/patches/dependency.patch
+        tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/graphviz-build.tcl tools/patches/dependency.patch
     } {
         spec_tracks dependencies [file join $::fixtureRoot {*}[split $relative /]]
     }
@@ -638,13 +638,14 @@ try {
     # A child interpreter has no runtime package of its own: it is given this
     # runtime's version and the commands the coordinator's helpers call.
     set startupRoot [file join $work coordinator-fixture]
-    set recipes {dev.tcl buildlib.tcl devcache.tcl cffi-build.tcl bootstrap.tcl}
+    set recipes {dev.tcl buildlib.tcl devcache.tcl cffi-build.tcl graphviz-build.tcl bootstrap.tcl}
     foreach name $recipes {
         write_bytes [file join $startupRoot tools $name] \
             [read_bytes [file join $repo tools $name]]
     }
     foreach relative {
         prefix/lib/libtcl90.a prefix/lib/libtcl9tk90.a prefix/lib/libtclstub.a prefix/lib/libcffi.a prefix/lib/libffi.a
+        prefix/lib/libmachteldgraphviz.a
         sqlite/sqlite3.c yyjson/yyjson.c
     } {
         write_bytes [file join $::fixtureCache {*}[split $relative /]] "fixture:$relative"

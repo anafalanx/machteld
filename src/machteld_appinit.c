@@ -7,6 +7,7 @@
 
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
 extern int Cffi_Init(Tcl_Interp *interp);
+extern int Machteldgraphviz_Init(Tcl_Interp *interp);
 
 #ifdef MACHTELD_STATIC_SQLITE
 #include "sqlite3.h"
@@ -320,6 +321,11 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldclipboard", Machteldclipboard_Init, NULL);
+    if (Machteldgraphviz_Init(interp) != TCL_OK) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldgraphviz", Machteldgraphviz_Init, NULL);
+
     /* The prelude registers `package require Tk` against the statically
      * linked Tk. It reads the library's own patch level from this variable,
      * so no hand-maintained literal can drift from what `load {} Tk` provides. */

@@ -8,4 +8,5 @@
 *.md text eol=lf
 LICENSE text eol=lf
 licenses/*.txt text eol=lf
+licenses/graphviz-16.1.2.txt -whitespace
 tools/patches/*.patch -text -whitespace

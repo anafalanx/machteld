@@ -93,6 +93,9 @@ proc ::pt::packageTests {} {
         yyjson-0.12.0.txt 45e384d3d52c73cba3a64d6e6c25d47cd738cd8a55c30629e3201046eda62947
         cffi-2.0.3.txt cdff44ed75ce0f7c9625165bdb86cc4221fab9479eeda359f9d8268db2a9591d
         tclh-6afd306.txt 5f1172dc3b77b33f1e856cf7a6f9fafa427e914e3e1b2e300ca1eb766d4e1c76
+        graphviz-16.1.2.txt 0becf16567beb77fa252b7664631dd177c8f9a1889e48995b45379c7130e5303
+        graphviz-ellipse.txt 133e194718ad2183f397682ca271ff088de745d6859c524483e1c743f1b992cd
+        expat-2.8.1.txt 31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87
         libffi-3.5.2.txt d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366
     }
 
@@ -256,6 +259,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/zlib-1.3.2.txt
             licenses/LibTomMath-1.3.0.txt licenses/yyjson-0.12.0.txt
             licenses/cffi-2.0.3.txt licenses/libffi-3.5.2.txt licenses/tclh-6afd306.txt
+            licenses/graphviz-16.1.2.txt licenses/graphviz-ellipse.txt licenses/expat-2.8.1.txt
             reference/catalog.dict reference/catalog.json reference/search.dict reference/manifest.sha256
             reference/schema.json reference/START-HERE.md reference/AGENTS.md reference/markdown/machteld/agent.md
         } {
@@ -269,7 +273,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
         if {[file exists $base/licenses/UNTRACKED-SENTINEL.txt]} {
             return "packaging copied a notice outside its explicit allowlist"
         }
-        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt} {
+        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt graphviz-16.1.2.txt graphviz-ellipse.txt expat-2.8.1.txt} {
             if {[readBytes $base/licenses/$notice] ne [readBytes [file join $licenses $notice]]} {
                 return "packaging changed license bytes: $notice"
             }

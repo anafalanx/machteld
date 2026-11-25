@@ -49,9 +49,10 @@ ZIP before the current CI policy was adopted.
    the build PC it is `C:\dev\.z\r\msys2`: pass `--msys C:\dev\.z\r\msys2`, or
    set `MSYS2_ROOT` for `tools\dev.tcl`. bash runs only inside MSYS2, for
    Tcl/Tk's configure and make.
-3. **The pinned sources:** Tcl/Tk 9.0.4, SQLite 3.53.4 and yyjson 0.12.0. The
-   bootstrap fetches the four source archives and the matching upstream
-   SQLite Tcl binding into `.cache\deps\downloads` with Windows' own
+3. **The pinned sources** include Tcl/Tk 9.0.4, SQLite 3.53.4, yyjson 0.12.0,
+   cffi and its dependencies, Graphviz 16.1.2 and Expat 2.8.1. The bootstrap
+   fetches their source archives and the matching upstream SQLite Tcl binding
+   into `.cache\deps\downloads` with Windows' own
    `curl.exe`. It verifies each file by SHA-256 and reuses matching cached
    downloads. Later builds reuse `.cache\deps`.
 

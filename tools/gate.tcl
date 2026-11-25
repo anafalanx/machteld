@@ -230,6 +230,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "cross-process file locks" lock_test.tcl
                 addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
+                addLane steps $runtime fast "Graphviz layout and drawing" graphviz_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl
@@ -308,6 +309,7 @@ proc ::gate::plan {settings} {
         addStep steps interactive "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
             [file join $test fixtures window_fixture.c] -luser32 -o $windowFixture]
         addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
+        addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl
