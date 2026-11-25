@@ -21,6 +21,63 @@ proc waitFor {file} {
     if {![file isfile $file]} {error "fixture did not produce [file tail $file]"}
 }
 
+proc visibleIcon {photo} {
+    for {set y 0} {$y < [image height $photo]} {incr y} {
+        for {set x 0} {$x < [image width $photo]} {incr x} {
+            if {![$photo transparency get $x $y]} {return 1}
+        }
+    }
+    return 0
+}
+
+proc catalogTests {fixture probe work} {
+    package require Tk
+    wm withdraw .
+    set photo [image create photo]
+    try {
+        set rows [desktop apps]
+        set byKind {}
+        foreach row $rows {dict lappend byKind [dict get $row kind] [dict get $row target]}
+        foreach kind {shortcut store} {
+            if {![dict exists $byKind $kind]} {
+                puts "No $kind entries are installed in this Windows profile."
+                continue
+            }
+            set found 0
+            foreach token [dict get $byKind $kind] {
+                if {![catch {desktop icon $token $photo 24}] && [visibleIcon $photo]} {set found 1; break}
+            }
+            check "an installed $kind supplies visible pixels to a Tk photo" {$found}
+        }
+        load $probe Desktopcatalog
+        set menu [file join $work isolated-menu]
+        set place [file join $work {launch here}]
+        file mkdir [file join $menu nested] $place
+        set shortcut [file join $menu nested {test application.lnk}]
+        exec $fixture --make-document [file nativename $shortcut] [file nativename $place]
+        set rows [fixtureCatalog scan $menu]
+        check "a closed installed shortcut is discovered by name" {
+            [llength $rows] == 1 && [dict get [lindex $rows 0] kind] eq "shortcut" &&
+            [dict get [lindex $rows 0] name] eq "test application"}
+        set token [dict get [lindex $rows 0] target]
+        check "unchanged catalog entries preserve their selections" {
+            [dict get [lindex [fixtureCatalog scan $menu] 0] target] eq $token}
+        check "the selected shortcut supplies an icon" {[fixtureCatalog icon $token $photo 32] eq $photo && [visibleIcon $photo]}
+        fixtureCatalog launch $token
+        waitFor [file join $place shell-opened]
+        check "launch preserves the selected shortcut arguments and working directory" {[file size [file join $place shell-opened]] > 0}
+        file rename $shortcut $shortcut.previous
+        exec $fixture --make-document [file nativename $shortcut] [file nativename $place]
+        check "replaced shortcut is refused before launch" {[code [list fixtureCatalog launch $token]] eq {MACHTELD DESKTOP notfound}}
+        set next [dict get [lindex [fixtureCatalog scan $menu] 0] target]
+        check "refreshed shortcut receives a new identity" {$next ne $token}
+        file delete $shortcut
+        check "deleted shortcut is refused before icon extraction" {
+            [code [list fixtureCatalog icon $next $photo 32]] eq {MACHTELD DESKTOP notfound}}
+        check "removed shortcuts leave the next catalog" {![llength [fixtureCatalog scan $menu]]}
+    } finally {image delete $photo; destroy .}
+}
+
 proc windowsTest {fixture work} {
     set fixture [file normalize $fixture]
     set class "MachteldDesktop[pid]"
@@ -106,8 +163,19 @@ try {
     check "an empty selection cannot activate a window" {[code {desktop activate {}}] eq {MACHTELD DESKTOP notfound}}
     check "operation and arity are exact" {
         [code {desktop wind}] eq {MACHTELD DESKTOP usage} && [code {desktop windows unused}] eq {MACHTELD DESKTOP usage}}
-    if {[llength $argv] == 2 && [lindex $argv 0] eq "--windows"} {
+    set targets {}
+    set valid 1
+    foreach row [desktop apps] {
+        if {[lsort [dict keys $row]] ne {kind name source target} || [dict get $row kind] ni {shortcut store} ||
+                [dict get $row name] eq {} || [dict get $row source] eq {} || [dict exists $targets [dict get $row target]]} {set valid 0}
+        dict set targets [dict get $row target] 1
+    }
+    check "installed applications have distinct targets and complete records" {$valid}
+    check "unknown application targets are refused" {[code {desktop launch invalid}] eq {MACHTELD DESKTOP notfound}}
+    check "invalid icon size is refused before shell access" {[code {desktop icon invalid photo 0}] eq {MACHTELD DESKTOP badvalue}}
+    if {[llength $argv] in {2 3} && [lindex $argv 0] eq "--windows"} {
         windowsTest [lindex $argv 1] $work
-    } elseif {[llength $argv]} {error "usage: desktop_test.tcl ?--windows fixture?"}
+        if {[llength $argv] == 3} {catalogTests [file normalize [lindex $argv 1]] [file normalize [lindex $argv 2]] $work}
+    } elseif {[llength $argv]} {error "usage: desktop_test.tcl ?--windows fixture ?catalog-probe??"}
 } finally {file delete -force -- $work}
 puts "Desktop checks passed."

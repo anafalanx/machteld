@@ -39,6 +39,9 @@ set ::machteld::manifest::native {
             windows {options {} doc machteld/command/desktop#windows}
             activate {options {} returns {foreground requested} doc machteld/command/desktop#activate}
             open {options {} doc machteld/command/desktop#open}
+            apps {options {} doc machteld/command/desktop#apps}
+            launch {options {} doc machteld/command/desktop#launch}
+            icon {options {} doc machteld/command/desktop#icon}
         }
     }
     clipboard {

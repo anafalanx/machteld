@@ -17,11 +17,11 @@ static HANDLE inherit_stream(DWORD stream, DWORD access) {
 }
 
 int wmain(int argc, wchar_t **argv) {
-    if (argc != 4) return 2;
+    if (argc != 5) return 2;
     /* All dynamic arguments are Windows file paths. A valid file name cannot
      * contain a quote or end in a directory separator. */
     size_t count = 32;
-    for (int i = 1; i < 4; i++) {
+    for (int i = 1; i < 5; i++) {
         size_t n = wcslen(argv[i]);
         if (!n || n > 32767 || wcschr(argv[i], L'"') || argv[i][n - 1] == L'\\' ||
                 argv[i][n - 1] == L'/') return 2;
@@ -30,7 +30,7 @@ int wmain(int argc, wchar_t **argv) {
     if (count > 32767) return 2;
     wchar_t *line = calloc(count, sizeof(*line));
     if (!line) return 2;
-    swprintf(line, count, L"\"%ls\" \"%ls\" --windows \"%ls\"", argv[1], argv[2], argv[3]);
+    swprintf(line, count, L"\"%ls\" \"%ls\" --windows \"%ls\" \"%ls\"", argv[1], argv[2], argv[3], argv[4]);
 
     int result = 1;
     const char *step = "desktop setup";

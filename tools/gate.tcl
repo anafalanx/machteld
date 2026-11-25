@@ -260,12 +260,17 @@ proc ::gate::plan {settings} {
                 addStep steps integration "command-line golden vectors" [list $cmdline]
                 set privateRunner [file join $out desktop_runner.exe]
                 set windowFixture [file join $out window_fixture.exe]
+                set catalogFixture [file join $out desktop_catalog.dll]
                 addStep steps integration "fixture desktop_runner.c" [list $gcc {*}$strict -municode \
                     [file join $test fixtures desktop_runner.c] -luser32 -o $privateRunner]
                 addStep steps integration "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
                     [file join $test fixtures window_fixture.c] -luser32 -lole32 -luuid -o $windowFixture]
+                addStep steps integration "fixture desktop_catalog.c" [list $gcc {*}$strict -shared -DUSE_TCL_STUBS -DUSE_TK_STUBS \
+                    -I [file join $cache prefix include] [file join $test fixtures desktop_catalog.c] \
+                    [file join $root src wintext.c] [file join $cache prefix lib libtkstub.a] \
+                    [file join $cache prefix lib libtclstub.a] -lshell32 -lole32 -luuid -luser32 -lgdi32 -o $catalogFixture]
                 addStep steps integration "isolated desktop selection" [list $privateRunner $runtime \
-                    [file join $test desktop_test.tcl] $windowFixture] timeout 120s
+                    [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
                 set ffiDependency [file join $out machteld_cffi_dependency.dll]
                 set ffiFixture [file join $out machteld_cffi_fixture.dll]
                 set ffiImport [file join $out libmachteld_cffi_dependency.a]

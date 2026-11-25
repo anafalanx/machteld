@@ -12,6 +12,7 @@
 #include <wchar.h>
 #include "tcl.h"
 #include "wintext.h"
+#include "desktop_apps.h"
 
 typedef struct {
     HWND window;
@@ -26,6 +27,7 @@ typedef struct {
     ATOM property;
     char issuer[40];
     uintptr_t next;
+    desktop_catalog *applications;
     int (WINAPI *caption)(HWND, WCHAR *, int);
 } desktop_state;
 
@@ -65,13 +67,18 @@ static void discard_absent(desktop_state *state, int all) {
     }
 }
 
-static void destroy_state(void *data) {
+static void free_state(void *data) {
     desktop_state *state = data;
     discard_absent(state, 1);
     Tcl_DeleteHashTable(&state->names);
     Tcl_DeleteHashTable(&state->handles);
     if (state->property) GlobalDeleteAtom(state->property);
+    desktop_catalog_free(state->applications);
     Tcl_Free(state);
+}
+
+static void destroy_state(void *data) {
+    Tcl_EventuallyFree(data, free_state);
 }
 
 static int initialize_property(desktop_state *state, Tcl_Interp *ip) {
@@ -280,15 +287,37 @@ static int open_path(Tcl_Interp *ip, Tcl_Obj *path) {
     return win_error(ip, "Windows could not open the document", error);
 }
 
-static int DesktopCmd(void *data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[]) {
-    static const char *const ops[] = {"windows", "activate", "open", NULL};
+static int dispatch(desktop_state *state, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[]) {
+    static const char *const ops[] = {"windows", "activate", "open", "apps", "launch", "icon", NULL};
     int op;
-    if (objc < 2 || Tcl_GetIndexFromObj(NULL, objv[1], ops, "operation", TCL_EXACT, &op) != TCL_OK ||
-            objc != (op == 0 ? 2 : 3))
-        return fail(ip, "usage", "usage: desktop windows | desktop activate token | desktop open path");
-    if (op == 0) return windows(data, ip);
-    if (op == 1) return activate(data, ip, objv[2]);
-    return open_path(ip, objv[2]);
+    if (objc >= 2 && Tcl_GetIndexFromObj(NULL, objv[1], ops, "operation", TCL_EXACT, &op) == TCL_OK) {
+        switch (op) {
+            case 0: if (objc == 2) return windows(state, ip); break;
+            case 1: if (objc == 3) return activate(state, ip, objv[2]); break;
+            case 2: if (objc == 3) return open_path(ip, objv[2]); break;
+            case 3:
+                if (objc != 2) break;
+                if (initialize_property(state, ip) != TCL_OK) return TCL_ERROR;
+                return desktop_applications(ip, state->issuer, &state->applications);
+            case 4: if (objc == 3) return desktop_launch_app(ip, state->applications, objv[2]); break;
+            case 5: if (objc == 4 || objc == 5)
+                return desktop_app_icon(ip, state->applications, objv[2], objv[3], objc == 5 ? objv[4] : NULL);
+        }
+    }
+    return fail(ip, "usage", "usage: desktop windows | activate token | open path | apps | launch target | icon target photo ?size?");
+}
+
+static int DesktopCmd(void *data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[]) {
+    desktop_state *state = data;
+    desktop_catalog *active = state->applications;
+    /* Shell COM dispatch can pump messages. A reentrant refresh or command
+     * deletion must preserve the selection that the outer request is using. */
+    Tcl_Preserve(state);
+    if (active) Tcl_Preserve(active);
+    int rc = dispatch(state, ip, objc, objv);
+    if (active) Tcl_Release(active);
+    Tcl_Release(state);
+    return rc;
 }
 
 int Machtelddesktop_Init(Tcl_Interp *interp) {

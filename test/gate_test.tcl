@@ -126,7 +126,8 @@ check {the integration group compiles its own fixtures and the process fixture} 
     [expr {[compiled [::gate::plan [settings {--group integration}]]] eq [list \
         {fixture process_fixture.c} {fixture http_fixture.c} {SQLite test object} \
         {fixture sqlite_lock_fixture.c} {fixture cmdline_test.c} \
-        {fixture desktop_runner.c} {fixture window_fixture.c} {fixture cffi_dependency.c} {fixture cffi_fixture.c}]}]
+        {fixture desktop_runner.c} {fixture window_fixture.c} {fixture desktop_catalog.c} \
+        {fixture cffi_dependency.c} {fixture cffi_fixture.c}]}]
 check {the packaging group compiles only the process fixture} \
     [expr {[compiled [::gate::plan [settings {--group packaging}]]] eq {{fixture process_fixture.c}}}]
 set nvPlan [::gate::plan [settings {--group native-validation}]]

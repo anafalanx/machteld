@@ -32,7 +32,9 @@ names or add `::machteld::palette` to their namespace path for the short names.
 - Windows desktop: `child present` shows the state of a supervised application
   window. `desktop windows` lists open application windows and `desktop activate`
   requests foreground for a selected window. `desktop open` dispatches a local
-  document to its associated viewer. `::machteld::clipboard owned` checks whether
+  document to its associated viewer. `desktop apps` lists Start-menu shortcuts
+  and Store applications. `desktop launch` opens a selected application, and
+  `desktop icon` copies its icon into a Tk photo. `::machteld::clipboard owned` checks whether
   this process owns the clipboard.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.

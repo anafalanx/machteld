@@ -2,8 +2,8 @@
 id: machteld/command/desktop
 type: command
 title: desktop
-summary: List and activate desktop windows and open a local document.
-commands: desktop, desktop windows, desktop activate, desktop open
+summary: Select desktop windows, open local documents and discover installed Windows applications.
+commands: desktop, desktop windows, desktop activate, desktop open, desktop apps, desktop launch, desktop icon
 ---
 
 # desktop
@@ -15,6 +15,12 @@ commands: desktop, desktop windows, desktop activate, desktop open
 `desktop activate token`
 
 `desktop open path`
+
+`desktop apps`
+
+`desktop launch target`
+
+`desktop icon target photo ?size?`
 
 ## Arguments and options
 
@@ -164,3 +170,123 @@ The shell receives the complete path as one file argument. The user's account se
 #### See also
 
 `machteld/command/canon`, `machteld/command/run`.
+
+<a id="apps"></a>
+### apps
+
+#### Synopsis
+
+`desktop apps`
+
+#### Arguments and options
+
+Takes no arguments. Resolves both the user and shared Start menus and the Windows AppsFolder.
+
+#### Results
+
+Each row contains `name`, `kind`, `source`, and `target`. The kind is `shortcut` or `store`. Source is the shortcut path or package application user model ID. Pass the target to `desktop launch` or `desktop icon`.
+
+#### Errors
+
+`oserror` reports a Windows catalog failure.
+
+#### Lifetime and timeouts
+
+Each call reads the current inventory. A successful refresh expires removed entries. Unchanged entries preserve their tokens. A failed refresh retains the preceding inventory.
+
+#### Examples
+
+```tcl
+set entries [desktop apps]
+foreach entry $entries {
+    puts [list [dict get $entry kind] [dict get $entry name]]
+}
+```
+
+#### Constraints
+
+The list includes closed applications. Start-menu traversal skips reparse points and inaccessible directories. Icons load on demand. Your application chooses ordering and duplicate-name presentation.
+
+#### See also
+
+`machteld/command/desktop#launch`, `machteld/command/desktop#icon`.
+
+
+<a id="launch"></a>
+### launch
+
+#### Synopsis
+
+`desktop launch target`
+
+#### Arguments and options
+
+Pass the `target` from a `desktop apps` result in this interpreter.
+
+#### Results
+
+Returns an empty string when Windows accepts the launch.
+
+#### Errors
+
+`notfound` indicates an expired selection or a deleted or changed shortcut. `oserror` reports a Windows activation failure.
+
+#### Lifetime and timeouts
+
+The shell can reuse an existing program. A shortcut launches with its own recorded arguments and working directory.
+
+#### Examples
+
+```tcl
+set selected [lindex $entries $selectedRow]
+desktop launch [dict get $selected target]
+```
+
+#### Constraints
+
+Windows handles Store activation using the selected application user model ID. The call preserves the user's foreground policy.
+
+#### See also
+
+`machteld/command/desktop#apps`, `machteld/command/desktop#open`.
+
+
+<a id="icon"></a>
+### icon
+
+#### Synopsis
+
+`desktop icon target photo ?size?`
+
+#### Arguments and options
+
+Pass an application `target`, the name of an existing Tk photo image and an optional size in pixels from 8 through 256. The default is 32.
+
+#### Results
+
+Returns the supplied photo name after replacing its pixels with the Shell icon. Tk receives straight alpha and the Shell's actual image dimensions.
+
+#### Errors
+
+`badvalue` indicates a missing Tk photo or invalid size. `notfound` identifies an expired selection. `oserror` reports a Shell extraction or bitmap error.
+
+#### Lifetime and timeouts
+
+The command obtains the image on demand. The caller owns the photo and can keep or delete it.
+
+#### Examples
+
+```tcl
+package require Tk
+set photo [image create photo]
+desktop icon [dict get $selected target] $photo 32
+label .applicationIcon -image $photo
+```
+
+#### Constraints
+
+Run this on the thread that owns the Tk image. Headless applications can use `desktop apps` and `desktop launch` independently.
+
+#### See also
+
+`machteld/command/desktop#apps`, `tk/command/photo`.

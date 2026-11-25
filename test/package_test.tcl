@@ -99,6 +99,7 @@ proc ::pt::packageTests {} {
         libffi-3.5.2.txt d5699fa516968e3a1550e6c902b7441c78856f2603d61bedd0b0662a26655366
         xxHash-0.8.3.txt 6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a
         Els-MIT.txt 6ecd1d4f5394b996f18f4c8710b78a20483cfcaa442c27b407049bc055a6c8ac
+        Ann-MIT.txt 6ecd1d4f5394b996f18f4c8710b78a20483cfcaa442c27b407049bc055a6c8ac
     }
 
     set result [runPackage --unknown value]
@@ -263,6 +264,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             licenses/xxHash-0.8.3.txt licenses/cffi-2.0.3.txt licenses/libffi-3.5.2.txt licenses/tclh-6afd306.txt
             licenses/graphviz-16.1.2.txt licenses/graphviz-ellipse.txt licenses/expat-2.8.1.txt
             licenses/Els-MIT.txt
+            licenses/Ann-MIT.txt
             reference/catalog.dict reference/catalog.json reference/search.dict reference/manifest.sha256
             reference/schema.json reference/START-HERE.md reference/AGENTS.md reference/markdown/machteld/agent.md
         } {
@@ -276,7 +278,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
         if {[file exists $base/licenses/UNTRACKED-SENTINEL.txt]} {
             return "packaging copied a notice outside its explicit allowlist"
         }
-        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt xxHash-0.8.3.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt graphviz-16.1.2.txt graphviz-ellipse.txt expat-2.8.1.txt Els-MIT.txt} {
+        foreach notice {Tcl-9.0.4.txt Tk-9.0.4.txt zlib-1.3.2.txt LibTomMath-1.3.0.txt yyjson-0.12.0.txt xxHash-0.8.3.txt cffi-2.0.3.txt libffi-3.5.2.txt tclh-6afd306.txt graphviz-16.1.2.txt graphviz-ellipse.txt expat-2.8.1.txt Els-MIT.txt Ann-MIT.txt} {
             if {[readBytes $base/licenses/$notice] ne [readBytes [file join $licenses $notice]]} {
                 return "packaging changed license bytes: $notice"
             }
