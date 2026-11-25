@@ -72,7 +72,8 @@ try {
     lassign [startFixture decoy $class iconic direct -window normal] decoy decoyPath launch
     check "normal launch requests SW_SHOWNORMAL from Windows" [expr {
         [dict get $launch showSet] && [dict get $launch show] == 1}]
-    foreach {label value} [list empty {} oversized [string repeat a 256] {embedded NUL} "ABC\u0000XYZ"] {
+    foreach {label value} [list empty {} oversized [string repeat a 256] \
+            {256 UTF-16 units} [string repeat "📦" 128] {embedded NUL} "ABC\u0000XYZ"] {
         check "present rejects a class with $label input" [expr {
             [catch {child present $decoy -class $value} msg opts] &&
             [dict get $opts -errorcode] eq {MACHTELD CHILD badvalue}}]
@@ -127,6 +128,18 @@ try {
     set actual [observe $misplacedPath]
     check "presentation without a class repairs an off-screen owned window" [expr {
         [dict get $restored onScreen] && [dict get $actual onScreen] && [dict get $actual visible]}]
+    closeFixture $misplaced
+
+    lassign [startFixture tiny $class tiny direct -window normal] tiny tinyPath ignored
+    signalFixture $tinyPath open-window
+    set small [reported $tinyPath opened]
+    check "fixture creates a four-pixel top-level window" [expr {
+        [dict get $small width] == 4 && [dict get $small height] == 4}]
+    ready $tiny -class $class
+    set repaired [observe $tinyPath]
+    check "presentation gives a tiny window usable dimensions" [expr {
+        [dict get $repaired width] >= 32 && [dict get $repaired height] >= 24 &&
+        [dict get $repaired onScreen]}]
 } finally {
     foreach token $tokens { catch {child close $token} }
     file delete -force $work

@@ -84,8 +84,9 @@ wmain(int argc, wchar_t **argv)
     klass.lpfnWndProc = DefWindowProcW;
     klass.lpszClassName = argv[2];
     if (!RegisterClassW(&klass)) return 1;
-    HWND w = CreateWindowExW(0, argv[2], L"Machteld window fixture", WS_OVERLAPPEDWINDOW,
-                             CW_USEDEFAULT, CW_USEDEFAULT, 420, 260, NULL, NULL, instance, NULL);
+    int tiny = wcscmp(argv[3], L"tiny") == 0;
+    HWND w = CreateWindowExW(0, argv[2], L"Machteld window fixture", tiny ? WS_POPUP : WS_OVERLAPPEDWINDOW,
+                             80, 80, tiny ? 4 : 420, tiny ? 4 : 260, NULL, NULL, instance, NULL);
     if (w == NULL) return 1;
     ShowWindow(w, SW_SHOWNOACTIVATE);
     if (wcscmp(argv[3], L"iconic") == 0) {
@@ -95,7 +96,7 @@ wmain(int argc, wchar_t **argv)
     } else if (wcscmp(argv[3], L"offscreen") == 0) {
         int outside = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) + 256;
         if (!SetWindowPos(w, NULL, outside, 100, 420, 260, SWP_NOACTIVATE | SWP_NOZORDER)) return 1;
-    } else if (wcscmp(argv[3], L"normal") != 0) {
+    } else if (!tiny && wcscmp(argv[3], L"normal") != 0) {
         return 2;
     }
     if (!report(L"opened", w)) return 1;
