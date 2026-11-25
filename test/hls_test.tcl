@@ -174,6 +174,8 @@ try {
         set h [::machteld::hls start $base/start receiveHls]
         set timer [after 12000 {set ::finished timeout}]
         try {
+            set methods [lsort [info class methods [info object class $h]]]
+            if {$methods ne {close status stop}} {error "unexpected public HLS methods: $methods"}
             vwait finished
             after cancel $timer
             if {$stopAfterOne} {

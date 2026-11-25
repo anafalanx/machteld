@@ -113,6 +113,7 @@ oo::class create ::machteld::media::Hls {
             if {[info object isa object $me]} {my fail $message $options}
         }
     }
+    unexport fail fetch reload advance receive
 }
 
 proc ::machteld::hls {operation args} {
