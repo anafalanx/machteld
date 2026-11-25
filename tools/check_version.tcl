@@ -73,6 +73,9 @@ set preludeVersion [lindex $declarations 1]
 if {$preludeVersion ne $current} {
     fail "tcl/machteld.tcl declares $preludeVersion but src/machteld.h declares $current"
 }
+if {[regexp {package\s+require\s+(?:-exact\s+)?machteld\s+[0-9]} $prelude]} {
+    fail "tcl/machteld.tcl carries a second literal package version"
+}
 set pages [lsort [glob -nocomplain -directory $ROOT *.md]]
 if {[file join $ROOT README.md] ni $pages} { fail "README.md is missing" }
 lappend pages {*}[authored_pages [file join $ROOT docs] 0]

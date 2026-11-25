@@ -123,9 +123,9 @@ try {
     case "front matter cannot be marked history" [dict create docs/roadmap.md "---\n$begin\ndescription: Machteld 21\n---\n$end\n## 22 development\n"] {*annotations are forbidden in front matter*}
     case "unclosed front matter is rejected" [dict create README.md "---\ntitle: Current\n"] {*unterminated front matter*}
     case "prelude mismatch is rejected" [dict create tcl/machteld.tcl {variable version 21}] {*declares 21 but src/machteld.h declares 22*}
-    case "literal launcher pin is rejected" [dict create tcl/machteld.tcl "variable version 22\npackage require machteld 22\n"] {*literal launcher pin*}
-    case "literal exact launcher pin is rejected" [dict create tcl/machteld.tcl "variable version 22\npackage require -exact machteld 22\n"] {*literal launcher pin*}
-    case "derived launcher pin remains allowed" [dict create tcl/machteld.tcl {variable version 22
+    case "a second literal package version is rejected" [dict create tcl/machteld.tcl "variable version 22\npackage require machteld 22\n"] {*second literal package version*}
+    case "a second exact package version is rejected" [dict create tcl/machteld.tcl "variable version 22\npackage require -exact machteld 22\n"] {*second literal package version*}
+    case "a version derived from the prelude remains allowed" [dict create tcl/machteld.tcl {variable version 22
 package require machteld $::machteld::version}] {}
     case "duplicate header declarations are rejected" [dict create src/machteld.h "#define MACHTELD_VERSION \"22\"\n#define MACHTELD_VERSION \"22\"\n"] {*one canonical MACHTELD_VERSION*}
     case "duplicate prelude declarations are rejected" [dict create tcl/machteld.tcl "variable version 22\nvariable version 22\n"] {*one canonical version variable*}
