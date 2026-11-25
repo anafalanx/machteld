@@ -31,7 +31,7 @@ set TCLSH [dict get $PATHS tclsh]
 set PREFIX [dict get $PATHS prefix]
 
 set OUT [lindex $argv 0]
-if {$OUT eq ""} { set OUT [Rp out machteld.exe] }
+if {$OUT eq ""} { set OUT [Rp out candidate machteld.exe] }
 set OUT [file normalize $OUT]
 set OUTDIR [file dirname $OUT]
 if {![catch {file lstat $OUT ignored}]} {

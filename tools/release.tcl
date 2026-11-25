@@ -3,7 +3,8 @@ package require machteld 0.21
 # tools/release.tcl -- the hermetic release build: the dependency cache
 # bootstrapped or verified, the reference generated, the hosts compiled and
 # packaged by tools/build.tcl on the cache's static tclsh, and the result
-# published under the requested name in one operation.
+# published under the requested name in one operation. A standalone build
+# defaults to out/candidate/machteld.exe. The release gate supplies its output.
 #
 #     machteld.exe tools/release.tcl ?--output FILE? ?--cache DIR? ?--msys DIR? ?--skip-bootstrap?
 #
@@ -38,7 +39,7 @@ proc ::release::plainDirectory {path} {
 
 proc ::release::main {argv} {
     variable root
-    set output [file join $root out machteld.exe]
+    set output [file join $root out candidate machteld.exe]
     set cache [file join $root .cache deps]
     set msysRequested ""
     set skipBootstrap 0

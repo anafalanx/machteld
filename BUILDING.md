@@ -27,7 +27,9 @@ PowerShell.
      `generate-version-resource.tcl`), `check_reference.tcl`,
      `check_version.tcl` and its regression test, the build-identity test,
      and the reference generator's upstream converter and final validator;
-   - the runtime under test, `out\machteld.exe`, runs every test lane.
+   - the runtime under test runs the lanes. The release gate uses
+     `out\machteld.exe` by default. Incremental tests use
+     `out\dev\machteld.exe`.
 2. **MSYS2 UCRT64, exactly as `tools\dependencies.lock.json` pins it:** gcc
    16.1.0 (`mingw-w64-ucrt-x86_64-gcc` 16.1.0-5), binutils 2.46-3, make
    4.4.1-4 and zip 3.0-4. The bootstrap compares `gcc.exe`, `strip.exe`,
@@ -83,35 +85,48 @@ PowerShell.
    ```
 
    `--verify-only` checks a cache and changes nothing.
-3. To build without the tests:
+3. To make a standalone clean build for comparison:
 
    ```text
    & .\dist\0.21\machteld.exe tools\release.tcl --msys C:\dev\.z\r\msys2
    ```
 
-   `--output FILE` publishes elsewhere; `--skip-bootstrap` only verifies the
-   cache instead of rebuilding a stale one.
+   The standalone build defaults to `out\candidate\machteld.exe`. Use
+   `--output FILE` to place a comparison build elsewhere. The gate explicitly
+   requests `out\machteld.exe`. Use `--skip-bootstrap` to verify an existing
+   dependency cache when rebuilding it would defeat the comparison.
+
+## Reconciliation and acceptance
+
+Keep commit ancestry, branches and release tags when integrating on local
+`main`. Push the reconciled source directly to GitHub `main` after its
+checks pass. Record the tested commit and executable hash with the results.
+
+Run the runtime checks and packaged sample applications for 0.22. Automate
+repeatable GUI checks on an isolated desktop. Before release, verify
+user-visible behavior, including foreground window presentation, in an
+attended desktop session. Record the Windows target and result for each.
+The porting project tracks its own full managed-desktop suite, including
+profile migration, backup and restore, updates and attended sign-in.
 
 ## Signing
 
 Signing is the owner's step, on the build PC, with signtool from the Windows
 SDK and the Certum code-signing certificate of Open Source Developer Vincent
-Vercauteren. The exact recipe is written at release. Its shape: sign a copy at
-a release path, never `out\machteld.exe`, which the gate and the development
-loop rewrite; the signature follows the appended payload, and the signed 0.21
-shows that the runtime still finds its payload then; and run the gate on the
-signed bytes without rebuilding them (`--skip-build --runtime FILE`; without
-`--skip-build` the gate refuses `--runtime`). No gate run signs anything or
-publishes a release: the one file it publishes is its own build,
-`out\machteld.exe`.
+Vercauteren. After acceptance, the owner signs a copy at a dedicated release
+path. The signature follows the appended payload. The signed 0.21 release
+demonstrated that the runtime could still find that payload. Run the gate
+on the signed 0.22 bytes with `--skip-build --runtime FILE`, record their
+SHA-256, and obtain the owner's publication decision.
 
-## What this is not
+## Incremental builds and version numbers
 
 1. `tools\dev.tcl` is the incremental development loop (`docs`, `build`, `test
    LANE`, `clean`), run on the build runtime the same way, with `MSYS2_ROOT`
-   set. It caches objects and reference generations by content in
-   `.cache\dev` and publishes `out\machteld.exe`, the path the gate uses. Only
-   the gate decides a release.
+   set. It writes its executable to `out\dev\machteld.exe`. It caches
+   objects and whole reference generations by content in `.cache\dev`.
+   A documentation edit regenerates the reference, which takes about a minute
+   on the build PC. An unchanged reference reuses its cached generation.
 2. Release 0.22 uses runtime number `22`. Its successor, release 0.30, uses
    `30`. Each release uses the same integer in `MACHTELD_VERSION` in
    `src\machteld.h`, `variable version` in `tcl\machteld.tcl`, and the

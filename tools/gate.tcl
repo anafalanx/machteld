@@ -450,7 +450,7 @@ proc ::gate::main {argv} {
     set identity {}
     if {[needs $settings runtime]} {
         if {![file isfile $runtime]} {
-            fail "runtime not found: [file nativename $runtime]; build it first (tools/release.tcl), or run the gate without --group"
+            fail "runtime not found: [file nativename $runtime]; use --runtime to select an existing executable, or run the gate without --group or --skip-build to build its default"
         }
         set identity [identify $runtime]
         puts "tested executable: [file nativename $runtime]"

@@ -72,13 +72,14 @@ in release 0.30 is the foreign-function interface, numbered 30.9.
 
 ### Establish the signed baseline
 
-1. **Prepare and verify the source (22.0–22.2).** Settle the scope of the
-   historical cleanup, make and verify its recovery copies, and check the
-   result in an isolated repository. Publication requires the owner's approval.
-   Run the full test gate on the resulting baseline and add the pre-push
-   check. Demonstrate that the check catches a deliberately failing fixture.
-2. **Stabilize the runtime (22.4a, 22.3–22.8).** Set up a hidden desktop for
-   tests, suppress crash dialogs, and stop captured console children flashing
+1. **Prepare and verify the source (22.0–22.2).** Preserve commit ancestry,
+   branches and release tags. Run the full gate on the reconciled source
+   before pushing it directly to GitHub `main`. Verify the planned pre-push
+   check with a deliberately failing fixture. Signing and release publication
+   require the owner's decision.
+2. **Stabilize the runtime (22.4a, 22.3–22.8).** Run repeatable GUI checks on
+   an isolated desktop and verify user-visible behavior in a real attended
+   session before release. Suppress crash dialogs and stop captured console children flashing
    a window when the parent has no console. Correct the documentation and
    build inputs, then fix the outstanding process, resource-lifetime and
    packaging defects. Each regression gets a test that fails before the fix.
@@ -87,7 +88,9 @@ in release 0.30 is the foreign-function interface, numbered 30.9.
    interactive checks. The owner signs a copy. Run the gate on those signed
    bytes, record their SHA-256 and adopt the released executable for builds.
 
-Alongside this work, run an existing application's suite against signed 0.21
+Runtime acceptance includes the packaged example applications. Track profile
+migrations, backup and restore, updates and managed sign-in with the porting
+application. Alongside this work, run its suite against signed 0.21
 with its current native extension (30.1). Record each failure and which side
 needs a change. Repeat on signed 22. Use the results to write a small runtime
 regression test. Open 0.30 by agreeing on the new command contracts, their

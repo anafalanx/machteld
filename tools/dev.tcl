@@ -5,7 +5,7 @@ package require machteld 0.21
 # Run on the build runtime, as every tool here is (dist/0.21/machteld.exe,
 # the signed machteld 0.21; MSYS2 from MSYS2_ROOT or C:/msys64):
 #     machteld.exe tools/dev.tcl docs           docs checks only, no build (seconds)
-#     machteld.exe tools/dev.tcl build ?-ref?   incremental build -> out/machteld.exe
+#     machteld.exe tools/dev.tcl build ?-ref?   incremental build -> out/dev/machteld.exe
 #     machteld.exe tools/dev.tcl test LANE ...  named pure-Tcl lane(s) against the existing executable
 #     machteld.exe tools/dev.tcl clean          delete the dev cache
 #
@@ -83,6 +83,7 @@ set PREFIX [dict get $PATHS prefix]
 # ---- the persistent dev cache (absent from the release build) ----
 
 set DEV [Rp .cache dev]
+set DEV_RUNTIME [Rp out dev machteld.exe]
 set OBJ [file join $DEV obj]
 set REF [file join $DEV reference]
 file mkdir $OBJ
@@ -258,8 +259,8 @@ proc dev_build_unlocked {{forceRef 0}} {
         [::machteld::devcache::reference_spec $::ROOT $::CACHE $::TCLSH] \
         $::DEV reference_candidate $forceRef]
 
-    set final [Rp out machteld.exe]
-    file mkdir [Rp out]
+    set final $::DEV_RUNTIME
+    file mkdir [file dirname $final]
     set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $bareGui $::REF]
     if {[catch {exec git -C $::ROOT rev-parse HEAD} ::SOURCE_REVISION]} { set ::SOURCE_REVISION unknown }
     set ::SOURCE_REVISION [string trim $::SOURCE_REVISION]
@@ -267,11 +268,11 @@ proc dev_build_unlocked {{forceRef 0}} {
     set ::PACKAGE_INPUT_KEY [::machteld::devcache::fingerprint $spec]
     if {[::machteld::devcache::ensure [file join $::DEV package.record] $spec $final \
             [list package_candidate $staged $bare $bareGui $::REF]]} {
-        puts "build: out/machteld.exe ([file size $final] bytes)"
+        puts "build: [file nativename $final] ([file size $final] bytes)"
     } else {
         # Cache hits skip package_candidate, but must not skip the final guard.
         ::machteld::devcache::verify_guard $::GUARD_KEY guard_spec
-        puts "build: out/machteld.exe current ([file size $final] bytes)"
+        puts "build: [file nativename $final] current ([file size $final] bytes)"
     }
 }
 
@@ -308,7 +309,7 @@ proc dev_docs {} {
     }
 
     # 4. If a built exe exists, confirm each guide resolves in its corpus.
-    set exe [Rp out machteld.exe]
+    set exe $::DEV_RUNTIME
     if {[file exists $exe]} {
         set probe [file join $::DEV docprobe.tcl]
         set ids {}
@@ -328,7 +329,7 @@ proc dev_docs {} {
             puts "  FAIL corpus probe (built exe may be stale; dev.tcl build to refresh)"; incr fail
         }
     } else {
-        puts "  --   no out/machteld.exe yet; dev.tcl build to check the built corpus"
+        puts "  --   no [file nativename $exe] yet; dev.tcl build to check the built corpus"
     }
     if {$fail} { puts "docs: $fail problem(s)"; exit 1 }
     puts "docs: ok"
@@ -350,7 +351,7 @@ set ::LANES {
 }
 
 proc dev_test {lanes} {
-    set exe [Rp out machteld.exe]
+    set exe $::DEV_RUNTIME
     if {![file isfile $exe]} { error "missing $exe; run dev.tcl build explicitly first" }
     puts "test: existing executable [file nativename $exe]"
     set exeHash [::machteld::devcache::file_digest $exe]

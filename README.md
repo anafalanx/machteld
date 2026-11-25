@@ -201,7 +201,8 @@ Every build and test tool is a Tcl program that runs on the build runtime,
 `dist/0.21/machteld.exe`, the signed 0.21 release, and finds MSYS2 through
 `--msys` (which the development loop does not take), `MSYS2_ROOT`, or
 `C:\msys64`. `tools/bootstrap.tcl` provisions the pinned build dependencies;
-`tools/dev.tcl build` is the incremental build. The release gate,
+`tools/dev.tcl build` writes the incremental executable to
+`out/dev/machteld.exe`. The release gate,
 `tools/gate.tcl`, builds `out/machteld.exe` and runs every test group on it;
 `--skip-build` tests the executable as it is. `--group fast`,
 `integration`, `packaging`, `native-validation`, or `reference-generator`,

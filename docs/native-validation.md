@@ -23,7 +23,7 @@ are different claims; see the [contract](contract.md).
 Build deliberately with `tools/dev.tcl build`, then run, on the build runtime:
 
 ```powershell
-.\dist\0.21\machteld.exe tools\gate.tcl --group native-validation
+.\dist\0.21\machteld.exe tools\gate.tcl --group native-validation --runtime out/dev/machteld.exe
 ```
 
 Use `--runtime`, `--cache`, and `--msys` to select existing artifacts. The

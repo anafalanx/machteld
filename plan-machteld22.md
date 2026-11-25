@@ -37,9 +37,9 @@ Four kinds of statement appear here:
   and the rulings in force before (section 3).
 - **Proposals**: the plan's substance, each grounded in what was read or
   measured, with its date.
-- **Open decisions** (section 6.3): the two questions of the consolidation's
-  re-cut that no ruling settles, D4 and D5, each with its options and a
-  recommendation. The recommendation is not the ruling.
+- **November decisions** (section 6.3) record the chosen build paths and
+  reference cache, the required runtime acceptance, and how the reconciled
+  source reaches GitHub `main`.
 - **The log** (section 7): a dated line per commit on `machteld-22`, with its
   gate result.
 
@@ -504,7 +504,7 @@ is.
     *Applied:* rejected. Section 8 records how a desktop app will launch
     once `wrap` retires.
 
-### 6.3. Still open
+### 6.3. Release preparation decisions (2026-11-25)
 
 The consolidation re-cut zef's decisions D1-D15 to eight that concern the
 runtime: zef's scope (D3) became D1 and D2; the gate (D9) D3; where the
@@ -518,23 +518,31 @@ checks (D10) keep the candidate's markers, extended to natural numbers
 API per feature (D7) waits for a feature to be admitted; and the
 environment's were dropped: a plain copy of `C:\dev` (D2a), the front door
 for zef's verbs (D5), zef's own namespace (D6), the runtime range in
-`zef.tcl` (D8) and zef on the build PC (D14). The rulings settle six of the
-eight: D1 by ruling 1, D2 by 2, D3 by 10, D6 by 11, D7 by 12 and D8 by 15.
-Two remain for the owner:
+`zef.tcl` (D8) and zef on the build PC (D14). The October poll settled six
+of the eight decisions. Rulings 1, 2, 10, 11, 12 and 15 covered D1, D2,
+D3, D6, D7 and D8 respectively. The November poll settled D4 and D5.
 
-**D4 - Where development builds land** (B10). (a) As now: the development
-loop and the gate both publish `out\machteld.exe`. (b) The development loop
-publishes `out\dev\machteld.exe`, and only the gate writes `out\machteld.exe`.
-(c) As (b), and every publication refuses to replace a file that carries an
-Authenticode signature. *Rec: (b). Signing happens on a copy at a release
-path (BUILDING.md), so (c)'s guard would protect only against a mistake in
-that recipe.*
+The following numbers match questions 5–10 of the November poll.
 
-**D5 - The reference stage cache** (6799d2b). The candidate cached the
-reference conversion's stages with PowerShell and C# serializers; they were
-not ported. (a) Leave it out: unchanged builds reuse a reference generation by
-content, and a documentation edit generates the reference again, in about a
-minute. (b) Port it to Tcl. *Rec: (a).*
+5. **Build outputs (D4, B10).** Incremental builds and their tests use
+   `out\dev\machteld.exe`. Reserve `out\machteld.exe` for the release gate.
+   Standalone clean builds default to `out\candidate\machteld.exe`. The
+   owner signs a copy in a dedicated release directory.
+6. **Reference cache (D5).** Keep the whole-generation content cache for
+   0.22. Unchanged inputs reuse a generation. A documentation edit rebuilds
+   the reference in about a minute on the build PC.
+7. **Desktop acceptance.** Automate repeatable GUI checks on an isolated
+   desktop. Verify user-visible behavior, including foreground window
+   presentation, in an attended desktop session before release. Record each
+   result against the candidate and the Windows target tested.
+8. **Application acceptance.** The runtime gate covers its regression
+   checks and packaged examples. The porting project tracks profile
+   migration, backup and restore, updates and attended sign-in separately.
+9. **Git history.** Reconcile the source on `main` with ordinary commits.
+   Preserve commit ancestry, branches and release tags.
+10. **Push to GitHub.** Push the reconciled source directly to GitHub
+    `main` after its checks pass. Signing and release publication are
+    separate owner decisions.
 
 ## 7. Log
 

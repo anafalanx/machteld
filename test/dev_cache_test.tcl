@@ -667,6 +667,20 @@ try {
                 [dict get $loaded $coordinator] eq [read_bytes $coordinator]}]
         check {unchanged loaded recipes pass startup verification} \
             [expr {![catch {interp eval $startup verify_loaded_recipes}]}]
+        set releaseRuntime [file join $startupRoot out machteld.exe]
+        set devRuntime [file join $startupRoot out dev machteld.exe]
+        write_bytes $releaseRuntime release
+        set missing [catch {interp eval $startup {dev_test runtime}} message]
+        check {development tests require the development executable even when the release executable exists} \
+            [expr {$missing && [string first "missing $devRuntime" $message] == 0}] $message
+        write_bytes $devRuntime development
+        interp eval $startup {
+            rename run {}
+            proc run {exe lane} { set ::testedRuntime $exe }
+            dev_test runtime
+        }
+        check {development tests select the incremental executable} \
+            [expr {[interp eval $startup {set ::testedRuntime}] eq $devRuntime}]
         # Exercise the real coordinator's three native entry points without
         # compiling against this deliberately fake dependency installation.
         interp eval $startup {
