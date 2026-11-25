@@ -81,7 +81,13 @@ proc command {line} {
         app.exe - documented-app.exe { set executable [file join $::WORK $program] }
         default { error "unrecognized README executable: $program" }
     }
-    set result [run -timeout 120s -- $executable {*}[lrange $line 1 end]]
+    # Bundling the complete reference processes every embedded file. Give
+    # this packaging step the same bound as the legacy compatibility lane.
+    set deadline 120s
+    if {[lrange $line 0 1] eq {machteld.exe wrap} && "--with-docs" in $line} {
+        set deadline 600s
+    }
+    set result [run -timeout $deadline -- $executable {*}[lrange $line 1 end]]
     check "README command succeeds: $line" [expr {
         [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
     if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
