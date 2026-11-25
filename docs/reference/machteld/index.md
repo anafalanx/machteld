@@ -79,6 +79,48 @@ Applications choose their confidence threshold and Tcl decoder.
   result. Use a worker for Tk applications that need to remain responsive
   during the wait.
 
+### UDP sockets
+
+`::machteld::network::udp open address port` creates a nonblocking,
+interpreter-owned socket and returns its command. Use `127.0.0.1` or
+`::1` for loopback. Use port `0` to let Windows choose an available port.
+Addresses are numeric IPv4 or IPv6 literals. An IPv6 link-local address may
+include a numeric scope, for example `fe80::1%12`.
+
+- `$socket local` returns the bound `address` and `port`.
+- `$socket send address port value` sends one datagram to an address
+  of the same family and returns its byte count. Bytearrays retain every
+  byte. Other values are encoded as UTF-8. An empty value sends an empty
+  datagram. Maximum payloads are 65,507 bytes for IPv4 and 65,527 for IPv6.
+- `$socket receive` takes one complete datagram from the kernel queue
+  and returns `address`, `port` and a `bytes` bytearray. An empty result
+  means the queue is empty. An empty *datagram* still has a sender and a
+  `bytes` field. UDP preserves datagram boundaries. Delivery and network
+  arrival order depend on the network.
+- `$socket readable commandPrefix` calls the prefix with the socket
+  command as its final argument when a datagram is ready. It runs through
+  the owning Tcl event loop. Receive at least one datagram in the handler
+  to rearm notification on further queued data. The no-argument form
+  returns the installed prefix. Supply `{}` to cancel pending notifications.
+  A handler error disables its registration and goes through Tcl's
+  background error handling.
+- `$socket close` cancels pending callbacks and releases the socket.
+  Deleting its command or interpreter does the same. A callback can close
+  its own socket. Windows errors raise `MACHTELD UDP oserror number`.
+
+```tcl
+package require machteld::network 1.0
+set socket [::machteld::network::udp open 127.0.0.1 0]
+$socket readable [list apply {{s} {
+    set packet [$s receive]
+    puts [list [dict get $packet address] [dict get $packet port] [dict get $packet bytes]]
+    $s close
+    set ::done 1
+}}]
+$socket send 127.0.0.1 [dict get [$socket local] port] [binary decode hex 00ff]
+vwait ::done
+```
+
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
 the language itself, rather than the Machteld palette, is the subject. Upstream

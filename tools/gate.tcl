@@ -237,6 +237,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "Directory metadata and local-only reads" localfiles_test.tcl
                 addLane steps $runtime fast "Text encoding detector" encoding_test.tcl
                 addLane steps $runtime fast "Windows network diagnostics" network_test.tcl
+                addLane steps $runtime fast "UDP datagrams and event delivery" udp_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
                 addLane steps $runtime fast "README examples" documentation_examples_test.tcl
@@ -331,6 +332,7 @@ proc ::gate::plan {settings} {
         addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
+        addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl

@@ -233,9 +233,12 @@ static int ping_cmd(void *unused, Tcl_Interp *interp, int objc, Tcl_Obj *const o
     return TCL_OK;
 }
 
+void Machteldudp_Register(Tcl_Interp *interp);
+
 int Machteldnetwork_Init(Tcl_Interp *interp) {
     if (Tcl_EvalEx(interp, "namespace eval ::machteld::network {}", -1, TCL_EVAL_GLOBAL) != TCL_OK) return TCL_ERROR;
     Tcl_CreateObjCommand(interp, "::machteld::network::wifi", wifi_cmd, NULL, NULL);
     Tcl_CreateObjCommand(interp, "::machteld::network::ping", ping_cmd, NULL, NULL);
+    Machteldudp_Register(interp);
     return Tcl_PkgProvide(interp, "machteld::network", "1.0");
 }

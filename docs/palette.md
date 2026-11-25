@@ -127,6 +127,10 @@ quality and negotiated rates for each wireless adapter, or to send a
 single source-selected IPv4 echo.
 [Windows network diagnostics](reference/machteld/index.md#windows-network-diagnostics)
 
+The same package supplies IPv4 and IPv6 UDP sockets. Each receive returns
+one datagram and its sender. A readable callback runs in the Tcl or Tk
+event loop. [UDP sockets](reference/machteld/index.md#udp-sockets)
+
 ## Machine processes
 
 ```tcl
