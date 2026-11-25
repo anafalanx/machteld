@@ -13,6 +13,7 @@
 #include "tcl.h"
 #include "wintext.h"
 #include "desktop_apps.h"
+#include "desktop_drop.h"
 
 typedef struct {
     HWND window;
@@ -24,6 +25,7 @@ typedef struct {
 
 typedef struct {
     Tcl_HashTable names, handles;
+    Tcl_HashTable drops;
     ATOM property;
     char issuer[40];
     uintptr_t next;
@@ -74,6 +76,7 @@ static void free_state(void *data) {
     Tcl_DeleteHashTable(&state->handles);
     if (state->property) GlobalDeleteAtom(state->property);
     desktop_catalog_free(state->applications);
+    desktop_drops_free(&state->drops);
     Tcl_Free(state);
 }
 
@@ -288,7 +291,7 @@ static int open_path(Tcl_Interp *ip, Tcl_Obj *path) {
 }
 
 static int dispatch(desktop_state *state, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[]) {
-    static const char *const ops[] = {"windows", "activate", "open", "apps", "launch", "icon", NULL};
+    static const char *const ops[] = {"windows", "activate", "open", "apps", "launch", "icon", "drop", NULL};
     int op;
     if (objc >= 2 && Tcl_GetIndexFromObj(NULL, objv[1], ops, "operation", TCL_EXACT, &op) == TCL_OK) {
         switch (op) {
@@ -300,11 +303,17 @@ static int dispatch(desktop_state *state, Tcl_Interp *ip, int objc, Tcl_Obj *con
                 if (initialize_property(state, ip) != TCL_OK) return TCL_ERROR;
                 return desktop_applications(ip, state->issuer, &state->applications);
             case 4: if (objc == 3) return desktop_launch_app(ip, state->applications, objv[2]); break;
-            case 5: if (objc == 4 || objc == 5)
-                return desktop_app_icon(ip, state->applications, objv[2], objv[3], objc == 5 ? objv[4] : NULL);
+            case 5:
+                if (objc == 4 || objc == 5)
+                    return desktop_app_icon(ip, state->applications, objv[2], objv[3], objc == 5 ? objv[4] : NULL);
+                break;
+            case 6:
+                if (objc == 3 || objc == 4)
+                    return desktop_drop(ip, &state->drops, objv[2], objc == 4 ? objv[3] : NULL);
+                break;
         }
     }
-    return fail(ip, "usage", "usage: desktop windows | activate token | open path | apps | launch target | icon target photo ?size?");
+    return fail(ip, "usage", "usage: desktop windows | activate token | open path | apps | launch target | icon target photo ?size? | drop widget ?commandPrefix?");
 }
 
 static int DesktopCmd(void *data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[]) {
@@ -327,6 +336,7 @@ int Machtelddesktop_Init(Tcl_Interp *interp) {
     memset(state, 0, sizeof(*state));
     Tcl_InitHashTable(&state->names, TCL_STRING_KEYS);
     Tcl_InitHashTable(&state->handles, TCL_ONE_WORD_KEYS);
+    Tcl_InitHashTable(&state->drops, TCL_ONE_WORD_KEYS);
     if (!Tcl_CreateObjCommand(interp, "::machteld::desktop", DesktopCmd, state, destroy_state)) {
         destroy_state(state);
         return TCL_ERROR;

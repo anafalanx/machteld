@@ -30,6 +30,68 @@ proc visibleIcon {photo} {
     return 0
 }
 
+proc dropTests {probe} {
+    set paths [list [file nativename {C:/files with spaces/one.txt}] \
+                    [file nativename {C:/éß/文件 🚉 [literal];$.txt}]]
+    frame .incoming
+    frame .other
+    set ::delivered {}
+    set prefix [list lappend ::delivered]
+    check "widget drop registration starts empty" {[desktop drop .incoming] eq {}}
+    desktop drop .incoming $prefix
+    check "each widget retains its own command prefix" {[desktop drop .incoming] eq $prefix && [desktop drop .other] eq {}}
+    fixtureCatalog drop .incoming $paths
+    check "the drop callback never runs inside native window dispatch" {$::delivered eq {}}
+    update
+    check "multiple Unicode file names arrive in order as one Tcl list" {$::delivered eq [list $paths]}
+    set ::delivered {}
+    fixtureCatalog drop .incoming $paths
+    desktop drop .incoming [list lappend ::delivered replaced]
+    update
+    check "replacing a registration cancels queued drops" {$::delivered eq {}}
+    fixtureCatalog drop .incoming $paths
+    update
+    check "a replacement receives only subsequent drops" {$::delivered eq [list replaced $paths]}
+    set ::delivered {}
+    fixtureCatalog drop .incoming $paths
+    desktop drop .incoming {}
+    update
+    check "unregistering cancels pending drops and removes OS acceptance" {$::delivered eq {} &&
+        [desktop drop .incoming] eq {} && [catch {fixtureCatalog drop .incoming $paths}]}
+    desktop drop .incoming $prefix
+    fixtureCatalog drop .incoming $paths
+    destroy .incoming
+    frame .incoming
+    update
+    check "destroyed and recreated widgets do not inherit pending drops" {$::delivered eq {} && [desktop drop .incoming] eq {}}
+    proc ::destroyAfterDrop {paths} {set ::delivered $paths; destroy .incoming}
+    desktop drop .incoming ::destroyAfterDrop
+    fixtureCatalog drop .incoming $paths
+    update
+    check "the callback can destroy its own target" {$::delivered eq $paths && ![winfo exists .incoming]}
+    rename ::destroyAfterDrop {}
+    check "unknown widgets and malformed command prefixes get typed errors" {
+        [code {desktop drop .absent abc}] eq {MACHTELD DESKTOP notfound} &&
+        [code [list desktop drop .other \{]] eq {MACHTELD DESKTOP badvalue}}
+    set other [interp create]
+    set ::lateDrops {}
+    try {
+        interp eval $other [list set ::tk_library $::tk_library]
+        interp eval $other {load {} Tk; wm withdraw .; load {} machtelddesktop}
+        load $probe Desktopcatalog $other
+        interp alias $other signalUnexpectedDrop {} lappend ::lateDrops
+        interp eval $other [list set paths $paths]
+        interp eval $other {
+            frame .child
+            ::machteld::desktop drop .child signalUnexpectedDrop
+            fixtureCatalog drop .child $paths
+        }
+    } finally {interp delete $other}
+    update
+    check "interpreter teardown retires a pending native drop" {$::lateDrops eq {} && [desktop drop .other] eq {}}
+    destroy .other
+}
+
 proc catalogTests {fixture probe work} {
     package require Tk
     wm withdraw .
@@ -50,6 +112,7 @@ proc catalogTests {fixture probe work} {
             check "an installed $kind supplies visible pixels to a Tk photo" {$found}
         }
         load $probe Desktopcatalog
+        dropTests $probe
         set menu [file join $work isolated-menu]
         set place [file join $work {launch here}]
         file mkdir [file join $menu nested] $place

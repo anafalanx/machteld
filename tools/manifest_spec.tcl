@@ -53,6 +53,7 @@ set ::machteld::manifest::native {
             apps {options {} doc machteld/command/desktop#apps}
             launch {options {} doc machteld/command/desktop#launch}
             icon {options {} doc machteld/command/desktop#icon}
+            drop {options {} doc machteld/command/desktop#drop}
         }
     }
     clipboard {

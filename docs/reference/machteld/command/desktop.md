@@ -2,8 +2,8 @@
 id: machteld/command/desktop
 type: command
 title: desktop
-summary: Select desktop windows, open local documents and discover installed Windows applications.
-commands: desktop, desktop windows, desktop activate, desktop open, desktop apps, desktop launch, desktop icon
+summary: Select windows and installed applications, open documents and receive Explorer file drops in Tk.
+commands: desktop, desktop windows, desktop activate, desktop open, desktop apps, desktop launch, desktop icon, desktop drop
 ---
 
 # desktop
@@ -21,6 +21,8 @@ commands: desktop, desktop windows, desktop activate, desktop open, desktop apps
 `desktop launch target`
 
 `desktop icon target photo ?size?`
+
+`desktop drop widget ?commandPrefix?`
 
 ## Arguments and options
 
@@ -290,3 +292,46 @@ Run this on the thread that owns the Tk image. Headless applications can use `de
 #### See also
 
 `machteld/command/desktop#apps`, `tk/command/photo`.
+
+<a id="drop"></a>
+### drop
+
+#### Synopsis
+
+`desktop drop widget ?commandPrefix?`
+
+#### Arguments and options
+
+Load Tk and pass a widget path from this interpreter. A nonempty Tcl command prefix registers the widget. An empty list unregisters it. Omit the prefix to query the registration.
+
+#### Results
+
+A query returns the current prefix, or the empty list for a widget with no registration. A change returns the empty string. When Explorer drops files, Machteld appends one argument to the prefix and calls it. That argument is the ordered Tcl list of Windows paths, including any spaces and Unicode characters.
+
+#### Errors
+
+`notfound` identifies a missing widget or unloaded Tk. `badvalue` identifies an invalid widget path or malformed command prefix. Windows registration failures use `oserror`. A path conversion error or callback exception reaches the interpreter's background error handler.
+
+#### Lifetime and timeouts
+
+Machteld queues the drop on the owning interpreter's event loop. Destroying the widget, replacing or removing its callback, or deleting the interpreter discards undelivered drops. A recreated widget starts with an empty registration. The callback can destroy its own widget.
+
+#### Examples
+
+```tcl
+package require Tk
+text .files
+pack .files -fill both -expand 1
+proc showFiles {widget paths} {
+    foreach path $paths { $widget insert end "$path\n" }
+}
+desktop drop .files [list showFiles .files]
+```
+
+#### Constraints
+
+Register each widget surface that should accept file drops. A Tk child receives drops over its own Windows window. The application decides which reported paths it will open.
+
+#### See also
+
+`machteld/command/desktop#open`, `tk/command/winfo`.
