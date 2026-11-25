@@ -198,7 +198,7 @@ try {
     for {set i 0} {$i < 24} {incr i} {
         set slave [interp create]
         try {
-            $slave eval {load {} Machteldhttp}
+            $slave eval {load {} machteldhttp}
             set handle [$slave eval [list ::machteld::http stream $base/late]]
             $slave eval [list $handle readable {apply {{s} {}}}]
             if {$i % 3 == 0} {update}
