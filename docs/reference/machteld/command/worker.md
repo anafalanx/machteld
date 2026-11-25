@@ -102,7 +102,7 @@ The compiled handler persists until replaced or interpreter exit.
 #### Constraints
 
 A nested namespace must arrange its ordinary command resolution, including
-`namespace path ::machteld` when using bare palette verbs.
+`namespace path ::machteld::palette` when using bare palette verbs.
 
 #### See also
 

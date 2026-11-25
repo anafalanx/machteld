@@ -25,6 +25,8 @@ Returns a dict keyed by public command. Entries contain applicable fields:
 `kind` (`c` or `tcl`), `domain`, raised `codes`, protocol-data `replycodes`,
 top-level `options`, `args`, `returns`, and `subcommands`. Each subcommand entry
 can carry its own options, fixed result keys, and stable exact `doc` identifier.
+When `qualified_only` is true, use the command's full name. For example,
+`::machteld::clipboard owned` queries native Windows clipboard ownership.
 Some entries also expose `defaults` and `limits`; these fields are only present
 where explicitly authored, not a complete resource-policy model for all verbs.
 Every command carries a stable exact `doc` identifier; commands without a

@@ -7,6 +7,10 @@ that executable and its console and GUI wraps within the job. Distributed
 releases come from the owner's signing process. Run the commands below from
 the repository root in PowerShell.
 
+The [Beta 1 release checklist](docs/releases/0.22-beta.1.md) describes the
+unsigned test artifact. Windows version information carries the prerelease flag
+and beta number. The Tcl runtime and package version remain 22.
+
 ## What the build stands on
 
 1. **The build runtime: the signed 0.21 at `dist\0.21\machteld.exe`,** a copy
@@ -71,9 +75,11 @@ the repository root in PowerShell.
    - `--group NAME`, repeatable, runs just those groups and builds nothing,
      on `out\machteld.exe` or on `--runtime FILE`; the fast group needs no
      MSYS2.
-   - Off by default, and the owner's to run: `--public-tls` (it reaches public
-     hosts), `--interactive-pty` (console input and output) and
-     `--interactive-gui` (it opens windows).
+   - Optional lanes include `--public-tls` (public hosts),
+     `--interactive-pty` (console input and output) and
+     `--interactive-gui` (opens windows and compiles a Win32 window fixture).
+     The beta's disposable Windows runner also exercises clipboard ownership
+     while a second process uses the same clipboard.
 2. When the dependency cache is cold or invalidated, build it alone first; Tcl
    and Tk are configured and built in MSYS2's bash, which takes several
    minutes:

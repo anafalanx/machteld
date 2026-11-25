@@ -11,7 +11,11 @@ are no compute engines, `macht`, or Lua. Development environments built with
 machteld live in their own repositories on the machines that use them; this
 repository holds the runtime only.
 
-## 22 — in preparation
+## 22 — Beta 1
+
+The [Beta 1 checklist and release notes](docs/releases/0.22-beta.1.md)
+describe the unsigned Windows x64 candidate, how to try it, and the work
+remaining before the signed release. The package version is `22`.
 
 The signed [0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21)
 is preserved, and its release notes describe that artifact, not everything now

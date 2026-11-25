@@ -16,8 +16,9 @@ The product has three layers:
    `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs`, `help`,
    and `wrap`, then provides package `machteld 22`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
-   `argv` and resolves palette commands through `::machteld` on the global
-   namespace path.
+   `argv` and resolves the public short names through `::machteld::palette`
+   on the global namespace path. Clipboard ownership is queried through the
+   fully qualified `::machteld::clipboard` command.
 
 Startup registers the native commands, loads the embedded prelude, and applies
 the entry gate before Tcl evaluates a program. The gate parses the first command

@@ -108,12 +108,15 @@ proc ::machteld::manifest {} {
 # throws, and re-raises the body's result/error unchanged.
 proc ::machteld::scope {body} {
     set before [::machteld::child list]
-    set code [catch {uplevel 1 $body} result options]
+    catch {uplevel 1 $body} result options
     foreach c [::machteld::child list] {
         if {$c ni $before} {
             catch {::machteld::child close $c}
         }
     }
+    # Returning through this procedure consumes one level. Restore that level
+    # so the caller receives the same completion it would get from the body.
+    dict incr options -level
     return -options $options $result
 }
 
@@ -1013,12 +1016,23 @@ proc ::machteld::app {args} {
     options {} doc machteld/command/app subcommands [dict create \
         launch [dict create options {} doc machteld/command/app#launch]]]
 
-# Expose the palette as bare verbs: unqualified run / child / pty / wait / scope
-# / detach / store resolve to ::machteld::* -- so the REPL and scripts read like
-# a shell script, the ergonomic point of the design. This uses the global
-# namespace's command-resolution path, so Tcl's own commands (found first) are
-# never shadowed and nothing is copied.
-namespace eval :: { namespace path [concat [namespace path] ::machteld] }
+# Called after all Tcl parts and the native manifest are loaded. Keep Tk's
+# global names available even before Tk is loaded. Tcl's namespace path sees
+# all commands in a namespace, including commands it has not exported.
+proc ::machteld::InstallPalette {} {
+    namespace eval ::machteld::palette {}
+    dict for {name facts} [manifest] {
+        if {[dict exists $facts qualified_only] && [dict get $facts qualified_only]} continue
+        if {[llength [info commands ::machteld::$name]]} {
+            interp alias {} ::machteld::palette::$name {} ::machteld::$name
+        }
+    }
+    namespace eval :: {
+        if {"::machteld::palette" ni [namespace path]} {
+            namespace path [concat [namespace path] ::machteld::palette]
+        }
+    }
+}
 
 # Tk on demand: a static build ships no Tk DLL, so wire `package require Tk`
 # straight to the in-process, statically-linked Tk_Init via `load {} Tk`. Tk is

@@ -20,14 +20,22 @@ set ::machteld::manifest::native {
         kind c domain CHILD
         doc machteld/command/child
         codes {badvalue launch nohandle notfound oserror usage}
-        options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout}
+        options {-arg0 -channels -class -console -cpu -dir -env -mem -stdin -timeout -window}
         subcommands {
-            start {options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout} doc machteld/command/child#start}
+            start {options {-arg0 -channels -console -cpu -dir -env -mem -stdin -timeout -window} doc machteld/command/child#start}
+            present {options {-class} returns {cloaked foreground iconic onScreen status visible} doc machteld/command/child#present}
             wait  {options -timeout returns {err exit out pid status truncated} doc machteld/command/child#wait}
             kill  {options {} doc machteld/command/child#kill}
             info  {options {} doc machteld/command/child#info}
             list  {options {} doc machteld/command/child#list}
             close {options {} doc machteld/command/child#close}
+        }
+    }
+    clipboard {
+        kind c domain CLIPBOARD codes {usage} options {} qualified_only 1
+        doc machteld/command/clipboard
+        subcommands {
+            owned {options {} doc machteld/command/clipboard#owned}
         }
     }
     detach {

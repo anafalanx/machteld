@@ -6,6 +6,8 @@
 #include "tcl.h"
 
 #define MACHTELD_VERSION "22"
+/* Distribution milestone. The Tcl package version remains a natural number. */
+#define MACHTELD_BETA 1
 
 /* The byte rule shared by every value-consuming native verb -- hash, store put,
  * http post, run/child -stdin: a byte array is its bytes exactly; any other

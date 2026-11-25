@@ -18,7 +18,10 @@ dirs root ?-depth nonnegativeInteger? ?-prune patterns?
 
 - `root` must resolve to a directory. A reparse-point root itself is entered
   because the caller named it; name-surrogate descendants are not followed.
-- `-depth n` bounds descent. Omitting it is unlimited; `0` emits only the root.
+- `-depth n` bounds descent. Omitting it allows unlimited descent. A depth of
+  `0` inspects only the root using metadata access, including when its ACL
+  denies directory listing. Its `links` rows disclose any observed root
+  reparse tag, including non-name-surrogate tags.
 - `-prune patterns` takes a Tcl list of case-insensitive `string match` patterns
   applied to each entry's base name. A matched directory is not entered.
 
