@@ -30,7 +30,10 @@ names or add `::machteld::palette` to their namespace path for the short names.
 - Process control: `run`, `child`, `wait`, `scope`, and `detach`.
 - Interactive processes: `pty`.
 - Windows desktop: `child present` shows the state of a supervised application
-  window. `::machteld::clipboard owned` checks whether this process owns the clipboard.
+  window. `desktop windows` lists open application windows and `desktop activate`
+  requests foreground for a selected window. `desktop open` dispatches a local
+  document to its associated viewer. `::machteld::clipboard owned` checks whether
+  this process owns the clipboard.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.

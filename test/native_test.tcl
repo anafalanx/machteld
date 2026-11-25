@@ -55,7 +55,7 @@ proc slurp {path} {
     return $value
 }
 
-set expected_native {canon child clipboard detach dirs graphviz hash http json links lock mtps pty run store wait watch}
+set expected_native {canon child clipboard desktop detach dirs graphviz hash http json links lock mtps pty run store wait watch}
 set metadata [manifest]
 check "manifest exposes the exact native surface" [expr {
     [lsort [lmap verb [dict keys $metadata] {

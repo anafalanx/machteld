@@ -1,7 +1,9 @@
 /* A cooperating GUI process for the attended-child acceptance test. It reports
  * its own window state; its only control inputs are files in its private cwd. */
 #define WIN32_LEAN_AND_MEAN
+#define COBJMACROS
 #include <windows.h>
+#include <shobjidl.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,9 +54,40 @@ handoff(void)
     return 0;
 }
 
+static HWND create_window(HINSTANCE instance, const wchar_t *class_name, int tiny)
+{
+    return CreateWindowExW(0, class_name, L"Machteld window fixture",
+        tiny ? WS_POPUP : WS_OVERLAPPEDWINDOW, 80, 80,
+        tiny ? 4 : 420, tiny ? 4 : 260, NULL, NULL, instance, NULL);
+}
+
+/* Use the existing Windows shortcut association to dispatch to this silent
+ * fixture. No default application or registry entry is changed by the test. */
+static int create_document(const wchar_t *link_path, const wchar_t *directory)
+{
+    wchar_t self[32768];
+    DWORD n = GetModuleFileNameW(NULL, self, 32768);
+    if (!n || n >= 32768 || FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED))) return 1;
+    IShellLinkW *link = NULL;
+    IPersistFile *persist = NULL;
+    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+                                      &IID_IShellLinkW, (void **)&link);
+    if (SUCCEEDED(result)) result = IShellLinkW_SetPath(link, self);
+    if (SUCCEEDED(result)) result = IShellLinkW_SetArguments(link, L"--record-open");
+    if (SUCCEEDED(result)) result = IShellLinkW_SetWorkingDirectory(link, directory);
+    if (SUCCEEDED(result)) result = IShellLinkW_QueryInterface(link, &IID_IPersistFile, (void **)&persist);
+    if (SUCCEEDED(result)) result = IPersistFile_Save(persist, link_path, TRUE);
+    if (persist) IPersistFile_Release(persist);
+    if (link) IShellLinkW_Release(link);
+    CoUninitialize();
+    return FAILED(result) ? 1 : 0;
+}
+
 int
 wmain(int argc, wchar_t **argv)
 {
+    if (argc == 2 && wcscmp(argv[1], L"--record-open") == 0) return report(L"shell-opened", NULL) ? 0 : 1;
+    if (argc == 4 && wcscmp(argv[1], L"--make-document") == 0) return create_document(argv[2], argv[3]);
     if (argc != 4) return 2;
     /* An isolated-desktop runner can demand a particular desktop. Check
      * before creating a window, including in the handoff descendant. */
@@ -94,8 +127,7 @@ wmain(int argc, wchar_t **argv)
     klass.lpszClassName = argv[2];
     if (!RegisterClassW(&klass)) return 1;
     int tiny = wcscmp(argv[3], L"tiny") == 0;
-    HWND w = CreateWindowExW(0, argv[2], L"Machteld window fixture", tiny ? WS_POPUP : WS_OVERLAPPEDWINDOW,
-                             80, 80, tiny ? 4 : 420, tiny ? 4 : 260, NULL, NULL, instance, NULL);
+    HWND w = create_window(instance, argv[2], tiny);
     if (w == NULL) return 1;
     int startup_mode = wcscmp(argv[3], L"startup") == 0;
     STARTUPINFOW startup = { .cb = sizeof(startup) };
@@ -121,6 +153,13 @@ wmain(int argc, wchar_t **argv)
             DispatchMessageW(&message);
         }
         if (!IsWindow(w)) return 0; /* DefWindowProc accepted WM_CLOSE. */
+        if (DeleteFileW(L"recreate")) {
+            DestroyWindow(w);
+            w = create_window(instance, argv[2], tiny);
+            if (!w) return 1;
+            ShowWindow(w, SW_SHOWNOACTIVATE);
+            if (!report(L"recreated", w)) return 1;
+        }
         if (DeleteFileW(L"minimize")) {
             ShowWindow(w, SW_SHOWMINNOACTIVE);
             if (!report(L"minimized", w)) return 1;

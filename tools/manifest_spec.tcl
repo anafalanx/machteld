@@ -32,6 +32,15 @@ set ::machteld::manifest::native {
             close {options {} doc machteld/command/child#close}
         }
     }
+    desktop {
+        kind c domain DESKTOP codes {badvalue noassociation notfound oserror usage} options {}
+        doc machteld/command/desktop
+        subcommands {
+            windows {options {} doc machteld/command/desktop#windows}
+            activate {options {} returns {foreground requested} doc machteld/command/desktop#activate}
+            open {options {} doc machteld/command/desktop#open}
+        }
+    }
     clipboard {
         kind c domain CLIPBOARD codes {usage} options {} qualified_only 1
         doc machteld/command/clipboard

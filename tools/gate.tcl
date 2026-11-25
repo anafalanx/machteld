@@ -229,6 +229,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "atomic file publication" publish_test.tcl
                 addLane steps $runtime fast "cross-process file locks" lock_test.tcl
                 addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
+                addLane steps $runtime fast "desktop arguments and document paths" desktop_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "Graphviz layout and drawing" graphviz_test.tcl
                 addLane steps $runtime fast "XXH3-64 catalog checksums" xxh3_test.tcl
@@ -254,6 +255,14 @@ proc ::gate::plan {settings} {
                 addStep steps integration "fixture cmdline_test.c" [list $gcc {*}$strict -I [file join $root src] \
                     [file join $test cmdline_test.c] [file join $root src winjob_cmdline.c] -o $cmdline]
                 addStep steps integration "command-line golden vectors" [list $cmdline]
+                set privateRunner [file join $out desktop_runner.exe]
+                set windowFixture [file join $out window_fixture.exe]
+                addStep steps integration "fixture desktop_runner.c" [list $gcc {*}$strict -municode \
+                    [file join $test fixtures desktop_runner.c] -luser32 -o $privateRunner]
+                addStep steps integration "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
+                    [file join $test fixtures window_fixture.c] -luser32 -lole32 -luuid -o $windowFixture]
+                addStep steps integration "isolated desktop selection" [list $privateRunner $runtime \
+                    [file join $test desktop_test.tcl] $windowFixture] timeout 120s
                 set ffiDependency [file join $out machteld_cffi_dependency.dll]
                 set ffiFixture [file join $out machteld_cffi_fixture.dll]
                 set ffiImport [file join $out libmachteld_cffi_dependency.a]
@@ -308,9 +317,10 @@ proc ::gate::plan {settings} {
     if {[dict get $settings gui]} {
         set windowFixture [file join $out window_fixture.exe]
         addStep steps interactive "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
-            [file join $test fixtures window_fixture.c] -luser32 -o $windowFixture]
+            [file join $test fixtures window_fixture.c] -luser32 -lole32 -luuid -o $windowFixture]
         addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
+        addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl

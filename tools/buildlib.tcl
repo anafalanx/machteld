@@ -35,7 +35,7 @@ set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}
 set ::machteld::build::SYSLIBS {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32
     -lgdi32 -lcomdlg32 -limm32 -lcomctl32 -lshell32 -luuid -lole32
-    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4
+    -loleaut32 -lwinspool -lpsapi -lbcrypt -lwinhttp -ldwmapi -lrpcrt4 -lshlwapi
 }
 
 # Prelude parts in sourcing order: machteld.tcl first (it defines Fail,
