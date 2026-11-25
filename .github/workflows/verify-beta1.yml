@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 120
     env:
-      CANDIDATE_SHA: d9df71f01d2c4f66d2d6f6e7a36bc72f7b40b75c
+      CANDIDATE_SHA: e0db215ede968d3255415613d86c66abda210249
     defaults:
       run:
         working-directory: candidate
@@ -107,6 +107,20 @@ jobs:
           if (-not $info.IsPreRelease -or $info.Comments -cne 'Machteld 22 Beta 1') {
             throw 'The executable does not carry the expected Beta 1 Windows prerelease marker and comment.'
           }
+
+      - name: Verify attended child presentation on the Windows desktop
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          MSYS2_ROOT: ${{ steps.msys.outputs.msys2-location }}
+        run: |
+          $bin = Join-Path $env:MSYS2_ROOT 'ucrt64/bin'
+          $env:Path = "$bin;$env:Path"
+          $fixture = Join-Path $env:RUNNER_TEMP 'beta-window-fixture.exe'
+          & "$bin/gcc.exe" -std=c17 -O2 -Wall -Wextra -Werror -municode -mwindows test/fixtures/window_fixture.c -luser32 -o $fixture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\out\machteld.exe test/child_window_test.tcl $fixture
+          exit $LASTEXITCODE
 
       - name: Verify Windows clipboard ownership under real contention
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
