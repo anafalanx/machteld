@@ -2,23 +2,30 @@
 id: machteld/command/app
 type: command
 title: app
-summary: Get the command prefix for starting another instance of the current application.
-commands: app, app launch
+summary: Relaunch the current application and locate per-user application data.
+commands: app, app launch, app data
 ---
 
 # app
 
 ## Synopsis
 
-`app launch`
+```tcl
+app launch
+app data local|roaming
+```
 
 ## Arguments and options
 
-`launch` takes no arguments.
+`launch` takes no arguments. For `data`, choose `local` for machine-specific
+state or `roaming` for settings that can follow a managed user profile.
 
 ## Results
 
-Returns a Tcl list of executable and argument words. Pass it to `child start`,
+`data` returns the current Windows user's configured application-data path.
+Append the application's own directory name and create it when needed.
+
+`launch` returns a Tcl list of executable and argument words. Pass it to `child start`,
 `run` or another argv-based process launcher, expanding it with `{*}`.
 Append the arguments the application should receive. Obtaining the prefix
 does not start a process.
@@ -27,7 +34,7 @@ does not start a process.
 
 `MACHTELD APP state` means there is no active application, for example at the
 interactive prompt. An unknown operation or extra argument raises
-`MACHTELD APP usage`.
+`MACHTELD APP usage`. Windows folder lookup failures raise `MACHTELD APP oserror`.
 
 ## Lifetime and timeouts
 
@@ -75,6 +82,49 @@ another temporary copy for Tcl's file-backed ZIP reader. Windows reclaims
 these snapshots when their owners release them.
 
 ## Subcommands
+
+<a id="data"></a>
+### data
+
+#### Synopsis
+
+`app data local|roaming`
+
+#### Arguments and options
+
+Choose `local` for state such as a cache or database and `roaming` for
+preferences that the application can use on another machine.
+
+#### Results
+
+Returns an absolute Windows path in Tcl notation, including configured folder
+redirections. The lookup uses the current user's Windows known-folder settings.
+
+#### Errors
+
+`APP usage` reports a missing or unsupported folder type. `APP oserror`
+includes the Windows HRESULT if the profile location cannot be resolved.
+
+#### Lifetime and timeouts
+
+The call resolves the path synchronously. It creates no files or directories.
+
+#### Examples
+
+```tcl
+set profile [file join [app data local] CatalogueLookup]
+file mkdir $profile
+set database [file join $profile catalogue.db]
+```
+
+#### Constraints
+
+The returned path may be offline or read-only. Check errors when creating
+the application directory or writing a file.
+
+#### See also
+
+`machteld/command/publish`, `machteld/guide/packaging`.
 
 <a id="launch"></a>
 ### launch

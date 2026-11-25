@@ -107,7 +107,9 @@ running version. The same Tcl worker command also works for a loose script. [App
 ## Distributing an application
 
 A shortcut can point to `machteld.exe` and pass the quoted archive path.
-Keep data that users modify in a separate writable location. The signed file
+Put a machine-local database under `[file join [app data local] MyApplication]`.
+Use `app data roaming` for small settings meant to follow the user's profile.
+Create the application's directory before saving. The signed file
 identifies the runtime publisher. Give the application its own name, icon or
 working directory in the shortcut as appropriate. On a supported Windows
 desktop, the detached console policy permits Explorer to launch a Tk entry

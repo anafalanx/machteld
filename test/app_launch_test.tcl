@@ -55,6 +55,7 @@ switch -- [lindex $argv 0] {
         puts [list [versionText] [string trim [encoding convertfrom -profile strict utf-8 [dict get $r out]]]]
     }
     child {puts [list [versionText] $argv0 [lrange $argv 1 end]]}
+    folders {puts [list [app data local] [app data roaming]]}
     prefix {
         set original [app launch]
         set argv0 changed
@@ -70,6 +71,22 @@ switch -- [lindex $argv 0] {
     check "changing working directory and argv0 preserves the captured prefix" \
         [expr {[invoke $exe $main prefix] eq "1"}]
     invoke $exe pack $source -o $archive
+    set folders [list [app data local] [app data roaming]]
+    set ps [file join $env(SystemRoot) System32 WindowsPowerShell v1.0 powershell.exe]
+    set query {[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        [Environment]::GetFolderPath('LocalApplicationData', 'DoNotVerify')
+        [Environment]::GetFolderPath('ApplicationData', 'DoNotVerify')}
+    set actual [lmap path [split [invoke $ps -NoLogo -NoProfile -NonInteractive -Command $query] \n] {
+        string map [list \\ /] [string trimright $path \r]
+    }]
+    check "local and roaming locations match the Windows profile" [expr {$folders eq $actual &&
+        [file pathtype [lindex $folders 0]] eq "absolute" && [file pathtype [lindex $folders 1]] eq "absolute"}]
+    check "direct and archived applications resolve the same user data" [expr {
+        [invoke $exe $main folders] eq $folders && [invoke $exe $archive folders] eq $folders}]
+    foreach arguments {{data} {data local extra} {data unsupported}} {
+        check "app rejects invalid data query $arguments" [expr {
+            [catch {app {*}$arguments} msg opts] && [dict get $opts -errorcode] eq {MACHTELD APP usage}}]
+    }
     set child [child start -timeout 30s -- $exe $archive parent $ready $signal]
     set deadline [expr {[clock milliseconds] + 12000}]
     while {(![file exists $ready] || [file size $ready] == 0) &&

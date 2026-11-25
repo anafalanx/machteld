@@ -14,6 +14,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlobj.h>
 
 static int host_mode = MACHTELD_HOST_NORMAL;
 
@@ -579,12 +580,50 @@ capture_archive_entry(Tcl_Interp *interp, Tcl_Obj *entry, Tcl_Obj **script_out)
     return status;
 }
 
+/* Ask Windows for the current user's configured location. DONT_VERIFY keeps
+ * this path lookup from opening a redirected folder or creating directories. */
+static int
+AppDataRootCmd(void *client_data, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+{
+    (void)client_data;
+    static const char *const kinds[] = {"local", "roaming", NULL};
+    int kind;
+    if (objc != 2 || Tcl_GetIndexFromObj(interp, objv[1], kinds, "data folder",
+            TCL_EXACT, &kind) != TCL_OK) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("usage: app data local|roaming", -1));
+        Tcl_SetErrorCode(interp, "MACHTELD", "APP", "usage", NULL);
+        return TCL_ERROR;
+    }
+    PWSTR path = NULL;
+    HRESULT hr = SHGetKnownFolderPath(kind == 0 ? &FOLDERID_LocalAppData :
+        &FOLDERID_RoamingAppData, KF_FLAG_DONT_VERIFY, NULL, &path);
+    if (FAILED(hr) || path == NULL) {
+        CoTaskMemFree(path);
+        Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+            "cannot resolve the user's app data folder (HRESULT 0x%08lx)", (unsigned long)hr));
+        Tcl_SetErrorCode(interp, "MACHTELD", "APP", "oserror", NULL);
+        return TCL_ERROR;
+    }
+    for (PWSTR p = path; *p; p++) {
+        if (*p == L'\\') *p = L'/';
+    }
+    Tcl_DString utf;
+    Tcl_DStringInit(&utf);
+    Tcl_WCharToUtfDString(path, -1, &utf);
+    CoTaskMemFree(path);
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(Tcl_DStringValue(&utf), Tcl_DStringLength(&utf)));
+    Tcl_DStringFree(&utf);
+    return TCL_OK;
+}
+
 int
 Machteld_EntryGate(Tcl_Interp *interp)
 {
     /* The packers call the same parser used by direct startup. Keeping this as a
      * private, capitalized command avoids a second grammar-sensitive checker. */
-    if (Tcl_CreateObjCommand(interp, "::machteld::EntryCheck", EntryCheckCmd,
+    if (Tcl_CreateObjCommand(interp, "::machteld::AppDataRoot", AppDataRootCmd,
+            NULL, NULL) == NULL ||
+        Tcl_CreateObjCommand(interp, "::machteld::EntryCheck", EntryCheckCmd,
             NULL, NULL) == NULL) {
         return TCL_ERROR;
     }

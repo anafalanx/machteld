@@ -747,14 +747,18 @@ proc ::machteld::PackArchive {args} {
 }
 
 proc ::machteld::app {args} {
-    if {$args ne {launch}} { Fail APP usage "usage: app launch" }
+    if {[lindex $args 0] eq "data" && [llength $args] == 2} {
+        return [AppDataRoot [lindex $args 1]]
+    }
+    if {$args ne {launch}} { Fail APP usage "usage: app launch | app data local|roaming" }
     variable launchPrefix
     if {![info exists launchPrefix]} { Fail APP state "app launch requires an active application" }
     return $launchPrefix
 }
 
-::machteld::MetaDefine app [dict create kind tcl args args domain APP codes {state usage} \
+::machteld::MetaDefine app [dict create kind tcl args args domain APP codes {oserror state usage} \
     options {} doc machteld/command/app subcommands [dict create \
+        data [dict create options {} doc machteld/command/app#data] \
         launch [dict create options {} doc machteld/command/app#launch]]]
 
 # Called after all Tcl parts and the native manifest are loaded. Keep Tk's
