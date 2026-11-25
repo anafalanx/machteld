@@ -249,15 +249,12 @@ static int dirs_namecmp(const void *a, const void *b) {
     return xn < yn ? -1 : (xn > yn ? 1 : 0);
 }
 
-/* FILE_LIST_DIRECTORY plus BACKUP_SEMANTICS is the only way to get a handle to a
- * directory at all. `follow` decides whether a reparse point is entered or
- * merely opened: without FILE_FLAG_OPEN_REPARSE_POINT a junction handle reports
- * the TARGET's attributes and enumerates the target's contents, which is
- * precisely the escape this verb must not make. */
-static HANDLE dirs_open(const wchar_t *path, int follow) {
+/* BACKUP_SEMANTICS permits a directory handle. An identity or tag query needs
+ * only metadata access; enumerating children requires FILE_LIST_DIRECTORY. */
+static HANDLE dirs_open(const wchar_t *path, DWORD access, int follow) {
     DWORD flags = FILE_FLAG_BACKUP_SEMANTICS;
     if (!follow) flags |= FILE_FLAG_OPEN_REPARSE_POINT;
-    return CreateFileW(path, FILE_LIST_DIRECTORY,
+    return CreateFileW(path, access,
                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        NULL, OPEN_EXISTING, flags, NULL);
 }
@@ -803,7 +800,7 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
         }
 
         if (!stop) {
-            h = dirs_open(it.path, it.depth == 0);
+            h = dirs_open(it.path, FILE_LIST_DIRECTORY, it.depth == 0);
             if (h == INVALID_HANDLE_VALUE) {
                 dirs_fault(w, it.path, GetLastError());
                 /* `failed`, NOT the `descended` this used to be left at. A
@@ -836,7 +833,7 @@ static int dirs_walk(DirsWalk *w, const wchar_t *rootw, int rootreparse, DWORD r
                      * through, it costs one open per cloud-style directory
                      * rather than one per directory, and it is recorded here as
                      * a known narrow window rather than left to be discovered. */
-                    h = dirs_open(it.path, 1);
+                    h = dirs_open(it.path, FILE_LIST_DIRECTORY, 1);
                     if (h == INVALID_HANDLE_VALUE) {
                         dirs_fault(w, it.path, GetLastError());
                         action = "failed";
@@ -1234,7 +1231,8 @@ static int dirs_core(Tcl_Interp *interp, Tcl_Obj *const objv[], DirsWalk *wp) {
      * from a handle or from the scan, never from a third source. */
     FILE_ATTRIBUTE_TAG_INFO rati;
     memset(&rati, 0, sizeof rati);
-    HANDLE rh = dirs_open(rootw, 1);
+    DWORD access = w.depthcap == 0 ? FILE_READ_ATTRIBUTES : FILE_LIST_DIRECTORY;
+    HANDLE rh = dirs_open(rootw, access, 1);
     if (rh == INVALID_HANDLE_VALUE) {
         free(rootw);
         dirs_free(&w); return dirs_error(interp, "notfound", "no such directory");
@@ -1253,7 +1251,7 @@ static int dirs_core(Tcl_Interp *interp, Tcl_Obj *const objv[], DirsWalk *wp) {
      * dirs_walk records what the omission cost. */
     int rootreparse = 0;
     DWORD roottag = 0, rootclassfail = 0;
-    HANDLE rrh = dirs_open(rootw, 0);
+    HANDLE rrh = dirs_open(rootw, FILE_READ_ATTRIBUTES, 0);
     if (rrh == INVALID_HANDLE_VALUE) {
         rootclassfail = GetLastError();
     } else {
@@ -1372,12 +1370,12 @@ static int CanonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     /* FOLLOW. This is the whole verb: `dirs` opens with
      * FILE_FLAG_OPEN_REPARSE_POINT so a junction is classified rather than
      * entered, and here the opposite is wanted -- the target is the answer. */
-    HANDLE h = dirs_open(pathw, 1);
+    HANDLE h = dirs_open(pathw, FILE_READ_ATTRIBUTES, 1);
     if (h == INVALID_HANDLE_VALUE) {
         /* A dangling link is not a missing path. A raw reparse-point open tells
          * us whether the name exists even though the followed open failed. */
         DWORD e = GetLastError();
-        HANDLE raw = dirs_open(pathw, 0);
+        HANDLE raw = dirs_open(pathw, FILE_READ_ATTRIBUTES, 0);
         if (raw != INVALID_HANDLE_VALUE) {
             CloseHandle(raw);
             free(pathw);

@@ -60,9 +60,26 @@ try {
     }
     check "junction fixture is available" [expr {[llength $junctions] == 3}]
 
-    set denied [expr {![catch {exec cmd /c icacls [file nativename [file join $ROOT locked]] \
-        /deny "$env(USERNAME):(OI)(CI)(RD)"}] &&
-        [catch {glob -nocomplain -directory [file join $ROOT locked] *}]}]
+    set locked [file join $ROOT locked]
+    set protected [file join $locked metadata.bin]
+    write_file $protected abc
+    set expectedDir [canon $locked]
+    set expectedFile [canon $protected]
+    # RD means list-directory on a directory and read-data on a file. Deny
+    # just that right to Everyone, leaving attributes readable on both.
+    exec icacls.exe [file nativename $locked] /deny {*S-1-1-0:(OI)(CI)(RD)}
+    check "fixture denies enumeration and file content reads" [expr {
+        [catch {glob -directory $locked *}] && [catch {close [open $protected rb]}]}]
+    check "canon identifies the directory and file using metadata rights" [expr {
+        [canon $locked] eq $expectedDir && [canon $protected] eq $expectedFile}]
+    set rootOnly [links $locked -depth 0]
+    check "depth-zero links inspects a non-listable directory" [expr {
+        [dict get $rootOnly dirs] == 1 && [dict get $rootOnly depthlimited] == 1 &&
+        [dict get $rootOnly files] == 0 && [dict get $rootOnly links] eq {} &&
+        [dict get $rootOnly errors] eq {}}]
+    set rootOnly [dirs $locked -depth 0]
+    check "depth-zero dirs inspects a non-listable directory" [expr {
+        [dict get $rootOnly paths] eq [list $locked] && [dict get $rootOnly errors] eq {}}]
 
     set result [dirs $ROOT]
     set paths [dict get $result paths]
@@ -100,15 +117,11 @@ try {
     if {$junctions ne {}} {
         check "every junction is disclosed" [expr {[llength [dict get $result links]] == [llength $junctions]}]
     }
-    if {$denied} {
-        check "unreadable directory is named" [expr {[file join $ROOT locked] in $paths}]
-        check "unreadable child is not invented" [expr {[file join $ROOT locked child] ni $paths}]
-        check "unreadable descent has an error row" [expr {
-            [llength [dict get $result errors]] == 1 &&
-            [dict get [lindex [dict get $result errors] 0] win32] > 0}]
-    } else {
-        puts "SKIP unreadable-directory checks (deny ACE did not take)"
-    }
+    check "unreadable directory is named" [expr {$locked in $paths}]
+    check "unreadable child is not invented" [expr {[file join $locked child] ni $paths}]
+    check "unreadable descent has an error row" [expr {
+        [llength [dict get $result errors]] == 1 &&
+        [dict get [lindex [dict get $result errors] 0] win32] == 5}]
 
     set depth0 [dirs $ROOT -depth 0]
     check "depth zero returns only the root" [expr {[dict get $depth0 paths] eq [list $ROOT]}]
@@ -157,7 +170,14 @@ try {
         [dict get [links $ROOT] multilinked] eq {}}]
 
     if {"junction" in $junctions} {
-        set canonical [canon [file join $ROOT junction]]
+        set junction [file join $ROOT junction]
+        set rootLinks [links $junction -depth 0]
+        set row [lindex [dict get $rootLinks links] 0]
+        check "depth-zero links identifies a root junction without entering it" [expr {
+            [llength [dict get $rootLinks links]] == 1 && [dict get $row path] eq $junction &&
+            [dict get $row type] eq "junction" && [dict get $rootLinks errors] eq {} &&
+            [dict get $rootLinks entered] eq {} && [dict get $rootLinks files] == 0}]
+        set canonical [canon $junction]
         # TEMP itself may contain a short name or a junction. Open the target
         # directly for its final path and its identity on this filesystem.
         set target [canon [file join $ROOT target]]
@@ -172,6 +192,9 @@ try {
             [dict get $canonical links] >= 1}]
     }
 } finally {
+    if {[info exists locked]} {
+        catch {exec icacls.exe [file nativename $locked] /remove:d *S-1-1-0}
+    }
     wipe $ROOT
     wipe $OUTSIDE
 }

@@ -7,7 +7,9 @@ tags: [machteld, api, tcl, windows]
 
 # Command palette
 
-All commands are in `::machteld` and resolve as bare names in a top-level entry.
+All commands are in `::machteld`. The palette supplies short names at top
+level. Use the qualified name `::machteld::clipboard owned` to query Windows
+clipboard ownership. Tk supplies its global `clipboard` command when loaded.
 This page is a composition tour. The [complete reference](reference/machteld/index.md)
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
@@ -37,7 +39,7 @@ detach -dir C:/service -- daemon.exe
 | Command | Contract |
 |---|---|
 | `run` | Launch and wait. Captures stdout/stderr by default; `-inherit` gives the child the terminal, `-onout/-onerr` stream lines, and `-stdin` supplies input. Supports `-arg0`, `-cpu`, `-mem`, `-dir`, `-env`, and `-timeout`. |
-| `child` | `start`, `wait`, `kill`, `info`, `list`, and `close` for supervised asynchronous children. `start -channels` exposes stdin/stdout/stderr channels through `child info`; the caller must close stdin when the child expects EOF. |
+| `child` | `start`, `wait`, `kill`, `info`, `list`, and `close` manage supervised process trees. `start -channels` exposes stdin/stdout/stderr channels through `child info`. For an attended GUI, use `start -window normal`, then `present` to check window readiness or request attention. |
 | `wait` | Wait for child or filesystem-watch handles; `-any` returns when the first is ready. |
 | `scope` | Evaluate a Tcl body and close every child born inside it, even when the body errors. |
 | `detach` | Launch an independent daemon and return its PID. Success is verified outside every Windows job; an enclosing policy that denies breakaway raises `{MACHTELD DETACH launch}`. |
@@ -109,7 +111,7 @@ canon C:/work/a-junction
 | `watch` | Live directory events through `start`, `read`, `info`, `list`, and `close`. `read` returns immediately unless given `-timeout`; `-raw` keeps the OS event stream while the default coalesces it. `info` reports token, directory, recursive/armed state, pending/dropped/failed counts, and `win32` (zero unless the watch failed) without consuming events. |
 | `dirs` | Deterministic depth-first directory walk. `-depth` bounds descent and `-prune` accepts case-insensitive glob names. Returns counts, ordered paths, link decisions, errors, and completeness facts. |
 | `links` | Walk reparse points without following name surrogates; `-hardlinks` also reports files with shared storage. It uses the same depth/prune policy as `dirs`. |
-| `canon` | Resolve a path through reparse points to its canonical target; a dangling target is a structured error. |
+| `canon` | Resolve a path through reparse points to its canonical target. Metadata access can suffice even when file reads or directory listings are denied. A dangling target raises a structured error. |
 
 ## Machine processes
 

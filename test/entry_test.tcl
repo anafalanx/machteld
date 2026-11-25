@@ -141,12 +141,17 @@ proc ::et::aclTests {versionRe} {
     set aclHost [file join $app [file tail $runtime]]
     file mkdir $app
     file copy $runtime $aclHost
+    set system [file join $::env(SystemRoot) System32]
+    set acl [file join $system icacls.exe]
+    set identity [run -- [file join $system whoami.exe] /user /fo csv /nh]
+    if {[dict get $identity exit] != 0} { error "whoami.exe could not identify the ACL test user" }
     set user [lindex [split [string trim [encoding convertfrom -profile replace utf-8 \
-        [dict get [run -- whoami.exe /user /fo csv /nh] out]]] ,] end]
+        [dict get $identity out]]] ,] end]
     set sid [string trim $user "\""]
+    if {![regexp {^S-1-(?:[0-9]+-)*[0-9]+$} $sid]} { error "whoami.exe returned an invalid SID" }
     set denied 0
     try {
-        set result [run -- icacls.exe [file nativename $blocked] /deny "*${sid}:(RD)"]
+        set result [run -- $acl [file nativename $blocked] /deny "*${sid}:(RD)"]
         if {[dict get $result exit] != 0} {
             check "ACL regression fixture permits exact open but denies parent enumeration" 0 \
                 [encoding convertfrom -profile replace utf-8 [dict get $result out][dict get $result err]]
@@ -179,7 +184,7 @@ proc ::et::aclTests {versionRe} {
             [expr {[dict get $result exit] == 0 && [file isfile $wrapped]}] [dict get $result text]
     } finally {
         if {$denied} {
-            run -- icacls.exe [file nativename $blocked] /remove:d "*$sid"
+            run -- $acl [file nativename $blocked] /remove:d "*$sid"
         }
     }
 }

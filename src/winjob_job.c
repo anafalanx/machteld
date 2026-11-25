@@ -208,3 +208,10 @@ int wj_in_job(void *process_handle, void *job_handle) {
     }
     return res ? 1 : 0;
 }
+
+int wj_job_contains(wj_job *job, void *process_handle) {
+    EnterCriticalSection(&job->lock);
+    int member = !job->closed && wj_in_job(process_handle, job->handle) == 1;
+    LeaveCriticalSection(&job->lock);
+    return member;
+}

@@ -67,6 +67,51 @@ proc own_handle_count {} {
     return $value
 }
 
+# Tcl completion crosses scope's procedure frame after its child cleanup.
+proc scope_return_case {fixture} {
+    scope {
+        child start -- $fixture hang 60000
+        scope {return early}
+    }
+    return fell-through
+}
+set priorChild [child start -- $FIXTURE hang 60000]
+try {
+    set before [child list]
+    check "nested scope returns from its caller and closes its child" [expr {
+        [scope_return_case $FIXTURE] eq "early" && [child list] eq $before}]
+
+    foreach {control expectedVisits} {break first continue {first second}} {
+        set visits {}
+        set rc [catch {
+            foreach item {first second} {
+                lappend visits $item
+                scope {
+                    child start -- $FIXTURE hang 60000
+                    $control
+                }
+                lappend visits fell-through
+            }
+        }]
+        check "scope forwards $control to its caller's loop and closes each child" [expr {
+            $rc == 0 && $visits eq $expectedVisits && [child list] eq $before}]
+    }
+
+    set rc [catch {scope {
+        child start -- $FIXTURE hang 60000
+        error "body error" {} {SCOPE FIXTURE}
+    }} message options]
+    check "scope preserves the body's error and closes its child" [expr {
+        $rc == 1 && $message eq "body error" &&
+        [dict get $options -errorcode] eq {SCOPE FIXTURE} && [child list] eq $before}]
+
+    set rc [catch {scope {return -level 0 -code 7 -detail custom value}} value options]
+    check "scope preserves a custom completion code and option" [expr {
+        $rc == 7 && $value eq "value" && [dict get $options -detail] eq "custom"}]
+} finally {
+    child close $priorChild
+}
+
 # Ordinary results, Unicode argv, full-width exit codes, and callbacks form one
 # compact supervision contract.
 set result [run -- $FIXTURE ok "hëllö 世界"]

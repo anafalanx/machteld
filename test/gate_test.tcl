@@ -116,7 +116,9 @@ set generator [settings {--group reference-generator}]
 check {the reference-generator group needs neither the runtime nor MSYS2} \
     [expr {![::gate::needs $generator runtime] && ![::gate::needs $generator msys] && [::gate::needs $generator tclsh]}]
 check {the release build needs MSYS2} [::gate::needs [settings {}] msys]
-check {--interactive-gui alone needs the runtime} [::gate::needs [settings {--group reference-generator --interactive-gui}] runtime]
+set desktop [settings {--group reference-generator --interactive-gui}]
+check {--interactive-gui needs the runtime and fixture compiler} \
+    [expr {[::gate::needs $desktop runtime] && [::gate::needs $desktop msys]}]
 
 check {the fast group compiles nothing} [expr {[compiled [::gate::plan $fast]] eq {}}]
 check {the fast group tests script and archive launch} [expr {"archive_test.tcl" in [scripts [::gate::plan $fast]]}]
@@ -220,7 +222,9 @@ check {the trapped identity driver gets both basekits and a work folder, all del
         [dict get $identityRun cleanup] eq [lrange [dict get $identityRun argv] 2 4]}]
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
-    [expr {"gui_widget_test.tcl" ni [scripts $releasePlan] &&
+    [expr {"child_window_test.tcl" ni [scripts $releasePlan] &&
+        "child_window_test.tcl" in [scripts $guiPlan] &&
+        "gui_widget_test.tcl" ni [scripts $releasePlan] &&
         "sqlite_lookup_gui_test.tcl" ni [scripts $releasePlan] &&
         "Tk app archive" ni $releaseLabels &&
         [lindex [dict get [lindex $guiPlan end-2] argv] end] eq "--tk" &&

@@ -56,9 +56,10 @@ by its absolute native path, `info script` identifies the mounted entry, and
 `argv` holds the program arguments. The caller's working directory is preserved.
 [Packaging guide](packaging.md)
 
-Once loaded, `package require machteld` returns `22`. Palette commands are in
-`::machteld`, which is on the global namespace path. A nested namespace may add
-`namespace path ::machteld` or use qualified names.
+Once loaded, `package require machteld` returns `22`. All palette commands
+have fully qualified names in `::machteld`. At top level, use their short
+names or the qualified-only `::machteld::clipboard`. A nested namespace can
+add `namespace path ::machteld::palette` to use the same short names.
 
 ## Values
 

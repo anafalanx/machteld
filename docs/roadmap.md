@@ -7,7 +7,14 @@ tags: [machteld, roadmap, windows]
 
 # Roadmap
 
-## 22 — in preparation
+## 22 — Beta 1
+
+The first beta combines supervised Tcl jobs, the upstream SQLite Tcl binding,
+script and archive entry, same-version archive workers, atomic publication
+and process-owned locks. Its desktop changes cover metadata-only path
+inspection, attended child windows and Windows clipboard ownership. The
+checkout's `docs/releases/0.22-beta.1.md` records the scope and release
+checklist.
 
 **machteld 22 is the next release; it is not released or signed.** From 22 on
 the version is one natural number, and only a change to the runtime makes a

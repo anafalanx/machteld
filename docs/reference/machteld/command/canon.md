@@ -17,7 +17,9 @@ canon path
 ## Arguments and options
 
 `path` names an existing file or directory. The command follows reparse points
-in the final component. There are no options.
+in the final component and opens the target with `FILE_READ_ATTRIBUTES`. A
+directory can be identified when its ACL denies listing, and a file can be
+identified when its ACL denies reading its contents. There are no options.
 
 ## Results
 

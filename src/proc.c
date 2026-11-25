@@ -6,7 +6,7 @@
  *
  *   ::machteld::run   ?-timeout t -mem b -cpu t -dir d? ?--? cmd ?arg...?
  *       blocking one-shot -> dict {exit status out err pid truncated}
- *   ::machteld::child start|wait|kill|info|list|close ...
+ *   ::machteld::child start|wait|kill|info|list|close|present ...
  *       async supervised children, addressed by an opaque token
  *   ::machteld::wait  ?-any? token ...
  *       block until all (or any) of the given children exit
@@ -231,6 +231,8 @@ typedef struct child_s {
     char            chIn[24], chOut[24], chErr[24];
     Tcl_Channel     owned_channels[3]; /* live only until its close handler fires */
     ULONGLONG       deadline;    /* GetTickCount64() by which it must be done */
+    int             normal_window;
+    wj_presentation presentation;
     int             reaped;      /* wait/reap already collected the exit + output */
     volatile LONG   killed;      /* was tree-killed by machteld (child kill) */
     volatile LONG   timeout;     /* specifically: killed because -timeout elapsed */
@@ -294,6 +296,7 @@ typedef struct {
     void              *env_block;  /* built UTF-16 env block (borrowed; the command owns the buffer) */
     Tcl_Obj           *onout;      /* -onout prefix: each stdout line appended + evaluated (run only) */
     Tcl_Obj           *onerr;      /* -onerr prefix: each stderr line appended + evaluated (run only) */
+    int                normal_window; /* -window normal: attended launch and presentation */
     int                no_console; /* -console none: start without a Windows console */
     int                channels;   /* -channels: hand the pipes over as Tcl channels */
     int                inherit;    /* -inherit: the child gets OUR stdio, not pipes */
@@ -313,7 +316,8 @@ enum {
     OPT_ONERR    = 1u << 8,
     OPT_CHANNELS = 1u << 9,
     OPT_INHERIT  = 1u << 10,
-    OPT_CONSOLE  = 1u << 11
+    OPT_CONSOLE  = 1u << 11,
+    OPT_WINDOW   = 1u << 12
 };
 
 /* The domain names the public command, not the internal helper. */
@@ -541,6 +545,7 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
     o->onerr = NULL;
     o->channels = 0;
     o->no_console = 0;
+    o->normal_window = 0;
     /* Initialize every field because this structure lives on the stack. */
     o->inherit = 0;
     o->arg0 = NULL;
@@ -601,6 +606,11 @@ static int parse_opts(Tcl_Interp *interp, const char *dom, int objc,
             if (has_nul || (strcmp(v, "default") != 0 && strcmp(v, "none") != 0))
                 return mt_error(interp, dom, "badvalue", "-console expects default or none");
             o->no_console = strcmp(v, "none") == 0;
+        } else if (strcmp(a, "-window") == 0) {
+            if (!(allowed & OPT_WINDOW)) return mt_error(interp, dom, "usage", "option is not supported by this command");
+            if (has_nul || (strcmp(v, "default") != 0 && strcmp(v, "normal") != 0))
+                return mt_error(interp, dom, "badvalue", "-window expects default or normal");
+            o->normal_window = strcmp(v, "normal") == 0;
         } else if (strcmp(a, "-timeout") == 0) {
             if (!(allowed & OPT_TIMEOUT)) return mt_error(interp, dom, "usage", "option is not supported by this command");
             if (has_nul) return mt_error(interp, dom, "badvalue", "duration may not contain NUL");
@@ -822,8 +832,9 @@ static child_t *child_launch(proc_ctx *ctx, run_opts *o, int cargc, const char *
     const char **largv = argv_with_arg0(o, cargc, cargv, err);
     if (largv == NULL) goto fail;
     wj_launch_mode mode = o->no_console ? WJ_NO_CONSOLE : WJ_SUPERVISED;
+    c->normal_window = o->normal_window;
     int lrc = wj_launch(exe, cargc, largv, o->dir, jobh, njobs, &io,
-                        mode, o->env_block, &c->pid, &c->proc, err);
+                        mode, o->normal_window, o->env_block, &c->pid, &c->proc, err);
     if (owns_argv) free((void *)largv);
     if (lrc != 0) goto fail;
     if (o->timeout_ms >= 0) c->deadline = GetTickCount64() + (ULONGLONG)o->timeout_ms;
@@ -1327,8 +1338,8 @@ static int RunCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
 
 static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     proc_ctx *ctx = (proc_ctx *)cd;
-    static const char *const subs[] = { "start", "wait", "kill", "info", "list", "close", NULL };
-    enum { START, WAIT, KILL, INFO, LIST, CLOSE };
+    static const char *const subs[] = { "start", "wait", "kill", "info", "list", "close", "present", NULL };
+    enum { START, WAIT, KILL, INFO, LIST, CLOSE, PRESENT };
     int idx;
     if (objc < 2) {
         return mt_error(interp, "CHILD", "usage", "child subcommand ?arg ...?");
@@ -1339,7 +1350,7 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
     if (idx == START) {
         run_opts o;
         unsigned allowed = OPT_TIMEOUT | OPT_MEM | OPT_CPU | OPT_DIR | OPT_ARG0 |
-                           OPT_STDIN | OPT_ENV | OPT_CHANNELS | OPT_CONSOLE;
+                           OPT_STDIN | OPT_ENV | OPT_CHANNELS | OPT_CONSOLE | OPT_WINDOW;
         if (parse_opts(interp, "CHILD", objc, objv, 2, allowed, &o) != TCL_OK) return TCL_ERROR;
         if (o.channels && o.stdin_obj != NULL) {
             return mt_error(interp, "CHILD", "usage",
@@ -1417,6 +1428,40 @@ static int ChildCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[
             if (w < 0) return mt_error(interp, "CHILD", "oserror", err);
         }
         Tcl_SetObjResult(interp, child_dict(interp, c));
+        return TCL_OK;
+    }
+    case PRESENT: {
+        if (objc != 3 && (objc != 5 || strcmp(Tcl_GetString(objv[3]), "-class") != 0))
+            return mt_error(interp, "CHILD", "usage", "child present token ?-class name?");
+        if (!c->normal_window)
+            return mt_error(interp, "CHILD", "badvalue", "presentation requires child start -window normal");
+        Tcl_DString wide;
+        Tcl_DStringInit(&wide);
+        const wchar_t *filter = NULL;
+        if (objc == 5) {
+            Tcl_Size len;
+            const char *text = Tcl_GetStringFromObj(objv[4], &len);
+            if (len <= 4 * 255) filter = Tcl_UtfToWCharDString(text, len, &wide);
+            size_t units = (size_t)Tcl_DStringLength(&wide) / sizeof(wchar_t);
+            if (!filter || units == 0 || units > 255 || wmemchr(filter, L'\0', units) != NULL) {
+                Tcl_DStringFree(&wide);
+                return mt_error(interp, "CHILD", "badvalue", "-class requires 1 to 255 UTF-16 units without NUL");
+            }
+        }
+        wj_window_facts facts = {0};
+        const char *err = NULL;
+        int failed = !c->reaped && wj_present(c->job, filter, &c->presentation, &facts, &err) != 0;
+        Tcl_DStringFree(&wide);
+        if (failed) return mt_error(interp, "CHILD", "oserror", err);
+        Tcl_Obj *d = Tcl_NewDictObj();
+        int ready = facts.visible && !facts.iconic && !facts.cloaked && facts.on_screen;
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("status", -1), Tcl_NewStringObj(ready ? "ready" : "pending", -1));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("visible", -1), Tcl_NewBooleanObj(facts.visible));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("iconic", -1), Tcl_NewBooleanObj(facts.iconic));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("cloaked", -1), Tcl_NewBooleanObj(facts.cloaked));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("onScreen", -1), Tcl_NewBooleanObj(facts.on_screen));
+        Tcl_DictObjPut(interp, d, Tcl_NewStringObj("foreground", -1), Tcl_NewBooleanObj(facts.foreground));
+        Tcl_SetObjResult(interp, d);
         return TCL_OK;
     }
     case KILL: {
@@ -1594,7 +1639,7 @@ static int DetachCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     const char **dargv = argv_with_arg0(&o, cargc, cargv, &err);
     if (dargv == NULL) { mt_error(interp, "DETACH", "oserror", err); goto cleanup; }
     int drc = wj_launch(exe, cargc, dargv, o.dir, NULL, 0, &io,
-                        WJ_BREAKAWAY, o.env_block, &pid, &proch, &err);
+                        WJ_BREAKAWAY, 0, o.env_block, &pid, &proch, &err);
     if (owns_argv) free((void *)dargv);
     if (drc != 0) {
         mt_error(interp, "DETACH", "launch", err);

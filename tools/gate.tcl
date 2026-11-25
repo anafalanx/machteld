@@ -161,7 +161,8 @@ proc ::gate::needs {settings what} {
             expr {[dict get $settings gui] || [anyOf {fast integration packaging native-validation} $chosen]}
         }
         msys {
-            expr {[dict get $settings build] || [anyOf {integration packaging native-validation} $chosen]}
+            expr {[dict get $settings build] || [dict get $settings gui] ||
+                [anyOf {integration packaging native-validation} $chosen]}
         }
         tclsh {
             anyOf {fast packaging reference-generator} $chosen
@@ -229,6 +230,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "same-application workers and archive replacement" app_launch_test.tcl
                 addLane steps $runtime fast "atomic file publication" publish_test.tcl
                 addLane steps $runtime fast "cross-process file locks" lock_test.tcl
+                addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "GUI model" gui_model_test.tcl
                 addLane steps $runtime fast "embedded reference" reference_test.tcl
@@ -297,6 +299,10 @@ proc ::gate::plan {settings} {
         }
     }
     if {[dict get $settings gui]} {
+        set windowFixture [file join $out window_fixture.exe]
+        addStep steps interactive "fixture window_fixture.c" [list $gcc {*}$strict -municode -mwindows \
+            [file join $test fixtures window_fixture.c] -luser32 -o $windowFixture]
+        addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
         addLane steps $runtime interactive "Tk app archive" archive_test.tcl --tk
         addLane steps $runtime interactive "packaged SQLite lookup" sqlite_lookup_gui_test.tcl
         addLane steps $runtime interactive "GUI widgets (opens windows)" gui_widget_test.tcl

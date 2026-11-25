@@ -20,14 +20,17 @@ its package version: builds can change without a new version number.
 Conceptual guides state design intent and history separately from the
 implemented command pages.
 
-Every command lives in `::machteld` and is available unqualified at top level.
-Nested namespaces should use the qualified name or add `::machteld` to their
-namespace path.
+Every command lives in `::machteld`. At top level, use the short names below
+and the qualified name `::machteld::clipboard`. Tk supplies the global
+`clipboard` command when loaded. Nested namespaces can use fully qualified
+names or add `::machteld::palette` to their namespace path for the short names.
 
 ## Command groups
 
 - Process control: `run`, `child`, `wait`, `scope`, and `detach`.
 - Interactive processes: `pty`.
+- Windows desktop: `child present` shows the state of a supervised application
+  window. `::machteld::clipboard owned` checks whether this process owns the clipboard.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.

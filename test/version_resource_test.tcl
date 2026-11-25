@@ -1,6 +1,6 @@
 package require machteld 0.21
 
-# test/version_resource_test.tcl -- every host carries exact, release-flagged
+# test/version_resource_test.tcl -- every host carries exact, milestone-aware
 # VERSIONINFO derived from the one canonical version, names its publisher, and
 # carries no path of the machine that built it.
 #
@@ -31,7 +31,7 @@ proc ::vr::check {name condition {detail ""}} {
     }
 }
 
-proc ::vr::checkResource {label path description internalName originalFilename version numeric} {
+proc ::vr::checkResource {label path description internalName originalFilename version numeric beta} {
     if {![file isfile $path]} {
         check "$label exists" 0 $path
         return
@@ -61,8 +61,12 @@ proc ::vr::checkResource {label path description internalName originalFilename v
                [field $info OriginalFilename] eq $originalFilename}] \
         "description={[field $info FileDescription]} internal={[field $info InternalName]} original={[field $info OriginalFilename]}"
     # VS_FF_DEBUG, PRERELEASE, PATCHED, PRIVATEBUILD, SPECIALBUILD.
-    check "$label carries release rather than development flags" \
-        [expr {([dict get $info flags] & [dict get $info flagsMask] & 0x2f) == 0}] "flags=[dict get $info flags]"
+    set expectedFlags [expr {$beta eq {} ? 0 : 2}]
+    check "$label carries the declared prerelease flag" \
+        [expr {([dict get $info flags] & [dict get $info flagsMask] & 0x2f) == $expectedFlags}] "flags=[dict get $info flags]"
+    if {$beta ne {}} {
+        check "$label identifies the beta milestone" [expr {[field $info Comments] eq "Machteld $version Beta $beta"}]
+    }
 }
 
 proc ::vr::embeddedBuildPaths {path cache} {
@@ -117,11 +121,13 @@ proc ::vr::main {argv} {
         error "src/machteld.h has no canonical MACHTELD_VERSION"
     }
     set numeric [list $version 0 0 0]
+    set beta {}
+    regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text -> beta
 
     set work [file join [file normalize $::env(TEMP)] machteld-version-resource-test-[pid]-[binary encode hex [hash random 8]]]
     file mkdir $work
     try {
-        checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric
+        checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric $beta
         set paths [embeddedBuildPaths $runtime $cache]
         check "full executable carries no repository or dependency-cache path" [expr {[llength $paths] == 0}] [join $paths {, }]
         if {$wrap} {
@@ -138,7 +144,7 @@ proc ::vr::main {argv} {
                 check "$kind metadata fixture wraps successfully" \
                     [expr {[dict get $result exit] == 0 && [file isfile $out]}]
                 if {[file isfile $out]} {
-                    checkResource "wrapped $kind" $out $description $internal $original $version $numeric
+                    checkResource "wrapped $kind" $out $description $internal $original $version $numeric $beta
                     set paths [embeddedBuildPaths $out $cache]
                     check "wrapped $kind carries no repository or dependency-cache path" \
                         [expr {[llength $paths] == 0}] [join $paths {, }]
