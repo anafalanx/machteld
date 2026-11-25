@@ -223,6 +223,8 @@ check {the window-opening lanes run only behind --interactive-gui, last} \
         "child_window_test.tcl" in [scripts $guiPlan] &&
         "gui_widget_test.tcl" ni [scripts $releasePlan] &&
         "sqlite_lookup_gui_test.tcl" ni [scripts $releasePlan] &&
+        "graphviz_test.tcl" in [scripts $releasePlan] &&
+        "graphviz_tk_test.tcl" ni [scripts $releasePlan] && "graphviz_tk_test.tcl" in [scripts $guiPlan] &&
         "Tk app archive" ni $releaseLabels &&
         [lindex [dict get [lindex $guiPlan end-2] argv] end] eq "--tk" &&
         [lrange [scripts $guiPlan] end-2 end] eq {archive_test.tcl sqlite_lookup_gui_test.tcl gui_widget_test.tcl}}]

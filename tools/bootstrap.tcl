@@ -41,6 +41,9 @@ if {[info commands ::machteld::devcache::toolchain_digest] eq ""} {
 if {[info commands ::boot::stageCffi] eq ""} {
     source -encoding utf-8 [file join [file dirname $::boot::script] cffi-build.tcl]
 }
+if {[info commands ::boot::stageGraphviz] eq ""} {
+    source -encoding utf-8 [file join [file dirname $::boot::script] graphviz-build.tcl]
+}
 
 proc ::boot::fail {message} {
     return -code error -errorcode {BOOTSTRAP fail} "bootstrap: $message"
@@ -244,7 +247,7 @@ proc ::boot::artifactManifest {} {
     }
     foreach file [list [file join $prefix bin tclsh90s.exe] [file join $prefix bin wish90s.exe] \
             [file join $prefix lib libtcl90.a] [file join $prefix lib libtcl9tk90.a] [file join $prefix lib libtclstub.a] \
-            [file join $prefix lib libffi.a] [file join $prefix lib libcffi.a] \
+            [file join $prefix lib libffi.a] [file join $prefix lib libcffi.a] [file join $prefix lib libmachteldgraphviz.a] \
             [file join $cache sqlite sqlite3.c] [file join $cache sqlite sqlite3.h] \
             [file join $cache sqlite tclsqlite.c]] {
         if {![file isfile $file]} {
@@ -317,10 +320,10 @@ proc ::boot::getDownload {entry} {
 }
 
 # Unpacks an archive with Windows' own tar.exe (zip, and gzip'd tar).
-proc ::boot::unpack {archive dest} {
+proc ::boot::unpack {archive dest args} {
     file mkdir $dest
     set tar [file join $::env(SystemRoot) System32 tar.exe]
-    set result [run -timeout 15m -- $tar -xf $archive -C $dest]
+    set result [run -timeout 15m -- $tar -xf $archive -C $dest {*}$args]
     if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
         fail "tar could not unpack [file tail $archive]: [string trim [encoding convertfrom utf-8 [dict get $result err]]]"
     }
@@ -579,7 +582,7 @@ proc ::boot::main {argv} {
             lappend noticePaths [file join $root licenses [dict get $entry notice file]]
         }
     }
-    set inputs [concat [list $lockPath $script [file join $root tools cffi-build.tcl]] $patchPaths $noticePaths]
+    set inputs [concat [list $lockPath $script [file join $root tools cffi-build.tcl] [file join $root tools graphviz-build.tcl]] $patchPaths $noticePaths]
     variable prefix [file join $cache prefix]
     set sourceRoot [file join $cache src]
     variable downloads [file join $cache downloads]
@@ -702,11 +705,13 @@ proc ::boot::main {argv} {
     }
 
     stageCffi $sourceRoot $archives [dict get $lock patches]
+    stageGraphviz $sourceRoot $archives
     if {$sourcesOnly} {
         say "dependency sources ready in [file nativename $cache] (Tcl/Tk not built; no state written)"
         return
     }
     buildCffi $msys $home $sourceRoot $prefix $archives
+    buildGraphviz $msys $home $sourceRoot $prefix $archives $jobs
     # A cache made while the recipe or the toolchain changed is a mixture:
     # it is left unrecorded, so the next bootstrap makes it again.
     if {[stateHash $inputs $msys] ne $stateHash} {

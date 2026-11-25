@@ -58,6 +58,7 @@ load_recipe [Rp tools dev.tcl] 0
 load_recipe [Rp tools buildlib.tcl]
 load_recipe [Rp tools devcache.tcl]
 load_recipe [Rp tools cffi-build.tcl]
+load_recipe [Rp tools graphviz-build.tcl]
 load_recipe [Rp tools bootstrap.tcl]
 # Global `run` is buildlib's streaming exec; the runtime's own run stays
 # reachable as ::machteld::run.
@@ -240,7 +241,7 @@ proc dev_build_unlocked {{forceRef 0}} {
     # not merely whether this invocation compiled an object.
     set bare    [file join $::DEV machteld-bare.exe]
     set inputs [list $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
-    foreach name {tcllib tklib tclstub cffilib ffilib} { lappend inputs [dict get $::PATHS $name] }
+    foreach name {tcllib tklib tclstub cffilib ffilib graphvizlib} { lappend inputs [dict get $::PATHS $name] }
     set spec [dict create files $inputs values [list console $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
     ::machteld::devcache::ensure $bare.record $spec $bare [list link_candidate $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj]
 

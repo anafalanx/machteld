@@ -439,7 +439,7 @@ proc ::machteld::devcache::immutable {recordPath spec parent commandPrefix {forc
 # patches; its state and artifact manifests name what it holds.
 proc ::machteld::devcache::dependency_spec {root cache} {
     set files {}
-    foreach name {dependencies.lock.json bootstrap.tcl cffi-build.tcl} {
+    foreach name {dependencies.lock.json bootstrap.tcl cffi-build.tcl graphviz-build.tcl} {
         lappend files [file join $root tools $name]
     }
     lappend files [file join $cache lock.sha256] [file join $cache artifacts.sha256]
