@@ -735,6 +735,27 @@ try {
     if {![file isfile [file join $realMsys ucrt64 bin gcc.exe]]} {
         error "native environment checks require the configured MSYS2 gcc"
     }
+    set lock [::machteld::json decode [::boot::readText [file join $repo tools dependencies.lock.json]]]
+    set failed [catch {::boot::checkToolchain $realMsys $lock} message]
+    check {bootstrap accepts the locked GCC and its actual implicit manifest object} [expr {!$failed}] $message
+
+    # Substitute an object in GCC's search order without touching the installed
+    # toolchain. Probe the verifier directly; the CLI also rejects LIBRARY_PATH.
+    set shadow [file join $work {alternate toolchain} lib]
+    set altered [file join $shadow default-manifest.o]
+    write_bytes $altered "deliberately different manifest object"
+    set hadLibPath [info exists ::env(LIBRARY_PATH)]
+    if {$hadLibPath} { set savedLibPath $::env(LIBRARY_PATH) }
+    try {
+        set ::env(LIBRARY_PATH) [file nativename $shadow]
+        set rejected [catch {::boot::checkToolchain $realMsys $lock} message options]
+        check {bootstrap rejects an altered object selected by the real GCC} \
+            [expr {$rejected && [dict get $options -errorcode] eq {BOOTSTRAP fail} &&
+                [string first "GCC default-manifest.o SHA-256 mismatch" $message] >= 0 &&
+                [string first [::machteld::hash file sha256 $altered] $message] >= 0}] $message
+    } finally {
+        if {$hadLibPath} { set ::env(LIBRARY_PATH) $savedLibPath } else { unset ::env(LIBRARY_PATH) }
+    }
 
     # Compiler lookup must be constrained in execution, not merely omitted
     # from a cache key. Real tiny compiler/resource/link products verify that

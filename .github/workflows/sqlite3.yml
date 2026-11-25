@@ -52,6 +52,7 @@ jobs:
             "$ucrt/$($lock.gccPackage)-$($lock.gccPackageVersion)-any.pkg.tar.zst"
             "$ucrt/$prefix-gcc-libs-$($lock.gccPackageVersion)-any.pkg.tar.zst"
             "$ucrt/$($lock.binutilsPackage)-$($lock.binutilsPackageVersion)-any.pkg.tar.zst"
+            "$ucrt/$($lock.defaultManifestPackage)-$($lock.defaultManifestPackageVersion)-any.pkg.tar.zst"
             "$ucrt/$($lock.makePackage)-$($lock.makePackageVersion)-any.pkg.tar.zst"
             "$mirror/msys/x86_64/$($lock.zipPackage)-$($lock.zipPackageVersion)-x86_64.pkg.tar.zst"
           )
@@ -62,6 +63,11 @@ jobs:
           $packages += "$ucrt/$prefix-isl-0.27-1-any.pkg.tar.zst"
           & "$env:MSYS2_ROOT/usr/bin/pacman.exe" --noconfirm -U @packages
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $manifest = & "$env:MSYS2_ROOT/ucrt64/bin/gcc.exe" '-print-file-name=default-manifest.o'
+          if ($LASTEXITCODE -ne 0 -or ![IO.Path]::IsPathFullyQualified($manifest)) { throw 'GCC could not resolve default-manifest.o' }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash
+          if ($digest -ne $lock.defaultManifestSha256) { throw "GCC default-manifest.o SHA-256 mismatch: $digest" }
+          "GCC default-manifest.o ($($lock.defaultManifestPackage) $($lock.defaultManifestPackageVersion)) SHA-256: $digest" >> $env:GITHUB_STEP_SUMMARY
           "MSYS2_ROOT=$env:MSYS2_ROOT" >> $env:GITHUB_ENV
 
       - name: Install the pinned build runtime

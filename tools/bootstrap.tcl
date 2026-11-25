@@ -338,7 +338,16 @@ proc ::boot::checkToolchain {msys lock} {
     if {![file isfile [file join $msys usr bin bash.exe]]} {
         fail "missing MSYS2 bash: [file nativename [file join $msys usr bin bash.exe]]"
     }
-    set gccVersion [firstLine [run -- [file join $msys ucrt64 bin gcc.exe] -dumpfullversion]]
+    set gcc [file join $msys ucrt64 bin gcc.exe]
+    # GCC inserts this resource object implicitly when linking either host.
+    set result [run -- $gcc -print-file-name=default-manifest.o]
+    set manifest [firstLine $result]
+    if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || [file pathtype $manifest] ne "absolute"} {
+        fail "GCC could not resolve default-manifest.o from [dict get $tool defaultManifestPackage]"
+    }
+    assertHash [file normalize $manifest] [dict get $tool defaultManifestSha256] "GCC default-manifest.o"
+    say "GCC default-manifest.o SHA-256: [dict get $tool defaultManifestSha256]"
+    set gccVersion [firstLine [run -- $gcc -dumpfullversion]]
     if {$gccVersion ne [dict get $tool gccVersion]} {
         fail "GCC version mismatch: expected [dict get $tool gccVersion], got $gccVersion"
     }

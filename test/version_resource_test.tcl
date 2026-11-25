@@ -32,6 +32,7 @@ proc ::vr::check {name condition {detail ""}} {
 }
 
 proc ::vr::checkResource {label path description internalName originalFilename version numeric beta} {
+    variable manifestSha256
     if {![file isfile $path]} {
         check "$label exists" 0 $path
         return
@@ -39,7 +40,11 @@ proc ::vr::checkResource {label path description internalName originalFilename v
     # Not checked: whether the file is marked FILE_ATTRIBUTE_TEMPORARY. Neither
     # Tcl nor the runtime can read that attribute (commentary.md, its entry of
     # 2026-10-28 on porting the runtime's tests).
-    if {[catch {parse [versionBlock $path]} info]} {
+    set data [bytes $path]
+    set digest [hash sum sha256 [resource $data 24 1]]
+    check "$label carries the locked Windows application manifest (RT_MANIFEST #1)" \
+        [expr {$digest eq $manifestSha256}] "SHA-256=$digest"
+    if {[catch {parse [resource $data 16]} info]} {
         check "$label carries a VERSIONINFO resource" 0 $info
         return
     }
@@ -101,6 +106,9 @@ proc ::vr::embeddedBuildPaths {path cache} {
 proc ::vr::main {argv} {
     variable root
     variable failures
+    variable manifestSha256
+    set lock [json decode [encoding convertfrom utf-8 [bytes [file join $root tools dependencies.lock.json]]]]
+    set manifestSha256 [dict get $lock toolchain defaultManifestResourceSha256]
     set runtime ""
     set cache ""
     set wrap 1

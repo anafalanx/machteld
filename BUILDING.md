@@ -39,9 +39,11 @@ ZIP before the current CI policy was adopted.
      `out\dev\machteld.exe`.
 2. **MSYS2 UCRT64, exactly as `tools\dependencies.lock.json` pins it:** gcc
    16.1.0 (`mingw-w64-ucrt-x86_64-gcc` 16.1.0-5), binutils 2.46-3, make
-   4.4.1-4 and zip 3.0-4. The bootstrap compares `gcc.exe`, `strip.exe`,
-   `windres.exe`, `mingw32-make.exe` and `zip.exe` with the lock's SHA-256
-   values and stops on any difference. The gate, the release build and the
+   4.4.1-4, zip 3.0-4 and `mingw-w64-ucrt-x86_64-windows-default-manifest`
+   6.4-4. The bootstrap compares `gcc.exe`, `strip.exe`, `windres.exe`,
+   `mingw32-make.exe`, `zip.exe` and the `default-manifest.o` resolved by
+   that GCC with the lock's SHA-256 values and stops on any difference.
+   The gate, the release build and the
    bootstrap find MSYS2 with `--msys DIR`, else `MSYS2_ROOT`, else
    `C:\msys64`; the development loop reads `MSYS2_ROOT`, else `C:\msys64`. On
    the build PC it is `C:\dev\.z\r\msys2`: pass `--msys C:\dev\.z\r\msys2`, or
@@ -121,10 +123,11 @@ incremental build separately and account for its development-only
 `build-info.dict`. The existing hosted workflow also checks a second build
 in a clean checkout on the same runner.
 
-The baseline exposed a previously unpinned linker input, MSYS2's
-`default-manifest.o`. Substituting the hosted object on the build PC
-reproduced the hosted executable hash. The first cross-machine gate must
-control the manifest resource actually linked and record its identity.
+Substituting the hosted `default-manifest.o` on the build PC reproduced the
+original hosted executable hash. CI now installs the locked manifest package
+and records the SHA-256 of the object selected by GCC. The resource tests
+also compare the linked Windows application manifest in the full runtime and
+both wrapped host types with the resource digest in the lock.
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
 Run the runtime checks and packaged sample applications for 0.30. Automate
