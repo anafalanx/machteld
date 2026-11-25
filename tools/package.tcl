@@ -109,6 +109,7 @@ foreach {package files} {
     machteld-httpd {pkgIndex.tcl httpd.tcl}
     cffi {pkgIndex.tcl}
     machteld-sqlite {pkgIndex.tcl sqlite.tcl}
+    machteld-files {pkgIndex.tcl}
 } {
     set target [file join $stage tcl_library $package]
     file mkdir $target

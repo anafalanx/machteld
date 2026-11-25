@@ -63,6 +63,42 @@ cursor. Depth and prune choices reduce traversal, but a single very wide
 directory can still be large. Use a supervised worker for expensive surveys
 when the host's event loop must remain responsive.
 
+## Single-directory entries and local-only reads
+
+`package require machteld::files 1.0` loads the following commands in a
+trusted interpreter. Both require native Windows paths.
+
+* `::machteld::files::entries directory ?rowCommandPrefix?` enumerates the
+  immediate children, including hidden files, junctions and cloud placeholders.
+  The operation reads native directory metadata once and opens no child file.
+  Each dictionary contains `name`, `size` in bytes, `mtime` in whole Unix
+  seconds, `filetime` as the original Windows modification time in 100 ns
+  ticks since 1601, the raw Windows `attributes` and `reparsetag` integers,
+  and the booleans `pinned` and `offline`. The latter includes the offline
+  and recall-on-access flags. An omitted command prefix returns a list in
+  filesystem enumeration order. A supplied prefix receives one row per call
+  and a successful operation returns the count. The callback form bounds
+  retained enumeration memory independently of directory size. Callback
+  errors propagate. A concurrent directory change can affect the observations.
+* `::machteld::files::openlocal path` returns a read-only, seekable Tcl
+  channel configured for binary data. Close it when finished. The call checks
+  current file metadata and verifies the actual data handle after opening it.
+  A cloud placeholder must be fully resident. An incompletely resident file
+  raises `{MACHTELD FILES offline}` before returning a channel. The native
+  read handle excludes writes, replacement and the exclusive access Windows
+  requires for dehydration until close. A conflicting writer reports `busy`,
+  missing paths report `notfound`, and an access refusal reports `denied`.
+  An unrecognized reparse point reports `unsupported`. Applications can use
+  ordinary Tcl `open` to allow Windows to fetch content on demand.
+
+```tcl
+package require machteld::files
+proc catalog {row} {puts [list [dict get $row name] [dict get $row size]]}
+::machteld::files::entries $directory catalog
+set f [::machteld::files::openlocal $path]
+try {set first [read $f 65536]} finally {close $f}
+```
+
 ## See also
 
 `machteld/command/links`, `machteld/command/canon`,

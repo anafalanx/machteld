@@ -112,6 +112,11 @@ canon C:/work/a-junction
 | `links` | Walk reparse points without following name surrogates; `-hardlinks` also reports files with shared storage. It uses the same depth/prune policy as `dirs`. |
 | `canon` | Resolve a path through reparse points to its canonical target. Metadata access can suffice even when file reads or directory listings are denied. A dangling target raises a structured error. |
 
+For one-pass metadata from the immediate children, load `machteld::files`
+and call `::machteld::files::entries $directory`. A callback can consume
+rows as they arrive. `::machteld::files::openlocal $path` returns a binary
+channel for locally available data. [File metadata and cloud-aware reads](reference/machteld/command/dirs.md#single-directory-entries-and-local-only-reads)
+
 ## Machine processes
 
 ```tcl

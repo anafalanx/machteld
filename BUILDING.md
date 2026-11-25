@@ -86,6 +86,22 @@ ZIP before the current CI policy was adopted.
      `--interactive-gui` (opens windows and compiles a Win32 window fixture).
      The beta's disposable Windows runner also exercises clipboard ownership
      while a second process uses the same clipboard.
+
+   - To verify Windows Cloud Files, compile the disposable provider in an x64
+     Windows SDK developer prompt. Run the test on an NTFS drive where the
+     account can register a temporary sync root. The provider counts data-fetch
+     callbacks and unregisters the test root before exit.
+
+     ```text
+     cl /nologo /W4 /WX /O2 /Fe:out/cloud_files_provider.exe /Fo:out/cloud_files_provider.obj test/fixtures/cloud_files_provider.c cldapi.lib
+     out\machteld.exe test\localfiles_test.tcl --cloud out\cloud_files_provider.exe
+     ```
+
+   - To measure directory metadata at the release fixture size, supply a
+     directory containing 100,000 ordinary files to
+     `test/localfiles_test.tcl --load DIRECTORY callback`. Repeat with
+     `list` and `stat` to compare a materialized result and Tcl's per-file
+     metadata calls. Each run prints its individual elapsed microseconds.
 2. When the dependency cache is cold or invalidated, build it alone first; Tcl
    and Tk are configured and built in MSYS2's bash, which takes several
    minutes:
