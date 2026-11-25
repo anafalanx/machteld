@@ -23,8 +23,9 @@ To run the same window and its workers from an application archive, run these co
 .\out\machteld.exe .\out\catalogue.machteld
 ```
 
-To keep a database on disk, run the entry with `--create-demo catalogue.db` and
-then pass that path as the argument to the archive. A worker starts through
+To keep a database on disk, run the entry with `--create-demo catalogue.db`.
+The runtime checks the finished database and publishes it only if that path
+is still free. Pass the saved path as the archive's argument. A worker starts through
 `app launch` and opens its own connection to the same database. Cancel stops the
 current search. Starting a new search discards pending rows from the previous
 request. Closing the window releases the child and its SQLite connection.

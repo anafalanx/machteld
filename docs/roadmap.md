@@ -12,7 +12,8 @@ tags: [machteld, roadmap, windows]
 **The next public release is 0.30, directly after signed 0.21.** On
 2026-11-25 the owner closed 0.22 as an unsigned development milestone.
 The reconciled Beta 1 work supplies the starting point for 0.30.
-Applications can run as Tcl scripts, packaged archives or wrapped executables.
+The 0.30 runtime runs Tcl scripts and verified application archives.
+Existing 0.21 wrapped executables carry their original runtime.
 The runtime includes supervised Tcl jobs, the upstream SQLite binding,
 same-version archive workers, atomic file publication and process-owned
 locks. The desktop changes cover metadata-only path inspection, quiet workers,

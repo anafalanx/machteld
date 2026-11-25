@@ -3,9 +3,10 @@ namespace eval ::lookup {
     variable categories {All Parts Tools Kits Supplies}
 }
 
-# The UI owns the empty temporary file or the CLI has just reserved a new one.
-proc ::lookup::seed {path} {
-    package require sqlite3
+# The UI supplies its temporary file. The CLI builds in memory and publishes
+# the finished database through the runtime's verified create-only backup.
+proc ::lookup::seed {path {backupPath {}}} {
+    package require machteld::sqlite
     sqlite3 ::lookup::database $path -foreignkeys 1 -defensive 1
     try {
         database transaction {
@@ -27,17 +28,13 @@ proc ::lookup::seed {path} {
                 CREATE INDEX items_by_category ON items(category, id);
             }
         }
+        if {$backupPath ne ""} { ::machteld::sqlite::backup database $backupPath }
     } finally { database close }
 }
 
 proc ::lookup::createDemo {path} {
     if {[file exists $path]} { error "File already exists: $path" }
-    set channel [file tempfile staging [file join [file dirname [file normalize $path]] .catalogue.tmp]]
-    ::close $channel
-    try {
-        seed $staging
-        file rename $staging $path
-    } finally { file delete -force $staging }
+    seed :memory: $path
 }
 
 proc ::lookup::send {record} { puts [::machteld::json encode -dict $record] }

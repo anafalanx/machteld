@@ -87,7 +87,7 @@ proc claimPattern {template} {
     string map [list VERSION $::versionToken] $template
 }
 set namedPatterns [list \
-    [claimPattern {\mmachteld[ \t]+(?:version[ \t]+)?[*`]*VERSION}] \
+    [claimPattern {(?:^|[^.[:alnum:]_])machteld[ \t]+(?:version[ \t]+)?[*`]*VERSION}] \
     [claimPattern {\mruntime[ \t]+version[ \t]+[*`]*VERSION}]]
 set prosePattern [claimPattern {(?:^[ \t]*(?:[-*>][ \t]+)?|[.!?][ \t]+)version[ \t]+[*`]*VERSION}]
 # A heading number followed by "." or ")" ("### 1. Typed JSON") enumerates.

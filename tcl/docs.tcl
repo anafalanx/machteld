@@ -1269,48 +1269,10 @@ proc ::machteld::DocsPublishText {destination text} {
             [list [dict get $target volume] [dict get $target file]]} {
         DocsFail badvalue "docs: --output cannot replace the running executable"
     }
-    set claim ""
-    set claimChannel ""
-    set candidate ""
-    set channel ""
-    if {[catch {file tempfile claim [file join $parent .machteld-docs-output-]} claimChannel]} {
-        DocsFail oserror "docs: cannot claim --output candidate: $claimChannel"
-    }
-    set candidateIdentity ""
-    try {
-        set candidate "${claim}.candidate"
-        if {[catch {open $candidate {WRONLY CREAT EXCL}} channel]} {
-            DocsFail oserror "docs: cannot create --output candidate: $channel"
-        }
-        if {[catch {canon $candidate} candidateIdentity] ||
-                [dict get $candidateIdentity kind] ne "file"} {
-            DocsFail oserror "docs: cannot identify --output candidate"
-        }
-        if {[catch {
-            fconfigure $channel -translation binary
-            puts -nonewline $channel [encoding convertto utf-8 $text]
-            close $channel
-        } message]} {
-            catch {close $channel}
-            set channel ""
-            DocsFail oserror "docs: cannot write --output candidate: $message"
-        }
-        set channel ""
-        if {[catch {::machteld::Publish $candidate $destination} message options]} {
-            set nativeCode [expr {[dict exists $options -errorcode] ? [lindex [dict get $options -errorcode] 2] : ""}]
-            set code [expr {$nativeCode in {badvalue notfound} ? "badvalue" : "oserror"}]
-            DocsFail $code "docs: cannot publish --output: $message"
-        }
-        set candidate ""
-    } finally {
-        if {$channel ne ""} { catch {close $channel} }
-        if {$candidate ne "" && $candidateIdentity ne "" && ![catch {canon $candidate} cleanupIdentity] &&
-                [list [dict get $cleanupIdentity volume] [dict get $cleanupIdentity file]] eq
-                    [list [dict get $candidateIdentity volume] [dict get $candidateIdentity file]]} {
-            catch {file delete -force $candidate}
-        }
-        if {$claimChannel ne ""} { catch {close $claimChannel} }
-        if {$claim ne ""} { catch {file delete -force $claim} }
+    if {[catch {::machteld::publish bytes $destination [encoding convertto utf-8 $text]} message options]} {
+        set nativeCode [lindex [dict get $options -errorcode] 2]
+        set code [expr {$nativeCode in {badvalue notfound} ? "badvalue" : "oserror"}]
+        DocsFail $code "docs: cannot publish --output: $message"
     }
 }
 

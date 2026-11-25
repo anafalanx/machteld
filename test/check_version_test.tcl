@@ -86,6 +86,7 @@ try {
     case "roadmap metadata is checked" [dict create docs/roadmap.md "---\ndescription: Machteld 21 plans.\n---\n## 22 development\n"] {*docs/roadmap.md:2 claims 21*}
     case "nested documentation is checked" [dict create docs/deep/nested/page.md {Machteld 21}] {*docs/deep/nested/page.md:1 claims 21*}
     case "root handoff is checked" [dict create HANDOFF.md {Machteld 0.21}] {*HANDOFF.md:1 claims 0.21*}
+    case "numeric arguments after an archive name belong to the application" [dict create README.md {machteld.exe sum.machteld 20 22}] {}
     case "nested example README is checked" [dict create examples/deep/tool/README.md {package require machteld 21-}] {*examples/deep/tool/README.md:1 claims 21*}
     case "dependency and link versions are not runtime claims" [dict create README.md {Tcl/Tk 9.0.4, yyjson 0.12.0, SQLite 3.53.4, [license](yyjson-0.12.0.txt).}] {}
     case "app versions and measured numbers are not runtime claims" [dict create README.md {The sample uses -appversion 0.42 and application version 7. It takes 25 seconds on build 26200, x64.}] {}

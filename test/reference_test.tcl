@@ -260,7 +260,19 @@ check {host parser errors use typed failure envelope and nonzero result} [expr {
     [dict get $decodedBad error code] eq "usage" &&
     [dict get $jsonOptions -errorcode] eq {MACHTELD DOCS usage}}]
 set output [file join $work status.json]
-set outputResult [::machteld::DocsHost status --json --output $output]
+rename ::machteld::Publish ::machteld::ReferenceTestPublish
+proc ::machteld::Publish {staged destination} {
+    set ::referenceOutputSibling [expr {[file dirname [file normalize $staged]] eq
+        [file dirname [file normalize $destination]]}]
+    return [::machteld::ReferenceTestPublish $staged $destination]
+}
+try {
+    set outputResult [::machteld::DocsHost status --json --output $output]
+} finally {
+    rename ::machteld::Publish {}
+    rename ::machteld::ReferenceTestPublish ::machteld::Publish
+}
+check {docs output stages on the destination volume in its own directory} $::referenceOutputSibling
 set channel [open $output rb]
 set outputText [read $channel]
 close $channel
@@ -284,7 +296,7 @@ check {host human mode also publishes parser failures} [expr {
     [string match {*unknown subcommand*} $plainErrorText] &&
     [dict get $plainErrorOptions -errorcode] eq {MACHTELD DOCS usage}}]
 check {host output publication leaves no candidate files} [expr {
-    ![llength [glob -nocomplain -directory $work .machteld-docs-output-*]]}]
+    ![llength [glob -nocomplain -directory $work .machteld-save-*]]}]
 check {host rejects repeated JSON and noncanonical option syntax} [expr {
     [errorcode {::machteld::DocsHost --json --json status}] eq {MACHTELD DOCS usage} &&
     [errorcode {docs list --limit 1}] eq {MACHTELD DOCS usage}}]
