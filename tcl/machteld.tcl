@@ -765,6 +765,22 @@ proc ::machteld::app {args} {
         data [dict create options {} doc machteld/command/app#data] \
         launch [dict create options {} doc machteld/command/app#launch]]]
 
+proc ::machteld::browser {args} {
+    package require machteld::browser 1.0
+    tailcall ::machteld::browser::Dispatch {*}$args
+}
+
+::machteld::MetaDefine browser [dict create kind tcl args args domain BROWSER \
+    codes {badvalue busy closed launch notfound ownership protocol timeout usage oserror} \
+    options {} doc machteld/command/browser subcommands [dict create \
+        launch [dict create options {-profile -executable -headless -timeout} doc machteld/command/browser#launch] \
+        attach [dict create options {-profile -timeout} doc machteld/command/browser#attach] \
+        navigate [dict create options {} doc machteld/command/browser#navigate] \
+        wait [dict create options {-timeout} doc machteld/command/browser#wait] \
+        cancel [dict create options {} doc machteld/command/browser#cancel] \
+        release [dict create options {} doc machteld/command/browser#release] \
+        close [dict create options {-timeout} doc machteld/command/browser#close]]]
+
 # Called after all Tcl parts and the native manifest are loaded. Keep Tk's
 # global names available even before Tk is loaded. Tcl's namespace path sees
 # all commands in a namespace, including commands it has not exported.

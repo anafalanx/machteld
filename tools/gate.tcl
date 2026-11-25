@@ -231,6 +231,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "cross-process file locks" lock_test.tcl
                 addLane steps $runtime fast "clipboard ownership query" clipboard_test.tcl
                 addLane steps $runtime fast "desktop arguments and document paths" desktop_test.tcl
+                addLane steps $runtime fast "browser session boundaries" browser_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "Graphviz layout and drawing" graphviz_test.tcl
                 addLane steps $runtime fast "XXH3-64 catalog checksums" xxh3_test.tcl
@@ -273,6 +274,8 @@ proc ::gate::plan {settings} {
                     [file join $cache prefix lib libtclstub.a] -lshell32 -lole32 -luuid -luser32 -lgdi32 -o $catalogFixture]
                 addStep steps integration "isolated desktop selection" [list $privateRunner $runtime \
                     [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
+                addStep steps integration "isolated browser lifecycle" [list $privateRunner $runtime \
+                    [file join $test browser_test.tcl]] timeout 120s
                 set ffiDependency [file join $out machteld_cffi_dependency.dll]
                 set ffiFixture [file join $out machteld_cffi_fixture.dll]
                 set ffiImport [file join $out libmachteld_cffi_dependency.a]

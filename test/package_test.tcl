@@ -260,6 +260,7 @@ proc ::pt::validatePackage {image apache licenses reference} {
             tcl_library/init.tcl tcl_library/clock.tcl tcl_library/package.tcl tcl_library/tm.tcl
             tcl_library/tclIndex tcl_library/encoding/cp1252.enc tcl_library/msgs/nl.msg
             tcl_library/machteld-job/pkgIndex.tcl tcl_library/machteld-job/job.tcl tcl_library/cffi/pkgIndex.tcl
+            tcl_library/machteld-browser/pkgIndex.tcl tcl_library/machteld-browser/browser.tcl tcl_library/machteld-browser/wire.tcl
             tcl_library/tzdata/Europe/Brussels tcl9/9.0/msgcat-1.7.1.tm tk_library/tk.tcl
             licenses/Apache-2.0.txt licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/zlib-1.3.2.txt
             licenses/LibTomMath-1.3.0.txt licenses/yyjson-0.12.0.txt

@@ -8,7 +8,7 @@ namespace eval ::machteld::manifest {}
 
 # Internal commands are registered for cooperation with the Tcl prelude, but
 # are intentionally absent from the public manifest.
-set ::machteld::manifest::private {AppDataRoot DirectoryStage EntryCheck PayloadRoot Publish PublishWrite}
+set ::machteld::manifest::private {AppDataRoot BrowserPeer BrowserStart BrowserStartupOwner DirectoryStage EntryCheck PayloadRoot Publish PublishWrite}
 
 set ::machteld::manifest::native {
     canon {

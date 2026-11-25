@@ -35,7 +35,8 @@ names or add `::machteld::palette` to their namespace path for the short names.
   document to its associated viewer. `desktop apps` lists Start-menu shortcuts
   and Store applications. `desktop launch` opens a selected application, and
   `desktop icon` copies its icon into a Tk photo. `::machteld::clipboard owned` checks whether
-  this process owns the clipboard.
+  this process owns the clipboard. Use `browser` to launch or resume an
+  app-owned Edge or Chromium tab, navigate and wait for its document to load.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.

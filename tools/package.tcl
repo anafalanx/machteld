@@ -107,6 +107,7 @@ set packages [file join [file dirname [file dirname [file normalize [info script
 foreach {package files} {
     machteld-job {pkgIndex.tcl job.tcl}
     machteld-httpd {pkgIndex.tcl httpd.tcl}
+    machteld-browser {pkgIndex.tcl browser.tcl wire.tcl}
     cffi {pkgIndex.tcl}
     machteld-sqlite {pkgIndex.tcl sqlite.tcl}
     machteld-files {pkgIndex.tcl}
