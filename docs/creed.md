@@ -23,8 +23,7 @@ intent does not add an API.
    validated at build time, and returned as structured data at runtime. The
    Machteld distribution carries the complete exact-version Machteld/Tcl/Tk
    reference through `docs`, with stable identifiers, bounded retrieval, search,
-   hashes, and extraction for agents. Wrapped applications include that corpus
-   only with `--with-docs`; their runtime metadata remains available without it.
+   hashes, and extraction for agents. Scripts and application archives share this reference.
 5. **Errors are contract.** Machteld-defined public failures carry
    `{MACHTELD DOMAIN code}`; Tcl language errors keep Tcl's own codes.
 6. **Orthogonal and small.** Prefer one composable primitive over a policy stack.

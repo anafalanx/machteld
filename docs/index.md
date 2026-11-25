@@ -49,10 +49,6 @@ extension (`examples/external-extension/README.md`).
 These are examples, not additional built-in commands; their source and tests
 are not part of the embedded reference corpus.
 
-The distribution and tools wrapped with `--with-docs` carry these guides plus
-complete Machteld, Tcl 9, and Tk 9 references. Use `docs status` to establish
-exact versions and corpus identity, `docs get` for exact IDs or sections, `docs
-search` for bounded discovery, and `docs extract` when filesystem search is
-preferable. `help` is the concise human-facing shorthand. Default wrapped tools
-omit this corpus; `docs schema` and `manifest` remain available, and bare `help`
-explains how to obtain the reference.
+The shared executable carries these guides and the Machteld, Tcl, Tk and cffi
+manuals. Use `docs status` for versions, `docs get` for a known ID, `docs search`
+for discovery and `docs extract` for a filesystem copy.

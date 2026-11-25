@@ -6,8 +6,7 @@ inspects one directory, not a recursive project database, and never executes
 commands found in the selected directory or changes its files.
 
 The commands use the release gate's `out/machteld.exe`. After an incremental
-build, use `out/dev/machteld.exe` in its place. Both report runtime version
-`22` and support the wrap manifest and application metadata shown here.
+build, use `out/dev/machteld.exe` in its place. The shared runtime launches both loose scripts and packaged archives.
 
 From the repository root in PowerShell:
 
@@ -52,7 +51,7 @@ the error and retained log tail, independently of text selection.
   calling the failed observer.
 
 `launch.tcl` owns the entry roles. It appends `--worker` to the command prefix
-from `app launch` in all three deployment forms. An archive worker uses the
+from `app launch` for both scripts and archives. An archive worker uses the
 version already open in the controller, even after an update. Each child
 enters the same headless controller. Supervision is lifetime
 ownership, not an authority sandbox: the trusted child retains the user's
@@ -65,50 +64,18 @@ From the repository root, pack the example and run its headless inspection
 against a local directory.
 
 ```powershell
-.\out\machteld.exe pack .\examples\project-inspector -o .\out\inspector.machteld
+.\out\machteld.exe pack .\examples\project-inspector\app.dict -o .\out\inspector.machteld
 .\out\machteld.exe .\out\inspector.machteld --headless .\examples
 ```
 
-## Package deliberately
-
-Use a new dedicated stage containing only the five listed payload files. The
-manifest is inert data outside that stage; it selects those files and declares
-the application's Windows identity independently from the Machteld runtime.
-The README, test scripts, and manifest itself are not executable payloads.
-
-```powershell
-$stage = New-Item -ItemType Directory .\out\inspector-stage -ErrorAction Stop
-'main.tcl', 'launch.tcl', 'model.tcl', 'view.tcl', 'inspect.tcl' | ForEach-Object {
-    Copy-Item (Join-Path .\examples\project-inspector $_) $stage.FullName
-}
-.\out\machteld.exe wrap $stage.FullName -o .\out\inspector.exe --gui --manifest .\examples\project-inspector\app.dict --plan
-.\out\machteld.exe wrap $stage.FullName -o .\out\inspector.exe --gui --manifest .\examples\project-inspector\app.dict
-```
-
-Read the plan's file list and hashes before packaging. Choose a fresh stage name
-if it already exists; do not blindly delete or wrap the whole repository. Use
-`--console` instead for a console-subsystem executable. Reference documentation
-is omitted by default; explicitly add `--with-docs` to both commands if wanted.
-The executable is the complete Inspector deployment: no adjacent worker scripts
-or DLLs are required. Application metadata is not an Authenticode signature.
-
-For automation without opening any window:
-
-```powershell
-.\out\machteld.exe .\examples\project-inspector\main.tcl --headless 'C:\dev\_machteld'
-.\out\inspector.exe --headless 'C:\dev\_machteld' noisy 2>&1 | Out-String
-```
-
-The pipe explicitly captures output and makes PowerShell wait for the GUI-
-subsystem executable; do not rely on an unredirected GUI launch to display its
-stdout/stderr. A console-subsystem build can be invoked directly. In either
-case the application role itself opens no window.
+The project dictionary selects the five application files. Move the archive and
+start it with Machteld from any directory. The worker opens the same archive
+generation even when a newer copy has been published at the original path.
 
 `--headless directory ?inspect|slow|fail|noisy?` emits one UTF-8 JSON model
 snapshot; exit 0 means done, 1 means a reported job failure, and 2 means invalid
 arguments or an entry error. `--worker directory mode` is the internal JSON-lines
-role, not the user-facing JSON snapshot. A GUI basekit creates Tk's initial root
-before application dispatch; non-UI roles destroy it before processing events.
+role, not the user-facing JSON snapshot. The headless and worker roles never initialize Tk.
 The normal GUI accepts one optional directory; `-- directory` also handles a
 directory argument that begins with `--`.
 
@@ -122,7 +89,7 @@ directory argument that begins with `--`.
 
 The model and example-packaging tests open no windows. The model test covers
 lifecycle, recovery, malformed protocols, bounds, and event-loop progress under
-output. The packaging test builds both console/GUI forms, exercises actual
+output. The packaging test runs relocated archives, exercises actual
 worker routing from unrelated directories, and checks selected payloads; its
 second example compiles a tiny extension using the explicitly named toolchain
 and Tcl prefix. The widget test creates

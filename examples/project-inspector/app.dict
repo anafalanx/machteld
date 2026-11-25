@@ -1,10 +1,3 @@
 schema 1
+entry main.tcl
 files {main.tcl launch.tcl model.tcl view.tcl inspect.tcl}
-metadata {
-    name {Project Inspector}
-    version 1.0
-    description {Read-only directory inspection with supervised background work}
-    author {Vincent Vercauteren}
-    publisher {Vincent Vercauteren}
-    copyright {Copyright (c) Vincent Vercauteren}
-}

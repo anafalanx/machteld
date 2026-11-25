@@ -3,6 +3,7 @@
 *.h text eol=lf
 *.manifest text eol=lf
 *.json text eol=lf
+*.dict text eol=lf
 *.tcl text eol=lf
 *.md text eol=lf
 LICENSE text eol=lf

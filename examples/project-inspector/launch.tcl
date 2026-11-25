@@ -1,12 +1,6 @@
 # Application-owned roles: no runtime special cases or shell command strings.
 namespace eval ::inspector { variable finished 0 }
 
-proc ::inspector::no_window {} {
-    # GUI basekits initialize Tk before sourcing the entry. Destroy the
-    # unmapped root before any event/idle processing in non-UI roles.
-    if {[llength [info commands ::destroy]]} { ::destroy . }
-}
-
 proc ::inspector::finished {object state} {
     if {[dict get $state phase] ne "running"} { set ::inspector::finished 1 }
 }
@@ -36,7 +30,6 @@ proc ::inspector::snapshot_json {state} {
 proc ::inspector::main {here arguments} {
     set role [lindex $arguments 0]
     if {$role in {--worker --headless}} {
-        no_window
         fconfigure stdout -encoding utf-8 -translation lf
         fconfigure stderr -encoding utf-8 -translation lf
         try {
@@ -68,7 +61,6 @@ proc ::inspector::main {here arguments} {
     }
     if {$role eq "--"} { set arguments [lrange $arguments 1 end] }
     if {[llength $arguments] > 1 || ($role ne "--" && [string match --* $role])} {
-        no_window
         puts stderr "usage: ?--? ?directory? | --headless directory ?mode? | --worker directory mode"
         exit 2
     }

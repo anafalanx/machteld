@@ -27,24 +27,22 @@ proc ::extension_example::compile {output msys prefix} {
     }
 }
 
-proc ::extension_example::build {stage msys prefix {host --console}} {
+proc ::extension_example::build {stage msys prefix} {
     variable here
-    if {$host ni {--console --gui}} { error "host must be --console or --gui" }
     set stage [file normalize $stage]
     if {[file exists $stage]} { error "example stage must not already exist: $stage" }
-    set application [file join $stage app]
     set bundle [file join $stage bundle]
-    file mkdir $application $bundle
-    file copy [file join $here main.tcl] [file join $application main.tcl]
+    file mkdir $bundle
     compile [file join $bundle examplemath.dll] $msys $prefix
     file copy [file join $here .. .. LICENSE] [file join $bundle LICENSE-examplemath.txt]
     file copy [file join $here NOTICE.txt] [file join $bundle NOTICE-examplemath.txt]
-    ::machteld::wrap $application -o [file join $bundle extension-example.exe] \
-        --manifest [file join $here app.dict] $host
-    # This is the complete deployment inventory, separate from the executable's
-    # embedded app-info inventory. The inventory does not hash itself.
+    set runtime [file join $bundle machteld.exe]
+    file copy [info nameofexecutable] $runtime
+    exec $runtime pack [file join $here app.dict] -o [file join $bundle extension-example.machteld]
+    # ship.dict inventories the entire folder. The archive has its own
+    # inventory of the selected application files.
     set files {}
-    foreach name {extension-example.exe examplemath.dll LICENSE-examplemath.txt NOTICE-examplemath.txt} {
+    foreach name {machteld.exe extension-example.machteld examplemath.dll LICENSE-examplemath.txt NOTICE-examplemath.txt} {
         set path [file join $bundle $name]
         dict set files $name [dict create size [file size $path] sha256 [::machteld::hash file sha256 $path]]
     }
@@ -57,8 +55,8 @@ proc ::extension_example::build {stage msys prefix {host --console}} {
 }
 
 if {[file normalize [info script]] eq [file normalize $argv0]} {
-    if {[llength $argv] ni {3 4}} {
-        puts stderr "usage: build.tcl new-stage-directory msys2-root tcl-prefix ?--console|--gui?"
+    if {[llength $argv] != 3} {
+        puts stderr "usage: build.tcl new-stage-directory msys2-root tcl-prefix"
         exit 2
     }
     puts [::extension_example::build {*}$argv]

@@ -64,7 +64,7 @@ end. The owner reads it when the next machteld is planned.
 Programs and extensions are **trusted local code**, with the launching user's
 permissions. Job Objects supervise process lifetime and resource limits; they
 are not a security sandbox. `-dir` is a working directory, not filesystem
-confinement. An environment overlay does not isolate credentials. Wrapped
+confinement. An environment overlay does not isolate credentials. Archived
 applications retain full runtime authority. Entry opt-in is a dependency
 declaration, not an authorization boundary.
 
@@ -77,7 +77,7 @@ older Windows does not extend the support contract.
 
 Use `store` for key/value data and `package require sqlite3` for SQL queries,
 transactions and backups. Both use the same embedded SQLite engine, including
-in wrapped programs. Database calls are synchronous. External extensions are
+in packaged applications. Database calls are synchronous. External extensions are
 provisioned manually. See [database access](docs/contract.md),
 [execution](docs/execution-model.md), and [external libraries](docs/extensions.md).
 
@@ -108,8 +108,8 @@ An existing entry with the requirement `22-` accepts 30. An entry with
 
 For a supervised child, save the following as `supervise.tcl` beside `app.tcl`
 and run it with the distribution executable. This is a direct-script example:
-a wrapped application's own executable enters its application, so a wrapped
-controller needs explicit worker-role dispatch, as demonstrated by the
+an archived controller can start the same application generation using
+`app launch`, as demonstrated by the
 [project inspector](examples/project-inspector/README.md).
 
 <!-- machteld-example: supervise -->
@@ -146,11 +146,11 @@ use event-driven `child -channels` composition for responsive tools.
 - Data and network: `store`, `json`, `hash`, and `http`.
 - Tool support: `cli`, `log`, `worker`, `pool`, and `pmap`.
 - Application support: `app launch` for workers, `publish` for atomic file replacement, and `lock` for exclusive use of a resource across processes.
-- Runtime support: `version`, `manifest`, `docs`, `help`, and `wrap`.
+- Runtime support: `version`, `manifest`, `docs`, and `help`.
 
 Commands live in `::machteld`; the prelude adds it to the global command path.
 `manifest` describes the running executable's verbs, options, fixed result
-shapes, and errors. `docs` reads its embedded Machteld, Tcl, and Tk corpus:
+shapes, and errors. `docs` reads its embedded Machteld, Tcl, Tk and cffi corpus:
 
 <!-- machteld-example: docs -->
 ```text
@@ -182,43 +182,16 @@ The archive carries the application files. The host supplies Tcl/Tk and the
 runtime. A single-file program can be packed directly with
 `machteld.exe pack app.tcl -o app.machteld`. [Packaging guide](docs/packaging.md)
 
-## Standalone tools
-
-From the directory containing the first program:
-
-<!-- machteld-example: wrap -->
-```text
-machteld.exe wrap app.tcl -o app.exe
-app.exe world
-machteld.exe wrap app.tcl -o documented-app.exe --with-docs
-documented-app.exe world
-```
-
-Both tools expose the same runtime API and required license notices.
-Wrapping omits the built-in reference by default; `--with-docs` includes the
-complete verified Machteld/Tcl/Tk corpus. Application assets are
-unaffected. Without the corpus, `docs schema` and `manifest` remain available,
-corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
-Wrapping basekits are not embedded recursively.
-
-For larger applications, use a dedicated stage and an explicit UTF-8 dictionary
-manifest. `--plan` previews selected paths, sizes, and hashes without writing
-an executable. Without a manifest, directory wrapping includes all files,
-**including hidden files**: do not wrap a repository root. The stage and
-completed archive are checked before atomic publication, but sources must
-remain stable; this is not a hostile-filesystem snapshot or sandbox.
-
-Optional metadata sets the application's name, version, description,
-authorship, and icon without a compiler. Application identity is separate from
-Machteld's runtime identity; a publisher string is not an Authenticode
-signature, and signing is never automatic. See [packaging](docs/packaging.md),
-the [GUI example](examples/project-inspector/README.md), and the
-[adjacent-DLL example](examples/external-extension/README.md) for tested workflows.
+For a project with a named entry and selected files, use
+`machteld.exe pack app.dict -o app.machteld`. The runtime verifies the file list,
+lengths and hashes before running the entry. The packaged examples demonstrate
+worker roles and the adjacent DLL layout. [Project inspector](examples/project-inspector/README.md) ·
+[External extension](examples/external-extension/README.md)
 
 ## Building and testing
 
 Unsigned candidates can run on the build PC and in a hosted Windows CI job.
-The unsigned executable and its wrappers stay inside the CI job. The owner
+Unsigned executables stay inside the CI job. The owner
 signs release executables on the build PC. [Build guide](BUILDING.md)
 
 Every build and test tool is a Tcl program that runs on the build runtime,
@@ -271,6 +244,8 @@ Machteld's own code is licensed under the [Apache License 2.0](LICENSE).
 Bundled material retains its own terms, including the verbatim
 [Tcl](licenses/Tcl-9.0.4.txt), [Tk](licenses/Tk-9.0.4.txt),
 [zlib](licenses/zlib-1.3.2.txt), [LibTomMath](licenses/LibTomMath-1.3.0.txt), and
-[yyjson](licenses/yyjson-0.12.0.txt) notices. The statically linked SQLite
+[yyjson](licenses/yyjson-0.12.0.txt) notices. The foreign-function interface includes
+[cffi](licenses/cffi-2.0.3.txt), [Tclh](licenses/tclh-6afd306.txt) and
+[libffi](licenses/libffi-3.5.2.txt). The statically linked SQLite
 amalgamation is public domain. JSONTestSuite is test-only and retains
 [its own license](test/jsontestsuite/LICENSE).

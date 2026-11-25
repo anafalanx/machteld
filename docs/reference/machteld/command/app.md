@@ -32,7 +32,7 @@ interactive prompt. An unknown operation or extra argument raises
 ## Lifetime and timeouts
 
 A direct script's prefix captures its absolute entry path at startup. Another
-instance reads that file again. A wrapped application starts its executable.
+instance reads that file again.
 Changing the current directory or assigning a different `argv0` does not alter
 the prefix.
 
@@ -114,5 +114,5 @@ The application interprets its own worker arguments.
 
 ## See also
 
-`machteld/command/child`, `machteld/command/run`, `machteld/command/wrap`,
+`machteld/command/child`, `machteld/command/run`,
 `machteld/guide/packaging`.

@@ -29,7 +29,7 @@ The binary may start on older builds — ConPTY has existed since Windows 10
 ## Entry and package
 
 A program begins with one of these literal commands in its readable UTF-8 entry
-file. A `.machteld` archive uses its root `main.tcl` as the entry.
+file. A `.machteld` archive uses the entry named in its verified inventory.
 
 ```tcl
 package require machteld
@@ -150,7 +150,7 @@ try {
 
 The current domains are `ENTRY`, `RUN`, `CHILD`, `WAIT`, `DETACH`, `PTY`,
 `WATCH`, `MTPS`, `DIRS`, `HTTP`, `HASH`, `JSON`, `STORE`, `CLI`, `LOG`,
-`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `WRAP`. Common codes include `usage`,
+`WORKER`, `POOL`, `PMAP`, `DOCS`, `HELP`, and `PACK`. Common codes include `usage`,
 `badvalue`, `notfound`, `nohandle`, `timeout`, `launch`, and `oserror`; each
 manifest entry lists its closed set of Machteld-domain codes.
 
@@ -199,8 +199,7 @@ Cancellation and resource-limit termination do not roll back side effects.
 
 ## SQLite
 
-`package require sqlite3` loads SQLite’s upstream Tcl binding in the full
-runtime and in wrapped console and GUI programs. The package and `store` use the
+`package require sqlite3` loads SQLite’s upstream Tcl binding in scripts and archived applications. The package and `store` use the
 same statically linked engine. Each `sqlite3` connection has its own Tcl command,
 transaction state and busy timeout. Programs can open an existing SQLite file or
 create one without deploying a driver or DLL.
@@ -242,8 +241,7 @@ the key did not exist. Operations before `open` raise `STORE notopen`.
 key/value table when needed in a durable database. Both configure a five-second
 SQLite busy timeout, allowing independent Machteld processes to wait through
 ordinary writer contention. SQLite failures use `STORE sqlite`.
-Every full, console-wrapped, and GUI-wrapped host built from this tree includes
-this same static implementation. Each write stands alone. For an atomic group
+Direct scripts and archived applications use this same implementation. Each write stands alone. For an atomic group
 of SQL statements, use a transaction on a `sqlite3` connection.
 
 ## Manifest
@@ -319,21 +317,12 @@ upstream syntax. The following rules apply to the bundled build.
 
 ## Compatibility
 
-The executable, wrapped console host, and wrapped GUI host all provide Machteld
-30 and the same process, terminal, filesystem, network, data, and Tcl
-composition commands, including `package require Tk` and static `store`. The
-distribution includes the complete exact-version reference corpus. Wrapped
-tools omit it by default; `wrap --with-docs` includes the verified complete
-corpus. Runtime libraries, license notices, and application assets are
-retained either way. Without the
-corpus, `docs schema` remains available, corpus queries report `DOCS unsupported`,
-and `help` queries report `HELP unsupported`; bare `help` explains the omission.
-The reserved `--machteld-docs` host route remains available with structured
-unavailable replies for corpus queries. Nested wrapping is intentionally
-nonrecursive: `wrap` reports `WRAP unsupported` because tools carry no nested
-basekits, even when they include the reference.
+Scripts and archived applications use the same runtime package, palette, Tcl/Tk
+libraries and embedded reference. Run `machteld.exe --docs status` to identify
+its corpus. Archive failure `{MACHTELD ENTRY inventory}` covers a missing or
+invalid inventory and a mismatch between the mounted files and their records.
+Repack an unpublished 22 archive from its original sources before using it on 30.
 
 A later runtime number may still remove a mistaken surface; a program that must
 be read again before it runs on one names an upper bound (see Entry and
-package). Within a release, `version`, `manifest`, package version, docs, and
-both wrapper hosts must agree.
+package). Within a release, `version`, `manifest`, package version, docs and the Windows file version must agree.

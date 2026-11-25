@@ -1256,9 +1256,9 @@ assumes — an agent picking up the binary cold: "which version's docs" stops
 being a failure class, and `docs verify` gives the corpus an integrity
 check in the same spirit as the damaged-exe refusal.
 
-Related, smaller, listed not specified: machteld's `wrap` turns packaging
-itself into a runtime verb — the shipped exe can stamp new exes — an
-alternative shape for §6 when a tool's job includes producing tools.
+Earlier Machteld releases could package an application in its own executable.
+The shared runtime now builds application-only archives and verifies them at
+startup. See the [packaging guide](packaging.md).
 
 ---
 

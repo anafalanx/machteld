@@ -14,7 +14,7 @@ supports a public capability that cannot be supplied more clearly in-house.
 
 Implemented and pinned dependencies (see `tools/dependencies.lock.json`):
 
-- Tcl/Tk 9.0.4 are part of every full and wrapped host, including their script
+- Tcl/Tk 9.0.4 are part of the shared executable, including their script
   libraries and distribution notices.
 - Tcl's static core incorporates its bundled zlib 1.3.2 and LibTomMath 1.3.0;
   their exact upstream notices are pinned and shipped in every host.
@@ -39,6 +39,6 @@ Admission policy, not additional bundled capabilities:
   replacements for those packages' APIs.
 
 The palette defines Machteld’s commands. The separate `sqlite3` package follows
-the upstream SQLite Tcl API. Wrapped tools receive the same pinned runtime.
+the upstream SQLite Tcl API. Archived applications use that same pinned runtime.
 The selected application may bring additional explicitly deployed dependencies;
 the [external libraries guide](extensions.md) separates those from the built-ins.

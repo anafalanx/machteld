@@ -2,7 +2,7 @@
 
 The owner builds and signs releases on the build PC with the repository at
 `C:\dev\machteld`. Hosted Windows CI may build and run an unsigned candidate
-and its console and GUI wraps. Keep those executables inside the job. CI can
+and its packaged application examples. Keep those executables inside the job. CI can
 publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
@@ -26,10 +26,10 @@ ZIP before the current CI policy was adopted.
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
      `dev.tcl`, `reference.tcl` (the reference generator) and
      `native-analysis.tcl`, and the driver tests: entry, package and
-     publication, VERSIONINFO, wrapped application identity, reference
+     publication, VERSIONINFO, archive integrity, reference
      generator and serializer, the development cache and the gate's own;
    - the dependency cache's static Tcl, `.cache\deps\prefix\bin\tclsh90s.exe`,
-     runs `tools\build.tcl`, which compiles, links and packages both hosts
+     runs `tools\build.tcl`, which compiles, links and packages the shared runtime
      (with `buildlib.tcl`, `package.tcl`, `genmanifest.tcl` and
      `generate-version-resource.tcl`), `check_reference.tcl`,
      `check_version.tcl` and its regression test, the build-identity test,
@@ -64,12 +64,11 @@ ZIP before the current CI policy was adopted.
    ```
 
    It bootstraps or verifies the dependency cache, generates the reference
-   corpus, compiles both hosts with `-Werror` and packages them
+   corpus, compiles the shared runtime with `-Werror` and packages it
    (`tools\release.tcl`, which runs `tools\build.tcl` on the cache's Tcl), and
-   publishes `out\machteld.exe`. It then runs every test group (fast,
-   integration, packaging, native-validation and reference-generator), the
-   lanes on that executable; native-validation ends with the full native
-   analysis, `tools\native-analysis.tcl`, which writes its report to a fresh
+   publishes `out\machteld.exe`. It runs the fast, integration, packaging,
+   native-validation and reference-generator test groups on that executable.
+   Native validation ends with `tools\native-analysis.tcl`, which writes its report to a fresh
    `out\native-analysis-<id>\`. The first failure stops it, and a green run
    ends with `ALL TEST LANES PASSED` and exit code 0. It names the tested
    executable by version and SHA-256, and fails if the file changes during
@@ -126,8 +125,8 @@ in a clean checkout on the same runner.
 Substituting the hosted `default-manifest.o` on the build PC reproduced the
 original hosted executable hash. CI now installs the locked manifest package
 and records the SHA-256 of the object selected by GCC. The resource tests
-also compare the linked Windows application manifest in the full runtime and
-both wrapped host types with the resource digest in the lock.
+compare the runtime’s linked RT_MANIFEST with the authored file, and check
+the console subsystem and detached console allocation setting.
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
 Run the runtime checks and packaged sample applications for 0.30. Automate

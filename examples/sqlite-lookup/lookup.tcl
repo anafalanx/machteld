@@ -69,8 +69,6 @@ proc ::lookup::page {path category cursor} {
 proc ::lookup::main {entry arguments} {
     set role [lindex $arguments 0]
     if {$role in {--worker --create-demo}} {
-        # A wrapped GUI host initializes Tk before it sources its own entry.
-        if {[llength [info commands ::destroy]]} { ::destroy . }
         fconfigure stdout -translation lf -encoding utf-8 -buffering line
         fconfigure stderr -translation lf -encoding utf-8 -buffering line
         try {

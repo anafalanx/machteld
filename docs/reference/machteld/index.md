@@ -34,7 +34,7 @@ names or add `::machteld::palette` to their namespace path for the short names.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
-- Runtime and distribution: `app`, `version`, `manifest`, `docs`, `help`, and `wrap`.
+- Runtime and distribution: `app`, `version`, `manifest`, `docs` and `help`.
 
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
@@ -42,13 +42,11 @@ the language itself, rather than the Machteld palette, is the subject. Upstream
 `application` pages describe upstream `tclsh`/`wish`; Machteld entry and host
 routes are defined only by this Machteld reference.
 
-The Machteld distribution includes this pack; wrapped tools include it only
-with `--with-docs`. Without it, `manifest` and `docs schema` still describe the
-runtime, corpus queries report `DOCS unsupported`, and bare `help` explains
-where to find the full same-version reference.
+The shared runtime carries the reference. Programs can use it from either a
+direct entry file or an archive.
 
 Machteld executes trusted Tcl and native extensions with the user's permissions.
-Entry declarations, supervised lifetimes, resource limits, and wrapper inventories
+Entry declarations, supervised lifetimes, resource limits, and archive inventories
 are not sandboxing or publisher authentication. Retrieve
 `machteld/guide/contract` for cross-command rules and
 `machteld/guide/execution-model` for GUI-safe composition of blocking and evented

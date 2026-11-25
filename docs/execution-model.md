@@ -61,7 +61,7 @@ loop. The worker command is a Tcl list with one element per argument.
 package require machteld
 package require machteld::job 1.0
 
-# Run in a console host from a Tcl file, a .machteld archive, or a wrapped tool.
+# Run in a console host from a Tcl file or a .machteld archive.
 if {$argv eq {--worker}} {
     fconfigure stdout -encoding utf-8 -translation lf
     puts {worker ready}
@@ -137,7 +137,7 @@ failure. Long logs and large directories cannot grow widget state indefinitely.
 
 The inspector keeps at most 500 rows and uses the package defaults of a
 30-second child deadline and a 128 MiB per-process memory limit. The child
-runs trusted read-only application code. The example supports both the source-file entry route and a wrapped executable. Its entry
+runs trusted read-only application code. The example supports both the source-file entry route and a verified application archive. Its entry
 dispatches an application-owned `--worker` role before opening the view, so the
 same executable can launch supervised work without recursively opening another
 application window. A `--headless` role exercises the same controller without

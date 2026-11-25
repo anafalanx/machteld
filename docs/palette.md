@@ -12,8 +12,7 @@ level. Use the qualified name `::machteld::clipboard owned` to query Windows
 clipboard ownership. Tk supplies its global `clipboard` command when loaded.
 This page is a composition tour. The [complete reference](reference/machteld/index.md)
 has the exact command pages; `[manifest]` describes the running build and `docs`
-queries the complete embedded Machteld/Tcl/Tk corpus in the distribution and
-tools wrapped with `--with-docs`.
+queries the embedded Machteld, Tcl, Tk and cffi manuals.
 
 This describes machteld 30, in preparation, not the older signed release. Its
 acceptance is in progress; check the selected executable's live `manifest`,
@@ -362,43 +361,15 @@ dict get [manifest] run options
 help
 help contract
 
-wrap app.tcl -o app.exe --console
-wrap appdir -o app.exe --entry src/main.tcl --gui
-wrap app.tcl -o documented-app.exe --with-docs
-wrap app-stage -o app.exe --manifest app.dict --plan
-wrap app-stage -o app.exe --manifest app.dict
 ```
 
-`version` and `package require machteld` return `30`. `manifest` describes the
-live public commands as structured data. Its `codes` are raised failures;
-`replycodes` are fixed protocol failures carried as data. `docs` provides exact,
-bounded, machine-readable access to the embedded Machteld, Tcl 9, and Tk 9
-references in the distribution and tools wrapped with `--with-docs`; `help` is
-its human-facing shorthand. Without that corpus, `docs schema` still works,
-corpus queries report `DOCS unsupported`, and bare `help` explains the omission.
-
-`wrap` accepts only an opted-in Machteld entry. A directory defaults to
-`main.tcl`; `--entry` selects another file inside it. Prefer a dedicated staging
-directory and `--manifest` with an explicit file inventory; `--plan` validates and
-previews that inventory without writing an executable. Without a manifest,
-directory wrapping includes every file, hidden assets and unrelated secrets
-alike: do not wrap a repository root. It stores selected assets
-under an application subtree, validates the staged entry, publishes atomically,
-and produces a console or GUI host with the same palette, static SQLite,
-Tcl/Tk libraries, license notices, and version. The built-in reference is
-omitted by default; `--with-docs` includes the full verified corpus.
-Application documentation and assets are unaffected. Basekits are not copied
-recursively, so a wrapped tool cannot perform another wrap. See
-[packaging](packaging.md).
-
-Manifest metadata can set the application's Windows name, version, description,
-authorship fields, and icon without a compiler. It stays separate from the
-runtime version and Vincent Vercauteren's Machteld identity. No automatic signing
-or dependency resolution is performed; inventories and VERSIONINFO are
-descriptive, not proof of a trusted publisher.
+`version` and `package require machteld` return `30`. Use `manifest` to inspect
+the live commands, `docs` to read the embedded manuals, and `help` for a
+short human-readable answer. To select a project entry and its assets, use
+`machteld.exe pack app.dict -o app.machteld`. [Packaging](packaging.md)
 
 ## Complete verb list
 
-`canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
-`links`, `log`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `run`,
-`scope`, `store`, `version`, `wait`, `watch`, `worker`, and `wrap`.
+`app`, `canon`, `child`, `cli`, `detach`, `dirs`, `docs`, `hash`, `help`, `http`, `json`,
+`links`, `lock`, `log`, `manifest`, `mtps`, `pmap`, `pool`, `pty`, `publish`, `run`,
+`scope`, `store`, `version`, `wait`, `watch`, and `worker`.

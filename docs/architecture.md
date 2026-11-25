@@ -1,7 +1,7 @@
 ---
 type: architecture
 title: Architecture
-description: How the executable, native palette, prelude, entry gate, and wrappers fit.
+description: How the executable, native palette, prelude, entry gate and application archives fit.
 tags: [machteld, architecture, tcl, windows]
 ---
 
@@ -13,8 +13,8 @@ The product has three layers:
    ConPTY, directory and reparse-point traversal, ReadDirectoryChangesW,
    WinHTTP, BCrypt, JSON, and statically linked SQLite.
 2. **Tcl runtime.** The prelude adds `version`, `manifest`, `scope`,
-   `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs`, `help`,
-   and `wrap`, then provides package `machteld 30`.
+   `pty expect/strip`, `cli`, `log`, `worker`, `pool`, `pmap`, `docs` and `help`,
+   then provides package `machteld 30`.
 3. **Program.** An opted-in entry remains ordinary Tcl. It receives normal
    `argv` and resolves the public short names through `::machteld::palette`
    on the global namespace path. Clipboard ownership is queried through the
@@ -23,9 +23,9 @@ The product has three layers:
 Startup registers the native commands, loads the embedded prelude, and applies
 the entry gate before Tcl evaluates a program. The gate parses the first command
 without evaluating it. Interactive startup is still available when no file is
-selected; `--help`, `--version`, `--docs`, `pack`, and `wrap` are handled by the host.
+selected; `--help`, `--version`, `--docs` and `pack` are handled by the host.
 The full host mounts a `.machteld` application ZIP read-only and applies the
-same entry gate to its root `main.tcl`.
+entry gate after verifying its inventory and selecting the declared entry.
 
 For a native startup file, the host captures the file once, checks that decoded
 value, and evaluates the same value; a second path read cannot substitute a
@@ -35,20 +35,11 @@ dependency declaration, not code review, permission reduction, or a sandbox.
 
 ## Hosts and archives
 
-The distribution executable contains Tcl/Tk libraries, docs, the prelude, and
-console and GUI basekits. The console host enters `Tcl_Main`; the GUI host enters
-`Tk_Main` without creating a console. The console host initializes Tk only after
-`package require Tk`; the GUI host initializes Tk at startup because it is a
-windowed host.
-
-`wrap` copies one basekit, the complete Machteld prelude, Tcl/Tk libraries, and
-the program into an appended zipfs. Both basekits link the same native core and
-SQLite, so a wrapped entry sees the same programmatic Machteld 30 API.
-Runtime libraries and license notices are always included.
-The complete versioned reference corpus is verified and copied only when
-`--with-docs` is requested; it is omitted by default. Application assets are
-unaffected. Nested wrapping basekits remain distribution-only and are not copied
-recursively.
+The shared console-subsystem executable enters `Tcl_Main` and initializes Tk
+on `package require Tk`. Its embedded Windows manifest requests detached
+console allocation. A separate application archive contains the selected Tcl
+entry, assets and their integrity inventory. The executable supplies the
+runtime libraries, static packages, reference and license notices.
 
 Tcl 9.0.4 predates the upstream fix for ACL-restricted Windows path
 normalization. Dependency bootstrap applies Tcl core check-in `0ac314cb96`
@@ -64,22 +55,15 @@ runtime API version, the working tree's base source revision, an input
 SHA-256, and the reference corpus SHA-256. The revision is not a clean-checkout
 claim: the input digest identifies the actual build ingredients, including
 uncommitted runtime changes. The record contains no build-machine paths or
-wall-clock timestamps. It is embedded when the build publishes its local
-executable and copied into wrapped tools even when their reference is omitted.
-It describes the embedded runtime, not the wrapped application's authorship or
-version.
+wall-clock timestamps. The build embeds it in the runtime executable.
 Clean reconstruction and historical release artifacts do not carry this
 development record. Absence is not evidence of signing or release authenticity;
 verify the artifact's hash
 and signature separately. `version` continues to report the runtime API version.
 
-Wrapped applications additionally carry an inert `app-info.dict`. It describes
-the selected application files and their hashes, host kind, reference choice,
-and explicit application metadata, separately from the runtime identity.
-`wrap --plan` returns that record before packaging. Optional Windows resources
-are stamped on a disposable bare-host copy before the ZIP payload is attached;
-the completed payload is checked before atomic publication. Neither this record
-nor VERSIONINFO is a signature or an authority boundary.
+Application archives carry `machteld-inventory.dict`. The launcher reads the
+pinned generation, verifies every member against its length and digest, and
+evaluates the selected entry only after the inventory check succeeds.
 
 Native metadata is an explicit table checked against the C registrations while
 building. Tcl commands register explicit facts with `MetaDefine`. `manifest`
@@ -96,10 +80,7 @@ normalized Markdown while preserving source and HTML representations. It
 combines those pages with authored Machteld command references, creates a
 deterministic catalog/search index, and hashes the corpus. `docs` reads only
 the executable's self-mounted payload and exposes exact lookup, sections, bounded
-search, verification, provenance, and safe extraction. The distribution always
-carries this corpus; wrapped applications opt in with `--with-docs`. Without
-it, `docs schema` still describes the API, corpus queries report `DOCS
-unsupported`, and bare `help` explains how to obtain the reference.
+search, verification, provenance, and safe extraction. Applications can query the shared executable’s corpus throughout their lifetime.
 The payload is trusted because the executable was chosen as trusted code;
 corpus hashes do not independently authenticate an unsigned executable. During
 unreleased work the runtime version alone does not identify the source revision
@@ -118,7 +99,7 @@ not runtime features, and release builds do not reuse development records.
 `tools/gate.tcl` builds and then runs every test group; `--group` selects
 groups to run against an existing executable without building. `fast` needs no
 compiler; `integration` adds native fixtures, native stream limits, and
-build-cache tests; `packaging` checks entry points, wrapping, publication, and
+build-cache tests; `packaging` checks entry points, archives, publication, and
 Windows metadata. A run that tests an executable identifies it by version and
 SHA-256 and refuses one that changes during the run. `native-validation` adds
 headless lifetime stress, bounded worker scaling, the

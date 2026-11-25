@@ -25,13 +25,9 @@ policy, or command names is not runtime work.
 Current decisions:
 
 - Programs begin with a parsed `package require machteld`. The full host runs
-  direct Tcl files and the root `main.tcl` of a `.machteld` application archive.
-- `wrap` is subordinate deployment machinery and accepts the same opt-in.
-- Every full or wrapped host exposes one Machteld version and the same palette,
-  including static SQLite `store`. The distribution includes the complete
-  exact-version reference corpus; wrapped tools omit it unless `--with-docs` is
-  requested. Runtime libraries and license notices remain included. Nested
-  wrapping remains distribution-only.
+  direct Tcl files and the selected entry of a verified application archive.
+- One executable supplies the palette, SQLite, the offline reference and the
+  license notices. `pack` publishes application files as a separate archive.
 - Documentation is a runtime interface: offline, versioned, machine-readable,
   provenance-bearing, and equally discoverable by people and agents.
 - Native and Tcl manifest facts are explicit metadata, never inferred from
@@ -52,7 +48,7 @@ development baseline for a direct release from signed 0.21 to 0.30.
 Starting with 22, the runtime version is one natural number and advances
 when the runtime changes. The baseline includes explicit wrapper inventories,
 optional Windows metadata and icons for wrapped applications, and native
-hardening. The 0.30 plan retires wrapping and qualifies applications as
+hardening. The 0.30 runtime runs applications as
 scripts or archives running on the shared executable. The owner signs and
 authorizes publication after acceptance. [Roadmap](roadmap.md)
 
@@ -82,8 +78,7 @@ Admission questions, in order:
    beyond what they can do in Tcl?
 2. Can ordinary Tcl already express it clearly and safely?
 3. Does it preserve deterministic values, structured errors, and bounded life?
-4. Can its runtime behavior be included identically in direct, console-wrapped,
-   and GUI-wrapped hosts?
+4. Can its runtime behavior be included identically for loose Tcl scripts and archived applications?
 5. Can the exact surface be stated in `manifest` without inference?
 
 These are admission questions, not a certification of arbitrary application

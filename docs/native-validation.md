@@ -60,8 +60,7 @@ capabilities each time it runs and records unavailable ones as
 instrumentation: a clean canary must succeed, while signed-overflow and
 array-bounds negative canaries must trap. Every native-validation run checks
 that canary and then runs, under those traps, the command-line/Unicode tests,
-JSON plus yyjson, the included hash/directory/store/HTTP boundary code, and
-the identity primitives that stamp wrapped executables. GCC's analyzer, the
+JSON plus yyjson, the included hash/directory/store/HTTP boundary code. GCC's analyzer, the
 sanitizer probes, and the Tk and Unicode-path checks below run in the full
 analysis, the group's last step. Tcl/Tk and SQLite dependencies are not
 instrumented. No address-sanitizer, leak-sanitizer, or thread-sanitizer

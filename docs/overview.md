@@ -38,23 +38,19 @@ Run it with `machteld.exe program.tcl ?argument ...?`. The `.tcl` extension is a
 convention, not a gate. The runtime parses that first command before evaluation,
 loads the same Machteld package in every host, then lets Tcl handle the file and
 its `argv` normally. The full host also runs a `.machteld` ZIP containing an
-opted-in `main.tcl` and its assets. [Packaging guide](packaging.md)
+opted-in entry, its assets and an integrity inventory. [Packaging guide](packaging.md)
 
 The palette has four layers:
 
 1. `run`, `child`, `wait`, `scope`, `detach`, and `pty` control processes.
 2. `watch`, `mtps`, `dirs`, `links`, `canon`, and `http` expose Windows facts.
 3. `store`, `json`, `hash`, `cli`, and `log` support real programs.
-4. `worker`, `pool`, `pmap`, `wrap`, `manifest`, `docs`, and `help` compose,
+4. `worker`, `pool`, `pmap`, `manifest`, `docs`, and `help` compose,
    explain, and ship them.
 
-`wrap` is subordinate to this runtime boundary. It accepts only an opted-in
-Machteld entry and produces a console or GUI exe with the same API and version,
-including static SQLite, runtime libraries, and license notices. The complete
-offline Machteld/Tcl/Tk reference corpus stays in the distribution and is
-omitted from wrapped tools by default; `--with-docs` embeds it when wanted.
-Application documentation and assets are unaffected. Nested wrapping remains in
-the distribution host. It is a deployment form, not a second language.
+The shared executable packages an opted-in entry and selected assets with
+`pack`. The same executable runs the archive, supplies its packages and
+provides the offline reference. [Packaging](packaging.md)
 
 The default model is linear and explicitly owned: operations use visible
 deadlines where their command offers one, supervised children and PTYs

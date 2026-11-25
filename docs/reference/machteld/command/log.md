@@ -56,8 +56,8 @@ if {[dict get [log configure] dropped]} { puts stderr "logs were lost" }
 ## Constraints
 
 Logging is best-effort diagnostics, not a durable transaction journal. File or
-channel blockage can block the caller. A GUI host may have no usable `stderr`,
-which is why explicit `-file` is recommended there.
+channel blockage can block the caller. An application launched from Explorer may
+have no usable `stderr`. Use `-file` if it needs to keep a diagnostic log.
 Messages and field names are not sanitized, and embedded newlines can span
 physical lines. This is not a JSON-lines protocol, secret-redaction layer, or
 safe way to insert arbitrary peer text into a machine-parsed audit trail.

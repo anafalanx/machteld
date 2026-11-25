@@ -13,8 +13,7 @@ references for Machteld 30, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
 `docs get cffi/manual/intro` for foreign calls and the Foreign calls section
 of the runtime contract for the bundled build's restrictions. The corpus includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not
-merely a short Machteld guide. Wrapped tools include this corpus only when
-created with `--with-docs`.
+merely a short Machteld guide. Programs share the same reference in the runtime.
 
 Use the matching embedded corpus to ground Machteld API claims and code changes;
 recalled or online documentation may describe a different release. While 30
@@ -56,17 +55,11 @@ machteld.exe --docs extract C:\work\machteld-reference
 
 Host JSON is always enveloped as `{ok:true,result:...}` or
 `{ok:false,error:{domain:"DOCS",code:...,message:...}}`; test `ok` before reading
-`result`. Use `--output FILE` for an atomic file result. GUI-subsystem wrappers
-require that output path except for extraction, which already names its
-destination.
+`result`. Use `--output FILE` for an atomic file result.
 
-A wrapped application preserves its own ordinary arguments and exposes the same
-operations under `tool.exe --machteld-docs ...`. Without `--with-docs`, corpus
-queries return `DOCS unsupported`; `docs schema` and `manifest` remain available,
-and bare `help` explains the omission. Query the full same-version Machteld
-executable for references, or rebuild the tool with `wrap --with-docs`. The
-reserved host route and its JSON error envelope remain available even when the
-corpus is absent; the same GUI output rules apply.
+An archive uses the shared runtime’s documentation. The arguments following
+its filename belong to the application. Invoke `machteld.exe --docs` directly
+to query the runtime before opening an application.
 
 Operational rules:
 
@@ -89,7 +82,7 @@ The upstream Tcl/Tk `application` pages document upstream `tclsh` and `wish`
 hosts. They are language-distribution reference, not Machteld host-option
 promises. The full Machteld host can run a Tcl file, run a `.machteld` archive,
 or create one with `machteld.exe pack INPUT -o OUTPUT.machteld`. See
-`machteld/guide/packaging` for the entry layout, argument handling and wrapping.
+`machteld/guide/packaging` for the entry layout, argument handling and archive inventory.
 
 ## When the palette is not enough
 
@@ -111,7 +104,7 @@ install software or broaden the user's task without asking. Apply two rules:
 - **Explicitly deployed.** Apply the installation-free delivery policy:
   every dependency is verified as part of the target platform, included in the
   reviewed bundle with its notices, or omitted. This is an application-authoring
-  rule, not a restriction enforced by `wrap`. Test the complete deployment;
+  rule, not a check performed by the packager. Test the complete deployment;
   hashes and an inventory do not certify arbitrary dependencies or authenticate
   an unsigned application.
 

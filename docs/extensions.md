@@ -11,7 +11,7 @@ A Machteld program can explicitly load compatible binary Tcl extensions and
 script packages beyond the built-in palette. Dependency selection and deployment
 remain the application's responsibility; there is no plugin manager or automatic
 resolver. The working example is `examples/external-extension`, whose small
-Tcl-stubs DLL is tested in both console and GUI-subsystem wrappers.
+Tcl-stubs DLL is tested alongside a relocated application archive.
 
 External code is fully trusted. A loaded DLL runs inside the host with the
 user's permissions and can crash or compromise it. Script packages run ordinary
@@ -23,11 +23,11 @@ supervised subprocess is a permissions sandbox.
 The host provides Tcl's stubs table despite being statically linked. An extension
 must still match the host's x64 architecture, Tcl 9 ABI, and its own native
 dependencies. The verified example loads an exact DLL **from disk**, beside the
-executable and independently of the current directory:
+application archive, independently of the current directory:
 
 ```tcl
 package require machteld 30-
-set bundle [file dirname [info nameofexecutable]]
+set bundle [file dirname [file normalize $argv0]]
 load [file join $bundle examplemath.dll] Examplemath
 puts [::examplemath::add 20 22]
 ```
@@ -37,7 +37,7 @@ For other reviewed packages, ordinary `auto_path` selects `pkgIndex.tcl`
 directories and `::tcl::tm::path add` selects directories of `.tm` modules.
 Adding either path permits package-loading Tcl code to execute; it does not
 audit that code or install a missing package. Script-only packages may be
-selected as wrapped application assets, provided the application configures
+selected as application archive members, provided the application configures
 their lookup paths.
 
 The Windows loader also resolves a DLL's imports. An absolute filename for the
@@ -61,14 +61,13 @@ installation. For each dependency, choose and verify one of these dispositions:
 - **in the box** — part of the explicitly supported platform, with evidence
   for the actual target configurations;
 - **in the folder** — shipped with the program: script packages inside the
-  wrapped payload, binary extensions and their DLL chains in a directory
-  beside the executable;
+  archive, binary extensions and their DLL chains in a directory
+  beside the archive;
 - **not in the program** — omit the capability until a reviewed deployment
   meets the intended installation-free delivery policy.
 
-This is an authoring policy, not something `wrap` enforces. It does not inspect
-imports, prevent downloads or registry writes, or certify that the program works
-on every Windows target. Test a fresh complete deployment without relying on
+The application author reviews imports and provisions the DLLs required on
+the supported Windows targets. Test a fresh complete deployment without relying on
 development-only packages, drivers, credentials, or PATH entries.
 
 ## Database scope
@@ -80,22 +79,14 @@ case. The tiny arithmetic extension proves the loading pattern, not any database
 binding's availability or suitability. No driver or installed application
 should be assumed merely because the target runs Windows.
 
-## What this page does not promise
+## Distributing a native dependency
 
-Dependency selection remains manual. `wrap --manifest` selects named application
-files; it does not discover `package require` dependencies, download packages,
-resolve transitive DLLs, or provide a `--deps` mode. Possible historical plans in
-the roadmap are not implemented contracts.
+Project manifests select the files that `pack` places in the application
+archive. Ship native extensions as reviewed Windows files. In
+`examples/external-extension` the Tcl entry loads the adjacent DLL by absolute
+path, and `ship.dict` lists the archive, runtime, DLL and notices. Move the
+folder and run it from an unrelated working directory to check the deployment.
 
-For a concrete source example, see `examples/external-extension` in the
-repository. It builds a tiny Tcl-stubs DLL, explicitly inventories the DLL and
-its license beside a wrapped application, and loads that exact disk path. The
-application can be started from a different working directory; moving or
-removing its declared DLL causes a clear failure, not an implicit search for an
-unrelated installed package.
-
-Build a fresh deployment folder containing the complete reviewed set. `wrap`
-atomically publishes one executable, not a multi-file deployment transaction.
-Do not overwrite an installed DLL chain piecemeal. Include dependency license
-notices and any runtime DLLs required by the extension's own compiler; being
-linked against Tcl stubs does not eliminate its other dependencies.
+Publish a new complete folder when changing a DLL chain. The atomic update
+of an application archive applies only to that archive. A stubs build can
+still need additional native libraries or the compiler's runtime.
