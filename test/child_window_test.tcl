@@ -132,8 +132,6 @@ try {
         destroy .
     }
 
-    if {$privateOnly} { puts "ALL $checks STARTUP WINDOW CHECKS PASSED"; return }
-
     # The decoy has exactly the same class. It belongs to a separate child job.
     lassign [startFixture decoy $class iconic direct -window normal] decoy decoyPath launch
     check "normal launch requests SW_SHOWNORMAL from Windows" [expr {
@@ -161,6 +159,16 @@ try {
         [dict get [child present $owner] status] eq "pending" && ![dict get [observe $path] visible]}]
     check "class matching requires the whole class name" [expr {
         [dict get [child present $owner -class [string range $class 0 end-1]] status] eq "pending"}]
+    if {$privateOnly} {
+        # DWM can only report presentation on a composed desktop. The window
+        # ownership and graceful handoff checks work on this desktop too.
+        check "shutdown reaches the surviving descendant's hidden window" [expr {
+            [dict get [child shutdown $owner] windows] >= 1 &&
+            [dict get [child wait $owner -timeout 5s] status] eq "ok"}]
+        check "the other job's lookalike remains minimized after the handoff" [dict get [observe $decoyPath] iconic]
+        puts "ALL $checks ISOLATED CHILD WINDOW CHECKS PASSED"
+        return
+    }
     set found [ready $owner -class [string toupper $class]]
     check "an exact class match presents the hidden descendant after its launcher exits" [expr {
         [dict get $found visible] && [dict get $found onScreen] &&
