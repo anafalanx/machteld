@@ -6,17 +6,24 @@ namespace eval ::lookup {
 # The UI owns the empty temporary file or the CLI has just reserved a new one.
 proc ::lookup::seed {path} {
     package require sqlite3
-    sqlite3 ::lookup::database $path
+    sqlite3 ::lookup::database $path -foreignkeys 1 -defensive 1
     try {
         database transaction {
             database eval {
+                CREATE TEMP TABLE import_category(slot INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            }
+            set slot 0
+            foreach category {Parts Tools Kits Supplies} {
+                database eval -parameters [dict create 1 [list integer $slot] 2 [list text $category]] {
+                    INSERT INTO import_category VALUES(?1,?2)
+                }
+                incr slot
+            }
+            database eval {
                 CREATE TABLE items(id INTEGER PRIMARY KEY, category TEXT NOT NULL, name TEXT NOT NULL);
                 WITH RECURSIVE ids(id) AS (VALUES(1) UNION ALL SELECT id+1 FROM ids WHERE id<125000)
-                INSERT INTO items SELECT id,
-                    CASE (id-1)%4 WHEN 0 THEN 'Parts' WHEN 1 THEN 'Tools'
-                                  WHEN 2 THEN 'Kits' ELSE 'Supplies' END,
-                    printf('Catalogue item %06d',id)
-                FROM ids;
+                INSERT INTO items SELECT id, cat.name, printf('Catalogue item %06d',id)
+                FROM ids JOIN import_category AS cat ON cat.slot=(ids.id-1)%4;
                 CREATE INDEX items_by_category ON items(category, id);
             }
         }

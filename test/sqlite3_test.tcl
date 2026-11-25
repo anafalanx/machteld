@@ -1,9 +1,192 @@
 package require machteld
 
+if {$argv eq {--sql-worker}} {
+    worker on verifyProfile {path} {
+        package require sqlite3
+        sqlite3 db $path -foreignkeys 1 -defensive 1
+        try {
+            return [expr {[db config enable_fkey] && [db config defensive] &&
+                [catch {db eval {INSERT INTO child VALUES(999)}}]}]
+        } finally {db close}
+    }
+    worker on compete {path destination barrier name} {
+        package require machteld::sqlite
+        sqlite3 db $path -readonly 1
+        db timeout 10000
+        # Rendezvous after both read-only integrity checks. Neither writer can
+        # rely on an earlier test for the absence of the final filename.
+        proc ::backupRendezvous {directory name cmd op} {
+            set f [open [file join $directory $name] {WRONLY CREAT EXCL}]
+            close $f
+            set until [expr {[clock milliseconds]+30000}]
+            while {![file exists [file join $directory A]] || ![file exists [file join $directory B]]} {
+                if {[clock milliseconds] >= $until} {error "other backup did not reach publication"}
+                after 20
+            }
+        }
+        set hook [list ::backupRendezvous $barrier $name]
+        trace add execution ::machteld::Publish enter $hook
+        try {
+            ::machteld::sqlite::backup db $destination
+            return created
+        } trap {MACHTELD SQLITE exists} {} {
+            return exists
+        } finally {
+            trace remove execution ::machteld::Publish enter $hook
+            db close
+        }
+    }
+    worker serve
+    return
+}
+
 namespace eval ::sqltest {
     proc check {name condition} {
         if {!$condition} { error "FAIL sqlite3: $name" }
         puts "ok   sqlite3: $name"
+    }
+
+    proc features {work} {
+        package require machteld::sqlite
+        set path [file join $work {profile and search.db}]
+        sqlite3 ::sqltest::db $path -foreignkeys true -defensive true
+        try {
+            db eval {
+                CREATE TABLE parent(id INTEGER PRIMARY KEY);
+                CREATE TABLE child(parent INTEGER REFERENCES parent);
+                CREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT NOT NULL);
+                INSERT INTO books VALUES (1,'Bruxelles-Nord'), (2,'Paris Nord');
+                CREATE VIRTUAL TABLE titles USING fts5(title, content='books', content_rowid='id', tokenize='trigram');
+                INSERT INTO titles(titles) VALUES('rebuild');
+            }
+            check "connection safeguards were applied before use" [expr {
+                [db config defensive] && [db config enable_fkey] && [db onecolumn {PRAGMA foreign_keys}] &&
+                [catch {db eval {INSERT INTO child VALUES(9)}}] && [catch {db eval {DELETE FROM sqlite_schema}}]}]
+            check "external-content trigram index resolves the case-insensitive joined catalogue row" [expr {
+                [db eval -parameters {3 {text XeLL}} {
+                    SELECT b.title FROM titles JOIN books AS b ON b.id=titles.rowid WHERE titles MATCH ?3
+                }] eq {Bruxelles-Nord}}]
+            ::machteld::store open $path
+            try {
+                ::machteld::store put checkpoint ok
+                check "key/value store and FTS index share one database" [expr {
+                    [db eval {SELECT key FROM kv}] eq {checkpoint} && [::machteld::store get checkpoint] eq "ok"}]
+            } finally {::machteld::store close}
+
+            set bytes [binary decode hex 00ff4180]
+            set text "00\u0000\U0001f31f"
+            set params [dict create 1 {integer -9223372036854775808} 3 [list blob $bytes] \
+                8 [list text $text] 9 {null} 10 {real 1.25}]
+            set sql {SELECT ?8, ?3, ?1, typeof(?9), ?10, hex(?3), hex(?8), ?8, '?2'}
+            set row [db eval -parameters $params $sql]
+            check "sparse repeated slots bind bytes, signed integers, real, NULL and UTF-8 with NUL" [expr {
+                $row eq [list $text $bytes -9223372036854775808 null 1.25 00FF4180 \
+                    [string toupper [binary encode hex [encoding convertto utf-8 $text]]] $text ?2]}]
+            check "an in-scope SQL comment or string adds no binding" [expr {
+                [db eval -parameters {5 {integer 12}} {SELECT ?5 /* ?12 */, '?2'}] eq {12 ?2}}]
+            check "empty blob and empty text are distinct from SQL NULL" [expr {
+                [db eval -parameters [dict create 1 [list blob [binary format a0 {}]] 2 {text {}} 3 {null}] \
+                    {SELECT typeof(?1),length(?1),typeof(?2),length(?2),typeof(?3)}] eq {blob 0 text 0 null}}]
+            foreach bad [list {} {3 integer} {3 {integer 9223372036854775808}} {3 {null unused}} {3 {unknown 4}}] {
+                check "invalid or missing typed binding is refused: $bad" [expr {
+                    [catch {db eval -parameters $bad {SELECT ?3}} msg opt] &&
+                    [dict get $opt -errorcode] eq {MACHTELD SQLITE parameter}}]
+            }
+            set values {}
+            db eval -parameters {2 {integer 37}} {SELECT ?2 AS n UNION ALL SELECT ?2+1} record {
+                lappend values $record(n) [db eval -parameters {2 {text nested}} {SELECT ?2}]
+            }
+            check "nested row callbacks retain the outer bindings" [expr {$values eq {37 nested 38 nested}}]
+            check "statement caching cannot leak a numbered binding into ordinary eval" [expr {
+                [db eval -parameters {2 {text bound}} {SELECT typeof(?2)}] eq "text" &&
+                [db eval {SELECT typeof(?2)}] eq "null"}]
+            sqlite3 ::sqltest::defaults $path
+            try {
+                check "default connections retain upstream settings" [expr {
+                    ![defaults config defensive] && ![defaults config enable_fkey]}]
+                defaults eval {INSERT INTO child VALUES(9); DELETE FROM child}
+            } finally {defaults close}
+            set pool [::machteld::pool create -width 2 -- [info nameofexecutable] [file normalize [info script]] --sql-worker]
+            try {
+                ::machteld::pool submit $pool [list [dict create op verifyProfile path $path]]
+                set reply [lindex [::machteld::pool wait $pool -timeout 30s] 0]
+                check "worker connection independently enforces the requested profile" [expr {
+                    [dict get $reply ok] && [dict get $reply result]}]
+            } finally {::machteld::pool close $pool}
+            db eval {PRAGMA journal_mode=WAL}
+            set dest [file join $work verified.db]
+            # Keep source-database lock acquisition independent on the two
+            # workers. This race deliberately synchronizes their publications.
+            set otherSource [file join $work other-source.db]
+            db backup $otherSource
+            set barrier [file join $work barrier]
+            file mkdir $barrier
+            set pool [::machteld::pool create -width 2 -- [info nameofexecutable] [file normalize [info script]] --sql-worker]
+            try {
+                ::machteld::pool submit $pool [lmap name {A B} source [list $path $otherSource] {
+                    dict create op compete path $source destination $dest barrier $barrier name $name
+                }]
+                set replies [::machteld::pool wait $pool -timeout 75s]
+                foreach reply $replies {
+                    if {![dict get $reply ok]} {error "backup contender failed: $replies"}
+                }
+                check "two processes finish verification before a single atomic winner publishes" [expr {
+                    [lsort [lmap r $replies {dict get $r result}]] eq {created exists}}]
+            } finally {::machteld::pool close $pool}
+            set digest [::machteld::hash file sha256 $dest]
+            check "existing backup is preserved byte-for-byte" [expr {
+                [catch {::machteld::sqlite::backup db $dest} message options] &&
+                [dict get $options -errorcode] eq {MACHTELD SQLITE exists} &&
+                [::machteld::hash file sha256 $dest] eq $digest}]
+            sqlite3 ::sqltest::snapshot $dest -readonly 1
+            try {
+                check "verified backup is a standalone read-only snapshot of the WAL database" [expr {
+                    [snapshot onecolumn {PRAGMA journal_mode}] eq "delete" &&
+                    [snapshot eval {SELECT title FROM titles WHERE titles MATCH 'xell'}] eq {Bruxelles-Nord} &&
+                    [snapshot eval {PRAGMA integrity_check}] eq {ok}}]
+            } finally {snapshot close}
+            db eval {
+                PRAGMA ignore_check_constraints=1;
+                CREATE TABLE checked(n INTEGER CHECK(n>0));
+                INSERT INTO checked VALUES(-1);
+                PRAGMA ignore_check_constraints=0;
+            }
+            set invalid [file join $work invalid.db]
+            set failed [catch {::machteld::sqlite::backup db $invalid} message options]
+            set remaining [glob -nocomplain -directory $work .machteld-sqlite-*]
+            check "failed integrity check leaves no backup or staging files ($message, $remaining)" [expr {
+                $failed && [dict get $options -errorcode] eq {MACHTELD SQLITE verify} &&
+                ![file exists $invalid] && ![llength $remaining]}]
+            db eval {DROP TABLE checked}
+            db collate NOCASE {apply {{a b} {string compare $b $a}}}
+            db eval {
+                CREATE TABLE names(s TEXT);
+                CREATE INDEX sorted_names ON names(s COLLATE NOCASE);
+                INSERT INTO names VALUES('a'),('c'),('b'),('d');
+            }
+            check "a read-only integrity check rejects an index requiring an app-local collation" [expr {
+                [catch {::machteld::sqlite::backup db $invalid} message options] &&
+                [dict get $options -errorcode] eq {MACHTELD SQLITE verify} &&
+                ![file exists $invalid]}]
+        } finally {db close}
+    }
+
+    proc packagedImport {work} {
+        set example [file normalize [file join [file dirname [info script]] .. examples sqlite-lookup]]
+        set executable [info nameofexecutable]
+        set archive [file join $work catalogue.machteld]
+        set database [file join $work {external catalogue.db}]
+        foreach arguments [list [list pack $example -o $archive] [list $archive --create-demo $database]] {
+            set run [::machteld::run -timeout 90s -dir $work -- $executable {*}$arguments]
+            if {[dict get $run status] ne "ok" || [dict get $run exit] != 0} {error "packaged import failed: $run"}
+        }
+        sqlite3 ::sqltest::catalogue $database -readonly 1
+        try {
+            check "the relocated archive imports four joined categories in one external catalogue" [expr {
+                [catalogue eval {SELECT category, count(*) FROM items GROUP BY category ORDER BY category}] eq
+                {Kits 31250 Parts 31250 Supplies 31250 Tools 31250} &&
+                [catalogue eval {PRAGMA integrity_check}] eq {ok}}]
+        } finally {catalogue close}
     }
 
     proc run {} {
@@ -22,6 +205,8 @@ namespace eval ::sqltest {
 
         set work [file tempdir]
         try {
+            features $work
+            packagedImport $work
             set path [file join $work {notes 雪.db}]
             sqlite3 ::sqltest::writer $path
             writer eval {CREATE TABLE notes(id INTEGER PRIMARY KEY, label TEXT NOT NULL)}

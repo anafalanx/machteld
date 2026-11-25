@@ -556,9 +556,10 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
            Tcl_Obj *const objv[])
 {
     (void)client_data;
-    if (objc != 3) {
+    int create_only = objc == 4 && strcmp(Tcl_GetString(objv[3]), "-createonly") == 0;
+    if (objc != 3 && !create_only) {
         return publish_error(interp, "badvalue",
-            "usage: ::machteld::Publish candidate destination");
+            "usage: ::machteld::Publish candidate destination ?-createonly?");
     }
 
     int result = TCL_ERROR;
@@ -593,6 +594,24 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
             &destination_parent_info.identity)) {
         publish_error(interp, "badvalue",
             "publication candidate and destination must be on the same volume");
+        goto done;
+    }
+
+    if (create_only) {
+        /* No preflight existence test or replacement fallback. The filesystem
+         * selects the winner atomically even if another process just created
+         * the name after the database integrity check. */
+        if (MoveFileExW(candidate.name, destination.name, 0)) {
+            Tcl_SetObjResult(interp, objv[2]);
+            result = TCL_OK;
+        } else {
+            DWORD error = GetLastError();
+            if (exists_error(error)) {
+                publish_error(interp, "exists", "publication destination already exists");
+            } else {
+                publish_win_error(interp, "cannot create publication destination", error, NULL);
+            }
+        }
         goto done;
     }
 

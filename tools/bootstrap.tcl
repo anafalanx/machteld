@@ -191,6 +191,24 @@ proc ::boot::cacheRelative {path} {
     string range $resolved [string length [string trimright $cache /]/] end
 }
 
+proc ::boot::applyLockedFilePatch {lock directory id} {
+    variable root
+    set matches [lmap patch [dict get $lock patches] {
+        if {[dict get $patch id] ne $id} continue
+        set patch
+    }]
+    if {[llength $matches] != 1} {fail "dependency lock must contain exactly one $id patch"}
+    set patch [lindex $matches 0]
+    set relative [dict get $patch target]
+    set path [file join $directory $relative]
+    set diff [file join $root tools [dict get $patch file]]
+    assertUnderCache $path
+    assertHash $diff [dict get $patch sha256] $id
+    assertHash $path [dict get $patch beforeSha256] "$id input"
+    applyPinnedUnifiedPatch $diff $path $relative
+    assertHash $path [dict get $patch afterSha256] "$id output"
+}
+
 proc ::boot::filesBelow {dir} {
     set found {}
     foreach path [glob -nocomplain -directory $dir -types {f hidden} *] {
@@ -633,17 +651,7 @@ proc ::boot::main {argv} {
         assertHash [file join $extract {*}[split [dict get $notice source] /]] [dict get $notice sha256] "[dict get $notice id] source notice"
         assertHash [file join $root {*}[split [dict get $notice distribution] /]] [dict get $notice sha256] "[dict get $notice id] distributed notice"
     }
-    set patches [lmap p [dict get $lock patches] {if {[dict get $p id] ne "tcl-windows-acl-normalize"} continue; set p}]
-    if {[llength $patches] != 1} {
-        fail "dependency lock must contain exactly one tcl-windows-acl-normalize patch"
-    }
-    set patch [lindex $patches 0]
-    set patchPath [file join $root tools {*}[split [dict get $patch file] /]]
-    set patchTarget [file join $extract {*}[split [dict get $patch target] /]]
-    assertHash $patchPath [dict get $patch sha256] [dict get $patch id]
-    assertHash $patchTarget [dict get $patch beforeSha256] "[dict get $patch id] input"
-    applyPinnedUnifiedPatch $patchPath $patchTarget [dict get $patch target]
-    assertHash $patchTarget [dict get $patch afterSha256] "[dict get $patch id] output"
+    applyLockedFilePatch $lock $extract tcl-windows-acl-normalize
 
     if {!$sourcesOnly} {
         # bash's HOME: an empty folder of this build, deleted with src.
@@ -672,6 +680,7 @@ proc ::boot::main {argv} {
     }
 
     file copy -force [getDownload $binding] [file join $cache sqlite tclsqlite.c]
+    applyLockedFilePatch $lock $cache sqlite-tcl-parameters-profile
 
     # yyjson: the json command's reader core; one .c and .h and its license.
     set yyjson [dict get $archives yyjson]

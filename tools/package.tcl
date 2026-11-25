@@ -103,15 +103,16 @@ copy_tree $tclLib [file join $stage tcl_library]
 
 # Tcl looks for package indexes in the children of its library directory.
 # The runtime carries these opt-in packages alongside the Tcl library.
-set packageSource [file join [file dirname [file dirname [file normalize [info script]]]] packages machteld-job]
-set packageTarget [file join $stage tcl_library machteld-job]
-file mkdir $packageTarget
-foreach name {pkgIndex.tcl job.tcl} {
-    file copy [file join $packageSource $name] [file join $packageTarget $name]
+set packages [file join [file dirname [file dirname [file normalize [info script]]]] packages]
+foreach {package files} {
+    machteld-job {pkgIndex.tcl job.tcl}
+    cffi {pkgIndex.tcl}
+    machteld-sqlite {pkgIndex.tcl sqlite.tcl}
+} {
+    set target [file join $stage tcl_library $package]
+    file mkdir $target
+    foreach name $files {file copy [file join $packages $package $name] [file join $target $name]}
 }
-set cffiIndex [file join [file dirname $packageSource] cffi pkgIndex.tcl]
-file mkdir [file join $stage tcl_library cffi]
-file copy $cffiIndex [file join $stage tcl_library cffi pkgIndex.tcl]
 
 # Tcl 9 installs script modules separately from the core script library. Core
 # services such as clock require msgcat from this sibling tree; keeping its

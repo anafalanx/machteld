@@ -8,7 +8,9 @@ Run this from the repository root in PowerShell using the release gate's
 ```
 
 The example creates a temporary SQLite database of 125,000 synthetic items in
-a worker. Choose a category, search, and use Next to move through the results.
+a worker. The import binds the four categories as typed parameters, joins
+them to generated item IDs, and commits the catalogue and index together.
+Choose a category, search, and use Next to move through the results.
 A search opens its own read-only connection and uses the last displayed item ID
 to fetch the next page. The worker reads one extra row to tell the window
 whether to enable Next. Tk displays at most 50 items and inserts them in small

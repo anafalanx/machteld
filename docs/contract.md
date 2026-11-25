@@ -229,6 +229,46 @@ The embedded build disables run-time loading of SQLite extensions.
 See [background jobs](execution-model.md) and the
 [SQLite Tcl API](https://www.sqlite.org/tclsqlite.html).
 
+FTS5 and its trigram tokenizer are built into the same engine. External-content
+indexes may join the application's tables by rowid. The application creates,
+rebuilds and maintains those indexes.
+
+`sqlite3 db $path -foreignkeys 1 -defensive 1` applies both settings and
+reads them back before creating the Tcl command. Either option accepts a Tcl
+boolean. Each newly opened connection, including a worker's, chooses its own
+settings. Omitting the options preserves the upstream defaults.
+
+`db eval -parameters $bindings $sql` adds numbered bindings to the ordinary
+eval interface, including its row callback and transaction behavior.
+`bindings` is a dictionary keyed by the positive decimal slot number.
+Each value is `{null}`, `{integer VALUE}`, `{real VALUE}`, `{text VALUE}`,
+or `{blob BYTES}`. Integers are signed 64-bit. Text uses UTF-8 with its
+explicit byte length, including embedded NUL. Blobs preserve bytes. SQLite
+selects the slots while preparing each statement. A repeated `?3` uses slot 3
+each time. A lone `?3` needs no entries for 1 or 2. A missing numbered value
+or invalid type raises `{MACHTELD SQLITE parameter}`. Named variables keep
+their upstream meaning and unnumbered question marks are SQL NULL.
+
+```tcl
+set values [dict create 3 [list text $code] 8 [list blob $payload]]
+db eval -parameters $values {INSERT INTO readings(code,payload) VALUES(?3,?8)}
+```
+
+`package require machteld::sqlite` provides `::machteld::sqlite::backup db destination`.
+It takes an online snapshot of the main database, converts the private copy
+to a single rollback-journal database, reopens it read-only and runs
+`PRAGMA integrity_check`. SQLite 3.53.4 omits CHECK expressions when it
+opens a database read-only. A schema containing CHECK also gets an integrity
+pass on the query-only staging connection before the read-only reopen.
+Custom functions or collations needed for verification must be available
+on a fresh connection. It then attempts one create-only Windows rename
+on the destination volume. The operation returns the normalized path.
+A prior or competing destination wins with `{MACHTELD SQLITE exists}`.
+A failed integrity check reports `{MACHTELD SQLITE verify}`. SQLite lock,
+file and access errors also propagate. Backup is synchronous. A worker can
+open its own source connection and run it for a GUI. The application owns
+backup scheduling, retention and restore decisions.
+
 ## Store
 
 `store` provides key/value operations. Keys are text. Values are binary-safe: `put` stores the exact Tcl

@@ -27,7 +27,7 @@ set ::machteld::build::DEFINES {
 # omits run-time extension loading, double-quoted string literals, deprecated
 # interfaces and shared cache. Both the store and the Tcl binding use this core.
 set ::machteld::build::SQLITE_FLAGS {
-    -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION
+    -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_ENABLE_FTS5
     -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE
 }
 set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}

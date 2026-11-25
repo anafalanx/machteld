@@ -59,7 +59,11 @@ try {
 ## Constraints
 
 For SQL queries and transactions, use `package require sqlite3` and open a
-separate connection. Machteld owns a table named
+separate connection. The same engine includes FTS5 and the trigram tokenizer.
+SQL connections accept `-foreignkeys` and `-defensive` at open time and
+`db eval -parameters $bindings $sql` for typed numbered parameters.
+`package require machteld::sqlite` provides `::machteld::sqlite::backup db path`
+for a verified snapshot at a new destination. Machteld owns a table named
 `kv(key TEXT PRIMARY KEY, value BLOB) WITHOUT ROWID`; do not treat the database
 schema as an extension API. Independent processes can share a file subject to
 normal SQLite locking.

@@ -1,0 +1,173 @@
+--- a/sqlite/tclsqlite.c
++++ b/sqlite/tclsqlite.c
+@@ -1389,8 +1389,12 @@
+ ** If successful, TCL_OK is returned. Otherwise, TCL_ERROR is returned
+ ** and an error message loaded into interpreter pDb->interp.
+ */
++extern int MachteldSqlBind(Tcl_Interp *, sqlite3_stmt *, int, Tcl_Obj *);
++extern Tcl_Obj *MachteldSqlColumnText(sqlite3_stmt *, int);
++
+ static int dbPrepareAndBind(
+   SqliteDb *pDb,                  /* Database object */
++  Tcl_Obj *parameters,            /* Optional dictionary of typed numbered values */
+   char const *zIn,                /* SQL to compile */
+   char const **pzOut,             /* OUT: Pointer to next SQL statement */
+   SqlPreparedStmt **ppPreStmt     /* OUT: Object used to cache statement */
+@@ -1490,7 +1494,15 @@
+   /* Bind values to parameters that begin with $ or : */
+   for(i=1; i<=nVar; i++){
+     const char *zVar = sqlite3_bind_parameter_name(pStmt, i);
+-    if( zVar!=0 && (zVar[0]=='$' || zVar[0]==':' || zVar[0]=='@') ){
++    if( zVar!=0 && zVar[0]=='?' ){
++      if( parameters ){
++        rc = MachteldSqlBind(interp, pStmt, i, parameters);
++        if( rc!=TCL_OK ) break;
++      }else{
++        /* A statement previously cached by -parameters may hold a value. */
++        sqlite3_bind_null(pStmt, i);
++      }
++    }else if( zVar!=0 && (zVar[0]=='$' || zVar[0]==':' || zVar[0]=='@') ){
+       Tcl_Obj *pVar = Tcl_GetVar2Ex(interp, &zVar[1], 0, 0);
+       if( pVar==0 && pDb->zBindFallback!=0 ){
+         Tcl_Obj *pCmd;
+@@ -1627,6 +1639,7 @@
+ struct DbEvalContext {
+   SqliteDb *pDb;                  /* Database handle */
+   Tcl_Obj *pSql;                  /* Object holding string zSql */
++  Tcl_Obj *parameters;            /* Owned across nested eval callbacks */
+   const char *zSql;               /* Remaining SQL to execute */
+   SqlPreparedStmt *pPreStmt;      /* Current statement */
+   int nCol;                       /* Number of columns returned by pStmt */
+@@ -1770,7 +1783,7 @@
+     int rc;
+     if( p->pPreStmt==0 ){
+       zPrevSql = (p->zSql==zPrevSql ? 0 : p->zSql);
+-      rc = dbPrepareAndBind(p->pDb, p->zSql, &p->zSql, &p->pPreStmt);
++      rc = dbPrepareAndBind(p->pDb, p->parameters, p->zSql, &p->zSql, &p->pPreStmt);
+       if( rc!=TCL_OK ) return rc;
+     }else{
+       int rcs;
+@@ -1837,6 +1850,7 @@
+     Tcl_DecrRefCount(p->pVarName);
+     p->pVarName = 0;
+   }
++  if( p->parameters ) Tcl_DecrRefCount(p->parameters);
+   Tcl_DecrRefCount(p->pSql);
+   dbReleaseColumnNames(p);
+   delDatabaseRef(p->pDb);
+@@ -1872,6 +1886,7 @@
+     }
+   }
+ 
++  if( p->parameters ) return MachteldSqlColumnText(pStmt, iCol);
+   return Tcl_NewStringObj((char*)sqlite3_column_text(pStmt, iCol), -1);
+ }
+ 
+@@ -2389,7 +2404,7 @@
+     SqlPreparedStmt *pStmt = 0;        /* Next statement to run */
+     char *zErr = 0;                    /* Error message from QRF */
+ 
+-    rc = dbPrepareAndBind(pDb, zSql, &zSql, &pStmt);
++    rc = dbPrepareAndBind(pDb, NULL, zSql, &zSql, &pStmt);
+     if( rc ) goto format_failed;
+     if( pStmt==0 ) continue;
+     rc = sqlite3_format_query_result(pStmt->pStmt, &qrf, &zErr);
+@@ -3297,10 +3312,21 @@
+   ** accessible during the eval of $code.
+   */
+   case DB_EVAL: {
++    Tcl_Obj *parameters = NULL;
+     int evalFlags = 0;
+     const char *zOpt;
+     while( objc>3 && (zOpt = Tcl_GetString(objv[2]))!=0 && zOpt[0]=='-' ){
+-      if( strcmp(zOpt, "-withoutnulls")==0 ){
++      if( strcmp(zOpt, "-parameters")==0 ){
++        Tcl_Size size;
++        if( parameters || objc<5 ){
++          Tcl_SetObjResult(interp, Tcl_NewStringObj("expected one -parameters DICT followed by SQL", -1));
++          return TCL_ERROR;
++        }
++        parameters = objv[3];
++        if( Tcl_DictObjSize(interp, parameters, &size)!=TCL_OK ) return TCL_ERROR;
++        objc--;
++        objv++;
++      }else if( strcmp(zOpt, "-withoutnulls")==0 ){
+         evalFlags |= SQLITE_EVAL_WITHOUTNULLS;
+       }else if( strcmp(zOpt, "-asdict")==0 ){
+         evalFlags |= SQLITE_EVAL_ASDICT;
+@@ -3313,7 +3339,7 @@
+     }
+     if( objc<3 || objc>5 ){
+       Tcl_WrongNumArgs(interp, 2, objv,
+-          "?OPTIONS? SQL ?VAR-NAME? ?SCRIPT?");
++          "?-parameters DICT? ?OPTIONS? SQL ?VAR-NAME? ?SCRIPT?");
+       return TCL_ERROR;
+     }
+ 
+@@ -3322,6 +3348,7 @@
+       Tcl_Obj *pRet = Tcl_NewObj();
+       Tcl_IncrRefCount(pRet);
+       dbEvalInit(&sEval, pDb, objv[2], 0, 0);
++      if( parameters ){ sEval.parameters = parameters; Tcl_IncrRefCount(parameters); }
+       while( TCL_OK==(rc = dbEvalStep(&sEval)) ){
+         int i;
+         int nCol;
+@@ -3350,6 +3377,7 @@
+ 
+       p = (DbEvalContext *)Tcl_Alloc(sizeof(DbEvalContext));
+       dbEvalInit(p, pDb, objv[2], pVarName, evalFlags);
++      if( parameters ){ p->parameters = parameters; Tcl_IncrRefCount(parameters); }
+ 
+       cd2[0] = (void *)p;
+       cd2[1] = (void *)pScript;
+@@ -4228,7 +4256,7 @@
+ ){
+   Tcl_WrongNumArgs(interp, 1, objv,
+     "HANDLE ?FILENAME? ?-vfs VFSNAME? ?-readonly BOOLEAN? ?-create BOOLEAN?"
+-    " ?-nofollow BOOLEAN?"
++    " ?-nofollow BOOLEAN? ?-foreignkeys BOOLEAN? ?-defensive BOOLEAN?"
+     " ?-nomutex BOOLEAN? ?-fullmutex BOOLEAN? ?-uri BOOLEAN?"
+   );
+   return TCL_ERROR;
+@@ -4264,6 +4292,7 @@
+   const char *zVfs = 0;
+   int flags;
+   int bTranslateFileName = 1;
++  int foreignKeys = -1, defensive = -1;
+   Tcl_DString translatedFilename;
+   int rc;
+ 
+@@ -4309,6 +4338,10 @@
+       /* no-op */
+     }else if( strcmp(zArg, "-vfs")==0 ){
+       zVfs = Tcl_GetString(objv[i]);
++    }else if( strcmp(zArg, "-foreignkeys")==0 ){
++      if( Tcl_GetBooleanFromObj(interp, objv[i], &foreignKeys) ) return TCL_ERROR;
++    }else if( strcmp(zArg, "-defensive")==0 ){
++      if( Tcl_GetBooleanFromObj(interp, objv[i], &defensive) ) return TCL_ERROR;
+     }else if( strcmp(zArg, "-readonly")==0 ){
+       int b;
+       if( Tcl_GetBooleanFromObj(interp, objv[i], &b) ) return TCL_ERROR;
+@@ -4395,6 +4428,22 @@
+     Tcl_Free((char*)p);
+     sqlite3_free(zErrMsg);
+     return TCL_ERROR;
++  }
++  {
++    int settings[] = {foreignKeys, defensive};
++    int ops[] = {SQLITE_DBCONFIG_ENABLE_FKEY, SQLITE_DBCONFIG_DEFENSIVE};
++    const char *names[] = {"foreignkeys", "defensive"};
++    for(i=0; i<2; i++){
++      int actual = -1;
++      if( settings[i]>=0 && (sqlite3_db_config(p->db, ops[i], settings[i], &actual)!=SQLITE_OK
++            || sqlite3_db_config(p->db, ops[i], -1, &actual)!=SQLITE_OK || actual!=settings[i]) ){
++        Tcl_SetObjResult(interp, Tcl_ObjPrintf("could not apply and verify -%s", names[i]));
++        Tcl_SetErrorCode(interp, "MACHTELD", "SQLITE", "profile", (char*)0);
++        sqlite3_close(p->db);
++        Tcl_Free((char*)p);
++        return TCL_ERROR;
++      }
++    }
+   }
+   p->maxStmt = NUM_PREPARED_STMTS;
+   p->openFlags = flags & SQLITE_OPEN_URI;
