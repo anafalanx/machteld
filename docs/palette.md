@@ -117,6 +117,11 @@ and call `::machteld::files::entries $directory`. A callback can consume
 rows as they arrive. `::machteld::files::openlocal $path` returns a binary
 channel for locally available data. [File metadata and cloud-aware reads](reference/machteld/command/dirs.md#single-directory-entries-and-local-only-reads)
 
+For text input, `package require machteld::encoding` makes
+`::machteld::encoding::detect $bytes` available. The result carries an ICU
+label and confidence estimate, or an explicit no-match or unavailable status.
+[Encoding detection](reference/machteld/index.md)
+
 ## Machine processes
 
 ```tcl

@@ -9,6 +9,7 @@
 extern int Cffi_Init(Tcl_Interp *interp);
 extern int Machteldgraphviz_Init(Tcl_Interp *interp);
 extern int Machteldfiles_Init(Tcl_Interp *interp);
+extern int Machteldencoding_Init(Tcl_Interp *interp);
 
 #ifdef MACHTELD_STATIC_SQLITE
 #include "sqlite3.h"
@@ -246,6 +247,9 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
     }
 
     Tcl_StaticLibrary(NULL, "Machteldfiles", Machteldfiles_Init, NULL);
+    Tcl_StaticLibrary(NULL, "Machteldencoding", Machteldencoding_Init, NULL);
+    if (Tcl_EvalEx(interp, "package ifneeded machteld::encoding 1.0 {load {} Machteldencoding}",
+                   -1, TCL_EVAL_GLOBAL) != TCL_OK) return TCL_ERROR;
     if (Tcl_EvalEx(interp, "package ifneeded machteld::files 1.0 {load {} Machteldfiles}",
                    -1, TCL_EVAL_GLOBAL) != TCL_OK) return TCL_ERROR;
     Tcl_StaticLibrary(NULL, "Cffi", Cffi_Init, NULL);

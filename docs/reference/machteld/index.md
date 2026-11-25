@@ -39,6 +39,18 @@ names or add `::machteld::palette` to their namespace path for the short names.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
 - Runtime and distribution: `app`, `version`, `manifest`, `docs` and `help`.
 
+For text-file bytes, `package require machteld::encoding 1.0` exposes
+`::machteld::encoding::detect $bytes`. Supply a bytearray, such as the
+result of `read` on a binary channel. The dictionary contains `status`,
+`encoding`, `confidence` and `samplebytes`. A `match` supplies an ICU
+encoding label and its estimate from 1 to 100. Empty or printable ASCII
+samples can have many source encodings and return `nomatch`. Other samples
+for which the detector finds no match also return `nomatch`. When Windows
+does not provide the required ICU entry points, detection returns
+`unavailable`. Both results carry an empty label and zero confidence.
+The detector examines up to the first 1 MiB and preserves the supplied bytes.
+Applications choose their confidence threshold and Tcl decoder.
+
 The complete Tcl 9 and Tk 9 references are separate scopes in the embedded
 reference pack. Search for an exact Tcl command such as `tcl/command/dict` when
 the language itself, rather than the Machteld palette, is the subject. Upstream

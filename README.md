@@ -247,5 +247,6 @@ Bundled material retains its own terms, including the verbatim
 [yyjson](licenses/yyjson-0.12.0.txt) and [xxHash](licenses/xxHash-0.8.3.txt) notices. The foreign-function interface includes
 [cffi](licenses/cffi-2.0.3.txt), [Tclh](licenses/tclh-6afd306.txt) and
 [libffi](licenses/libffi-3.5.2.txt). The statically linked SQLite
-amalgamation is public domain. JSONTestSuite is test-only and retains
+amalgamation is public domain. The encoding detector includes code from
+Els under its [MIT license](licenses/Els-MIT.txt). JSONTestSuite is test-only and retains
 [its own license](test/jsontestsuite/LICENSE).
