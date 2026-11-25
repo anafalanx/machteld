@@ -94,7 +94,7 @@ check {all documented README examples are covered} [expr {
     [lsort [dict keys $examples]] eq {app archive direct docs supervise supervised}}]
 
 # File links are checked in authored sources, not the immutable release corpus.
-# The present authored inline links have no local fragments or escaped targets.
+# A local section link must also resolve in the packaged reference.
 # A link must name a file every clone has: one inside the repository and
 # outside the root folders .gitignore ignores (/dist/, /out/ and the like),
 # which only the machine that filled them has. Existence alone is not enough:
@@ -118,20 +118,28 @@ set pages [concat [glob -directory $ROOT *.md] \
 foreach page $pages {
     foreach {whole target} [regexp -all -inline {\]\(([^)]+)\)} [read_text $page]] {
         if {[regexp {^[a-zA-Z][a-zA-Z0-9+.-]*:} $target]} { continue }
-        if {[string first # $target] >= 0 || [string first % $target] >= 0} {
-            error "extend link checker for fragment/escaped target in $page: $target"
+        if {[string first % $target] >= 0} {
+            error "extend link checker for escaped target in $page: $target"
         }
-        set problem [clone_problem $page $target]
+        lassign [split $target #] linkPath fragment
+        set fileTarget [expr {$linkPath eq "" ? [file tail $page] : $linkPath}]
+        set problem [clone_problem $page $fileTarget]
         if {$problem ne {}} { puts "     $target: $problem" }
         check "local link in [file tail $page]: $target" [expr {$problem eq {}}]
+        if {$fragment ne {} && $problem eq {}} {
+            set destination [file join [file dirname $page] $fileTarget]
+            set hasId [regexp -line {^id: ([a-z0-9/-]+)\r?$} [read_text $destination] -> docId]
+            check "packaged section resolves: $target" [expr {$hasId &&
+                ![catch {docs get $docId -section $fragment -limit 1}]}]
+        }
         # Embedded guides cannot link to checkout-only files. Match the
         # generator's supported authored-link shapes before a slow refresh.
         set relative [string range $page [expr {[string length $ROOT] + 1}] end]
-        if {[string match docs/* $relative]} {
+        if {[string match docs/* $relative] && $linkPath ne {}} {
             if {[file dirname $page] eq [file join $ROOT docs]} {
-                set supported [regexp {^(?:[a-z0-9-]+\.md|reference/machteld/(?:index|agent)\.md|reference/machteld/command/[a-z0-9-]+\.md)$} $target]
+                set supported [regexp {^(?:[a-z0-9-]+\.md|reference/machteld/(?:index|agent)\.md|reference/machteld/command/[a-z0-9-]+\.md)$} $linkPath]
             } else {
-                set supported [regexp {^(?:command/[a-z0-9-]+\.md|(?:index|agent)\.md)$} $target]
+                set supported [regexp {^(?:command/[a-z0-9-]+\.md|(?:index|agent)\.md)$} $linkPath]
             }
             check "embedded link has a stable reference mapping: $target" $supported
         }
