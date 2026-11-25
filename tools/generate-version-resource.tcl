@@ -63,6 +63,10 @@ file mkdir [file dirname [file normalize $output]]
 set channel [open $output w]
 fconfigure $channel -encoding utf-8 -translation lf
 try {
+    if {$kind eq "console"} {
+        set manifest [file join [file dirname [file normalize $header]] machteld.manifest]
+        puts $channel "1 24 \"$manifest\""
+    }
     puts $channel "1 VERSIONINFO"
     puts $channel " FILEVERSION $fixed"
     puts $channel " PRODUCTVERSION $fixed"

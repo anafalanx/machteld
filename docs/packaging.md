@@ -80,6 +80,13 @@ The archive can use Tk and the
 host's installed packages. Changes to application data belong in a writable
 native file.
 
+For a desktop shortcut set the target to the runtime and pass the quoted
+archive path as its first argument. The Windows console subsystem lets a
+foreground terminal wait for exit and keeps redirected input and output
+usable. The embedded detached console policy tells Explorer to launch the
+same executable without allocating a console window.
+[Windows console allocation policy](https://learn.microsoft.com/en-us/windows/console/console-allocation-policy)
+
 In the entry, `$argv0` is the absolute native pathname of the archive,
 `[info script]` names the mounted entry, and `$argv` contains the
 arguments after the archive name. The working directory is the caller's.

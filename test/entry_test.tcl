@@ -273,6 +273,7 @@ vwait ::machteld_crash_fixture_forever
 
 proc ::et::entryTests {versionRe version} {
     variable work
+    variable runtime
     set accepted [file join $work accepted.program]
     writeText $accepted [join {
         {#!/usr/bin/env machteld}
@@ -336,6 +337,38 @@ proc ::et::entryTests {versionRe version} {
     writeText $exitProgram "package require machteld\nexit 7\n"
     set result [host $exitProgram]
     check "direct opted-in exit status survives process cleanup" [expr {[dict get $result exit] == 7}] [dict get $result text]
+
+    # Use the Windows shell's normal foreground and redirection paths. The
+    # named files are relative to its private cwd and the image is quoted.
+    writeText [file join $work redirected.tcl] {package require machteld
+after 100
+puts "[gets stdin]|[lindex $argv 0]"
+puts stderr done
+exit 37
+}
+    writeText [file join $work input.txt] "input from disk\n"
+    writeText [file join $work foreground.cmd] [join {
+        {@echo off}
+        {"%ENTRY_TEST_EXE%" redirected.tcl "two words" < input.txt > output.txt 2> errors.txt}
+        {exit /b %errorlevel%}
+    } "\r\n"]
+    set shell [file join $::env(SystemRoot) System32 cmd.exe]
+    set previousDir [pwd]
+    set hadExe [info exists ::env(ENTRY_TEST_EXE)]
+    if {$hadExe} { set previousExe $::env(ENTRY_TEST_EXE) }
+    try {
+        cd $work
+        set ::env(ENTRY_TEST_EXE) [file nativename $runtime]
+        catch {exec $shell /d /c foreground.cmd} message options
+    } finally {
+        cd $previousDir
+        if {$hadExe} { set ::env(ENTRY_TEST_EXE) $previousExe } else { unset ::env(ENTRY_TEST_EXE) }
+    }
+    check "Windows shell waits for the console host and preserves redirected streams, arguments and exit status" \
+        [expr {[dict exists $options -errorcode] && [lindex [dict get $options -errorcode] 0] eq "CHILDSTATUS" &&
+            [lindex [dict get $options -errorcode] 2] == 37 &&
+            [string trimright [readText [file join $work output.txt]] "\r\n"] eq "input from disk|two words" &&
+            [string trimright [readText [file join $work errors.txt]] "\r\n"] eq "done"}] $message
 
     set bom [file join $work bom-crlf.tcl]
     writeBytes $bom "\xEF\xBB\xBFpackage require machteld\r\nputs ENTRY-BOM-OK\r\n"

@@ -1,6 +1,7 @@
 .gitattributes text eol=lf
 *.c text eol=lf
 *.h text eol=lf
+*.manifest text eol=lf
 *.json text eol=lf
 *.tcl text eol=lf
 *.md text eol=lf

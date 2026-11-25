@@ -162,10 +162,23 @@ proc ::machteld::build::stage_prelude {root manifest output} {
 proc ::machteld::build::link_host {gcc strip subsystem mainobj resobj objects sqliteobj yyjsonobj paths output} {
     variable SYSLIBS
     set flags [list -municode -static-libgcc -Wl,--gc-sections]
-    if {$subsystem eq "gui"} { lappend flags -mwindows }
-    run $gcc {*}$flags $mainobj $resobj {*}$objects $sqliteobj $yyjsonobj \
-        [dict get $paths cffilib] [dict get $paths ffilib] \
-        [dict get $paths tklib] [dict get $paths tcllib] [dict get $paths tclstub] \
-        {*}$SYSLIBS -o $output
+    # GCC supplies default-manifest.o through its Win64 specs. Select our
+    # compiled VERSIONINFO and RT_MANIFEST in that slot exactly once.
+    set override [file tempdir]
+    try {
+        set manifestObject [file join $override default-manifest.o]
+        file copy $resobj $manifestObject
+        lappend flags "-B$override/"
+        set selected [exec $gcc "-B$override/" -print-file-name=default-manifest.o]
+        if {![string equal -nocase [file normalize [string trim $selected]] [file normalize $manifestObject]]} {
+            error "GCC did not select the Machteld application manifest"
+        }
+        run $gcc {*}$flags $mainobj {*}$objects $sqliteobj $yyjsonobj \
+            [dict get $paths cffilib] [dict get $paths ffilib] \
+            [dict get $paths tklib] [dict get $paths tcllib] [dict get $paths tclstub] \
+            {*}$SYSLIBS -o $output
+    } finally {
+        file delete -force $override
+    }
     if {$strip ne "" && [file exists $strip]} { run $strip $output }
 }

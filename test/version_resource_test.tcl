@@ -41,9 +41,20 @@ proc ::vr::checkResource {label path description internalName originalFilename v
     # Tcl nor the runtime can read that attribute (commentary.md, its entry of
     # 2026-10-28 on porting the runtime's tests).
     set data [bytes $path]
-    set digest [hash sum sha256 [resource $data 24 1]]
-    check "$label carries the locked Windows application manifest (RT_MANIFEST #1)" \
-        [expr {$digest eq $manifestSha256}] "SHA-256=$digest"
+    set manifest [resource $data 24 1]
+    if {$internalName eq "machteld"} {
+        variable root
+        set peHeader [::pe::u32 $data 0x3c]
+        check "$label keeps the Windows console subsystem" \
+            [expr {[::pe::u16 $data [expr {$peHeader + 24 + 68}]] == 3}]
+        check "$label embeds the authored detached-console manifest" \
+            [expr {$manifest eq [bytes [file join $root src machteld.manifest]] &&
+                [string match {*consoleAllocationPolicy*2024/WindowsSettings">detached</consoleAllocationPolicy>*} $manifest]}]
+    } else {
+        set digest [hash sum sha256 $manifest]
+        check "$label carries the locked Windows application manifest (RT_MANIFEST #1)" \
+            [expr {$digest eq $manifestSha256}] "SHA-256=$digest"
+    }
     if {[catch {parse [resource $data 16]} info]} {
         check "$label carries a VERSIONINFO resource" 0 $info
         return

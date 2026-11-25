@@ -140,6 +140,7 @@ proc resource_candidate {kind candidate} {
 proc version_resource {kind obj} {
     set spec [dict create files [list [Rp src machteld.h] [Rp tools generate-version-resource.tcl] \
         [Rp tools buildlib.tcl] $::TCLSH] values [list $kind $::TOOLCHAIN_KEY $::BUILD_ENV]]
+    if {$kind eq "console"} { dict lappend spec files [Rp src machteld.manifest] }
     return [::machteld::devcache::ensure $obj.record $spec $obj [list resource_candidate $kind]]
 }
 
