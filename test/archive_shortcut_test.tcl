@@ -4,6 +4,14 @@ proc check {label condition} {
     if {!$condition} {error "FAIL $label"}
     puts "ok   $label"
 }
+proc samePath {actual expected} {
+    set a [canon $actual]
+    set b [canon $expected]
+    # The shell may expand an 8.3 component in the caller's TEMP directory.
+    # Compare both the final pathname and the opened object's identity.
+    expr {[string equal -nocase [dict get $a path] [dict get $b path]] &&
+        [dict get $a volume] eq [dict get $b volume] && [dict get $a file] eq [dict get $b file]}
+}
 if {![info exists env(MACHTELD_TEST_EXPECT_DESKTOP)] ||
         ![string match MachteldDesktopTest-* $env(MACHTELD_TEST_EXPECT_DESKTOP)] || [llength $argv] != 1} {
     error {run archive_shortcut_test.tcl on the isolated desktop with the window fixture}
@@ -15,6 +23,8 @@ try {
     file mkdir $install $cwd
     set exe [file join $install machteld.exe]
     file copy -- [info nameofexecutable] $exe
+    check "path comparison distinguishes the original executable and the two directories" [expr {
+        ![samePath $exe [info nameofexecutable]] && ![samePath $install $cwd]}]
     set archive [file join $install {example app.machteld}]
     set entry [file join [file dirname [info script]] fixtures shortcut_app.tcl]
     set built [run -timeout 30s -- [info nameofexecutable] pack $entry -o $archive]
@@ -37,9 +47,9 @@ try {
     try {set result [encoding convertfrom -profile strict utf-8 [read $f]]} finally {close $f}
     if {![dict get $result ok]} {error [dict get $result message]}
     check "the selected archive on the relocated host received the original arguments" [expr {
-        [dict get $result mounted] && [dict get $result archive] eq $archive &&
-        [dict get $result executable] eq $exe && [dict get $result args] eq $words}]
-    check "the shortcut preserves its independent working directory" [expr {[dict get $result workingDirectory] eq $cwd}]
+        [dict get $result mounted] && [samePath [dict get $result archive] $archive] &&
+        [samePath [dict get $result executable] $exe] && [dict get $result args] eq $words}]
+    check "the shortcut preserves its independent working directory" [samePath [dict get $result workingDirectory] $cwd]
     check "Tk starts on the requested private desktop" [expr {[dict get $result tk] && [dict get $result desktop] eq $expected}]
     check "the shortcut target has no attached console at application entry" [expr {[dict get $result console] == 0}]
     check "the installed folder contains only the host and archive" [expr {
