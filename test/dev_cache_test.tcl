@@ -77,6 +77,47 @@ proc fixture_tree_fail {candidate} {
     error "deliberate directory generation failure"
 }
 
+proc wait_for_marker {path} {
+    set deadline [expr {[clock milliseconds] + 15000}]
+    while {![file exists $path]} {
+        if {[clock milliseconds] >= $deadline} { error "timed out waiting for $path" }
+        after 10
+    }
+}
+
+# Pause after a contender reads the stale marker but before it acts on it.
+proc pause_stale_reader {prefix command code result operation} {
+    if {$code == 0 && $result && ![file exists $prefix.ready]} {
+        write_bytes $prefix.ready observed
+        wait_for_marker $prefix.go
+    }
+}
+proc resume_on_unlink {lockFile prefix command operation} {
+    if {[lindex $command 1] eq "delete" && [lindex $command end] eq $lockFile &&
+            ![file exists $prefix.go]} {
+        write_bytes $prefix.go resume
+        wait_for_marker $prefix.done
+    }
+}
+proc unavailable_process_snapshot {command operation} {
+    return -code error -errorcode {MACHTELD MTPS oserror} "process snapshot unavailable"
+}
+if {[lindex $argv 0] eq "--stale-reader"} {
+    lassign [lrange $argv 1 end] lockFile prefix hold
+    trace add execution ::machteld::devcache::stale leave [list pause_stale_reader $prefix]
+    if {[catch {::machteld::devcache::lock $lockFile} message]} {
+        write_bytes $prefix.result "REFUSED $message"
+        write_bytes $prefix.done completed
+    } else {
+        try {
+            write_bytes $prefix.result ACQUIRED
+            write_bytes $prefix.done completed
+            if {$hold} { wait_for_marker $prefix.finish }
+        } finally { ::machteld::devcache::unlock $lockFile }
+    }
+    exit 0
+}
+
 # A subprocess is killed while ensure's real generation callback is active.
 # This verifies the old publication/record survive an actual process interruption.
 if {[lindex $argv 0] eq "--interrupt"} {
@@ -181,6 +222,18 @@ close $marker
 set work [file normalize "${claim}.d"]
 file mkdir $work
 try {
+    set ::boot::cache [file join $work {deps[ab]}]
+    foreach child [list [file join $work {deps[ab]} source] \
+            [file join $work {DEPS[AB]} temp .. source]] {
+        check "bootstrap accepts literal cache descendant [file tail $child]" \
+            [expr {![catch {::boot::assertUnderCache $child}]}]
+    }
+    foreach outside [list $::boot::cache [file join $work depsa source] \
+            [file join $work {deps[ab]2} source] [file join $::boot::cache .. escape]] {
+        check "bootstrap refuses non-descendant $outside" \
+            [catch {::boot::assertUnderCache $outside}]
+    }
+    unset ::boot::cache
     check {text digest is the exact lowercase SHA-256 of the UTF-8 bytes} \
         [expr {[::machteld::devcache::text_digest ""] eq \
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" &&
@@ -387,7 +440,7 @@ try {
     check {malformed outputs list in a directory record is a cache miss} \
         [expr {!$badRecordFailed && $builds == $count + 1}] $message
 
-    # The production lock is a file naming its holder's process and start time.
+    # Killing the holder must also release the Windows handle guarding the name.
     # Killing its owner must make the lock it leaves behind reusable; a mere
     # leftover filename must not deadlock.
     set cleanRoot [file join $work clean-fixture]
@@ -431,6 +484,59 @@ try {
     set reacquired [expr {![catch {::machteld::devcache::lock $lockFile} message]}]
     check {an old lock file that names no holder is taken over} $reacquired $message
     if {$reacquired} { ::machteld::devcache::unlock $lockFile }
+    write_bytes $lockFile [list [pid] [dict get [::machteld::mtps info [pid]] started]]
+    check {a live legacy PID and start-time marker is respected} \
+        [catch {::machteld::devcache::lock $lockFile}]
+    trace add execution ::machteld::mtps enter unavailable_process_snapshot
+    try {
+        check {an unavailable process snapshot cannot retire a live legacy holder} \
+            [expr {![::machteld::devcache::stale $lockFile]}]
+    } finally { trace remove execution ::machteld::mtps enter unavailable_process_snapshot }
+    write_bytes $lockFile [list [pid] 0]
+    set contenders {}
+    set acquired 0
+    try {
+        foreach tag {first second release} {
+            set prefix [file join $work $tag]
+            set command [list [info nameofexecutable] [file normalize [info script]] \
+                --stale-reader $lockFile $prefix [expr {$tag eq "release"}]]
+            dict set contenders $prefix [open |$command r]
+        }
+        foreach prefix [dict keys $contenders] { wait_for_marker $prefix.ready }
+        ::machteld::devcache::lock $lockFile
+        set acquired 1
+        set owner [read_bytes $lockFile]
+        check {a legacy reader recognizes the guarded holder by PID and start time} \
+            [expr {$owner eq [list [pid] [dict get [::machteld::mtps info [pid]] started]]}]
+        foreach tag {first second} {
+            set prefix [file join $work $tag]
+            write_bytes $prefix.go resume
+            wait_for_marker $prefix.done
+            set answer [read_bytes $prefix.result]
+            check {a contender that observed the old marker cannot take the successor's lock} \
+                [string match {REFUSED *} $answer] $answer
+        }
+        check {the successor still owns its original lock after both stale contenders finish} \
+            [expr {[file exists $lockFile] && [read_bytes $lockFile] eq $owner}]
+        set prefix [file join $work release]
+        set handoff [list resume_on_unlink $lockFile $prefix]
+        trace add execution ::file enter $handoff
+        try { ::machteld::devcache::unlock $lockFile } finally {
+            trace remove execution ::file enter $handoff
+        }
+        set acquired 0
+        check {unlock preserves a successor that wins between marker verification and unlink} \
+            [expr {[read_bytes $prefix.result] eq "ACQUIRED" &&
+                [file isfile $lockFile] && [read_bytes $lockFile] ne $owner &&
+                [catch {::machteld::devcache::lock $lockFile}]}]
+    } finally {
+        dict for {prefix pipe} $contenders {
+            write_bytes $prefix.go resume
+            write_bytes $prefix.finish finish
+            catch {close $pipe}
+        }
+        if {$acquired} { ::machteld::devcache::unlock $lockFile }
+    }
     ::machteld::devcache::clean $cleanRoot
     check {uncontended clean removes fixtures and its own lock file} \
         [expr {[glob -tails -nocomplain -directory $cleanRoot *] eq {} && \

@@ -597,6 +597,14 @@ to the shared executable. Applications supply system-wide hotkeys. The
 independently installable runtime and the application archive replace
 executable-producing `wrap` for new delivery.
 
+For 0.30 the release gate tests an invocation-owned candidate and promotes
+it to `out/machteld.exe` only after every selected step passes (B11).
+The bootstrap checks cache containment using the literal Windows path (B9).
+The development build keeps the cache lock open throughout its critical
+section, including publication, so a stale-lock contender cannot displace
+a live owner (B17). The signed 0.21 driver exercises failed promotion,
+bracketed cache paths, and competing lock owners.
+
 ## 7. Log
 
 <!-- machteld-version-history: begin -->

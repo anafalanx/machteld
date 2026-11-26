@@ -10,8 +10,9 @@
 # holder still runs. No process is started beside the build for this.
 namespace eval ::machteld::devcache {
     variable directory [file dirname [file normalize [info script]]]
-    # The locks this process holds: normalized path -> the holder it wrote.
-    variable locks {}
+    # Keep the guarding channel and its PID/start marker until unlock.
+    variable locks
+    if {![info exists locks]} { set locks {} }
     # Publication attempts, 500 ms apart: 20 s outlasts the virus scanner's
     # hold on a file just written, as tools/bootstrap.tcl's renames do.
     variable publishAttempts 40
@@ -169,35 +170,43 @@ proc ::machteld::devcache::toolchain_digest {root} {
 
 # ---- the build lock ----
 
-# The lock is a file made exclusively that names its holder's process ID and
-# start time. machteld 0.21 offers no lock that Windows releases when its
-# holder ends, so a lock whose holder no longer runs (or whose ID now belongs
-# to another process) is stale and is taken over. A held lock is refused at
-# once: two builds never share one development cache.
+# On Windows Tcl opens regular files without FILE_SHARE_DELETE. Keep the
+# exclusive creator's channel open so even a contender that already examined
+# an older stale marker cannot unlink its successor. Windows closes the
+# channel if the owner crashes, and the next claimant can remove the marker.
 proc ::machteld::devcache::lock {path} {
     variable locks
     set path [file normalize $path]
     if {[dict exists $locks $path]} { error "lock is already held by this process: $path" }
-    set me "[pid] [dict get [::machteld::mtps info [pid]] started]"
+    set me [list [pid] [dict get [::machteld::mtps info [pid]] started]]
     file mkdir [file dirname $path]
     for {set attempt 0} {$attempt < 3} {incr attempt} {
         if {![catch {open $path {WRONLY CREAT EXCL}} channel options]} {
-            try { puts -nonewline $channel $me } finally { close $channel }
-            dict set locks $path $me
+            try {
+                puts -nonewline $channel $me
+                flush $channel
+            } on error {message options} {
+                close $channel
+                return -options $options $message
+            }
+            dict set locks $path [list $channel $me]
             return locked
         }
         if {[lrange [dict get $options -errorcode] 0 1] ne {POSIX EEXIST}} {
             return -options $options $channel
         }
         if {![stale $path]} { error "lock is held by a running process: $path" }
-        catch {file delete $path}
+        if {[catch {file delete -- $path} message]} {
+            error "lock is held or cannot be removed: $path ($message)"
+        }
     }
     error "cannot take over the stale lock: $path"
 }
 
-# Whether the lock file's holder has gone. A file just made and not yet
-# written names nobody for a moment; only an old one that names nobody is stale.
+# Older builds wrote the same PID/start pair, then closed the file. Respect a
+# live legacy holder and allow time for an empty legacy marker to be written.
 proc ::machteld::devcache::stale {path} {
+    if {[catch {file lstat $path stat}] || $stat(type) ne "file"} { return 0 }
     if {[catch {
         set channel [open $path rb]
         try { set holder [read $channel 256] } finally { close $channel }
@@ -206,23 +215,35 @@ proc ::machteld::devcache::stale {path} {
         return [expr {[catch {file mtime $path} when] == 0 && [clock seconds] - $when > 10}]
     }
     lassign $holder id started
-    if {[catch {::machteld::mtps info $id} row]} { return 1 }
-    return [expr {[dict get $row started] ne $started}]
+    if {[catch {::machteld::mtps info $id} row options]} {
+        return [expr {[dict get $options -errorcode] in {
+            {MACHTELD MTPS notfound} {MACHTELD MTPS badvalue}
+        }}]
+    }
+    set actual [dict get $row started]
+    return [expr {$actual ne "" && $started ne "" && $actual ne $started}]
 }
 
-# Releases a lock this process holds; the file goes only while it still names
-# this holder.
+# A new owner may win immediately after close. Its channel protects it even
+# if the name changes between our marker check and the deletion.
 proc ::machteld::devcache::unlock {path} {
     variable locks
     set path [file normalize $path]
     if {![dict exists $locks $path]} { error "lock is not held by this process: $path" }
-    set me [dict get $locks $path]
+    lassign [dict get $locks $path] guard me
     dict unset locks $path
-    if {![catch {
-        set channel [open $path rb]
+    close $guard
+    # Preserve the live PID/start until deletion, including across brief
+    # sharing violations from another build reading the ownership marker.
+    for {set attempt 0} {$attempt < 20} {incr attempt} {
+        try { set channel [open $path rb] } trap {POSIX ENOENT} {} { break }
         try { set holder [read $channel 256] } finally { close $channel }
-    }] && $holder eq $me} {
-        file delete $path
+        if {$holder ne $me} { break }
+        if {![catch {file delete -- $path} message options]} { break }
+        if {$attempt == 19 || [lrange [dict get $options -errorcode] 0 1] ne {POSIX EACCES}} {
+            return -options $options $message
+        }
+        after 10
     }
     return unlocked
 }

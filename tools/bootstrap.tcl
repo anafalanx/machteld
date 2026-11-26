@@ -87,7 +87,10 @@ proc ::boot::renameWaiting {from to} {
 proc ::boot::assertUnderCache {path} {
     variable cache
     set resolved [file normalize $path]
-    if {![string match -nocase "[string trimright $cache /]/*" $resolved]} {
+    set prefix "[string trimright [file normalize $cache] /]/"
+    set length [string length $prefix]
+    if {[string length $resolved] <= $length ||
+            ![string equal -nocase -length $length $prefix $resolved]} {
         fail "refusing path outside dependency cache: [file nativename $resolved]"
     }
 }
