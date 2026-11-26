@@ -25,6 +25,10 @@ watched. `read -timeout` waits for the first available state and defaults to an
 immediate poll. `read -raw` preserves the OS event sequence; default mode
 coalesces one read batch deterministically.
 
+Windows can deliver the old and new names of a rename in separate reads.
+In that case the later event can have no `from` field. Consumers maintaining
+a catalog can recheck the affected directory when a rename has no partner.
+
 ## Results
 
 `start` returns `watch#...`. `read` returns event dicts containing `path` and

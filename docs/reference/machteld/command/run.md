@@ -85,6 +85,11 @@ use `child start -channels` and bounded channel-event callbacks instead of `run`
 The deadline can terminate the tree while a callback is running, but it cannot
 interrupt that Tcl callback or bound cleanup time.
 
+Captured output finishes when the last writer closes the pipe. Keep its writers
+inside the supervised tree. If an independent process holds one open after the
+tree exits, the call can still be waiting for the end of the stream. Use
+`run -inherit` when the caller has no need to collect the output.
+
 ## Examples
 
 ```tcl

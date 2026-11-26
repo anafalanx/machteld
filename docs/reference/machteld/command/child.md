@@ -106,6 +106,10 @@ no deadline or resource cap, captured output, and stdin connected to `NUL`.
 `-channels` creates binary Tcl channels; otherwise output capture is bounded to
 1 MiB per stream.
 
+With captured output, cleanup waits for the last pipe writer to close. An
+independent process holding a writer can extend that wait beyond the supervised
+tree's lifetime. Keep capture handles within the tree when designing a helper.
+
 `-console default` (the default) uses ordinary Windows console attachment.
 `-console none` starts the target without attaching or allocating a console.
 Windows calls this creation mode `DETACHED_PROCESS`. Use it for a console
