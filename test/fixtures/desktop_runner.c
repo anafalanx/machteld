@@ -17,6 +17,15 @@ static HANDLE inherit_stream(DWORD stream, DWORD access) {
 }
 
 int wmain(int argc, wchar_t **argv) {
+    DWORD timeout = 90000;
+    if (argc > 2 && !wcscmp(argv[1], L"--timeout-seconds")) {
+        wchar_t *end;
+        unsigned long seconds = wcstoul(argv[2], &end, 10);
+        if (*end || seconds < 1 || seconds > 300) return 2;
+        timeout = seconds * 1000;
+        argc -= 2;
+        argv += 2;
+    }
     if (argc < 3 || argc > 5) return 2;
     /* All dynamic arguments are Windows file paths. A valid file name cannot
      * contain a quote or end in a directory separator. */
@@ -89,7 +98,7 @@ int wmain(int argc, wchar_t **argv) {
     if (!CreateProcessW(argv[1], line, NULL, NULL, TRUE, EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS,
             NULL, NULL, &startup.StartupInfo, &process)) goto failed;
     step = "private host exit";
-    DWORD wait = WaitForSingleObject(process.hProcess, 90000), code;
+    DWORD wait = WaitForSingleObject(process.hProcess, timeout), code;
     if (wait == WAIT_TIMEOUT) {
         error = WAIT_TIMEOUT;
         goto failed;

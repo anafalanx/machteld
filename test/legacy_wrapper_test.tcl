@@ -50,19 +50,14 @@ puts [list [package provide machteld] $argv]}} finally {close $f}
             ![regexp -line {^docs-corpus:[0-9a-f]{64}$} $marker]} {
         error "relocated archive did not receive runtime libraries and help: $marker"
     }
-    if {[dict exists [manifest] wrap] || [llength [info commands ::machteld::wrap]]} {
-        error "the shared runtime advertises wrap"
-    }
-    set result [run -dir $work -- $runtime wrap absent.tcl -o unexpected.exe]
-    if {[dict get $result exit] == 0 || [file exists [file join $work unexpected.exe]]} {
-        error "the retired CLI unexpectedly produced an executable"
-    }
     zipfs mount $runtime verifyDelivered
     try {
-        if {[file exists //zipfs:/verifyDelivered/basekit]} {error "runtime still carries embedded executable templates"}
+        if {[glob -tails -directory //zipfs:/verifyDelivered/basekit *] ne "app.exe"} {
+            error "expected a single standalone application host template"
+        }
         foreach item {reference/reference.db licenses/Apache-2.0.txt licenses/Tk-logo-9.0.4.txt tcl_library/init.tcl tk_library/tk.tcl} {
             if {![file isfile //zipfs:/verifyDelivered/$item]} {error "missing runtime member: $item"}
         }
     } finally {zipfs unmount verifyDelivered}
 } finally {file delete -force -- $work}
-puts "Legacy executable, retired command and shared runtime contents verified."
+puts "Legacy executable, shared archive and runtime contents verified."

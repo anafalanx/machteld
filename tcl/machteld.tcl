@@ -455,7 +455,7 @@ proc ::machteld::_pack_data_dict {text label} {
     return [dict create {*}$text]
 }
 
-proc ::machteld::_pack_manifest {path} {
+proc ::machteld::_pack_manifest {path {defaultEntry ""}} {
     if {[file isfile $path] && [file size $path] > 1048576} { Fail PACK badvalue "pack: manifest exceeds 1 MiB" }
     set snapshot [_pack_snapshot $path]
     if {[dict get $snapshot bytes] > 1048576} { Fail PACK badvalue "pack: manifest exceeds 1 MiB" }
@@ -472,7 +472,7 @@ proc ::machteld::_pack_manifest {path} {
     if {[string index $text 0] eq "\ufeff"} { set text [string range $text 1 end] }
     set data [_pack_data_dict $text manifest]
     foreach key [dict keys $data] {
-        if {$key ni {schema entry files}} { Fail PACK badvalue "pack: unknown manifest key $key" }
+        if {$key ni {schema entry files metadata}} { Fail PACK badvalue "pack: unknown manifest key $key" }
     }
     if {![dict exists $data schema] || [dict get $data schema] ne "1" || ![dict exists $data files]} {
         Fail PACK badvalue "pack: manifest requires schema 1 and an explicit files list"
@@ -480,8 +480,21 @@ proc ::machteld::_pack_manifest {path} {
     if {[catch {llength [dict get $data files]} count] || $count < 1 || $count > 10000} {
         Fail PACK badvalue "pack: manifest files must list between 1 and 10000 files"
     }
-    if {![dict exists $data entry]} { Fail PACK badvalue "pack: project manifest needs an entry" }
-    return [dict create entry [_pack_relative [dict get $data entry]] files [dict get $data files] snapshot $snapshot]
+    if {![dict exists $data entry]} {
+        if {$defaultEntry eq ""} { Fail PACK badvalue "pack: project manifest needs an entry" }
+        dict set data entry $defaultEntry
+    }
+    set metadata {}
+    if {[dict exists $data metadata]} {
+        set metadata [_pack_data_dict [dict get $data metadata] metadata]
+        foreach key [dict keys $metadata] {
+            if {$key ni {name version description author publisher copyright icon}} {
+                Fail PACK badvalue "pack: unknown application metadata key $key"
+            }
+        }
+    }
+    return [dict create entry [_pack_relative [dict get $data entry]] files [dict get $data files] \
+        metadata $metadata snapshot $snapshot]
 }
 
 proc ::machteld::_pack_check_tree {sourceRoot} {
@@ -573,11 +586,17 @@ proc ::machteld::_pack_archive_inventory {root} {
     return $inventory
 }
 
-proc ::machteld::_pack_verify_candidate {candidate inventory {entry {}}} {
+proc ::machteld::_pack_verify_candidate {candidate inventory {entry {}} {appRoot {}}} {
     set mount "machteld-pack-[binary encode hex [hash random 16]]"
     zipfs mount $candidate $mount
     try {
-        if {$entry ne ""} { ::machteld::EntryCheck [file join //zipfs:/$mount $entry] }
+        if {$entry ne ""} {
+            set entryPath [file join //zipfs:/$mount $entry]
+            if {$appRoot ne "" && [ArchiveEntry [file join //zipfs:/$mount $appRoot]] ne $entryPath} {
+                Fail PACK badvalue "pack: candidate inventory selects a different entry"
+            }
+            EntryCheck $entryPath
+        }
         set actual [_pack_archive_inventory //zipfs:/$mount]
         if {[lsort [dict keys $actual]] ne [lsort [dict keys $inventory]]} {
             Fail PACK badvalue "pack: candidate archive inventory differs from staging"
@@ -625,7 +644,7 @@ proc ::machteld::_pack_destination {out sourceCanon entryCanon single} {
 
 # Read the pinned generation mounted by the native entry gate. The file list
 # is inert data. Verify every mounted member before returning the entry path.
-proc ::machteld::ArchiveEntry {root {countVar ""}} {
+proc ::machteld::ArchiveEntry {root {countVar ""} {inventoryVar ""}} {
     set indexName machteld-inventory.dict
     set index [file join $root $indexName]
     if {![file isfile $index]} {
@@ -659,26 +678,49 @@ proc ::machteld::ArchiveEntry {root {countVar ""}} {
             dict unset files $name
         }
         if {[dict size $files]} { error "missing member: [lindex [dict keys $files] 0]" }
+        if {$inventoryVar ne ""} {upvar 1 $inventoryVar verified; set verified [dict get $record files]}
     } on error {message options} {
         Fail ENTRY inventory "invalid application archive inventory: $message"
     }
     return [file join $root {*}[split $entry /]]
 }
 
-proc ::machteld::_pack_plan {input} {
+proc ::machteld::WithAppArchive {path rootVar script} {
+    upvar 1 $rootVar root
+    set mount "machteld-app-[binary encode hex [hash random 16]]"
+    if {[catch {zipfs mount $path $mount} message]} {Fail ENTRY inventory $message}
+    set root //zipfs:/$mount
+    try {uplevel 1 $script} finally {zipfs unmount $mount}
+}
+
+proc ::machteld::_pack_plan {input {entryOverride ""} {selectionManifest ""}} {
     _pack_no_links $input
     set input [file normalize $input]
     set single [expr {![file isdirectory $input]}]
-    set project [expr {$single && [string equal -nocase [file extension $input] ".dict"] &&
-        [catch {::machteld::EntryCheck $input}]}]
+    if {$single && ($entryOverride ne "" || $selectionManifest ne "")} {
+        Fail PACK usage "pack: --entry and --manifest apply only to directories"
+    }
+    set project [expr {$selectionManifest ne "" || ($single &&
+        [string equal -nocase [file extension $input] ".dict"] && [catch {::machteld::EntryCheck $input}])}]
     set manifestSnapshot {}
-    set entry main.tcl
+    set metadata {}
+    set entry [expr {$entryOverride eq "" ? "main.tcl" : [_pack_relative $entryOverride]}]
     if {$project} {
-        set spec [_pack_manifest $input]
+        if {$selectionManifest eq ""} {
+            set spec [_pack_manifest $input]
+            set sourceRoot [file dirname $input]
+        } else {
+            _pack_no_links $selectionManifest
+            set spec [_pack_manifest [file normalize $selectionManifest] $entry]
+            if {$entryOverride ne "" && $entry ne [dict get $spec entry]} {
+                Fail PACK badvalue "pack: --entry and the manifest entry disagree"
+            }
+            set sourceRoot $input
+        }
         set selected [dict get $spec files]
         set entry [dict get $spec entry]
         set manifestSnapshot [dict get $spec snapshot]
-        set sourceRoot [file dirname $input]
+        set metadata [dict get $spec metadata]
     } elseif {$single} {
         set sourceRoot [file dirname $input]
         set selected [list [file tail $input]]
@@ -686,8 +728,9 @@ proc ::machteld::_pack_plan {input} {
         set sourceRoot $input
         _pack_check_tree $sourceRoot
         set selected [_pack_tree_files $sourceRoot]
-        if {"main.tcl" ni $selected} {
-            Fail PACK notfound "pack: directory must contain a root main.tcl"
+        if {$entry ni $selected} {
+            if {$entryOverride eq ""} {Fail PACK notfound "pack: directory must contain a root main.tcl"}
+            Fail PACK notfound "pack: directory must contain its entry $entry"
         }
     }
     set sourceCanon [canon $sourceRoot]
@@ -712,7 +755,7 @@ proc ::machteld::_pack_plan {input} {
     }
     return [dict create single $single project $project entry $entry entryPath $entryPath \
         selected $selected sourceRoot $sourceRoot sourceCanon $sourceCanon records $records \
-        manifestSnapshot $manifestSnapshot entries $entries inventory $inventory indexBytes $indexBytes]
+        metadata $metadata manifestSnapshot $manifestSnapshot entries $entries inventory $inventory indexBytes $indexBytes]
 }
 
 # CLI-only so Tk retains its global pack geometry manager.

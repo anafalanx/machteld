@@ -1,7 +1,7 @@
 ---
 type: guide
 title: Packaging
-description: Creating and launching application archives on the shared Windows runtime.
+description: Packaging Tcl applications as shared-runtime archives or standalone Windows executables.
 tags: [machteld, pack, zipfs, deployment]
 ---
 
@@ -121,6 +121,14 @@ path in both generations. Use `info script` to locate assets belonging to the
 running version. The same Tcl worker command also works for a loose script. [Application launch](reference/machteld/command/app.md)
 
 ## Distributing an application
+
+For single-file delivery, use `machteld.exe wrap app.dict -o FieldNotes.exe --gui`.
+The same project can supply the shared-runtime archive through
+`machteld.exe pack app.dict -o FieldNotes.machteld`. Select `--console` for
+a terminal program. A standalone application carries its runtime, scripts,
+assets and license notices. The full host provides the offline manuals. The
+app can include its own help among its selected files.
+[Standalone executable options and Windows properties](reference/machteld/command/wrap.md)
 
 A shortcut can point to `machteld.exe` and pass the quoted archive path.
 Put a machine-local database under `[file join [app data local] MyApplication]`.

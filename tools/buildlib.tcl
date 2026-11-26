@@ -43,7 +43,7 @@ set ::machteld::build::SYSLIBS {
 # MetaDefine, and the version every later part reads); the generated manifest
 # is appended last by stage_prelude.
 set ::machteld::build::PRELUDE_PARTS {
-    machteld.tcl docs.tcl inspect.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl hls.tcl
+    machteld.tcl wrap.tcl docs.tcl inspect.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl hls.tcl
 }
 
 proc ::machteld::build::werror {} {
@@ -149,6 +149,11 @@ proc ::machteld::build::version_resource {tclsh windres root rc object} {
     run $tclsh [file join $root tools generate-version-resource.tcl] \
         [file join $root src machteld.h] $rc
     run $windres --codepage=65001 -O coff -i $rc -o $object
+}
+
+proc ::machteld::build::wrapped_resource {windres root object} {
+    run $windres --codepage=65001 -I [file join $root src] -O coff \
+        -i [file join $root src wrapped.rc] -o $object
 }
 
 # Concatenate the prelude parts and the generated manifest, LF-only, into output.

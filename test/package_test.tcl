@@ -137,7 +137,9 @@ proc ::pt::packageTests {} {
     file mkdir [file join $prefix lib tk9.0 images]
     file copy [file join $root licenses Tk-logo-9.0.4.txt] [file join $prefix lib tk9.0 images README]
     set apache [file join $root LICENSE]
-    set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper]
+    set appTemplate [file join $work app-template.exe]
+    writeText $appTemplate "fixture wrapped executable"
+    set common [list --prefix $prefix --prelude $prelude --wrapper $wrapper --app-template $appTemplate]
 
     # A collision in the output directory verifies the packager actually uses
     # a sibling path. Windows may silently ignore the directory of file tempfile.
@@ -158,7 +160,11 @@ proc ::pt::packageTests {} {
     check "existing-output refusal creates no work paths" [noWorkPaths]
 
     set out [file join $work [uniqueName .machteld-build-].exe]
-    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $wrapper \
+    set result [runPackage {*}$common --app-template [file join $work absent.exe] \
+        --licenses $licenses --apache-license $apache --reference $reference --out $out]
+    check "a full host requires the wrapped-app template" \
+        [expr {[refused $result {missing wrapped-app template}] && ![file exists $out] && [noWorkPaths]}] [dict get $result text]
+    set result [runPackage --prefix $prefix --prelude [file join $work missing.tcl] --wrapper $wrapper --app-template $appTemplate \
         --licenses $licenses --apache-license $apache --reference $reference --out $out]
     check "failed packaging does not publish a partial output" \
         [expr {[dict get $result exit] != 0 && ![file exists $out]}] [dict get $result text]
@@ -232,7 +238,7 @@ proc ::pt::packageTests {} {
         [expr {[dict get $result exit] == 0 && [file size $out] > 1048576 &&
                [string range [readBytes $out] 0 1] eq "MZ"}] [dict get $result text]
     check "successful packaging leaves no staging or candidate paths" [noWorkPaths]
-    set problem [validatePackage $out $apache $licenses $reference]
+    set problem [validatePackage $out $apache $licenses $reference $appTemplate]
     check "packaged image carries complete runtime and byte-identical reference payloads" \
         [expr {$problem eq ""}] $problem
 
@@ -258,11 +264,15 @@ proc ::pt::packageTests {} {
 
 # Mounts the image and compares its payload with the sources; returns the
 # first problem, or "" when there is none.
-proc ::pt::validatePackage {image apache licenses reference} {
+proc ::pt::validatePackage {image apache licenses reference appTemplate} {
     set mount package-test-[pid]
     zipfs mount $image $mount
     try {
         set base //zipfs:/$mount
+        if {[glob -tails -directory $base/basekit *] ne "app.exe" ||
+                [readBytes $base/basekit/app.exe] ne [readBytes $appTemplate]} {
+            return "packaged application template differs from its source"
+        }
         foreach relative {
             tcl_library/init.tcl tcl_library/clock.tcl tcl_library/package.tcl tcl_library/tm.tcl
             tcl_library/tclIndex tcl_library/encoding/cp1252.enc tcl_library/msgs/nl.msg

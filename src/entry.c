@@ -703,7 +703,7 @@ AppDataRootCmd(void *client_data, Tcl_Interp *interp, int objc, Tcl_Obj *const o
 }
 
 int
-Machteld_EntryGate(Tcl_Interp *interp)
+Machteld_EntryGate(Tcl_Interp *interp, Tcl_Obj *payload_root)
 {
     /* The packers call the same parser used by direct startup. Keeping this as a
      * private, capitalized command avoids a second grammar-sensitive checker. */
@@ -766,6 +766,10 @@ Machteld_EntryGate(Tcl_Interp *interp)
             !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::PackArchive", 1);
     }
+    if (strcmp(selected, "wrap") == 0 &&
+            !startup_path_is_regular_file(startup)) {
+        dispatch_command(interp, "::machteld::wrap", 1);
+    }
     /* `machteld docs ...` is the readable counterpart of the reserved
      * `--docs` route.  As with `pack`, a real program file named docs wins. */
     if (strcmp(selected, "docs") == 0 &&
@@ -784,9 +788,12 @@ Machteld_EntryGate(Tcl_Interp *interp)
     Tcl_Obj *exe = Tcl_NewStringObj(Tcl_GetNameOfExecutable(), -1);
     Tcl_Obj *prefix = Tcl_NewListObj(1, &exe);
     Tcl_IncrRefCount(prefix);
-    if (host_mode == MACHTELD_HOST_GENERATION ||
+    if (host_mode == MACHTELD_HOST_WRAPPED || host_mode == MACHTELD_HOST_GENERATION ||
             (extension != NULL && _stricmp(extension, ".machteld") == 0)) {
-        if (select_archive_entry(interp, startup, prefix) != TCL_OK) {
+        int status = host_mode == MACHTELD_HOST_WRAPPED ?
+            Machteld_SelectWrappedApp(interp, payload_root, prefix) :
+            select_archive_entry(interp, startup, prefix);
+        if (status != TCL_OK) {
             Machteld_Fatal(interp);
         }
         startup = Tcl_GetStartupScript(NULL);

@@ -20,7 +20,10 @@ The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Build guide](BUILDING.md)
 
 In the 0.30 checkout, one executable runs Tcl scripts and launches
-`.machteld` application archives. Its offline reference covers the shipped
+`.machteld` application archives. To distribute a standalone Windows app,
+`machteld.exe wrap app.dict -o MyApp.exe --gui` embeds the selected app and
+runtime and can set the app's icon and Windows file properties. The full
+host keeps the offline reference. It covers the shipped
 commands and packages and the Tcl/Tk 9.0.4 manuals. Run
 `machteld.exe --help` for the entry points, `machteld.exe --docs search FTS5`
 to find a topic, or `machteld.exe --docs extract DIRECTORY` to export the
@@ -42,6 +45,8 @@ windows and clipboard ownership queries. The exact Beta 1 revision passed
 | Database access | Key/value `store` | `store` and the built-in Tcl `sqlite3` package |
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
+
+In 0.30, the offline manual stays in the full host. Standalone apps can include their own help files and use their own Windows identity. [Standalone packaging](docs/reference/machteld/command/wrap.md)
 
 Before signing 0.30, the build PC and hosted Windows CI must produce
 byte-identical clean unsigned executables from the same revision and

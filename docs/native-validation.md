@@ -44,6 +44,7 @@ public-network and visible-GUI acceptance remain separate opt-ins.
 
 | Boundary | Repeatable check | What it does not prove |
 | --- | --- | --- |
+| Wrapped application resources | The trapped driver stamps disposable copies, validates Windows version fields and icon images, and checks malformed inputs. The packaging tests also read the resources from finished executables. | Visual appearance on the owner's desktop |
 | Authored native code | GCC `-fanalyzer`, warnings as errors, required use-after-free diagnostic canary | Complete path coverage or absence of defects |
 | Command-line construction | Golden vectors, allocation-failure injection, Unicode/CRT round trips, malformed argument checks | Every third-party application's private argument parser |
 | Hash token allocation | Synthetic last-token/exhaustion test under undefined-behavior traps | Exhausting billions of tokens through the public interface |

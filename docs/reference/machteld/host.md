@@ -2,8 +2,8 @@
 id: machteld/application/host
 type: application
 title: Running and packaging Tcl applications
-summary: Run an opted-in Tcl script, start an application archive or build a verified archive for the shared runtime.
-commands: machteld.exe, machteld pack, machteld --help, machteld --version, machteld --docs, machteld --check, machteld --manifest
+summary: Run Tcl scripts and application archives, or build a verified archive or branded Windows executable.
+commands: machteld.exe, machteld pack, machteld wrap, machteld --help, machteld --version, machteld --docs, machteld --check, machteld --manifest
 ---
 
 # Running and packaging Tcl applications
@@ -19,6 +19,7 @@ machteld.exe --manifest command child wait --json
 machteld.exe program.tcl argument ...
 machteld.exe program.machteld argument ...
 machteld.exe pack source -o program.machteld
+machteld.exe wrap app.dict -o Program.exe --gui
 ```
 
 The program receives the arguments after its name in Tcl's `argv` list. An attached interactive terminal can start a prompt by running the host with no program. For batch work, pass a UTF-8 program file. The first command is a literal `package require machteld`, optionally with a literal version requirement or `-exact`. The host rejects redirected program input, `-` and an explicit `-encoding` option. A direct application controls its own command-line options.
@@ -52,7 +53,11 @@ Omit `--json` for a Tcl dict on success and a plain message on failure.
 schema 1 entry ui/start.tcl files {ui/start.tcl ui/views.tcl assets/title.txt}
 ```
 
-A renamed copy such as `notes.exe` runs an opted-in `notes.tcl` next to it when present. The executable selects the sibling independently of the current directory and passes its arguments to that script. A renamed host without a companion retains the usual host command line. `--docs` selects the reserved documentation route on the standard host. The convenience `docs` and `pack` words select a real same-named program file first.
+A renamed copy such as `notes.exe` runs an opted-in `notes.tcl` next to it when present. The executable selects the sibling independently of the current directory and passes its arguments to that script. A renamed host without a companion retains the usual host command line. `--docs` selects the reserved documentation route on the standard host. The convenience `docs`, `pack` and `wrap` words select a real same-named program file first.
+
+## Standalone executables
+
+Use `machteld.exe wrap app.dict -o FieldNotes.exe --gui` for a standalone Windows app. The executable always runs its own verified entry, even if a matching `.tcl` file is beside it. Arguments such as `--help` and `--docs` reach that entry. `app launch` adds an internal generation check when starting another instance. The full host carries the searchable offline manual. Wrapped executables carry their licenses and the app's selected assets.
 
 ## Errors and lifetime
 

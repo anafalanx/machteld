@@ -50,7 +50,8 @@ The palette has four layers:
 
 The shared executable packages an opted-in entry and selected assets with
 `pack`. The same executable runs the archive, supplies its packages and
-provides the offline reference. [Packaging](packaging.md)
+provides the offline reference. For standalone delivery, `wrap` builds an
+executable with the app's own Windows name, version and icon. [Packaging](packaging.md)
 
 The default model is linear and explicitly owned: operations use visible
 deadlines where their command offers one, supervised children and PTYs

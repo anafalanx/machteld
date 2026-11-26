@@ -12,15 +12,12 @@ proc ::machteld::InspectCheck {args} {
         set path $target
         if {[file isfile $input] && [string equal -nocase [file extension $input] ".machteld"]} {
             set kind archive
-            set mount "machteld-check-[binary encode hex [hash random 16]]"
-            if {[catch {zipfs mount $target $mount} message]} { Fail ENTRY inventory $message }
-            try {
-                set root //zipfs:/$mount
+            WithAppArchive $target root {
                 set entryPath [ArchiveEntry $root files]
                 set entry [string range $entryPath [expr {[string length $root] + 1}] end]
                 set path "$target!/$entry"
                 EntryCheck $entryPath -inspect
-            } finally { zipfs unmount $mount }
+            }
         } else {
             set plan [_pack_plan $input]
             set path [dict get $plan entryPath]

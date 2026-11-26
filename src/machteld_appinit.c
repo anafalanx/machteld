@@ -11,6 +11,7 @@ extern int Machteldgraphviz_Init(Tcl_Interp *interp);
 extern int Machteldfiles_Init(Tcl_Interp *interp);
 extern int Machteldnetwork_Init(Tcl_Interp *interp);
 extern int Machteldencoding_Init(Tcl_Interp *interp);
+extern int Machteldresource_Init(Tcl_Interp *interp);
 
 #ifdef MACHTELD_STATIC_SQLITE
 #include "sqlite3.h"
@@ -124,7 +125,10 @@ find_payload_root(Tcl_Interp *interp, Tcl_Obj **root_out)
             return Machteld_EntryError(interp, "payload",
                 "embedded runtime mount path is invalid");
         }
-        if (!is_app || !Tcl_FSEqualPaths(mountv[i + 1], executable)) {
+        int expected_source = Machteld_IsWrappedHost() ?
+            strcmp(Tcl_GetString(mountv[i + 1]), MACHTELD_SNAPSHOT_PATH) == 0 :
+            Tcl_FSEqualPaths(mountv[i + 1], executable);
+        if (!is_app || !expected_source) {
             continue;
         }
         if (*root_out != NULL) {
@@ -250,6 +254,9 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
             "cannot register the trusted payload accessor");
     }
 
+    if (Machteldresource_Init(interp) != TCL_OK ||
+            Tcl_CreateObjCommand(interp, "::machteld::WrapTemplate",
+                Machteld_WrapTemplate, payload_root, NULL) == NULL) return TCL_ERROR;
     Tcl_StaticLibrary(NULL, "Machteldfiles", Machteldfiles_Init, NULL);
     Tcl_StaticLibrary(NULL, "Machteldnetwork", Machteldnetwork_Init, NULL);
     if (Tcl_EvalEx(interp, "package ifneeded machteld::network 1.0 {load {} Machteldnetwork}",
@@ -385,5 +392,5 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
             "cannot retain the embedded machteld prelude path");
     }
     Tcl_DecrRefCount(prelude);
-    return Machteld_EntryGate(interp);
+    return Machteld_EntryGate(interp, payload_root);
 }

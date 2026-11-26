@@ -12,7 +12,9 @@ tags: [machteld, roadmap, windows]
 **The next public release is 0.30, directly after signed 0.21.** On
 2026-11-25 the owner closed 0.22 as an unsigned development milestone.
 The reconciled Beta 1 work supplies the starting point for 0.30.
-The 0.30 runtime runs Tcl scripts and verified application archives.
+The 0.30 runtime runs Tcl scripts and verified application archives. A project
+can also produce a standalone Windows executable with its own application
+name, file and product versions, and icon.
 Existing 0.21 wrapped executables carry their original runtime.
 The runtime includes supervised Tcl jobs, the upstream SQLite binding,
 same-version archive workers, atomic file publication and process-owned
@@ -38,6 +40,12 @@ without launching it and query the installed host's live capabilities.
 Make exact subcommand references and executable recipes discoverable in the
 SQLite manual, and stream machine-readable progress from both test runners.
 These changes require fresh clean-build comparisons and gate receipts.
+
+The owner restored optional standalone delivery for 0.30. Keep the shared
+runtime and `.machteld` path as the standard distribution. Exercise standalone
+console and GUI executables after relocation, verify Windows resources, and
+inspect their embedded files. The offline manual belongs to the full host.
+The app owner handles any signing separately.
 
 ### Unsigned development baseline
 
@@ -67,7 +75,7 @@ tools and exercise the candidate within its verification job.
 
 The 22 baseline retained the explicit wrap inventory (`--manifest`), preview
 (`--plan`) and optional custom Windows metadata and icons for console and GUI
-wrappers. A wrapper without a custom identity uses the host's resources.
+wrappers. In that baseline, wrappers with no custom identity inherited the host's resources. In 0.30, they use the output name and Windows' generic application icon.
 
 Evidence and remaining limits of the stabilization are recorded in
 `tools/stabilization.json` in the source checkout; exact artifact receipts live
@@ -353,7 +361,8 @@ the test used a hardware device or the Windows software renderer.
    console-subsystem manifest. Extend the existing `pack` and archive launch
    with an explicit project inventory and verify it before executing
    application code.
-   Remove `wrap`, its Tcl and CLI entries, and both executable templates.
+   Retain optional Tcl and CLI `wrap` for standalone apps with native Windows
+   resources. Test its app-only entry point independently of archive startup.
    Build an example with only the runtime, project manifest, script and asset.
    Run it in another directory containing only the runtime and archive.
    Reject a damaged archive and attempts to write a mounted asset. Verify

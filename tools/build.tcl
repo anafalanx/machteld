@@ -88,6 +88,9 @@ foreach source [::machteld::build::native_sources $ROOT] {
 set consoleObj [file join $OBJDIR machteld_main.o]
 puts "cc   machteld_main.c"
 run $GCC {*}$common -municode -c $consoleMain -o $consoleObj
+set appMainObj [file join $OBJDIR wrapped_main.o]
+puts "cc   machteld_main.c (wrapped app)"
+run $GCC {*}$common -municode -DMACHTELD_WRAPPED_APP -c $consoleMain -o $appMainObj
 # Windows Explorer and installer tooling read VERSIONINFO without starting the
 # program. The resource derives from the canonical version macro.
 set consoleVersionObj [file join $OBJDIR machteld-console-resource.o]
@@ -100,6 +103,12 @@ set bare [file join $BUILDROOT machteld-bare.exe]
 puts "ld   [file tail $bare]"
 ::machteld::build::link_host $GCC $STRIP $consoleObj $consoleVersionObj \
     $objects $sqliteObj $yyjsonObj $PATHS $bare
+set appTemplate [file join $BUILDROOT wrapped-bare.exe]
+set appResource [file join $OBJDIR wrapped-resource.o]
+::machteld::build::wrapped_resource $WINDRES $ROOT $appResource
+puts "ld   [file tail $appTemplate]"
+::machteld::build::link_host $GCC $STRIP $appMainObj $appResource \
+    $objects $sqliteObj $yyjsonObj $PATHS $appTemplate
 set generatedManifest [file join $OBJDIR manifest.tcl]
 run $TCLSH [Rp tools genmanifest.tcl] [Rp src] $generatedManifest
 set staged [file join $OBJDIR prelude.tcl]
@@ -115,7 +124,7 @@ if {![file isdirectory $referenceRoot]} {
 }
 
 run $TCLSH [Rp tools package.tcl] \
-    --prefix $PREFIX --prelude $staged --wrapper $bare --out $OUT \
+    --prefix $PREFIX --prelude $staged --wrapper $bare --app-template $appTemplate --out $OUT \
     --licenses [Rp licenses] --apache-license [Rp LICENSE] \
     --reference $referenceRoot
 

@@ -20,6 +20,7 @@ static int Machteld_AppInit(Tcl_Interp *interp);
 
 /* Select a matching sibling of the actual process image. argv[0] and the
  * working directory are caller-controlled and cannot identify the host. */
+#ifndef MACHTELD_WRAPPED_APP
 static int
 select_companion(void)
 {
@@ -54,6 +55,7 @@ select_companion(void)
     Machteld_SetHostMode(MACHTELD_HOST_COMPANION);
     return TCL_OK;
 }
+#endif
 
 /*
  * _tmain -- console entry (wmain under -municode). Normalize argv[0], let
@@ -69,12 +71,42 @@ _tmain(
 
     setlocale(LC_ALL, "C");
 
+#ifdef MACHTELD_WRAPPED_APP
+    WCHAR image[32768];
+    DWORD length = GetModuleFileNameW(NULL, image, (DWORD)(sizeof(image) / sizeof(*image)));
+    if (!length || length >= sizeof(image) / sizeof(*image) ||
+            Machteld_PinWrappedImage(image) != TCL_OK) {
+        fprintf(stderr, "cannot pin wrapped executable (Windows error %lu)\n", GetLastError());
+        return 1;
+    }
+    argv[0] = image;
+#else
+    if (argc >= 2 && _tcscmp(argv[1], _T("--machteld-wrapped-generation")) == 0) {
+        fputs("wrapped application generation requires its original executable\n", stderr);
+        return 1;
+    }
+#endif
     for (p = argv[0]; *p != '\0'; p++) {
         if (*p == '\\') {
             *p = '/';
         }
     }
 
+#ifdef MACHTELD_WRAPPED_APP
+    /* Mount only our own image. An application argument is never a Tcl
+     * startup selector, even if this executable is missing its payload. */
+    Tcl_FindExecutable(NULL);
+    if (Machteld_MountWrappedImage() != TCL_OK) {
+        fputs("cannot mount the pinned wrapped executable\n", stderr);
+        return 1;
+    }
+    int mount_argc = 1;
+    TCHAR *mount_words[] = {argv[0], NULL};
+    TCHAR **mount_argv = mount_words;
+    TclZipfs_AppHook(&mount_argc, &mount_argv);
+    Tcl_SetStartupScript(Tcl_NewStringObj("machteld-wrapped-entry", -1), "utf-8");
+    Machteld_SetHostMode(MACHTELD_HOST_WRAPPED);
+#else
 #if defined(UNICODE)
     TclZipfs_AppHook(&argc, &argv);
 #endif
@@ -121,6 +153,7 @@ _tmain(
             _tcscmp(argv[1], _T("-")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_STDIN);
     }
+#endif
 
     Tcl_Main(argc, argv, Machteld_AppInit);
     return 0; /* Tcl_Main does not return; silences a warning. */

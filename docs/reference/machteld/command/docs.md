@@ -104,7 +104,7 @@ Raised codes are `DOCS ambiguous`, `DOCS badvalue`, `DOCS corrupt`,
 `DOCS usage`.
 `ambiguous` identifies an alias with multiple exact candidates; its message
 lists the canonical IDs so callers can choose rather than accept a guess.
-`unsupported` covers requesting a representation that a document does not carry. It does
+`unsupported` covers requesting a representation that a document does not carry. A wrapped executable also reports `MACHTELD DOCS unsupported` for corpus operations, including `docs search`. Run those queries with the full `machteld.exe`. It does
 not mean the runtime's commands or its license notices were omitted.
 `corrupt` means packaged catalog/content/hash invariants failed; results are not
 silently returned from a mismatched corpus.

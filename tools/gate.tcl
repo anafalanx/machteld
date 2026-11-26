@@ -294,6 +294,8 @@ proc ::gate::plan {settings} {
                     -I [file join $cache prefix include] [file join $test fixtures desktop_catalog.c] \
                     [file join $root src wintext.c] [file join $cache prefix lib libtkstub.a] \
                     [file join $cache prefix lib libtclstub.a] -lshell32 -lole32 -luuid -luser32 -lgdi32 -o $catalogFixture]
+                addStep steps integration "isolated standalone application windows and icons" [list $privateRunner --timeout-seconds 300 $runtime \
+                    [file join $test wrap_test.tcl] $catalogFixture] timeout 360s
                 addStep steps integration "isolated desktop selection" [list $privateRunner $runtime \
                     [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
                 addStep steps integration "isolated child window startup and callbacks" [list $privateRunner $runtime \
@@ -330,6 +332,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "relocated Tcl application profile upgrade and recovery" application_qualification_test.tcl
 
                 addLane steps $runtime packaging "archive inventory" pack_inventory_test.tcl
+                addLane steps $runtime packaging "standalone wrapped applications" wrap_test.tcl
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
             }
             native-validation {
@@ -342,7 +345,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime native-validation "native lifecycle" native_lifecycle_test.tcl $probe $processFixture
                 # Its checks gate; only its timings are observations.
                 addLane steps $runtime native-validation "native scaling" native_scaling_test.tcl $probe $processFixture
-                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out] {
+                foreach step [::na::trappedSteps [::na::layout $cache] $gcc $out $runtime] {
                     addStep steps native-validation [dict get $step label] [dict get $step argv] {*}[dict remove $step label argv]
                 }
                 # The whole harness, as the candidate's group ran it: it runs

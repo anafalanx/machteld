@@ -65,7 +65,16 @@ int Machteld_RegisterLibs(Tcl_Interp *interp);
  * after the machteld package has been registered but before Tcl_Main evaluates
  * a user entry file.  It is the opt-in boundary for direct script execution.
  */
-int Machteld_EntryGate(Tcl_Interp *interp);
+int Machteld_EntryGate(Tcl_Interp *interp, Tcl_Obj *payload_root);
+int Machteld_PinWrappedImage(const wchar_t *path);
+int Machteld_MountWrappedImage(void);
+int Machteld_IsWrappedHost(void);
+/* The temporary Tcl filesystem adapter opens a duplicate of an existing
+ * read-only Windows handle. Its path identifies the source in zipfs mounts. */
+#define MACHTELD_SNAPSHOT_PATH "//machteld-snapshot:/archive"
+int Machteld_MountPinnedFile(Tcl_Interp *interp, void *file, const char *mount);
+int Machteld_SelectWrappedApp(Tcl_Interp *interp, Tcl_Obj *root, Tcl_Obj *prefix);
+int Machteld_WrapTemplate(void *root, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
 int Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj *prefix);
 int Machteld_SnapshotSha256(Tcl_Interp *interp, const unsigned char *data, size_t size, char hex[65]);
 int Machteld_EntryError(Tcl_Interp *interp, const char *code,
@@ -82,7 +91,8 @@ enum {
     MACHTELD_HOST_STDIN,
     MACHTELD_HOST_ENCODING,
     MACHTELD_HOST_GENERATION,
-    MACHTELD_HOST_COMPANION
+    MACHTELD_HOST_COMPANION,
+    MACHTELD_HOST_WRAPPED
 };
 void Machteld_SetHostMode(int mode);
 

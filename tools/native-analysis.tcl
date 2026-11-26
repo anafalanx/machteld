@@ -76,7 +76,8 @@ proc ::na::layout {cache} {
 # every invocation of the candidate's harness had: 180 s, and 30 s for a fault
 # the canary must trap; a hung driver or compiler fails its step instead of
 # hanging the gate.
-proc ::na::trappedSteps {layout gcc out} {
+proc ::na::trappedSteps {layout gcc out {runtime {}}} {
+    if {$runtime eq {}} {set runtime [info nameofexecutable]}
     variable root
     variable trapped
     set src [file join $root src]
@@ -108,6 +109,11 @@ proc ::na::trappedSteps {layout gcc out} {
         [file join $test wintext_test.c] [file join $src wintext.c] [file join $src winjob_cmdline.c] \
         -static-libgcc -lshell32 -o $wintext]]
     lappend steps [dict create label "trapped Unicode conversion" argv [list $wintext]]
+    set identity [file join $out identity-trap.exe]
+    lappend steps [dict create label "trapped application identity: compile" argv [list $gcc {*}$flags -municode \
+        [file join $fixtures identity_driver.c] [file join $src resource.c] [file join $src wintext.c] {*}$tcl -o $identity]]
+    lappend steps [dict create label "trapped application identity" \
+        argv [list $identity [file join $test identity_native_test.tcl] $runtime]]
     set json [file join $out json-trap.exe]
     set yyjson [dict get $layout yyjson]
     lappend steps [dict create label "trapped JSON: compile" argv [list $gcc {*}$flags -municode -I$yyjson \

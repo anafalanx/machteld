@@ -129,10 +129,13 @@ check {the integration group compiles its own fixtures and the process fixture} 
         {fixture cffi_dependency.c} {fixture cffi_fixture.c}]}]
 check {the packaging group compiles only the process fixture} \
     [expr {[compiled [::gate::plan [settings {--group packaging}]]] eq {{fixture process_fixture.c}}}]
+check {the release packaging group verifies standalone wrapping as well as legacy compatibility} \
+    [expr {"wrap_test.tcl" in [scripts [::gate::plan [settings {--group packaging}]]] &&
+        "legacy_wrapper_test.tcl" in [scripts [::gate::plan [settings {--group packaging}]]]}]
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 14 &&
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 15 &&
         {trapped PCM output lifetime} in [labels $nvPlan]}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
@@ -144,6 +147,10 @@ check {the relocated archive shortcut runs exclusively through the private deskt
     [lmap arg [dict get $shortcutStep argv] {file tail $arg}] eq
     {desktop_runner.exe machteld.exe archive_shortcut_test.tcl window_fixture.exe}}]
 set windowStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated child window startup and callbacks}]]
+set wrapWindowStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated standalone application windows and icons}]]
+check {wrapped application window and icon checks use the release's private desktop} [expr {
+    [lmap arg [dict get $wrapWindowStep argv] {file tail $arg}] eq
+    {desktop_runner.exe --timeout-seconds 300 machteld.exe wrap_test.tcl desktop_catalog.dll}}]
 check {the release exercises supervised child window startup and Tk callbacks on its private desktop} [expr {
     [lmap arg [dict get $windowStep argv] {file tail $arg}] eq
     {desktop_runner.exe machteld.exe child_window_test.tcl window_fixture.exe}}]
@@ -222,8 +229,9 @@ foreach step $nvPlan {
     if {![string match {trapped *} [dict get $step label]] || [string match {*: compile} [dict get $step label]]} continue
     lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
 }
-check {the trapped drivers run the native, audio, filesystem, encoding and networking boundaries} \
+check {the trapped drivers run the native, branding, audio, filesystem, encoding and networking boundaries} \
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
+        {identity-trap.exe identity_native_test.tcl} \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
         native-boundary-trap.exe hash-boundary-trap.exe audio-output-trap.exe files-provider-trap.exe \
         {publish-recovery-trap.exe publish_recovery.tcl} \

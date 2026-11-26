@@ -56,7 +56,7 @@ expects the full application runtime, and open its database connection there.
 - Filesystem and machine state: `dirs`, `links`, `canon`, `watch`, `mtps`, `lock`, and `publish`.
 - Data and network: `http`, `json`, `hash`, and `store`.
 - Tool construction: `cli`, `log`, `worker`, `pool`, and `pmap`.
-- Runtime and distribution: `app`, `version`, `manifest`, `docs` and `help`.
+- Runtime and distribution: `app`, `wrap`, `version`, `manifest`, `docs` and `help`.
 
 ## Find a runtime capability
 

@@ -8,9 +8,9 @@
 #
 #   tclsh90s package.tcl --prefix <dir> --prelude <machteld.tcl> --wrapper <exe> \
 #           --licenses <dir> --apache-license <file> --reference <dir> --out <exe> \
-#           ?--build-info <dict-file>?
+#           --app-template <bare-exe> ?--build-info <dict-file>?
 
-array set opt {--prefix "" --prelude "" --wrapper "" --licenses "" --apache-license "" --reference "" --out "" --build-info ""}
+array set opt {--prefix "" --prelude "" --wrapper "" --app-template "" --licenses "" --apache-license "" --reference "" --out "" --build-info ""}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set a [lindex $argv $i]
     if {![info exists opt($a)]} { error "package.tcl: unknown option $a" }
@@ -18,7 +18,7 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
     incr i
     set opt($a) [lindex $argv $i]
 }
-foreach k {--prefix --prelude --wrapper --licenses --apache-license --reference --out} {
+foreach k {--prefix --prelude --wrapper --app-template --licenses --apache-license --reference --out} {
     if {$opt($k) eq ""} { error "package.tcl: missing $k" }
 }
 set TC   $opt(--prefix)
@@ -35,6 +35,9 @@ if {![regexp {^\.machteld-build-[0-9a-f]{32}\.exe$} [file tail $OUT]]} {
 }
 if {![catch {file lstat $OUT ignored}]} {
     error "package output already exists (an absent candidate is required): $OUT"
+}
+if {![file isfile $opt(--app-template)]} {
+    error "missing wrapped-app template: $opt(--app-template)"
 }
 
 proc children {directory} {
@@ -210,6 +213,8 @@ if {[children $referenceRoot] ne [list $refFile]} {
     error "reference directory must contain only reference.db"
 }
 file mkdir [file join $stage reference]
+file mkdir [file join $stage basekit]
+file copy $opt(--app-template) [file join $stage basekit app.exe]
 set stagedDatabase [file join $stage reference reference.db]
 file copy $refFile $stagedDatabase
 source [file join [file dirname [info script]] build_identity.tcl]

@@ -67,10 +67,12 @@ try {
     set prelude [file join $work prelude.tcl]
     bytes $prelude "namespace eval ::machteld \{\n    variable version $runtime\n\}\n"
     set reference [file join $work reference]
+    set appTemplate [file join $work wrapped.exe]
+    bytes $appTemplate {fixture wrapped host}
     bytes [file join $reference reference.db] fixture
     dict set good reference_sha256 [::machteld::buildidentity::fileSha256 [file join $reference reference.db]]
     set arguments [list [info nameofexecutable] [file join $ROOT tools package.tcl] \
-        --prefix $prefix --prelude $prelude --wrapper [info nameofexecutable] \
+        --prefix $prefix --prelude $prelude --wrapper [info nameofexecutable] --app-template $appTemplate \
         --licenses [file join $ROOT licenses] --apache-license [file join $ROOT LICENSE] \
         --reference $reference]
     set serial 0

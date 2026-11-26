@@ -52,6 +52,8 @@ fresh launch from that location reads the published copy. In either case
 `argv0` identifies the original absolute distribution path, and `info script`
 identifies the mounted entry.
 
+A standalone wrapped app's prefix includes its executable path and the SHA-256 of the full executable. A worker verifies that identity before it starts the embedded entry. Use the prefix as a Tcl list and append worker arguments after it. Running wrapped processes hold the executable open. Close them before replacing it.
+
 Each archive process holds a reference to its generation. A worker that has
 entered its application can start another worker after its parent exits. When
 the last holder exits or is killed, the prefix expires. To hand off to a

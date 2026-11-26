@@ -13,7 +13,6 @@
 
 #define BUFFER_MOUNT_MAX (64u * 1024u * 1024u)
 #define MOUNT "machteld-app"
-#define HANDLE_PATH "//machteld-snapshot:/archive"
 #define TOKEN_CHARS 32
 
 typedef struct {
@@ -54,7 +53,7 @@ static int
 snapshot_path(Tcl_Obj *path, void **unused)
 {
     (void)unused;
-    return strcmp(Tcl_GetString(path), HANDLE_PATH) == 0 ? TCL_OK : -1;
+    return strcmp(Tcl_GetString(path), MACHTELD_SNAPSHOT_PATH) == 0 ? TCL_OK : -1;
 }
 
 static Tcl_Obj *
@@ -73,7 +72,7 @@ snapshot_open(Tcl_Interp *interp, Tcl_Obj *path, int mode, int permissions)
             !DuplicateHandle(GetCurrentProcess(), mount_source,
                 GetCurrentProcess(), &handle, GENERIC_READ, FALSE, 0)) {
         mount_open_error = GetLastError();
-        os_error(interp, "cannot open the archive snapshot", mount_open_error);
+        if (interp != NULL) os_error(interp, "cannot open the archive snapshot", mount_open_error);
         return NULL;
     }
     Tcl_Channel chan = Tcl_MakeFileChannel(handle, TCL_READABLE);
@@ -97,16 +96,17 @@ static const Tcl_Filesystem snapshot_fs = {
     .openFileChannelProc = snapshot_open
 };
 
-static int
-mount_file(Tcl_Interp *interp, HANDLE file)
+int
+Machteld_MountPinnedFile(Tcl_Interp *interp, void *file, const char *mount)
 {
     if (Tcl_FSRegister(NULL, &snapshot_fs) != TCL_OK) {
-        return Machteld_EntryError(interp, "state", "cannot register the archive reader");
+        return interp == NULL ? TCL_ERROR :
+            Machteld_EntryError(interp, "state", "cannot register the archive reader");
     }
     mount_source = file;
     mount_open_error = ERROR_SUCCESS;
-    int status = TclZipfs_Mount(interp, HANDLE_PATH, MOUNT, NULL);
-    if (status != TCL_OK) {
+    int status = TclZipfs_Mount(interp, MACHTELD_SNAPSHOT_PATH, mount, NULL);
+    if (status != TCL_OK && interp != NULL) {
         status = mount_open_error == ERROR_SUCCESS ? mount_error(interp) :
             os_error(interp, "cannot open the archive snapshot", mount_open_error);
     }
@@ -333,7 +333,7 @@ Machteld_MountApp(Tcl_Interp *interp, Tcl_Obj *origin, Tcl_Obj *ticket, Tcl_Obj 
             status = copy_snapshot(interp, INVALID_HANDLE_VALUE, current.view, current.size, backing);
             if (status != TCL_OK) goto done;
         }
-        status = mount_file(interp, backing);
+        status = Machteld_MountPinnedFile(interp, backing, MOUNT);
         UnmapViewOfFile(current.view);
         current.view = NULL;
     }

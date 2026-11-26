@@ -170,7 +170,7 @@ compare the runtime’s linked RT_MANIFEST with the authored file, and check
 the console subsystem and detached console allocation setting.
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
-Run the runtime checks and packaged sample applications for 0.30. Automate
+Run the runtime checks and packaged sample applications for 0.30. The packaging gate builds and relocates standalone executables, reads their Windows resources and inspects their contents. Compare the console and GUI fixture hashes in the build-PC and hosted logs, in addition to the hash of the distribution executable. Automate
 repeatable GUI checks on an isolated desktop. Before release, verify
 user-visible behavior, including foreground window presentation, in an
 attended desktop session. Record the Windows target and result for each.

@@ -59,11 +59,8 @@ set expected $::machteld::manifest::native
 # lets machteld.tcl install its public Tcl extension without loading the host;
 # no command body is invoked. This exercises exactly the authored MetaDefine
 # values, including subcommands and documentation IDs.
-set tclFiles [list [file join $ROOT tcl machteld.tcl] [file join $ROOT tcl cli.tcl] \
-    [file join $ROOT tcl log.tcl] [file join $ROOT tcl worker.tcl] \
-    [file join $ROOT tcl pool.tcl] [file join $ROOT tcl pmap.tcl] [file join $ROOT tcl hls.tcl]]
-set docsTcl [file join $ROOT tcl docs.tcl]
-if {[file exists $docsTcl]} { lappend tclFiles $docsTcl }
+source [file join $ROOT tools buildlib.tcl]
+set tclFiles [lmap name $::machteld::build::PRELUDE_PARTS {file join $ROOT tcl $name}]
 set slave [interp create]
 interp eval $slave {namespace eval ::machteld {}; proc ::machteld::pty args {}}
 foreach path $tclFiles {

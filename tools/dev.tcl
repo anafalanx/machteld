@@ -152,6 +152,12 @@ proc version_resource {obj} {
     return [::machteld::devcache::ensure $obj.verified.record $spec $obj resource_candidate remember_record]
 }
 
+proc wrapped_resource_candidate {candidate} {
+    ::machteld::devcache::with_native_environment $::MSYS2 {
+        ::machteld::build::wrapped_resource $::WINDRES $::ROOT $candidate
+    }
+}
+
 proc link_candidate {main resource objects sqlite yyjson candidate} {
     puts "  ld  machteld"
     ::machteld::devcache::with_native_environment $::MSYS2 {
@@ -171,7 +177,7 @@ proc reference_candidate {candidate} {
         --cache $::CACHE --output $candidate --tclsh $::TCLSH
 }
 
-proc package_candidate {staged bare reference candidate} {
+proc package_candidate {staged bare appTemplate reference candidate} {
     # The input guard covers shared group snapshots used by compilation. Check
     # both before and after packaging so an edit during a long generation is
     # never published as a verified current build.
@@ -187,6 +193,7 @@ proc package_candidate {staged bare reference candidate} {
     try {
         ::machteld::buildidentity::create $identity $version $::SOURCE_REVISION $::PACKAGE_INPUT_KEY $referenceDigest
         run $::TCLSH [Rp tools package.tcl] --prefix $::PREFIX --prelude $staged --wrapper $bare --out $candidate \
+            --app-template $appTemplate \
             --licenses [Rp licenses] --apache-license [Rp LICENSE] --reference $reference \
             --build-info $identity
     } finally { if {[file exists $identity]} { file delete $identity } }
@@ -255,17 +262,27 @@ proc dev_build_unlocked {{forceRef 0}} {
     }
     set consoleObj [file join $::OBJ machteld_main.o]
     incr changed [cc $consoleObj $consoleMain [concat $::common -municode] machteld_main.c]
+    set appMainObj [file join $::OBJ wrapped_main.o]
+    incr changed [cc $appMainObj $consoleMain [concat $::common -municode -DMACHTELD_WRAPPED_APP] wrapped_main.c]
     set consoleVersionObj [file join $::OBJ machteld-console-resource.o]
     incr changed [version_resource $consoleVersionObj]
+    set appResource [file join $::OBJ wrapped-resource.o]
+    set spec [dict create files [list [Rp src wrapped.rc] [Rp src machteld.manifest] [Rp tools buildlib.tcl]] \
+        values [list $::TOOLCHAIN_KEY $::BUILD_ENV]]
+    incr changed [::machteld::devcache::ensure $appResource.verified.record $spec $appResource \
+        wrapped_resource_candidate remember_record]
 
     # Link keys include static libraries and toolchain/configuration identity,
     # not merely whether this invocation compiled an object.
     set bare    [file join $::DEV machteld-bare.exe]
-    set inputs [list $consoleObj $consoleVersionObj {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
+    set appTemplate [file join $::DEV wrapped-bare.exe]
+    set inputs [list {*}$objects $sqliteObj $yyjsonObj [Rp tools buildlib.tcl]]
     foreach name {tcllib tklib tclstub cffilib ffilib graphvizlib} { lappend inputs [dict get $::PATHS $name] }
-    set spec [dict create files $inputs values [list console $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
-    ::machteld::devcache::ensure $bare.verified.record $spec $bare \
-        [list link_candidate $consoleObj $consoleVersionObj $objects $sqliteObj $yyjsonObj] remember_record
+    foreach main [list $consoleObj $appMainObj] resource [list $consoleVersionObj $appResource] output [list $bare $appTemplate] {
+        set spec [dict create files [linsert $inputs 0 $main $resource] values [list $::TOOLCHAIN_KEY $::DEPS_KEY $::BUILD_ENV]]
+        ::machteld::devcache::ensure $output.verified.record $spec $output \
+            [list link_candidate $main $resource $objects $sqliteObj $yyjsonObj] remember_record
+    }
 
     # Manifest + prelude: unchanged builds invoke neither generator.
     set staged [file join $::OBJ prelude.tcl]
@@ -280,13 +297,13 @@ proc dev_build_unlocked {{forceRef 0}} {
 
     set final $::DEV_RUNTIME
     file mkdir [file dirname $final]
-    set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $::REF]
+    set spec [::machteld::devcache::package_spec $::ROOT $::PATHS $staged $bare $::REF $appTemplate]
     if {[catch {exec git -C $::ROOT rev-parse HEAD} ::SOURCE_REVISION]} { set ::SOURCE_REVISION unknown }
     set ::SOURCE_REVISION [string trim $::SOURCE_REVISION]
     dict set spec values [list source_revision $::SOURCE_REVISION build_inputs $::GUARD_KEY]
     set ::PACKAGE_INPUT_KEY [::machteld::devcache::fingerprint $spec]
     if {[::machteld::devcache::ensure [file join $::DEV package.record] $spec $final \
-            [list package_candidate $staged $bare $::REF]]} {
+            [list package_candidate $staged $bare $appTemplate $::REF]]} {
         puts "build: [file nativename $final] ([file size $final] bytes)"
     } else {
         # Cache hits skip package_candidate, but must not skip the final guard.
