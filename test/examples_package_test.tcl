@@ -64,36 +64,6 @@ proc inspect_image {image expected} {
         return $info
     } finally { zipfs unmount $mount }
 }
-proc inspect_runs {label prefix directory} {
-    set result [run_utf8 -timeout 15s -- {*}$prefix --headless $directory]
-    check "$label: normal controller/worker route exits successfully" [expr {
-        [dict get $result status] eq "ok" && [dict get $result exit] == 0}]
-    set state [json decode [dict get $result out]]
-    set paths [lmap row [dict get $state rows] { dict get $row path }]
-    check "$label: Unicode and spaces survive worker round-trip" [expr {
-        [dict get $state phase] eq "done" && [file join $directory {café 雪.txt}] in $paths}]
-    set numeric [lindex [dict get $state rows] 0]
-    check "$label: numeric-looking filename stays a JSON string" [expr {
-        [dict get $numeric name] eq "123" && [string match {*"name":"123"*} [dict get $result out]]}]
-    set result [run_utf8 -timeout 15s -- {*}$prefix --headless $directory noisy]
-    set state [json decode [dict get $result out]]
-    check "$label: sustained stdout/stderr completes with bounded diagnostics" [expr {
-        [dict get $result status] eq "ok" && [dict get $state phase] eq "done" &&
-        [string length [dict get $state log]] == 8192}]
-    set result [run_utf8 -timeout 15s -- {*}$prefix --headless $directory fail]
-    set state [json decode [dict get $result out]]
-    check "$label: deliberate worker failure remains a copyable error" [expr {
-        [dict get $result exit] == 1 && [dict get $state phase] eq "error" &&
-        [string match {*Deliberate demonstration failure*} [dict get $state error]]}]
-    set result [run_utf8 -timeout 15s -- {*}$prefix --worker $directory inspect]
-    set records [split [string trim [dict get $result out]] \n]
-    check "$label: direct worker role is not recursive GUI startup" [expr {
-        [dict get $result status] eq "ok" &&
-        [dict get [json decode [lindex $records end]] type] eq "complete"}]
-    set result [run_utf8 -timeout 5s -- {*}$prefix --headless]
-    check "$label: invalid role arguments fail without entering Tk" [expr {
-        [dict get $result exit] == 2 && [string match {*usage:*} [dict get $result err]]}]
-}
 set originalDirectory [pwd]
 set originalChildren [child list]
 try {
@@ -117,8 +87,11 @@ try {
     # application must source siblings from its archive and launch its own role.
     file rename $stage [file join $WORK retired-inspector-stage]
     cd $unrelated
-    inspect_runs source [list [info nameofexecutable] [file join $INSPECTOR main.tcl]] $directory
-    inspect_runs archive [list [info nameofexecutable] $image] $directory
+    # Run the exact shipped entry and inventory. The app corpus exercises
+    # the worker and its failure paths in all three deployment forms.
+    set result [run_utf8 -timeout 15s -- [info nameofexecutable] $image --headless $directory]
+    check "the shipped Inspector archive runs with its selected siblings" [expr {
+        [dict get $result status] eq "ok" && [dict get [json decode [dict get $result out]] phase] eq "done"}]
     set bundle [::extension_example::build [file join $WORK extension] $MSYS $PREFIX]
     set headers [exec [file join $MSYS ucrt64 bin objdump.exe] -p [file join $bundle examplemath.dll]]
     set imports [regexp -all -inline -line {DLL Name: ([^\r\n]+)} $headers]

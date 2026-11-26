@@ -1,0 +1,3 @@
+schema 1
+entry main.tcl
+files {main.tcl version.txt migration.sql}

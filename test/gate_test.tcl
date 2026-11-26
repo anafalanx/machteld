@@ -142,6 +142,11 @@ check {the reference-generator group compiles nothing} \
 
 set releasePlan [::gate::plan [settings {}]]
 set releaseLabels [labels $releasePlan]
+set corpus [lindex $releasePlan [lsearch -exact $releaseLabels {Tcl application corpus}]]
+check {the release runs the unfiltered Tcl application corpus once on the candidate} [expr {
+    [llength [lsearch -all -exact [scripts $releasePlan] application_corpus_test.tcl]] == 1 &&
+    $corpus ne {} && [dict get $corpus group] eq "packaging" &&
+    [dict get $corpus argv] eq [list [dict get $default runtime] [file join $root test application_corpus_test.tcl]]}]
 set shortcutStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated shortcut to a relocated archive}]]
 check {the relocated archive shortcut runs exclusively through the private desktop runner} [expr {
     [lmap arg [dict get $shortcutStep argv] {file tail $arg}] eq
@@ -304,6 +309,7 @@ proc mentions {path name} {
 }
 set inner [dict create gui_model_fairness_test.tcl test/gui_model_test.tcl \
     protocol_fairness_test.tcl test/protocol_test.tcl \
+    application_qualification_test.tcl test/gate_test.tcl \
     tk_index_format_test.c tools/native-analysis.tcl]
 set unwired {}
 foreach path [lsort [concat [glob -directory [file join $root test] *_test.tcl *.c] \
@@ -423,6 +429,17 @@ check {the gate names a runtime by its --version and SHA-256} \
 set work [file join [file normalize $::env(TEMP)] machteld-gate-test-[pid]-[binary encode hex [hash random 8]]]
 file mkdir $work
 try {
+    set legacy [file join $work application_qualification_test.tcl]
+    file copy -- [file join $root test application_qualification_test.tcl] $legacy
+    writeText [file join $work application_corpus_test.tcl] {set ::selected $argv}
+    set probeInterp [interp create]
+    try {
+        $probeInterp eval {package provide machteld 30}
+        $probeInterp eval [list source $legacy]
+        check {the historical profile qualification entry selects the SQLite archive case} \
+            [expr {[$probeInterp eval {set ::selected}] eq {sqlite-profile archive}}]
+    } finally {interp delete $probeInterp}
+
     set tested [file join $work tested.bin]
     writeText $tested "tested bytes"
     set testedIdentity [dict create version fixture sha256 [hash file sha256 $tested]]

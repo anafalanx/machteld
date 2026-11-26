@@ -25,7 +25,8 @@ package require machteld 0.21
 #                        streaming-bounds lanes
 #   packaging            the runtime's build identity, entry, package and
 #                        publication, VERSIONINFO, 0.21 executable compatibility,
-#                        archive inventories and relocated examples
+#                        archive inventories, relocated examples and the Tcl
+#                        application corpus in source, archive and wrapped form
 #   native-validation    the candidate's group: native lifetime with the
 #                        telemetry probe; bounded worker scaling (every child
 #                        live and closed, 128 ordered pool replies and the
@@ -329,8 +330,7 @@ proc ::gate::plan {settings} {
                 addStep steps packaging "package and publication" [list $driver [file join $test package_test.tcl] --tclsh $tclsh]
                 addStep steps packaging VERSIONINFO [list $driver [file join $test version_resource_test.tcl] $runtime --cache $cache]
                 addLane steps $runtime packaging "legacy application compatibility" legacy_wrapper_test.tcl $driver
-                addLane steps $runtime packaging "relocated Tcl application profile upgrade and recovery" application_qualification_test.tcl
-
+                addLane steps $runtime packaging "Tcl application corpus" application_corpus_test.tcl
                 addLane steps $runtime packaging "archive inventory" pack_inventory_test.tcl
                 addLane steps $runtime packaging "standalone wrapped applications" wrap_test.tcl
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]

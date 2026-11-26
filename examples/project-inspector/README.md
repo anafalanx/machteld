@@ -83,16 +83,19 @@ directory argument that begins with `--`.
 
 ```powershell
 .\out\machteld.exe .\test\gui_model_test.tcl
+.\out\machteld.exe .\test\application_corpus_test.tcl project-inspector
 .\out\machteld.exe .\test\examples_package_test.tcl C:\dev\.z\r\msys2 .\.cache\deps\prefix
 .\out\machteld.exe .\test\gui_widget_test.tcl
 ```
 
-The model and example-packaging tests open no windows. The model test covers
+The model, corpus and example-packaging tests run headlessly. The model test covers
 lifecycle, recovery, malformed protocols, bounds, and event-loop progress under
-output. The packaging test runs relocated archives, exercises actual
-worker routing from unrelated directories, and checks selected payloads; its
-second example compiles a tiny extension using the explicitly named toolchain
-and Tcl prefix. The widget test creates
+output. The corpus runs Inspector as loose Tcl, a relocated application archive
+and a relocated standalone executable. It checks directory rows, worker identity,
+bounded diagnostics and failure reporting. It also replaces the running archive
+and checks which version the old controller and a fresh launch see. The packaging
+test checks the unmodified example archive and its selected payload. It also
+compiles a tiny extension using the explicitly named toolchain and Tcl prefix. The widget test creates
 a visible, short-lived Tk window and temporarily uses the clipboard. It checks
 real widget state/bindings, selection, keyboard focus, copying errors, cancellation,
 resize, Tk scaling values 1.0/1.5/2.0, and close-during-work. These synthetic events

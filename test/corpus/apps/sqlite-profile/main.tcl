@@ -1,8 +1,8 @@
 package require -exact machteld 30
 package require machteld::sqlite 1.0
 
-# This Tcl-only application is packed with a schema version and its own
-# migration SQL. All persistent paths and records come from the test driver.
+# The app carries its own schema version and migration SQL. Its callers supply
+# the profile path so that replacing the app does not replace the user's data.
 fconfigure stdout -encoding utf-8 -translation lf
 set root [file dirname [info script]]
 proc asset {name} {

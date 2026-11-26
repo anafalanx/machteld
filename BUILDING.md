@@ -178,6 +178,30 @@ The porting project supplies its managed-desktop tests for profile
 migration, backup and restore, updates and attended sign-in. Qualify the
 signed runtime and application archive on the target share and desktop.
 
+### Tcl application corpus
+
+The packaging gate runs two Tcl applications as loose source, a relocated
+`.machteld` archive and a relocated standalone executable. Each runs from an
+unrelated working directory. [Project Inspector](examples/project-inspector)
+exercises directory inspection
+through a supervised worker and reports a worker failure. The SQLite profile
+app uses a [small Tcl project](test/corpus/apps/sqlite-profile) to exercise a
+failed migration, a successful upgrade and restoration from a backup.
+The checks reopen the database and compare the stored Unicode text and binary
+values. All six cases run headlessly against the candidate.
+
+Run the full corpus from the checkout, or select one application and form to
+reproduce a failure.
+
+```powershell
+.\out\machteld.exe test/application_corpus_test.tcl
+.\out\machteld.exe test/application_corpus_test.tcl sqlite-profile wrapped
+```
+
+The application names are `project-inspector` and `sqlite-profile`. Supplying
+just the name runs all three forms. To select a form, append `source`,
+`archive`, or `wrapped`.
+
 ## Signing
 
 Signing is the owner's step, on the build PC, with signtool from the Windows
