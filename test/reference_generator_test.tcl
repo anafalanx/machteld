@@ -7,11 +7,9 @@ package require machteld 0.21
 #
 #     machteld.exe test/reference_generator_test.tcl --cache DIR --tclsh EXE ?--keep-work?
 #
-# The Tcl port (2026-10-28) of test/reference_generator_test.ps1; the
-# generator is tools/reference.tcl, run on this same runtime. The work folder
-# is this run's own, "machteld reference determinism <pid>-<random hex>" in
-# TEMP: one that exists already is refused, and only that exact folder is
-# deleted afterwards, unless --keep-work keeps it (machteld 8bcc1ec).
+# The generator is tools/reference.tcl, run on this same runtime. A short,
+# exclusively created directory leaves room for its source tree in Windows
+# TEMP. --keep-work retains both generated databases for inspection.
 
 namespace eval ::rgt {
     namespace path ::machteld
@@ -175,14 +173,10 @@ proc ::rgt::main {argv} {
         fail "usage: reference_generator_test.tcl --cache DIR --tclsh EXE ?--keep-work?"
     }
     set temp [file normalize $::env(TEMP)]
-    set leaf "machteld reference determinism [pid]-[binary encode hex [hash random 16]]"
-    set work [file join $temp $leaf]
-    if {[file exists $work]} {
-        fail "the work folder exists already: [file nativename $work]"
-    }
+    set work [file normalize [file tempdir [file join $temp {ref test}]]]
+    set owned [::machteld::_canon_key [canon $work]]
     set first [file join $work "first pack"]
     set second [file join $work "second pack"]
-    file mkdir $work
     puts "reference test work: [file nativename $work]"
     try {
         set header [readUtf8 [file join $root src machteld.h]]
@@ -298,8 +292,9 @@ proc ::rgt::main {argv} {
     } finally {
         if {$keepWork} {
             puts "reference test work kept: [file nativename $work]"
-        } elseif {[file tail $work] eq $leaf && [file dirname $work] eq $temp && [file isdirectory $work]} {
-            file delete -force $work
+        } elseif {[file dirname $work] eq $temp && [file isdirectory $work] &&
+                ![catch {::machteld::_canon_key [canon $work]} identity] && $identity eq $owned} {
+            file delete -force -- $work
         }
     }
 }
