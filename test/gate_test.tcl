@@ -133,7 +133,7 @@ check {the packaging group compiles only the process fixture} \
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 13 &&
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 14 &&
         {trapped PCM output lifetime} in [labels $nvPlan]}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
@@ -227,6 +227,7 @@ check {the trapped drivers run the native, audio, filesystem, encoding and netwo
     [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
         native-boundary-trap.exe hash-boundary-trap.exe audio-output-trap.exe files-provider-trap.exe \
+        {publish-recovery-trap.exe publish_recovery.tcl} \
         nts-crypto-trap.exe nts-lifetime-trap.exe udp-trap.exe network-trap.exe \
         {encoding-trap.exe system} {encoding-trap.exe missing} {encoding-trap.exe incomplete}]}] $driven
 set guiPlan [::gate::plan [settings {--interactive-gui}]]
