@@ -8,8 +8,8 @@ namespace eval ::guiTest {
         try { puts $f $text } finally { close $f }
     }
     proc fail {text} { record result.txt $text; exit 1 }
-    proc rootEvent {event widget} {
-        if {$widget eq "."} { record $event-[pid] yes }
+    proc tkInitialized {args} {
+        record tk-[pid] $::tk_patchLevel
     }
     proc check {name condition} {
         if {!$condition} { error "failed: $name" }
@@ -86,6 +86,9 @@ namespace eval ::guiTest {
     }
     proc exercise {path} {
         package require sqlite3
+        check "the GUI initialized Tk and owns its root window" [expr {
+            [file exists [file join $::env(MACHTELD_LOOKUP_TEST_DIR) tk-[pid]]] &&
+            [package provide Tk] ne {} && [winfo exists .]}]
         if {$path eq {}} {
             until "first page of the generated demo" {
                 $::lookup::phase eq "ready" && [winfo ismapped .results]}
@@ -136,11 +139,8 @@ namespace eval ::guiTest {
             check "close releases ownership" [expr {![llength [::machteld::child list]]}]
             until "worker from closed window exited" {[exited $closing]}
             reference eval {ROLLBACK}
-            # Check the worker did not map a second application window.
             foreach id [list $retired $closing] {
-                check "worker $id disposed of its GUI root without mapping it" [expr {
-                    [file exists [file join $::env(MACHTELD_LOOKUP_TEST_DIR) dropped-$id]] &&
-                    ![file exists [file join $::env(MACHTELD_LOOKUP_TEST_DIR) mapped-$id]]}]
+                check "observed startup of supervised worker $id" [file exists [file join $::env(MACHTELD_LOOKUP_TEST_DIR) worker-$id]]
             }
         } finally { reference close }
     }
@@ -153,10 +153,12 @@ namespace eval ::guiTest {
 
 if {[info exists env(MACHTELD_LOOKUP_TEST_DIR)]} {
     proc bgerror {message} { ::guiTest::fail "Tk background error: $message" }
+    # Tk sets its public patch level during initialization. Observe that write
+    # in both roles without loading Tk or creating a root in a worker.
+    trace add variable ::tk_patchLevel write ::guiTest::tkInitialized
+    if {[info exists ::tk_patchLevel]} { ::guiTest::tkInitialized }
     if {[lindex $argv 0] eq "--worker"} {
-        if {[winfo ismapped .]} { ::guiTest::record mapped-[pid] yes }
-        bind . <Map> +[list ::guiTest::rootEvent mapped %W]
-        bind . <Destroy> +[list ::guiTest::rootEvent dropped %W]
+        ::guiTest::record worker-[pid] started
     } else {
         after 0 [list ::guiTest::run [lindex $argv 0]]
     }

@@ -36,10 +36,12 @@ try {
         }
     } finally { catalogue close }
     set original [hash file sha256 $database]
+    set scenario 0
     foreach arguments [list [list $database] {}] {
-        set report [file join $work result.txt]
-        file delete -force -- $report
-        set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $work] -- $runtime $app {*}$arguments]
+        set observations [file join $work "scenario-[incr scenario]"]
+        file mkdir $observations
+        set report [file join $observations result.txt]
+        set result [run -timeout 90s -dir $cwd -env [list MACHTELD_LOOKUP_TEST_DIR $observations] -- $runtime $app {*}$arguments]
         if {[file exists $report]} {
             set f [open $report]
             try { set detail [read $f] } finally { close $f }
@@ -47,12 +49,19 @@ try {
         if {[dict get $result status] ne "ok" || [dict get $result exit] != 0 || [string trim $detail] ne "PASS"} {
             error "archived SQLite lookup failed for arguments [list $arguments]: $detail ($result)"
         }
+        set workers [glob -nocomplain -directory $observations -tails worker-*]
+        if {![llength $workers]} {error "no SQLite lookup worker reported startup"}
+        foreach worker $workers {
+            set id [string range $worker [string length worker-] end]
+            if {[file exists [file join $observations tk-$id]]} {error "SQLite lookup worker $id initialized Tk"}
+        }
     }
     if {[hash file sha256 $database] ne $original} { error "lookup changed the catalogue" }
     # On Windows a lingering connection/file lock can prevent this rename.
     file rename $database [file join $work closed.db]
     puts "PASS relocated GUI: two pages, UI event during query, cancellation, replacement, active window close and worker cleanup"
     puts "PASS first launch: generated demo, first visible page, temporary catalogue cleanup"
+    puts "PASS GUI initialized Tk and every observed SQLite worker stayed Tk-free"
 } finally {
     file delete -force -- $work
 }
