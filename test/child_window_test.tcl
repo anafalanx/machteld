@@ -1,13 +1,12 @@
 package require machteld
 
-# The release runner sets this identifier on its never-switched desktop.
-# The foreground and monitor checks below require the attended lane.
+# Foreground and presentation checks require a composed desktop. The gate
+# clears test environment overrides, so ask Windows which desktop we inherited.
 if {[llength $argv] != 1 && ([llength $argv] != 2 || [lindex $argv 1] ne "--startup-only")} {
     error "usage: child_window_test.tcl window_fixture.exe ?--startup-only?"
 }
-set privateOnly [expr {[llength $argv] == 2 || ([info exists env(MACHTELD_TEST_EXPECT_DESKTOP)] &&
-    [string match MachteldDesktopTest-* $env(MACHTELD_TEST_EXPECT_DESKTOP)])}]
 set fixture [file normalize [lindex $argv 0]]
+set privateOnly [expr {[llength $argv] == 2 || [exec $fixture --private-test-desktop]}]
 set work [file tempdir]
 set tokens {}
 set checks 0
@@ -20,12 +19,15 @@ proc check {label value} {
 proc signalFixture {path name} { close [open [file join $path $name] {WRONLY CREAT EXCL}] }
 proc reported {path name} {
     set file [file join $path $name]
-    set deadline [expr {[clock milliseconds] + 10000}]
-    while {![file isfile $file]} {
-        if {[clock milliseconds] >= $deadline} { error "fixture did not report $name in $path" }
+    set deadline [expr {[clock clicks -milliseconds] + 10000}]
+    while {[catch {open $file rb} f options]} {
+        set errorCode [dict get $options -errorcode]
+        if {[lindex $errorCode 0] ne {POSIX} || [lindex $errorCode 1] ni {ENOENT EACCES}} {
+            return -options $options $f
+        }
+        if {[clock clicks -milliseconds] >= $deadline} {error "fixture report $file unreadable: $f"}
         after 15
     }
-    set f [open $file rb]
     try { return [string trim [read $f]] } finally { close $f }
 }
 proc startFixture {leaf class mode disposition args} {

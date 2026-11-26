@@ -92,6 +92,15 @@ static int create_shortcut(const wchar_t *link_path, const wchar_t *directory,
 int
 wmain(int argc, wchar_t **argv)
 {
+    if (argc == 2 && wcscmp(argv[1], L"--private-test-desktop") == 0) {
+        const wchar_t prefix[] = L"MachteldDesktopTest-";
+        wchar_t name[256];
+        DWORD bytes;
+        if (!GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()), UOI_NAME,
+                name, sizeof(name), &bytes)) return 3;
+        printf("%d\n", wcsncmp(name, prefix, wcslen(prefix)) == 0);
+        return 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--record-open") == 0) return report(L"shell-opened", NULL) ? 0 : 1;
     if (argc == 4 && wcscmp(argv[1], L"--make-document") == 0)
         return create_shortcut(argv[2], argv[3], NULL, L"--record-open");
