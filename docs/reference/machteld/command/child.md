@@ -117,6 +117,12 @@ helper started by a GUI. Input, captured output, channel
 mode, and ownership of the process tree work as usual. A program can still
 create its own windows or console and choose how it launches descendants.
 
+On a desktop without an attached console, Windows can start a console host
+in the job. Completion waits for that host even after the target exits.
+For a background helper, use `-console none`. If the helper launches
+another console program, it must also choose that program's console mode
+and pass along the standard handles needed for capture.
+
 `-window visible` requests a normal initial window and enables `child present`
 for this token. `normal` is an alias for `visible`. Use `-window hidden` for
 a helper that should start with its first window hidden. The default,

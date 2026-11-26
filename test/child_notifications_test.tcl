@@ -29,7 +29,8 @@ namespace eval ::childNotifications {
     }
     proc start {args} {
         variable tokens
-        set token [child start -onexit [namespace current]::receive {*}$args]
+        # Exercise completion of the fixture job without allocating a Windows console host.
+        set token [child start -console none -onexit [namespace current]::receive {*}$args]
         lappend tokens $token
         return $token
     }
@@ -44,7 +45,7 @@ namespace eval ::childNotifications {
     try {
         foreach prefix [list {} "\{"] {
             check "malformed or empty prefix fails before launch" [expr {
-                [catch {child start -onexit $prefix -- $fixture ok} msg opts] &&
+                [catch {child start -console none -onexit $prefix -- $fixture ok} msg opts] &&
                 [dict get $opts -errorcode] eq {MACHTELD CHILD badvalue}}]
         }
         set waiting [start -- $fixture fail payload]
@@ -90,7 +91,7 @@ namespace eval ::childNotifications {
             interp eval $slave {load {} machteldproc}
             interp alias $slave notify {} [namespace current]::receive
             set count $serial
-            set t [interp eval $slave [list ::machteld::child start -onexit notify -- $fixture ok retired]]
+            set t [interp eval $slave [list ::machteld::child start -console none -onexit notify -- $fixture ok retired]]
             interp eval $slave [list ::machteld::child wait $t]
         } finally {interp delete $slave}
         update
@@ -103,13 +104,13 @@ namespace eval ::childNotifications {
             interp alias $slave background {} [namespace current]::background
             interp bgerror $slave background
             interp eval $slave {proc failCallback {args} {return -code error -errorcode {TEST CALLBACK} deliberate}}
-            set t [interp eval $slave [list ::machteld::child start -onexit failCallback -- $fixture ok ok]]
+            set t [interp eval $slave [list ::machteld::child start -console none -onexit failCallback -- $fixture ok ok]]
             set guard [after 10000 [list set [namespace current]::backgroundError expired]]
             try {vwait [namespace current]::backgroundError} finally {after cancel $guard}
             check "a callback error reaches the interpreter background handler" [expr {
                 $backgroundError eq {deliberate {TEST CALLBACK}} &&
                 [dict get [interp eval $slave [list ::machteld::child wait $t]] status] eq "ok"}]
-            interp eval $slave [list ::machteld::child start -onexit retire -- $fixture ok done]
+            interp eval $slave [list ::machteld::child start -console none -onexit retire -- $fixture ok done]
             set guard [after 10000 [list set [namespace current]::retired expired]]
             try {vwait [namespace current]::retired} finally {after cancel $guard}
             check "a callback can delete its own interpreter" [expr {$retired eq "ok" && ![interp exists $slave]}]

@@ -127,7 +127,13 @@ static int descendant_parent(DWORD hold_ms, const wchar_t *pidfile) {
     STARTUPINFOW startup = {0};
     PROCESS_INFORMATION process = {0};
     startup.cb = sizeof(startup);
-    BOOL launched = CreateProcessW(executable, command, NULL, NULL, TRUE, 0,
+    /* This descendant writes to its parent's capture pipes, including when
+     * the parent itself was started without a console. */
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    BOOL launched = CreateProcessW(executable, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
                                    NULL, NULL, &startup, &process);
     free(command);
     if (!launched) {
