@@ -189,6 +189,63 @@ namespace eval ::sqltest {
         } finally {catalogue close}
     }
 
+    proc documentedCallbacks {work} {
+        sqlite3 ::sqltest::hooks [file join $work hooks.db]
+        try {
+            hooks eval {PRAGMA journal_mode=WAL; CREATE TABLE notes(title TEXT)}
+            set ::sqltest::changes {}
+            set ::sqltest::wal {}
+            hooks update_hook [list lappend ::sqltest::changes]
+            hooks wal_hook [list apply {{schema frames} {
+                set ::sqltest::wal [list $schema $frames]
+                return 0
+            }}]
+            hooks eval {INSERT INTO notes VALUES ('first')}
+            check "update and WAL hooks receive the documented arguments" [expr {
+                $::sqltest::changes eq {INSERT main notes 1} &&
+                [lindex $::sqltest::wal 0] eq "main" && [lindex $::sqltest::wal 1] > 0}]
+
+            set ::sqltest::rolledBack 0
+            hooks rollback_hook {incr ::sqltest::rolledBack}
+            hooks commit_hook {expr {1}}
+            check "commit veto triggers rollback after an update notification" [expr {
+                [catch {hooks eval {INSERT INTO notes VALUES ('vetoed')}}] &&
+                $::sqltest::rolledBack == 1 && [hooks onecolumn {SELECT count(*) FROM notes}] == 1}]
+            hooks commit_hook {}
+            hooks authorizer [list apply {{action first second schema context} {
+                if {$action eq "SQLITE_READ" && $first eq "notes" && $second eq "title" &&
+                        $schema eq "main" && $context eq ""} {return SQLITE_IGNORE}
+                return SQLITE_OK
+            }}]
+            check "authorizer can replace one column read with SQL NULL" [expr {
+                [hooks onecolumn {SELECT title IS NULL FROM notes}]}]
+            hooks authorizer {}
+
+            hooks function lower_label -argcount 1 -deterministic -returntype text {string tolower}
+            hooks function number_value -argcount 1 -returntype integer {string cat}
+            check "SQL functions apply the documented result conversions" [expr {
+                [hooks eval {SELECT lower_label('North'), typeof(number_value('2')),
+                                    typeof(number_value('2.5')), typeof(number_value('north'))}] eq
+                {north integer real text}}]
+            foreach mask {statement profile row close} {
+                set ::sqltest::event {}
+                hooks trace_v2 [list lappend ::sqltest::event] $mask
+                if {$mask eq "close"} {hooks close} else {hooks eval {SELECT 42}}
+                set event $::sqltest::event
+                lassign $event id detail
+                switch $mask {
+                    statement {set valid [expr {[llength $event] == 2 && $detail eq "SELECT 42"}]}
+                    profile {set valid [expr {[llength $event] == 2 && [string is entier -strict $detail] && $detail >= 0}]}
+                    row - close {set valid [expr {[llength $event] == 1}]}
+                }
+                check "trace_v2 $mask delivers the documented payload" [expr {[string is entier -strict $id] && $valid}]
+            }
+        } finally {
+            if {[namespace which hooks] ne {}} {hooks close}
+            unset -nocomplain ::sqltest::changes ::sqltest::wal ::sqltest::rolledBack ::sqltest::event
+        }
+    }
+
     proc run {} {
         set version [package require sqlite3]
         check "the Tcl binding is static in this interpreter" [expr {
@@ -205,6 +262,7 @@ namespace eval ::sqltest {
 
         set work [file tempdir]
         try {
+            documentedCallbacks $work
             features $work
             packagedImport $work
             set path [file join $work {notes 雪.db}]

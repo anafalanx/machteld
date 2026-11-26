@@ -71,6 +71,56 @@ FTS5 can index its own content or share row IDs with application tables through 
 
 The build omits loadable extensions, shared cache and deprecated SQLite interfaces. Use `trace_v2` for trace and profile events. Legacy `trace` and `profile` may accept a callback without delivering events. The compatibility operations `-key` and `rekey` do not encrypt data. The `format` (query result formatter), `preupdate`, `unlock_notify` and `enable_load_extension` operations report that the requested feature is unavailable in this build.
 
+## Connection callbacks
+
+The connection calls Tcl synchronously. Use a fully qualified command prefix when installing a callback. Pass an empty script to remove an installed hook. An update notification can precede a rollback.
+
+| Registration | Arguments appended to the callback | Result |
+| --- | --- | --- |
+| `db authorizer prefix` | `action detail1 detail2 schema triggerOrView` at SQL preparation. For `SQLITE_READ`, the details identify the table and column. Unused fields are empty. | Return the literal `SQLITE_OK` to allow the action, `SQLITE_DENY` to reject the statement, or `SQLITE_IGNORE` for action-specific suppression. Ignoring a column read supplies SQL NULL. |
+| `db commit_hook script` | None | Return integer 0 to allow the commit. A nonzero integer or Tcl error rolls the transaction back. |
+| `db rollback_hook script` | None | Notification after rollback. The hook has no veto. |
+| `db update_hook prefix` | `operation schema table rowid` for changes to rowid tables. The operation is `INSERT`, `UPDATE` or `DELETE`. | Notification only. SQLite omits some changes, including those to WITHOUT ROWID tables. |
+| `db wal_hook prefix` | `schema frameCount` after a write commits in WAL mode. The count is the number of frames in the WAL. | Return integer 0 for success. A SQLite error code can reach the caller after the transaction has committed. |
+| `db busy prefix` | `attempt`, starting at zero | Return 0 to retry the lock or a nonzero integer to give up. Installing `db timeout milliseconds` replaces this handler. |
+| `db progress n script` | None, about every `n` SQLite virtual-machine instructions | Return 0 to continue. A nonzero integer or Tcl error interrupts the query. |
+| `db bind_fallback prefix` | The unresolved named SQL parameter, including its prefix | Return the value to bind, or raise a Tcl error to reject the query. The usual behavior for an unresolved variable is to bind SQL NULL. |
+
+For example, an application can record which row changed and discard those notifications if its transaction rolls back.
+
+```tcl
+sqlite3 db :memory:
+try {
+    db eval {CREATE TABLE notes(title TEXT)}
+    set ::changes {}
+    db update_hook [list lappend ::changes]
+    db eval {INSERT INTO notes VALUES ('first')}
+    puts $::changes
+    # INSERT main notes 1
+} finally {db close}
+```
+
+## SQL functions and collations
+
+`db function name ?-argcount n? ?-deterministic? ?-directonly? ?-innocuous? ?-returntype type? prefix` appends the SQL arguments in order. Tcl receives bytearrays for BLOBs and the connection's `nullvalue` string for SQL NULL. A callback error fails the SQL expression. The default return type `any` chooses a storage class from the Tcl object's internal type. The explicit types are `integer`, `real`, `text` and `blob`. An `integer` result that cannot convert to a wide integer falls back to real and then text. A `real` result that cannot convert to a double falls back to text. A callback that completes with Tcl's break code produces SQL NULL.
+
+For example, `db function lower_label -argcount 1 -deterministic -returntype text {string tolower}` registers a scalar function for `SELECT lower_label('North')`. Specify `-directonly` to restrict use to top-level SQL. Declare `-deterministic` only when the same inputs always produce the same result and `-innocuous` only when the function has no side effects or access to sensitive information.
+
+`db collate name prefix` calls `prefix left right`. Return a negative integer, zero or a positive integer for the sort order. `db collation_needed prefix` calls `prefix name` when SQL requests an unknown collation, giving the application a chance to register it.
+
+## Trace and profile events
+
+`db trace_v2 prefix ?mask?` accepts a Tcl list with any of the four event names below, or their numerical bit values. The default is `statement`. Use `db trace_v2 {}` to stop. The callback receives the listed arguments directly. Select one event type when the argument shapes would otherwise be ambiguous.
+
+| Mask | Callback arguments |
+| --- | --- |
+| `statement` (1) | An opaque statement identifier and the SQL text. Trigger execution can supply a comment in place of the top-level SQL. |
+| `profile` (2) | The statement identifier and the approximate elapsed time in nanoseconds. |
+| `row` (4) | The identifier of the statement that produced the row. |
+| `close` (8) | The opaque database connection identifier. |
+
+The callback result is ignored. Use the identifiers only to correlate events during the lifetime of their objects. For example, `db trace_v2 [list lappend ::timings] profile` appends a statement identifier and duration to `::timings` when a statement finishes.
+
 ## Errors and lifetime
 
 Missing or malformed numbered values raise `MACHTELD SQLITE parameter`. An unsuccessful open reports an error before handing the caller a connection. SQLite prepare, execution, constraint and locking failures raise Tcl errors. Use `try ... finally` around a connection, and handle database errors where the application can roll back or retry. A busy timeout bounds lock waiting only. Run long synchronous queries in a worker when Tk must remain responsive.
