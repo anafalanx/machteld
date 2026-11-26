@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -45,6 +46,7 @@ static ULONG WINAPI get_adapters(ULONG family, ULONG flags, void *reserved, IP_A
 #define IcmpCloseHandle close_echo
 #include "../../src/network.c"
 
+enum { interface_count = 8 };
 static int handle_tally, allocations;
 static DWORD WINAPI open_wlan(DWORD ver, void *r, DWORD *neg, HANDLE *h) {
     if (ver != 2 || r) abort();
@@ -59,21 +61,26 @@ static void WINAPI free_wlan(void *p) {--allocations; free(p);}
 static DWORD WINAPI list_wlan(HANDLE h, void *r, WLAN_INTERFACE_INFO_LIST **lst) {
     if (h != (HANDLE)2 || r) abort();
     if (list_mode == 1) return ERROR_ACCESS_DENIED;
-    *lst = calloc(1, sizeof **lst + 7 * sizeof(WLAN_INTERFACE_INFO)); ++allocations;
-    (*lst)->dwNumberOfItems = 8;
-    for (int i = 0; i < 8; ++i) {
+    *lst = calloc(1, offsetof(WLAN_INTERFACE_INFO_LIST, InterfaceInfo) +
+                     interface_count * sizeof((*lst)->InterfaceInfo[0]));
+    if (!*lst) return ERROR_NOT_ENOUGH_MEMORY;
+    ++allocations;
+    (*lst)->dwNumberOfItems = interface_count;
+    for (DWORD i = 0; i < interface_count; ++i) {
         (*lst)->InterfaceInfo[i].InterfaceGuid.Data1 = i + 1;
-        (*lst)->InterfaceInfo[i].isState = i == 7 ? wlan_interface_state_disconnected : wlan_interface_state_connected;
+        (*lst)->InterfaceInfo[i].isState = i + 1 == interface_count ? wlan_interface_state_disconnected : wlan_interface_state_connected;
     }
     return ERROR_SUCCESS;
 }
 static DWORD WINAPI query_wlan(HANDLE h, const GUID *guid, WLAN_INTF_OPCODE op, void *r, DWORD *size,
                                void **result, WLAN_OPCODE_VALUE_TYPE *kind) {
-    if (h != (HANDLE)2 || op != wlan_intf_opcode_current_connection || r || kind || guid->Data1 == 8) abort();
+    if (h != (HANDLE)2 || op != wlan_intf_opcode_current_connection || r || kind || guid->Data1 == interface_count) abort();
     if (guid->Data1 == 2) return ERROR_ACCESS_DENIED;
     if (guid->Data1 == 3) return ERROR_INVALID_STATE;
     if (guid->Data1 == 4) return ERROR_NOT_FOUND;
-    WLAN_CONNECTION_ATTRIBUTES *v = calloc(1, sizeof *v); ++allocations;
+    WLAN_CONNECTION_ATTRIBUTES *v = calloc(1, sizeof *v);
+    if (!v) return ERROR_NOT_ENOUGH_MEMORY;
+    ++allocations;
     v->isState = guid->Data1 == 5 ? wlan_interface_state_disconnected : wlan_interface_state_connected;
     v->wlanAssociationAttributes.wlanSignalQuality = 86;
     v->wlanAssociationAttributes.dot11Ssid.uSSIDLength = guid->Data1 == 6 ? 33 : 3;
