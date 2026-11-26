@@ -3,7 +3,7 @@ package require machteld 0.21
 # test/reference_generator_test.tcl -- the reference generator is
 # deterministic (two runs, byte for byte, below a path with spaces) and keeps
 # the catalog contracts: the 249/177 core manuals, lowercase IDs, no
-# auto-discovered extension, an exact inventory partition, the manifest.
+# auto-discovered extension, one SQLite file and its page/section identities.
 #
 #     machteld.exe test/reference_generator_test.tcl --cache DIR --tclsh EXE ?--keep-work?
 #
@@ -32,22 +32,17 @@ proc ::rgt::readUtf8 {path} {
     }
 }
 
-proc ::rgt::relativeFiles {root} {
-    set found {}
-    set pending [list ""]
-    while {[llength $pending]} {
-        set pending [lassign $pending dir]
-        set here [expr {$dir eq "" ? $root : [file join $root {*}[split $dir /]]}]
-        foreach path [glob -nocomplain -directory $here *] {
-            set relative [expr {$dir eq "" ? [file tail $path] : "$dir/[file tail $path]"}]
-            if {[file isdirectory $path]} {
-                lappend pending $relative
-            } else {
-                lappend found $relative
-            }
-        }
+proc ::rgt::databaseFile {root} {
+    set entries {}
+    foreach name [concat [glob -tails -nocomplain -directory $root *] \
+            [glob -tails -nocomplain -types hidden -directory $root *]] {
+        if {$name ni {. ..}} {lappend entries $name}
     }
-    lsort $found
+    set path [file join $root reference.db]
+    if {[lsort -unique $entries] ne {reference.db} || [file type $path] ne "file"} {
+        fail "unexpected reference directory entries: $entries"
+    }
+    return $path
 }
 
 proc ::rgt::generate {cache tclsh output} {
@@ -203,19 +198,14 @@ proc ::rgt::main {argv} {
         # well as same-parent immutable publication.
         generate $cache $tclsh $first
         generate $cache $tclsh $second
-        set firstFiles [relativeFiles $first]
-        if {$firstFiles ne [relativeFiles $second]} {
-            fail "two runs produced different file inventories"
+        set firstDb [databaseFile $first]
+        set firstHash [hash file sha256 $firstDb]
+        set secondHash [hash file sha256 [databaseFile $second]]
+        if {$firstHash ne $secondHash} {
+            fail "reference.db differs between runs: $firstHash and $secondHash"
         }
-        foreach relative $firstFiles {
-            if {[hash file sha256 [file join $first {*}[split $relative /]]] ne
-                    [hash file sha256 [file join $second {*}[split $relative /]]]} {
-                fail "two runs differ byte-for-byte at $relative"
-            }
-        }
-        if {$firstFiles ne {reference.db}} {fail "unexpected single-file reference inventory: $firstFiles"}
         if {![llength [info commands ::sqlite3]]} {load [file join $cache prefix bin refsqlite.dll] Sqlite3}
-        sqlite3 ::rgt::fixture [file join $first reference.db] -readonly 1
+        sqlite3 ::rgt::fixture $firstDb -readonly 1
         try {
             if {[fixture onecolumn {SELECT value FROM metadata WHERE key='machteld_version'}] ne $runtimeVersion ||
                 [fixture onecolumn {PRAGMA application_id}] != 1296323122 || [fixture onecolumn {PRAGMA user_version}] != 2} {
@@ -243,12 +233,13 @@ proc ::rgt::main {argv} {
             if {[fixture eval {SELECT name,documents,manual_pages FROM product WHERE name IN ('tcl','tk','cffi') ORDER BY name}]
                     ne {cffi 5 4 tcl 250 249 tk 178 177}} {fail "unexpected upstream manual counts"}
             checkCoreManuals $cache
-            foreach required {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/agent machteld/license tcl/license tk/license} {
+            foreach required {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/package/sqlite3 machteld/agent machteld/license tcl/license tk/license} {
                 if {![fixture exists {SELECT 1 FROM page WHERE id=$required}]} {fail "missing stable page $required"}
             }
             fixture eval {SELECT id,path,body,sha256,characters,bytes FROM page ORDER BY id} {
                 if {$id ne [string tolower $id] || $id in {machteld/command/macht machteld/guide/engine} ||
-                        [regexp {/(?:tdbc|sqlite3|itcl|tclx|tktable)(?:/|$)} $id] ||
+                        [regexp {/(?:tdbc|itcl|tclx|tktable)(?:/|$)} $id] ||
+                        ([regexp {/sqlite3(?:/|$)} $id] && $id ne "machteld/package/sqlite3") ||
                         ([regexp {/thread(?:/|$)} $id] && $id ne "tcl/c-api/thread")} {fail "invalid page $id"}
                 set utf8 [encoding convertto utf-8 $body]
                 if {[string length $body] != $characters || [string length $utf8] != $bytes ||
@@ -282,7 +273,7 @@ proc ::rgt::main {argv} {
             }
         }
 
-        puts "REFERENCE GENERATOR TEST PASSED ([llength $firstFiles] byte-identical files, Tcl 249 / Tk 177)"
+        puts "REFERENCE GENERATOR TEST PASSED (one byte-identical reference.db, SHA-256 $firstHash, Tcl 249 / Tk 177)"
     } finally {
         if {$keepWork} {
             puts "reference test work kept: [file nativename $work]"
