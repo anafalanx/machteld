@@ -568,7 +568,8 @@ if {$argv eq {--relaunch}} {
 puts [list [file normalize [info script]] [file normalize $argv0] $argv [app launch]]}
     set side [file join $bin {field notes.tcl}]
     set decoy [file join $cwd {field notes.tcl}]
-    writeText $decoy "package require machteld\nputs WRONG-DIRECTORY"
+    set decoyText "package require machteld\nputs WRONG-DIRECTORY"
+    writeText $decoy $decoyText
     set explicit [file join $cwd explicit.tcl]
     writeText $explicit "package require machteld\nputs EXPLICIT"
     set r [host -exe $host -dir $cwd $explicit]
@@ -603,9 +604,19 @@ puts [list [file normalize [info script]] [file normalize $argv0] $argv [app lau
             [string match {*package require machteld*} [dict get $r err]]}] [dict get $r text]
     file delete -- $side
     if {![catch {file link -symbolic $side $decoy}]} {
-        set r [host -exe $host -dir $cwd $explicit]
-        check "a companion name redirect never selects its target" \
-            [expr {[dict get $r exit] != 0 && [dict get $r out] eq {}}] [dict get $r text]
+        try {
+            set r [host -exe $host -dir $cwd $explicit]
+            check "a companion name redirect never selects its target" \
+                [expr {[dict get $r exit] != 0 && [dict get $r out] eq {}}] [dict get $r text]
+        } finally {
+            # The signed 0.21 driver cannot recursively remove file symlinks on Windows.
+            file delete -- $side
+            set missing [catch {file lstat $side st} message options]
+            check "the companion link has been removed" \
+                [expr {$missing && [lrange [dict get $options -errorcode] 0 1] eq {POSIX ENOENT}}] $message
+            check "removing the companion link preserves its target" \
+                [expr {[file isfile $decoy] && [readText $decoy] eq $decoyText}]
+        }
     } else {
         puts "--   companion symbolic link requires Windows file-symlink permission"
     }
