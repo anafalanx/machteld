@@ -11,13 +11,24 @@ file mkdir $WORK
 set ch [open [file join $WORK {café 雪.txt}] w]
 puts $ch {read-only fixture}; close $ch
 set originalDigest [hash file sha256 [file join $WORK {café 雪.txt}]]
-set fails 0; set checks 0; set ticks 0; set bgerrors {}
+set fails 0; set checks 0; set bgerrors {}
 proc bgerror {message} { lappend ::bgerrors $message }
 proc check {name condition} {
     incr ::checks
     if {$condition} { puts "ok   $name" } else { incr ::fails; puts "FAIL $name" }
 }
-proc tick {} { incr ::ticks; set ::tickTimer [after 5 tick] }
+# Schedule independent idle work only after the view receives noisy stdout.
+# A later numbered update proves that the callback ran between output batches.
+array set noisy {latest -1 atIdle -1 timer {}}
+proc observe_noisy {job snapshot} {
+    global noisy
+    if {[dict get $snapshot mode] ne "noisy" || [dict get $snapshot phase] ne "running" ||
+        ![regexp {^Output demonstration ([0-9]+)/[0-9]+$} [dict get $snapshot message] -> sequence]} {return}
+    set noisy(latest) $sequence
+    if {$noisy(timer) eq {}} {
+        set noisy(timer) [after idle {set ::noisy(atIdle) $::noisy(latest)}]
+    }
+}
 proc inspect_wait {job {limit 12000}} {
     set until [expr {[clock milliseconds]+$limit}]
     while {[dict get [$job snapshot] phase] eq "running" && [clock milliseconds] < $until} {
@@ -28,8 +39,7 @@ proc inspect_wait {job {limit 12000}} {
     return [$job snapshot]
 }
 set baseline [child list]
-set job [::inspector::Job new [file join $EXAMPLE inspect.tcl]]
-tick
+set job [::inspector::Job new [file join $EXAMPLE inspect.tcl] observe_noisy]
 try {
     check "first start accepted" [$job start $WORK]
     check "duplicate start rejected" [expr {![$job start $WORK]}]
@@ -49,11 +59,11 @@ try {
         [string match {*Deliberate demonstration failure*} [dict get $state error]]}]
     $job start $WORK
     check "failure can be followed by successful job" [expr {[dict get [inspect_wait $job] phase] eq "done"}]
-    set before $ticks
     $job start $WORK noisy
     set state [inspect_wait $job]
     check "output burst completes without deadlock" [expr {[dict get $state phase] eq "done"}]
-    check "event loop progresses under output" [expr {$ticks-$before > 5}]
+    check "idle callback runs between noisy output batches" [expr {
+        $noisy(atIdle) >= 0 && $noisy(latest) > $noisy(atIdle)}]
     check "diagnostic retention bounded" [expr {[string length [dict get $state log]] == 8192}]
     check "latest diagnostics retained" [string match {*Output demonstration 1199*} [dict get $state log]]
     $job start $WORK slow
@@ -120,12 +130,11 @@ try {
         [hash file sha256 [file join $WORK {café 雪.txt}]] eq $originalDigest &&
         [llength [glob -directory $WORK *]] == 1}]
     $job destroy; set job {}
-    after cancel $tickTimer
     source [file join $HERE gui_model_fairness_test.tcl]
     incr checks $::inspector_fairness::checks
     check "no background callback errors" [expr {$bgerrors eq {}}]
 } finally {
-    after cancel $tickTimer
+    after cancel $noisy(timer)
     if {$job ne {}} { $job destroy }
     if {[file dirname [file normalize $WORK_ROOT]] ne $TEMP_ROOT} { error "refusing escaped test cleanup" }
     file delete -force $WORK_ROOT
