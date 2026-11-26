@@ -280,11 +280,13 @@ check "completed descendant is dead" [expr {$descendant_pid ne "" && [wait_for_d
 
 # With a timeout, the same held pipes must not make run wait for natural EOF.
 # The timeout kills the entire job and retains output written before the kill.
+# Reserve time for two Windows process starts and the parent's PID report.
+# The descendant's natural exit is well beyond the maximum accepted duration.
 set descendant_pidfile [file join $WORK descendant-timeout.pid]
-set started [clock milliseconds]
-set result [run -timeout 500ms -- $FIXTURE descendant-parent 5000 $descendant_pidfile]
-set elapsed [expr {[clock milliseconds] - $started}]
-check "descendant-held pipes honor run timeout" [expr {$elapsed >= 300 && $elapsed < 3000}]
+set started [clock clicks -milliseconds]
+set result [run -timeout 3s -- $FIXTURE descendant-parent 12000 $descendant_pidfile]
+set elapsed [expr {[clock clicks -milliseconds] - $started}]
+check "descendant-held pipes honor run timeout" [expr {$elapsed >= 2700 && $elapsed < 7000}]
 check "descendant-held pipe reports timeout" [expr {[dict get $result status] eq "timeout"}]
 check "tree timeout keeps the already-exited root process code" [expr {
     [dict get $result exit] == 0}]
@@ -297,11 +299,11 @@ check "run timeout kills the descendant" [expr {$descendant_pid ne "" && [wait_f
 # A child-start deadline is autonomous. Deliberately do not call child list,
 # info, wait, or the generic wait command until well after the deadline.
 set child_pidfile [file join $WORK autonomous-child.pid]
-set token [child start -timeout 450ms -env [list MACHTELD_TEST_PIDFILE $child_pidfile] -- \
-           $FIXTURE hang 5000]
+set token [child start -timeout 3s -env [list MACHTELD_TEST_PIDFILE $child_pidfile] -- \
+           $FIXTURE hang 15000]
 check "autonomous child reports its PID" [wait_for_file $child_pidfile]
 set child_pid [expr {[file exists $child_pidfile] ? [string trim [slurp $child_pidfile]] : ""}]
-after 1300
+after 3500
 check "child deadline fires without observation" [expr {$child_pid ne "" && [wait_for_dead $child_pid]}]
 set result [child wait $token]
 check "autonomous deadline reason survives" [expr {[dict get $result status] eq "timeout"}]
