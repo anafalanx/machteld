@@ -21,12 +21,15 @@ typedef struct {
     char diagnostic[512];
 } Output;
 
-static void release_output(Output *o) {
-    if (InterlockedDecrement(&o->refs) != 0) return;
+static void destroy_output(Output *o) {
     if (o->stop) CloseHandle(o->stop);
     if (o->changed) CloseHandle(o->changed);
     rae_ring_free(&o->ring);
     free(o);
+}
+
+static void release_output(Output *o) {
+    if (InterlockedDecrement(&o->refs) == 0) destroy_output(o);
 }
 
 static void output_delete(void *data) {
@@ -145,19 +148,20 @@ int audio_output(Tcl_Interp *interp, Tcl_Obj *rateObj, Tcl_Obj *channelsObj) {
         return audio_error(interp, "format", "expected 8000 to 192000 Hz and one to eight channels");
     Output *o = calloc(1, sizeof *o);
     if (!o) return audio_error(interp, "oserror", "out of memory creating PCM output");
-    o->refs = 1;
     o->rate = rate;
     o->channels = channels;
     if (rae_ring_init(&o->ring, (size_t)rate * (size_t)channels / 2) != RAE_OK ||
         !(o->stop = CreateEventW(NULL, TRUE, FALSE, NULL)) ||
         !(o->changed = CreateEventW(NULL, FALSE, FALSE, NULL))) {
-        release_output(o);
+        destroy_output(o);
         return audio_error(interp, "oserror", "cannot allocate the PCM queue");
     }
-    InterlockedIncrement(&o->refs);
+    /* The Tcl command and the device thread each own a reference once the
+     * thread starts. Until then only this function can access the output. */
+    o->refs = 2;
     uintptr_t owner = _beginthreadex(NULL, 0, own_device, o, 0, NULL);
     if (!owner) {
-        release_output(o); release_output(o);
+        destroy_output(o);
         return audio_error(interp, "oserror", "cannot start the audio device owner");
     }
     CloseHandle((HANDLE)owner);
