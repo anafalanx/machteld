@@ -272,22 +272,36 @@ proc ::machteld::DocsSearch {args} {
     # caller are words. Bound parameters also keep SQL and query text separate.
     set expression [join [lmap term $terms {format {"%s"*} $term}] { AND }]
     set exact [DocsNormalizeAlias $query]
+    # Some upstream spellings (for example tclsh90.exe) occur only in the
+    # alias index. Sections can also have a qualified command/method name.
+    set exactPages {
+        WITH exact_page(id) AS (
+            SELECT id FROM alias WHERE name=$exact
+            UNION SELECT id FROM fragment WHERE name=$exact
+        )
+    }
     set options [DocsFilterOptions {*}[lrange $args 1 end]]
     dict with options {
-        set total [ReferenceDb onecolumn {
-            SELECT count(*) FROM search JOIN page p ON p.rowid=search.rowid
-            WHERE search MATCH $expression AND ($scope='all' OR p.product=$scope) AND ($type='all' OR p.kind=$type)
-        }]
+        set total [ReferenceDb onecolumn [string cat $exactPages {
+            SELECT count(*) FROM page p
+             WHERE ($scope='all' OR p.product=$scope) AND ($type='all' OR p.kind=$type)
+               AND (p.id IN (SELECT id FROM exact_page) OR
+                    p.rowid IN (SELECT rowid FROM search WHERE search MATCH $expression))
+        }]]
         set items {}
-        ReferenceDb eval {
-            SELECT p.id, bm25(search,8,10,6,3,1) AS relevance,
-                   snippet(search,4,'','',' ... ',20) AS sample
+        ReferenceDb eval [string cat $exactPages {
+            SELECT p.id AS id, bm25(search,8,10,6,3,1) AS relevance,
+                   snippet(search,4,'','',' ... ',20) AS sample, e.id IS NOT NULL AS direct
               FROM search JOIN page p ON p.rowid=search.rowid
+              LEFT JOIN exact_page e ON e.id=p.id
              WHERE search MATCH $expression AND ($scope='all' OR p.product=$scope) AND ($type='all' OR p.kind=$type)
-             ORDER BY (EXISTS(SELECT 1 FROM alias WHERE name=$exact AND id=p.id) OR
-                       EXISTS(SELECT 1 FROM fragment WHERE name=$exact AND id=p.id)) DESC, relevance, p.id
+            UNION ALL
+            SELECT p.id, 0.0, p.summary, 1 FROM exact_page e JOIN page p ON p.id=e.id
+             WHERE ($scope='all' OR p.product=$scope) AND ($type='all' OR p.kind=$type)
+               AND NOT EXISTS (SELECT 1 FROM search WHERE rowid=p.rowid AND search MATCH $expression)
+             ORDER BY direct DESC, relevance, id
              LIMIT $limit OFFSET $offset
-        } {
+        }] {
             set record [DocsSummary $id]
             dict set record score [expr {round(-1000000*$relevance)}]
             dict set record snippet [string range $sample 0 239]

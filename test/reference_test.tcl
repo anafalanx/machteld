@@ -179,6 +179,38 @@ check {search is ranked, filtered, bounded, and actionable} [expr {
     [dict get [lindex [dict get $searched items] 0] product] eq "tcl"}]
 check {search rejects degenerate query} [expr {
     [errorcode {docs search {   }}] eq {MACHTELD DOCS badvalue}}]
+# The installed Windows shell name and the man(3) spelling are exact aliases
+# even though the upstream page does not contain those literal search terms.
+foreach {query product kind id} {tclsh90.exe tcl application tcl/application/tclsh
+                                 wish9.0 tk application tk/application/wish
+                                 Tcl_EvalEx(3) tcl c-api tcl/c-api/eval} {
+    set hit [docs search $query -scope $product -type $kind -limit 1]
+    set first [lindex [dict get $hit items] 0]
+    check "exact alias $query finds its page under the requested filters" [expr {
+        [dict get $hit total] >= 1 && [dict get $first id] eq $id && [dict get $first snippet] ne ""}]
+}
+set outside [docs search tclsh90.exe -scope tk -type application]
+check {an alias outside the requested scope does not enter the result count} [expr {
+    [dict get $outside total] == 0 && [dict get $outside returned] == 0}]
+set ordinary [::machteld::ReferenceDb eval {
+    SELECT p.id FROM search JOIN page p ON p.rowid=search.rowid
+    WHERE search MATCH '"tclsh90"* AND "exe"*' AND p.id!='tcl/application/tclsh'
+    ORDER BY bm25(search,8,10,6,3,1),p.id}]
+set front [docs search tclsh90.exe -limit 1]
+set rest [docs search tclsh90.exe -offset 1 -limit 200]
+check {one alias-only result precedes all ordinary FTS matches without changing their order or duplicating a page} [expr {
+    [dict get [lindex [dict get $front items] 0] id] eq "tcl/application/tclsh" &&
+    [dict get $front total] == 1+[llength $ordinary] && [dict get $rest total] == [dict get $front total] &&
+    [dict get $front next] eq ([llength $ordinary] ? 1 : "") && [dict get $rest next] eq "" &&
+    [lmap hit [dict get $rest items] {dict get $hit id}] eq $ordinary}]
+set past [docs search tclsh90.exe -offset [dict get $front total] -limit 1]
+check {an offset beyond alias and text matches retains the total} [expr {
+    [dict get $past total] == [dict get $front total] && [dict get $past returned] == 0 && [dict get $past next] eq ""}]
+set shared [docs search dict -scope tcl -type command -limit 200]
+set sharedIds [lmap hit [dict get $shared items] {dict get $hit id}]
+check {a command found by both its exact name and full text appears and counts once} [expr {
+    [lindex $sharedIds 0] eq "tcl/command/dict" && [llength $sharedIds] == [dict get $shared total] &&
+    [llength [lsort -unique $sharedIds]] == [llength $sharedIds]}]
 foreach query {{-maxframe} {MACHTELD POOL} {tcl/command/dict} {read "binary" data}} {
     set result [docs search $query -limit 2]
     check "punctuation, options and plain-language queries produce bounded matches: $query" [expr {
