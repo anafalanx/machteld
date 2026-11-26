@@ -32,3 +32,14 @@ The caller waits for the function. A supervised process can isolate a slow or fa
 ## Offline manuals
 
 Use `docs get cffi/manual/intro` to start, `docs get cffi/manual/commands` for declarations and command syntax, `docs get cffi/manual/concepts` for ownership and types, and `docs get cffi/manual/cookbook` for examples. `docs get cffi/license` retrieves the package license.
+
+Use a qualified name for one declaration. These lookups return just its signature, parameters and upstream explanation.
+
+```tcl
+docs get {cffi::pointer address}
+docs get {cffi::Wrapper function}
+docs get {cffi::Struct new}
+docs get {STRUCTOBJ new}
+```
+
+`cffi::Struct new` constructs a type. The `new` method on a resulting struct object allocates a native value. Use the object spelling from the manual (such as `STRUCTOBJ new`) to retrieve an instance method.

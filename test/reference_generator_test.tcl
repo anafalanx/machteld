@@ -233,6 +233,27 @@ proc ::rgt::main {argv} {
             if {[fixture eval {SELECT name,documents,manual_pages FROM product WHERE name IN ('tcl','tk','cffi') ORDER BY name}]
                     ne {cffi 5 4 tcl 250 249 tk 178 177}} {fail "unexpected upstream manual counts"}
             checkCoreManuals $cache
+            set id cffi/manual/commands
+            set path [file join $cache cffi-doc cffi-cffi.3tcl]
+            if {[hash file sha256 $path] ne [fixture onecolumn {SELECT source_sha256 FROM provenance WHERE id=$id}]} {
+                fail "cffi command documentation no longer identifies its original source"
+            }
+            # Each outdented label in the Ruff manual introduces one distinct
+            # command or method. Verify against the pinned input independently
+            # of the generator's aliases or slug normalization.
+            set labels 0
+            set previous ""
+            foreach line [split [readUtf8 $path] \n] {
+                set line [string trimright $line \r]
+                if {$previous eq ".RS -4n"} {
+                    set heading [string map [list {\fB} "" {\fR} ""] $line]
+                    if {![fixture exists {SELECT 1 FROM section WHERE id=$id AND heading=$heading
+                            AND end-start BETWEEN 50 AND 8192}]} {fail "missing bounded cffi entry: $heading"}
+                    incr labels
+                }
+                set previous $line
+            }
+            if {$labels != 137} {fail "unexpected upstream cffi command and method count: $labels"}
             foreach required {tcl/command/dict tcl/command/http tcl/c-api/crtobjcmd tk/command/bind machteld/package/sqlite3 machteld/agent machteld/license tcl/license tk/license} {
                 if {![fixture exists {SELECT 1 FROM page WHERE id=$required}]} {fail "missing stable page $required"}
             }

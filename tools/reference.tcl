@@ -850,6 +850,7 @@ proc ::ref::convertHtmlPage {html htmlRelative id inspection htmlToId pageAnchor
         if {$skipDepth > 0} {
             continue
         }
+        # "Struct new" invokes the constructor; STRUCTOBJ new allocates a value.
         switch -- $name {
             a {
                 if {!$closing} {
@@ -1556,12 +1557,53 @@ proc ::ref::uniqueName {} {
 # The four Ruff-generated manuals in the pinned cffi release use this small
 # roff vocabulary. Unknown directives fail the build so an upstream layout
 # change cannot silently remove part of a manual.
-proc ::ref::cffiMarkdown {source title} {
+# Ruff marks each command and class method with its name and owner. Use
+# the qualified spelling for lookups and keep the original label in the body.
+proc ::ref::cffiEntry {name owner lookupsVar} {
+    upvar 1 $lookupsVar lookups
+    set class [namespace tail $owner]
+    if {$owner eq "::cffi"} {
+        set qualified cffi::$name
+        set key $name
+        set names [list $qualified ::$qualified]
+    } else {
+        set qualified cffi::$class
+        set key "$class $name"
+        switch -- $name {
+            constructor { set methods {constructor create new} }
+            destructor { set methods {destructor destroy} }
+            new { set methods {} }
+            default { set methods [list $name] }
+        }
+        set names {}
+        foreach method $methods {
+            lappend names "$qualified $method" "::${qualified} $method"
+        }
+        if {$name ni {constructor destructor}} {
+            lappend names "${class}OBJ $name" "$qualified instance $name" "::${qualified} instance $name"
+        } elseif {$name eq "destructor"} {
+            lappend names "${class}OBJ destroy"
+        }
+    }
+    set anchor [slug [string map {! -bang} $key]]
+    foreach lookup $names {
+        set lookup [normalizeSearch $lookup]
+        if {[dict exists $lookups $lookup]} {fail "duplicate cffi lookup $lookup"}
+        dict set lookups $lookup $anchor
+    }
+    return $anchor
+}
+
+proc ::ref::cffiMarkdown {source title manual lookupsVar} {
+    upvar 1 $lookupsVar lookups
+    set lookups {}
     set text "# $title\n\n"
     append text {Upstream cffi 2.0.3 manual. The Foreign calls section of the [runtime contract](machteld/guide/contract) describes the bundled DLL search, text conversion and callback rules.} \n
+    set callbackNote {Machteld on Windows disables native-to-Tcl callbacks. The upstream `cffi::callback` command is unavailable. Synchronous calls from Tcl into a DLL are supported.}
     set escapes [list {\\} \\ {\&} {} {\fB} {} {\fR} {} {\fI} {} {\fP} {}]
     set literal 0
     set bullet 0
+    set heading ""
     foreach line [split $source \n] {
         if {[string range $line 0 2] eq {'\"}} continue
         if {[string index $line 0] eq "."} {
@@ -1572,12 +1614,26 @@ proc ::ref::cffiMarkdown {source title} {
                     set heading [string map $escapes [string trim $arg \"]]
                     set level [expr {$directive eq ".SH" ? "##" : "###"}]
                     append text "\n$level $heading\n\n"
+                    if {($manual eq "commands" && $heading eq "SYNOPSIS") ||
+                            ($manual eq "concepts" && $heading eq "CALLBACKS")} {
+                        append text $callbackNote "\n\n"
+                    }
                 }
                 .PP - .TP { append text \n }
                 .br { append text "  \n" }
                 .nf { set literal 1; append text "\n~~~\n" }
                 .fi { set literal 0; append text "~~~\n\n" }
                 default { fail "unsupported cffi manual directive $directive" }
+            }
+            continue
+        }
+        if {!$literal && $manual eq "commands" && $heading in {COMMANDS CLASSES} &&
+                [regexp {^\\fB([^\\]+)\\fR \((::cffi(?:::[[:alnum:]]+)?)\)$} $line -> name owner]} {
+            set anchor [cffiEntry $name $owner lookups]
+            append text "\n<a id=\"$anchor\"></a>\n### " [string map $escapes $line] "\n\n"
+            if {[lindex $name 0] eq "callback"} {append text $callbackNote "\n\n"}
+            if {$anchor eq "wrapper-constructor"} {
+                append text {Machteld on Windows looks up bare DLL names in System32. Pass an absolute path for an application DLL. Its dependencies can load from the DLL's directory and System32.} "\n\n"
             }
             continue
         }
@@ -1592,8 +1648,8 @@ proc ::ref::cffiMarkdown {source title} {
     return $text
 }
 
-proc ::ref::addCffiManuals {cache candidate documentsVar aliasesVar} {
-    upvar 1 $documentsVar documents $aliasesVar aliases
+proc ::ref::addCffiManuals {cache candidate documentsVar aliasesVar fragmentsVar} {
+    upvar 1 $documentsVar documents $aliasesVar aliases $fragmentsVar fragments
     foreach {slug file title digest} {
         intro cffi.3tcl {Introduction to cffi} 5c108421ac08ddfeca3aa90b8b9c85962386af848c92d9c1602509983e44bac5
         commands cffi-cffi.3tcl {cffi commands and classes} cbd3f3eabc13486e0eeccbc2fd0fbc88bb1e8c533adf29d795c416d3564b13c7
@@ -1608,7 +1664,7 @@ proc ::ref::addCffiManuals {cache candidate documentsVar aliasesVar} {
         copyBytes $from $sourcePath
         assertArchive $sourcePath $digest $file
         set source [readUtf8Strict $sourcePath]
-        set markdown [cffiMarkdown $source $title]
+        set markdown [cffiMarkdown $source $title $slug lookups]
         writeUtf8Lf [file join $candidate $mdRel] $markdown
         set sections [markdownSections $markdown $id]
         set formats [D markdown [formatRecord $candidate $mdRel $sections] \
@@ -1619,6 +1675,16 @@ proc ::ref::addCffiManuals {cache candidate documentsVar aliasesVar} {
             source_file [S $file] content_sha256 [S [get $formats markdown sha256]] \
             source_sha256 [S $digest] bytes [N [get $formats markdown bytes]]]
         foreach alias [list $id "cffi $slug" $title] { addUnique aliases [normalizeSearch $alias] $id }
+        foreach section $sections {
+            set anchor [dict get $section slug]
+            dict set lookups "$id#$anchor" $anchor
+        }
+        dict for {lookup anchor} $lookups {
+            # Preserve the established package overview aliases (e.g. cffi::Wrapper).
+            if {[dict exists $aliases $lookup]} continue
+            if {[dict exists $fragments $lookup]} {fail "duplicate reference fragment $lookup"}
+            dict set fragments $lookup [D id [S $id] section [S $anchor]]
+        }
     }
 }
 
@@ -1895,7 +1961,7 @@ proc ::ref::main {argv} {
             }
         }
 
-        addCffiManuals $cache $candidate documents aliases
+        addCffiManuals $cache $candidate documents aliases fragments
         # A standalone extracted reference is itself a distribution.
         foreach {product file from title} [list \
                 machteld Apache-2.0.txt [file join $root LICENSE] "Machteld Apache License 2.0" \

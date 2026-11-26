@@ -39,6 +39,36 @@ check {the bundled cffi manual preserves upstream declarations, as searchable Ma
     [errorcode {docs get cffi/manual/cookbook -format source}] eq {MACHTELD DOCS unsupported} &&
     [dict get [docs get cffi/license -limit 16] id] eq "cffi/license"}]
 
+foreach {lookup section snippet} {
+    cffi::pointer pointer {pointer subcommand}
+    {cffi::pointer address} pointer-address {pointer address}
+    {::cffi::memory get!} memory-get-bang {memory get!}
+    { ::CFFI::Memory   get! } memory-get-bang {memory get!}
+    {cffi::memory get} memory-get {memory get}
+    {cffi::Wrapper function} wrapper-function {WRAPPEROBJ function fnname fntype parameters}
+    {cffi::Wrapper new} wrapper-constructor {looks up bare DLL names in System32}
+    {cffi::Struct new} struct-constructor {Struct create OBJNAME}
+    {STRUCTOBJ new} struct-new {Allocates and initializes a native struct}
+    {cffi::Union size} union-size {UNIONOBJ size}
+    {cffi::Struct size} struct-size {STRUCTOBJ size}
+    {cffi::Wrapper destroy} wrapper-destructor {WRAPPEROBJ destroy}
+} {
+    set result [docs get $lookup]
+    set text [dict get $result text]
+    check "cffi reference resolves $lookup to its signature and section" [expr {
+        [dict get $result id] eq "cffi/manual/commands" && [dict get $result section] eq $section &&
+        [dict get $result total] < 8192 && ![dict get $result truncated] &&
+        [string first $snippet $text] >= 0 && [regexp -all -line {^### } $text] == 1 &&
+        $text eq [dict get [docs get cffi/manual/commands#$section] text]}]
+}
+check {qualified cffi section lookups rank their owning page first in search} [expr {
+    [dict get [lindex [dict get [docs search {cffi::Wrapper function} -limit 1] items] 0] id] eq "cffi/manual/commands"}]
+foreach lookup {{cffi::callback} {cffi::callback new} {cffi::callback free} cffi/manual/commands#synopsis cffi/manual/concepts#callbacks} {
+    set text [dict get [docs get $lookup -limit 400] text]
+    check "$lookup explains synchronous-only Windows support immediately" [expr {
+        [string first {Machteld on Windows disables native-to-Tcl callbacks.} $text] >= 0}]
+}
+
 set schema [docs schema]
 check {schema describes all operations and bounded retrieval} [expr {
     [dict get $schema schema] == 2 && [dict get $schema catalog_schema] == 2 &&

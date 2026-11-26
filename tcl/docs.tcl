@@ -103,7 +103,7 @@ proc ::machteld::DocsOptions {args defaults allowed} {
 proc ::machteld::DocsResolve {requested} {
     DocsLoad
     if {[string length $requested] > 32767} {DocsFail badvalue "docs: document id is too long"}
-    set key [string tolower [string trim $requested]]
+    set key [DocsNormalizeAlias $requested]
     if {$key eq ""} {DocsFail badvalue "docs: document id must not be empty"}
     set direct [ReferenceDb eval {SELECT id,slug FROM fragment WHERE name=$key}]
     if {[llength $direct]} {return $direct}
@@ -284,7 +284,8 @@ proc ::machteld::DocsSearch {args} {
                    snippet(search,4,'','',' ... ',20) AS sample
               FROM search JOIN page p ON p.rowid=search.rowid
              WHERE search MATCH $expression AND ($scope='all' OR p.product=$scope) AND ($type='all' OR p.kind=$type)
-             ORDER BY EXISTS(SELECT 1 FROM alias WHERE name=$exact AND id=p.id) DESC, relevance, p.id
+             ORDER BY (EXISTS(SELECT 1 FROM alias WHERE name=$exact AND id=p.id) OR
+                       EXISTS(SELECT 1 FROM fragment WHERE name=$exact AND id=p.id)) DESC, relevance, p.id
              LIMIT $limit OFFSET $offset
         } {
             set record [DocsSummary $id]
