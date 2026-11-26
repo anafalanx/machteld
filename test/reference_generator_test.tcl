@@ -123,7 +123,13 @@ proc ::rgt::checkCoreManuals {cache} {
                 set row [fixture eval {SELECT names,body FROM page WHERE id=$id AND kind=$kind AND version='9.0.4'}]
                 if {[llength $row] != 2} {fail "missing pinned $product 9.0.4 manual $file ($id)"}
                 lassign $row dbNames body
-                set source [readUtf8 $path]
+                set input [open $path rb]
+                try {set bytes [read $input]} finally {close $input}
+                set original [list $file source/$product/doc/$file [hash sum sha256 $bytes]]
+                if {[fixture eval {SELECT source_file,raw_path,source_sha256 FROM provenance WHERE id=$id}] ne $original} {
+                    fail "$file source identity or original checksum differs from its pinned archive"
+                }
+                set source [encoding convertfrom -profile strict utf-8 $bytes]
                 set lines [split [string map {\r\n \n} $source] \n]
                 set names [sourceNames $lines $file]
                 if {$names ne $dbNames} {fail "$file NAME field changed during conversion"}
