@@ -96,6 +96,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Record native and embedded file hashes for the build PC comparison
+        id: inventory
         if: github.ref_name == 'main' && !cancelled()
         run: |
           if (Test-Path -LiteralPath out/machteld.exe) {
@@ -103,11 +104,13 @@ jobs:
             & .\dist\0.21\machteld.exe tools/repro_report.tcl out/machteld.exe
             $reportExit = $LASTEXITCODE
             Write-Output '::endgroup::'
-            exit $reportExit
+            if ($reportExit -ne 0) { exit $reportExit }
+            "candidate=available" >> $env:GITHUB_OUTPUT
           }
 
       - name: Check out an independent copy of the same source
-        if: github.ref_name == 'main'
+        id: second_checkout
+        if: ${{ !cancelled() && steps.inventory.outputs.candidate == 'available' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repro
@@ -115,7 +118,7 @@ jobs:
           persist-credentials: false
 
       - name: Compare two independent clean unsigned builds
-        if: github.ref_name == 'main'
+        if: ${{ !cancelled() && steps.second_checkout.outcome == 'success' }}
         working-directory: repro
         run: |
           $actual = git rev-parse HEAD
@@ -126,9 +129,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $gated = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:GITHUB_WORKSPACE/out/machteld.exe").Hash
           $rebuilt = (Get-FileHash -Algorithm SHA256 -LiteralPath out/candidate/machteld.exe).Hash
-          "Commit: $env:GITHUB_SHA" >> $env:GITHUB_STEP_SUMMARY
-          "Gated executable SHA-256: $gated" >> $env:GITHUB_STEP_SUMMARY
-          "Independent executable SHA-256: $rebuilt" >> $env:GITHUB_STEP_SUMMARY
+          $hashes = @("Commit: $env:GITHUB_SHA", "Gated executable SHA-256: $gated", "Independent executable SHA-256: $rebuilt")
+          Write-Output $hashes
+          $hashes >> $env:GITHUB_STEP_SUMMARY
           if ($gated -ne $rebuilt) {
             Write-Output '::group::Independent executable hash inventory'
             & "$env:GITHUB_WORKSPACE/dist/0.21/machteld.exe" tools/repro_report.tcl out/candidate/machteld.exe
