@@ -578,6 +578,10 @@ proc ::et::hostModeTests {versionRe} {
         [expr {[regexp -nocase {complete offline reference} $out] && [regexp "Machteld $versionRe" $out] &&
                [regexp {Tcl 9\.0\.4} $out] && [regexp {Tk 9\.0\.4} $out] &&
                [regexp -nocase -- {--docs} $out] && [regexp -nocase {search} $out]}] [dict get $help text]
+    check "--help shows archive and standalone packaging" [expr {
+        [string first {machteld.exe pack app-directory -o app.machteld} $out] >= 0 &&
+        [string first {machteld.exe wrap app.dict -o MyApp.exe --gui} $out] >= 0
+    }]
     set result [host --version]
     check "--version is a host mode" \
         [expr {[dict get $result exit] == 0 && [regexp $versionRe [dict get $result out]]}] [dict get $result err]

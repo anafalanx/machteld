@@ -1990,11 +1990,12 @@ proc ::ref::main {argv} {
 
         set bootstrap [join [list "# Machteld $version" "" \
             "The complete offline reference covers Machteld $version, Tcl [productVersion tcl $version], Tk [productVersion tk $version] and cffi [productVersion cffi $version]." \
-            "" "Run a Tcl script, package an application, or launch an archive." \
+            "" "Run a Tcl script, launch an application archive, or build a standalone Windows app." \
             "" "```text" \
             "machteld.exe app.tcl" \
             "machteld.exe pack app-directory -o app.machteld" \
-            "machteld.exe app.machteld" "```" \
+            "machteld.exe app.machteld" \
+            "machteld.exe wrap app.dict -o MyApp.exe --gui" "```" \
             "" "Read and search the bundled manuals." \
             "" "```text" \
             "machteld.exe --docs search canvas" \

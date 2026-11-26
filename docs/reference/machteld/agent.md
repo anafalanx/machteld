@@ -113,7 +113,9 @@ Operational rules:
 The upstream Tcl/Tk `application` pages document upstream `tclsh` and `wish`
 hosts. They are language-distribution reference, not Machteld host-option
 promises. The full Machteld host can run a Tcl file, run a `.machteld` archive,
-or create one with `machteld.exe pack INPUT -o OUTPUT.machteld`. See
+or create one with `machteld.exe pack INPUT -o OUTPUT.machteld`. For a standalone
+Windows executable, use `machteld.exe wrap app.dict -o MyApp.exe --gui`.
+The full host's `machteld/command/wrap` page covers file properties, icons and packaging previews. See
 `machteld/guide/packaging` for the entry layout, argument handling and archive inventory.
 
 ## When the palette is not enough
