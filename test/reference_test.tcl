@@ -53,6 +53,30 @@ check {schema declares boolean JSON envelopes and compact stable ids} [expr {
     [string match {*product/license*} [dict get $schema identifiers canonical]]}]
 check {stable agent guide id resolves despite its guide type} [expr {
     [dict get [docs get machteld/agent -limit 32] id] eq "machteld/agent"}]
+set missingDocs {}
+dict for {verb facts} [manifest] {
+    set targets [list [dict get $facts doc]]
+    if {[dict exists $facts subcommands]} {
+        dict for {sub details} [dict get $facts subcommands] {
+            lappend targets [dict get $details doc]
+        }
+    }
+    foreach target $targets {
+        if {[catch {docs get $target -limit 1}]} {lappend missingDocs $target}
+    }
+}
+check {every running public command and subcommand resolves to its documented page or section} \
+    [expr {![llength $missingDocs]}] $missingDocs
+set packageIds [lmap item [dict get [docs list -scope machteld -type package -limit 200] items] {
+    dict get $item id
+}]
+foreach name {browser cffi encoding files httpd job network sqlite sqlite3} {
+    check "shipped package $name has a discoverable Markdown manual" \
+        [expr {"machteld/package/$name" in $packageIds}]
+}
+check {host startup and a namespaced UDP command resolve from the packaged reference} [expr {
+    [dict get [docs get machteld/application/host -limit 1] id] eq "machteld/application/host" &&
+    [dict get [docs get ::machteld::network::udp -limit 1] id] eq "machteld/package/network"}]
 check {stable two-part license ids resolve despite their license type} [expr {
     [dict get [docs get machteld/license -limit 16] id] eq "machteld/license" &&
     [dict get [docs get tcl/license -limit 16] id] eq "tcl/license" &&
@@ -386,8 +410,14 @@ check {help returns a truncated real page with a literal continuation hint} [exp
     $longHelp eq "[dict get $longPage text]\n\n$continuation"}] $longHelpRc
 check {help translates docs discovery failures into its own domain} [expr {
     [errorcode {help zxqzunknownmachteldverb}] eq {MACHTELD HELP notfound}}]
-check {help discovery advertises agent query primitives} [expr {
-    [string match {*docs get*docs search*docs schema*} [help]]}]
+set startHere [help]
+check {help discovery serves the searchable Markdown start page} [expr {
+    $startHere eq [dict get [docs get machteld/start-here -all 1] text] &&
+    [string first {machteld.exe app.tcl} $startHere] >= 0 &&
+    [string first {machteld.exe pack app-directory -o app.machteld} $startHere] >= 0 &&
+    [string first {machteld.exe app.machteld} $startHere] >= 0 &&
+    [string first {docs get} $startHere] >= 0 && [string first {docs search} $startHere] >= 0 &&
+    [string first {docs schema} $startHere] >= 0}]
 
 file delete -force $work
 if {$fails} { puts stderr "$fails reference test(s) failed"; exit 1 }

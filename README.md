@@ -19,6 +19,14 @@ The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
 [Build guide](BUILDING.md)
 
+In the 0.30 checkout, one executable runs Tcl scripts and launches
+`.machteld` application archives. Its offline reference covers the shipped
+commands and packages and the Tcl/Tk 9.0.4 manuals. Run
+`machteld.exe --help` for the entry points, `machteld.exe --docs search FTS5`
+to find a topic, or `machteld.exe --docs extract DIRECTORY` to export the
+Markdown pages and their full-text index in a single SQLite database.
+[0.30 qualification record](docs/releases/0.30-qualification.md)
+
 The development baseline includes the Beta 1 features. Tk applications can run
 cancellable jobs and SQL queries in supervised workers. Workers started
 from a running archive keep using its version after an update. The runtime
