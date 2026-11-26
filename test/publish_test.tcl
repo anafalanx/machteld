@@ -101,6 +101,12 @@ namespace eval ::publishTest {
             # Prove that the public command keeps a native diagnostic and its own domain.
             rename ::machteld::Publish ::publishTest::realPublish
             proc ::machteld::Publish {candidate path} {
+                if {[info exists ::publishTest::movedStage]} {
+                    file rename -- $candidate $::publishTest::movedStage
+                    set ch [open $candidate {WRONLY CREAT EXCL BINARY}]
+                    try {puts -nonewline $ch unrelated} finally {close $ch}
+                    set ::publishTest::replacementStage $candidate
+                }
                 return -code error -errorcode {MACHTELD PUBLISH oserror} \
                     "replacement failed; prior destination remains at RECOVERY-PATH"
             }
@@ -110,7 +116,14 @@ namespace eval ::publishTest {
                     $failed && [dict get $options -errorcode] eq {MACHTELD PUBLISH oserror} &&
                     [string match *RECOVERY-PATH $message] && [bytes $dest] eq $binary &&
                     [glob -nocomplain -directory $homeDir .machteld-save-*] eq {}}]
+                set ::publishTest::movedStage [file join $homeDir moved-stage]
+                set failed [catch {publish bytes $dest owned} message options]
+                check "failed bytes publication preserves a new occupant of its stage name" [expr {
+                    $failed && [dict get $options -errorcode] eq {MACHTELD PUBLISH oserror} &&
+                    [bytes $::publishTest::movedStage] eq "owned" &&
+                    [bytes $::publishTest::replacementStage] eq "unrelated" && [bytes $dest] eq $binary}]
             } finally {
+                unset -nocomplain ::publishTest::movedStage ::publishTest::replacementStage
                 rename ::machteld::Publish {}
                 rename ::publishTest::realPublish ::machteld::Publish
             }

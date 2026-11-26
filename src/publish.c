@@ -29,6 +29,8 @@ typedef struct {
 typedef struct {
     DWORD attributes;
     DWORD type;
+    ULONGLONG size;
+    FILETIME written;
     PublishIdentity identity;
 } PublishFileInfo;
 
@@ -182,6 +184,8 @@ query_handle(HANDLE handle, PublishFileInfo *info, DWORD *error)
     int has_legacy_info = GetFileInformationByHandle(handle, &legacy) != 0;
     if (has_legacy_info) {
         info->attributes = legacy.dwFileAttributes;
+        info->size = ((ULONGLONG)legacy.nFileSizeHigh << 32) | legacy.nFileSizeLow;
+        info->written = legacy.ftLastWriteTime;
         info->identity.legacy_volume = legacy.dwVolumeSerialNumber;
         info->identity.legacy_file =
             ((ULONGLONG)legacy.nFileIndexHigh << 32) | legacy.nFileIndexLow;
@@ -494,62 +498,76 @@ delete_backup_after_replace(HANDLE old_handle)
     (void)delete_open_handle(old_handle, &error);
 }
 
-/* Return nonzero when the old destination could only be retained at backup. */
+typedef enum {
+    PRIOR_UNVERIFIED,
+    PRIOR_AT_DESTINATION,
+    PRIOR_AT_BACKUP
+} PriorLocation;
+
+typedef struct {
+    PriorLocation prior;
+    int backup_absent;
+} ReplaceRecovery;
+
 static int
-recover_replace_failure(HANDLE old_handle, const wchar_t *backup,
-                        const wchar_t *destination,
-                        const PublishFileInfo *marker)
+probe_recovery_path(const wchar_t *path, PublishFileInfo *info)
 {
-    PublishFileInfo held;
-    DWORD error;
-    if (!query_handle(old_handle, &held, &error) || !is_regular(&held)) {
-        return 1;
-    }
-
-    PublishFileInfo current;
-    int state = probe_path(backup, FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        &current, &error);
-    if (state == PUBLISH_PROBE_ERROR) {
-        return 1;
-    }
-    if (state == PUBLISH_PROBE_PRESENT) {
-        if (!is_regular(&current)) {
-            return 1;
-        }
-        if (same_identity(&current, &held)) {
-            PublishFileInfo at_destination;
-            state = probe_path(destination, FILE_READ_ATTRIBUTES,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                &at_destination, &error);
-            if (state == PUBLISH_PROBE_ABSENT &&
-                    MoveFileExW(backup, destination, 0)) {
-                return 0;
-            }
-            return 1;
-        }
-        if (!same_identity(&current, marker)) {
-            return 1;
-        }
-        delete_identity(backup, marker);
-        state = probe_path(backup, FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            &current, &error);
-        if (state != PUBLISH_PROBE_ABSENT) {
-            return 1;
-        }
-    }
-
-    PublishFileInfo at_destination;
-    state = probe_path(destination, FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        &at_destination, &error);
-    if (state == PUBLISH_PROBE_PRESENT && is_regular(&at_destination) &&
-            same_identity(&at_destination, &held)) {
-        return 0;
-    }
-    return 1;
+    DWORD ignored;
+    return probe_path(path, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, info, &ignored);
 }
+
+/* The held handle keeps the original file ID live. An inaccessible path or
+ * an unremoved reservation cannot establish the location of the old file. */
+static ReplaceRecovery
+recover_replace_failure(const PublishFileInfo *held, const wchar_t *backup,
+                        const wchar_t *destination, const PublishFileInfo *marker)
+{
+    PublishFileInfo at_backup, at_destination;
+    int backup_state = probe_recovery_path(backup, &at_backup);
+    if (backup_state == PUBLISH_PROBE_PRESENT && is_regular(&at_backup)) {
+        if (same_identity(&at_backup, marker)) {
+            delete_identity(backup, marker);
+        } else if (same_identity(&at_backup, held) &&
+                probe_recovery_path(destination, &at_destination) == PUBLISH_PROBE_ABSENT) {
+            /* No replacement flag: a new occupant of the name wins. */
+            MoveFileExW(backup, destination, 0);
+        }
+    }
+
+    /* Recheck both names after any restoration or cleanup attempt. */
+    backup_state = probe_recovery_path(backup, &at_backup);
+    int destination_state = probe_recovery_path(destination, &at_destination);
+    ReplaceRecovery recovery = {PRIOR_UNVERIFIED, backup_state == PUBLISH_PROBE_ABSENT};
+    if (destination_state == PUBLISH_PROBE_PRESENT && is_regular(&at_destination) &&
+            same_identity(&at_destination, held)) {
+        recovery.prior = PRIOR_AT_DESTINATION;
+    } else if (backup_state == PUBLISH_PROBE_PRESENT && is_regular(&at_backup) &&
+            same_identity(&at_backup, held)) {
+        recovery.prior = PRIOR_AT_BACKUP;
+    }
+    return recovery;
+}
+
+/* Retry only when the names still refer to the same completed file versions.
+ * A filesystem that cannot provide size and write time gets one attempt. */
+static int
+same_file_version(const PublishFileInfo *left, const PublishFileInfo *right)
+{
+    return left->identity.has_legacy && right->identity.has_legacy &&
+           is_regular(left) && is_regular(right) && same_identity(left, right) &&
+           left->size == right->size &&
+           CompareFileTime(&left->written, &right->written) == 0;
+}
+
+static int
+same_parent_at_path(const NativePath *path, const PublishFileInfo *expected)
+{
+    PublishFileInfo current;
+    return probe_recovery_path(path->name, &current) == PUBLISH_PROBE_PRESENT &&
+           is_plain_directory(&current) && same_identity(&current, expected);
+}
+
 
 /* Reopen the published name and hold it stable through the flush. If another
  * writer won the name between replacement and open, its flush cannot confirm
@@ -649,6 +667,8 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
         goto done;
     }
 
+    unsigned int replace_retries = 0;
+    PublishFileInfo retry_destination = {0};
     for (int attempt = 0; attempt < 8; attempt++) {
         PublishFileInfo current_candidate;
         if (check_candidate(interp, &candidate, &original_candidate,
@@ -661,6 +681,16 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
         int state = check_destination(interp, &destination,
             &old_destination, &probe_error);
         if (state == PUBLISH_PROBE_ERROR) {
+            goto done;
+        }
+        if (replace_retries != 0 &&
+                (state != PUBLISH_PROBE_PRESENT ||
+                 !same_file_version(&original_candidate, &current_candidate) ||
+                 !same_file_version(&retry_destination, &old_destination) ||
+                 !same_parent_at_path(&candidate_parent, &candidate_parent_info) ||
+                 !same_parent_at_path(&destination_parent, &destination_parent_info))) {
+            publish_win_error(interp, "cannot retry replacement after an input changed",
+                ERROR_UNABLE_TO_REMOVE_REPLACED, NULL);
             goto done;
         }
         if (state == PUBLISH_PROBE_ABSENT) {
@@ -754,6 +784,16 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
             continue;
         }
 
+        if (replace_retries != 0 &&
+                (!same_file_version(&original_candidate, &final_candidate) ||
+                 !same_file_version(&retry_destination, &held_destination))) {
+            CloseHandle(old_handle);
+            delete_identity(backup, &marker);
+            free(backup);
+            publish_win_error(interp, "cannot retry replacement after an input changed",
+                ERROR_UNABLE_TO_REMOVE_REPLACED, NULL);
+            goto done;
+        }
         if (ReplaceFileW(destination.name, candidate.name, backup, 0,
                 NULL, NULL)) {
             delete_backup_after_replace(old_handle);
@@ -765,15 +805,27 @@ PublishCmd(void *client_data, Tcl_Interp *interp, int objc,
         }
 
         DWORD error = GetLastError();
-        int retained = recover_replace_failure(old_handle, backup,
+        ReplaceRecovery recovery = recover_replace_failure(&held_destination, backup,
             destination.name, &marker);
         CloseHandle(old_handle);
-        if (missing_error(error) && !retained) {
-            free(backup);
-            continue;
+        if (recovery.prior == PRIOR_AT_DESTINATION && recovery.backup_absent) {
+            if (missing_error(error)) {
+                free(backup);
+                continue;
+            }
+            if (error == ERROR_UNABLE_TO_REMOVE_REPLACED && replace_retries < 3 && attempt < 7 &&
+                    original_candidate.identity.has_legacy && held_destination.identity.has_legacy) {
+                if (replace_retries == 0) retry_destination = held_destination;
+                free(backup);
+                Sleep(10U << replace_retries);
+                ++replace_retries;
+                continue;
+            }
         }
-        publish_win_error(interp, "cannot atomically replace the destination",
-            error, retained ? backup : NULL);
+        publish_win_error(interp, recovery.prior == PRIOR_UNVERIFIED
+            ? "cannot atomically replace the destination or verify the prior file's location"
+            : "cannot atomically replace the destination",
+            error, recovery.prior == PRIOR_AT_BACKUP ? backup : NULL);
         free(backup);
         goto done;
     }
@@ -794,6 +846,49 @@ done:
 
 /* Write to the public command's private, blocking binary staging channel.
  * Use the same byte/text distinction as hash, the store and child stdin. */
+/* Capture the new stage's ID from the writable channel itself. The private
+ * binary token contains no pointers and is only used during this call to
+ * publish bytes. Removing by an identity-checked handle keeps a new occupant
+ * of the temporary pathname untouched. */
+static int
+PublishCleanupCmd(void *unused, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[])
+{
+    (void)unused;
+    PublishFileInfo owned = {0};
+    if (objc == 2) {
+        int mode;
+        void *handle;
+        DWORD error = ERROR_INVALID_HANDLE;
+        Tcl_Channel channel = Tcl_GetChannel(interp, Tcl_GetString(objv[1]), &mode);
+        if (channel == NULL || !(mode & TCL_WRITABLE) ||
+                Tcl_GetChannelHandle(channel, TCL_WRITABLE, &handle) != TCL_OK ||
+                !query_handle(handle, &owned, &error) || !is_regular(&owned)) {
+            return publish_win_error(interp, "cannot identify the new publication stage", error, NULL);
+        }
+        Tcl_SetObjResult(interp, Tcl_NewByteArrayObj((const unsigned char *)&owned.identity,
+            sizeof owned.identity));
+        return TCL_OK;
+    }
+    if (objc == 3) {
+        Tcl_Size size;
+        const unsigned char *token = Tcl_GetBytesFromObj(interp, objv[2], &size);
+        if (token == NULL || size != sizeof owned.identity) {
+            return publish_error(interp, "badvalue", "invalid publication stage identity");
+        }
+        memcpy(&owned.identity, token, sizeof owned.identity);
+        NativePath stage = {0};
+        if (native_path_from_obj(interp, objv[1], "publication stage", &stage) != TCL_OK) {
+            return TCL_ERROR;
+        }
+        int removed = delete_identity(stage.name, &owned);
+        native_path_release(&stage);
+        Tcl_SetObjResult(interp, Tcl_NewBooleanObj(removed));
+        return TCL_OK;
+    }
+    Tcl_WrongNumArgs(interp, 1, objv, "channel | path identity");
+    return TCL_ERROR;
+}
+
 static int
 PublishWriteCmd(void *client_data, Tcl_Interp *interp, int objc,
                 Tcl_Obj *const objv[])
@@ -902,6 +997,8 @@ Machteldpublish_Init(Tcl_Interp *interp)
             "cannot create the machteld command namespace");
     }
     if (Tcl_CreateObjCommand(interp, "::machteld::DirectoryStage", DirectoryStageCmd,
+            NULL, NULL) == NULL ||
+        Tcl_CreateObjCommand(interp, "::machteld::PublishCleanup", PublishCleanupCmd,
             NULL, NULL) == NULL ||
         Tcl_CreateObjCommand(interp, "::machteld::Publish", PublishCmd,
             NULL, NULL) == NULL ||

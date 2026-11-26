@@ -158,6 +158,7 @@ proc ::machteld::PublishBytes {destination value args} {
     set channel [open $candidate {WRONLY CREAT EXCL BINARY} 0600]
     try {
         try {
+            set owned [PublishCleanup $channel]
             PublishWrite $channel $value
         } finally {
             close $channel
@@ -167,7 +168,7 @@ proc ::machteld::PublishBytes {destination value args} {
         # The move consumed our staging file, so this name is no longer ours.
         return -options $options $message
     } on error {message options} {
-        catch {file delete -- $candidate}
+        if {[info exists owned]} {catch {PublishCleanup $candidate $owned}}
         return -options $options $message
     }
     return $published

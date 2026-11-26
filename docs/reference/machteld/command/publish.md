@@ -48,10 +48,16 @@ A competing replacement can cause this outcome. Check the destination
 before retrying. The staged name was consumed by the publication.
 
 A failure before the switch preserves an existing destination. If Windows
-partially completes a replacement and cannot restore the old file to its
-name, the diagnostic gives the recovery path containing its prior bytes.
-Retain that diagnostic. Cleanup of a recovery backup after successful
-publication is best effort.
+partially completes a replacement, Machteld checks both names against the
+original file's identity. When the original can only be found at the backup
+name, the diagnostic gives that recovery path. Keep it to recover the prior
+bytes. If neither name can be verified, the diagnostic reports that uncertainty.
+Cleanup of a recovery backup after successful publication is best effort.
+
+Windows can temporarily refuse to remove the replaced file (error 1175).
+Machteld retries up to three times, after 10, 20 and 40 milliseconds, when
+both inputs still have their original identities, sizes and modification
+times, both parent directories match, and the backup reservation is gone.
 
 ## Lifetime and timeouts
 

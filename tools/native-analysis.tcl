@@ -138,6 +138,10 @@ proc ::na::trappedSteps {layout gcc out} {
     lappend steps [dict create label "trapped cloud file transitions: compile" argv [list $gcc {*}$flags \
         [file join $fixtures localfiles_driver.c] [file join $src wintext.c] {*}$tcl -o $fileBoundary]]
     lappend steps [dict create label "trapped cloud file transitions" argv [list $fileBoundary]]
+    set publication [file join $out publish-recovery-trap.exe]
+    lappend steps [dict create label "trapped atomic publication recovery: compile" argv [list $gcc {*}$flags -municode \
+        [file join $fixtures publish_driver.c] [file join $src wintext.c] {*}$tcl -o $publication]]
+    lappend steps [dict create label "trapped atomic publication recovery" argv [list $publication [file join $fixtures publish_recovery.tcl]]]
     set udp [file join $out udp-trap.exe]
     set nts [file join $out nts-crypto-trap.exe]
     lappend steps [dict create label "trapped NTS AES-SIV: compile" argv [list $gcc {*}$flags \
@@ -331,6 +335,7 @@ proc ::na::main {argv} {
             test/json_test.tcl test/native_adversarial_test.tcl
             test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c test/fixtures/audio_output_startup.c
             test/fixtures/native_boundary_driver.c test/fixtures/tk_index_format_test.c
+            test/fixtures/publish_driver.c test/fixtures/publish_recovery.tcl
         } {
             lappend inputs [file join $root {*}[split $relative /]]
         }
