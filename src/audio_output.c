@@ -2,11 +2,12 @@
  * already uses an STA. Tcl owns the producer side of a bounded PCM ring. */
 #include "audio_internal.h"
 #include "media/rae_wasapi.h"
+#include <malloc.h>
 #include <objbase.h>
 #include <process.h>
 #include <stdatomic.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef enum { OPENING, READY, PLAYING, DONE, STOPPED, DEVICE_FAILED } OutputState;
 typedef struct {
@@ -25,7 +26,7 @@ static void destroy_output(Output *o) {
     if (o->stop) CloseHandle(o->stop);
     if (o->changed) CloseHandle(o->changed);
     rae_ring_free(&o->ring);
-    free(o);
+    _aligned_free(o);
 }
 
 static void release_output(Output *o) {
@@ -146,8 +147,9 @@ int audio_output(Tcl_Interp *interp, Tcl_Obj *rateObj, Tcl_Obj *channelsObj) {
         Tcl_GetIntFromObj(interp, channelsObj, &channels) != TCL_OK) return TCL_ERROR;
     if (rate < 8000 || rate > 192000 || channels < 1 || channels > 8)
         return audio_error(interp, "format", "expected 8000 to 192000 Hz and one to eight channels");
-    Output *o = calloc(1, sizeof *o);
+    Output *o = _aligned_malloc(sizeof *o, alignof(Output));
     if (!o) return audio_error(interp, "oserror", "out of memory creating PCM output");
+    memset(o, 0, sizeof *o);
     o->rate = rate;
     o->channels = channels;
     if (rae_ring_init(&o->ring, (size_t)rate * (size_t)channels / 2) != RAE_OK ||

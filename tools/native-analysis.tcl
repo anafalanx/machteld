@@ -130,6 +130,10 @@ proc ::na::trappedSteps {layout gcc out} {
     lappend steps [dict create label "trapped hash sequence boundary: compile" argv [list $gcc {*}$flags \
         [file join $test hash_boundary_test.c] {*}$tcl -o $hashBoundary]]
     lappend steps [dict create label "trapped hash sequence boundary" argv [list $hashBoundary]]
+    set outputOwner [file join $out audio-output-trap.exe]
+    lappend steps [dict create label "trapped PCM output lifetime: compile" argv [list $gcc {*}$flags \
+        [file join $fixtures audio_output_startup.c] {*}$tcl -o $outputOwner]]
+    lappend steps [dict create label "trapped PCM output lifetime" argv [list $outputOwner]]
     set fileBoundary [file join $out files-provider-trap.exe]
     lappend steps [dict create label "trapped cloud file transitions: compile" argv [list $gcc {*}$flags \
         [file join $fixtures localfiles_driver.c] [file join $src wintext.c] {*}$tcl -o $fileBoundary]]
@@ -284,6 +288,7 @@ proc ::na::main {argv} {
             {filesystem length/capacity boundaries}
             {SQLite result cleanup and HTTP header-key ownership}
             {hash token sequence exhaustion}
+            {aligned PCM allocation, startup failures and owner teardown order}
             {Cloud Files provider outcomes and encoding detector availability}
             {UDP lifetime and Windows network adapter errors}
             {authenticated time cryptographic vectors, deadlines and worker lifetime}}] \
@@ -324,7 +329,7 @@ proc ::na::main {argv} {
             test/wintext_test.c test/hash_boundary_test.c test/fixtures/localfiles_driver.c test/fixtures/encoding_driver.c test/fixtures/network_driver.c test/fixtures/udp_driver.c
             test/fixtures/nts_crypto.c test/fixtures/nts_lifetime.c test/fixtures/nts_server.c test/nts_test.tcl
             test/json_test.tcl test/native_adversarial_test.tcl
-            test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c
+            test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c test/fixtures/audio_output_startup.c
             test/fixtures/native_boundary_driver.c test/fixtures/tk_index_format_test.c
         } {
             lappend inputs [file join $root {*}[split $relative /]]
