@@ -2,7 +2,7 @@ package require machteld 0.21
 
 # tools/bootstrap.tcl -- the dependency cache the build stands on: the pinned
 # Tcl/Tk 9.0.4, SQLite and yyjson sources, fetched and checked by SHA-256; Tcl
-# patched with the exact upstream correction the lock names; static Tcl/Tk
+# patched with the upstream corrections the lock names; static Tcl/Tk
 # built with the hash-pinned MSYS2 toolchain; SQLite and yyjson staged. An
 # artifact manifest hashes everything the build later reads, and a state file
 # names the inputs it was made from, so a current cache is reused and a stale
@@ -655,6 +655,7 @@ proc ::boot::main {argv} {
         assertHash [file join $root {*}[split [dict get $notice distribution] /]] [dict get $notice sha256] "[dict get $notice id] distributed notice"
     }
     applyLockedFilePatch $lock $extract tcl-windows-acl-normalize
+    applyLockedFilePatch $lock $extract tcl-windows-delete-symlinks
 
     if {!$sourcesOnly} {
         # bash's HOME: an empty folder of this build, deleted with src.

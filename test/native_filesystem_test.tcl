@@ -19,6 +19,46 @@ proc readbytes {path} {
     set channel [open $path rb]
     try {return [read $channel]} finally {close $channel}
 }
+
+# Exercise Tcl's Windows tree deletion on the candidate. Targets are siblings
+# of the tree being removed. Directory links and junctions have distinct tags.
+proc testDeleteLinks {scratch} {
+    set tree [file join $scratch {tree with links}]
+    set target [file join $scratch {outside target}]
+    file mkdir $tree $target
+    set sentinel [file join $target sentinel]
+    writebytes $sentinel original
+    file link -symbolic [file join $tree junction] $target
+
+    package require cffi
+    set kernel [cffi::Wrapper new kernel32.dll]
+    $kernel function CreateSymbolicLinkW {uchar saveerrors} {link winstring target winstring flags uint}
+    try {
+        # Flag 2 also permits an unprivileged link on a Developer Mode PC.
+        set live [file nativename [file join $tree live]]
+        if {[CreateSymbolicLinkW $live [file nativename $sentinel] 2]} {
+            foreach {name dest flags} [list directory $target 3 dangling [file join $target absent] 2] {
+                if {![CreateSymbolicLinkW [file nativename [file join $tree $name]] [file nativename $dest] $flags]} {
+                    error "could not create $name symbolic link: Windows error [lindex [cffi::savederrors] 1]"
+                }
+            }
+            puts "testing recursive deletion with file, directory and dangling symbolic links"
+        } else {
+            set winerror [lindex [cffi::savederrors] 1]
+            if {$winerror != 1314 || [info exists ::env(GITHUB_ACTIONS)]} {
+                error "could not create file symbolic link: Windows error $winerror"
+            }
+            puts "SKIP Windows symbolic links (privilege unavailable); testing the junction"
+        }
+        file delete -force -- $tree
+        check "recursive deletion removes the link tree" [expr {![file exists $tree]}]
+        check "recursive deletion preserves the target and its bytes" [expr {[readbytes $sentinel] eq "original"}]
+    } finally {
+        rename CreateSymbolicLinkW {}
+        $kernel destroy
+    }
+}
+
 set scratch [file tempfile marker machteld-native-filesystem-]
 close $scratch
 file delete $marker
@@ -61,6 +101,7 @@ try {
     writebytes $candidate content
     ::machteld::Publish $candidate $target
     check "valid Unicode publication remains supported" [expr {[readbytes $target] eq "content"}]
+    testDeleteLinks $marker
 } finally {
     catch {store close}
     file delete -force $marker

@@ -169,6 +169,16 @@
       "afterSha256": "e11debfcf3a5ff6cdb75b9d3fc54f9b0120c5fa8e1a0b6dc8313551c3a404094"
     },
     {
+      "id": "tcl-windows-delete-symlinks",
+      "appliesTo": "tcltk@9.0.4",
+      "file": "patches/tcl-9.0.4-08203e40.patch",
+      "upstream": "https://github.com/tcltk/tcl/commit/945ecf325f89212b1b29d30ce13c46cb24975dd8",
+      "sha256": "8a289fcabcee3d04fbd9e1fa4415a4542a674b37397060bebf266607c927e468",
+      "target": "tcl9.0.4/win/tclWinFCmd.c",
+      "beforeSha256": "5411e862bc78fa21c6d0e96febf569ec32071ab044c7c230477540655099f0ec",
+      "afterSha256": "2114ac3279db856178e8086077fecb4d91d4ccc35fa82745739748a25b9d6595"
+    },
+    {
       "id": "cffi-no-callbacks",
       "appliesTo": "cffi@2.0.3",
       "kind": "machteld",
