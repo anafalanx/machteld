@@ -235,7 +235,10 @@ proc ::machteld::DocsGet {args} {
     lassign [DocsResolve $id] canonical fragment
     set section [string tolower [dict get $options section]]
     if {[string length $section] > 32767} { DocsFail badvalue "docs: section is too long" }
-    if {$fragment ne "" && $section ne "" && $fragment ne $section} {
+    # Plain Machteld subcommands were page aliases before section lookup.
+    # Keep an explicit -section on those spellings selecting from that page.
+    if {$fragment ne "" && $section ne "" && $fragment ne $section &&
+            ([string first # $id] >= 0 || ![string match machteld/command/* $canonical])} {
         DocsFail usage "docs: the id fragment and -section select different sections"
     }
     if {$section eq ""} { set section $fragment }
@@ -281,6 +284,7 @@ proc ::machteld::DocsSearch {args} {
         )
     }
     set options [DocsFilterOptions {*}[lrange $args 1 end]]
+    lassign [ReferenceDb eval {SELECT id,slug FROM fragment WHERE name=$exact}] exactId exactSlug
     dict with options {
         set total [ReferenceDb onecolumn [string cat $exactPages {
             SELECT count(*) FROM page p
@@ -303,6 +307,7 @@ proc ::machteld::DocsSearch {args} {
              LIMIT $limit OFFSET $offset
         }] {
             set record [DocsSummary $id]
+            dict set record doc_ref [expr {$id eq $exactId ? "$id#$exactSlug" : $id}]
             dict set record score [expr {round(-1000000*$relevance)}]
             dict set record snippet [string range $sample 0 239]
             lappend items $record
@@ -508,6 +513,7 @@ proc ::machteld::DocsJSummary {item} {
         sections [DocsJStringDict [dict get $item sections]]]
     if {[dict exists $item score]} { lappend pairs score [DocsJNumber [dict get $item score]] }
     if {[dict exists $item snippet]} { lappend pairs snippet [DocsJString [dict get $item snippet]] }
+    if {[dict exists $item doc_ref]} { lappend pairs doc_ref [DocsJString [dict get $item doc_ref]] }
     return [DocsJObject $pairs]
 }
 
@@ -630,7 +636,8 @@ proc ::machteld::DocsHostText {subcommand result} {
         list - search {
             set output ""
             foreach item [dict get $result items] {
-                append output "[dict get $item id]\t[dict get $item title]\t[dict get $item summary]\n"
+                set ref [expr {$subcommand eq "search" ? [dict get $item doc_ref] : [dict get $item id]}]
+                append output "$ref\t[dict get $item title]\t[dict get $item summary]\n"
             }
             if {[dict get $result truncated]} { append output "-- more at offset [dict get $result next] --\n" }
             return [string trimright $output \n]

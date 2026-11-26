@@ -477,7 +477,25 @@ try {
         set options [list --cache $cache --msys $msys]
         set exitCode 7
         set expected absent
-        set failed [catch {::gate::main $options} why]
+        set progressPath [file join $work "gate progress.jsonl"]
+        set failed [catch {::gate::main [concat $options [list --progress-jsonl $progressPath]]} why]
+        set reader [open $progressPath r]
+        try {
+            set records [lmap line [split [string trimright [read $reader] \n] \n] {json decode $line}]
+        } finally {close $reader}
+        check {failed gate reports paired suite and step events in execution order} [expr {
+            [lmap r $records {dict get $r status}] eq {running running passed running failed failed} &&
+            [lmap r $records {dict get $r kind}] eq {suite step step step step suite} &&
+            [lmap r $records {dict get $r name}] eq {gate {release build} {release build} {qualification probe} {qualification probe} gate}}]
+        foreach record $records {
+            check {each progress record has a timestamp and each finish has a duration} [expr {
+                [dict get $record schema] == 1 && [dict get $record at_ms] > 0 &&
+                ([dict get $record event] eq "start" ? ![dict exists $record elapsed_ms] :
+                 [dict get $record event] eq "finish" && [dict get $record elapsed_ms] >= 0)}]
+        }
+        check {an existing progress file is preserved} [expr {
+            [catch {::gate::main [concat $options [list --progress-jsonl $progressPath]]} message] &&
+            [string match {*cannot create progress log*} $message]}]
         check {an initial failed lane publishes nothing and removes its private candidate} [expr {
             $failed && [string match {*qualification probe failed (error, exit code 0x00000007)*} $why] &&
             ![file exists $public] && [file tail $observed] eq "machteld.exe" &&

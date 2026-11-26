@@ -89,6 +89,10 @@ dict for {verb facts} [manifest] {
     if {[dict exists $facts subcommands]} {
         dict for {sub details} [dict get $facts subcommands] {
             lappend targets [dict get $details doc]
+            if {[catch {set match [docs get "$verb $sub" -limit 1]}] ||
+                    "[dict get $match id]#[dict get $match section]" ne [dict get $details doc]} {
+                lappend missingDocs "$verb $sub"
+            }
         }
     }
     foreach target $targets {
@@ -135,6 +139,13 @@ check {section retrieval returns the requested complete span} [expr {
     [dict get $synopsis section] eq "synopsis" && ![dict get $synopsis truncated] &&
     [string length [dict get $synopsis text]] > 20}]
 set fragment [docs get machteld/command/child#start -limit 100]
+set waitSection [docs get {  CHILD   wait  } -all 1]
+set waitHit [lindex [dict get [docs search {child wait} -limit 1] items] 0]
+check {subcommand search links to the same bounded section as the natural spelling} [expr {
+    [dict get $waitHit doc_ref] eq "machteld/command/child#wait" &&
+    [dict get $waitHit id] eq "machteld/command/child" && [dict get $waitSection section] eq "wait" &&
+    [dict get $waitSection text] eq [dict get [docs get [dict get $waitHit doc_ref] -all 1] text] &&
+    [dict get [docs get {child wait} -section examples] section] eq "examples"}]
 check {fragment IDs select authored subcommand sections} [expr {
     [dict get $fragment id] eq "machteld/command/child" && [dict get $fragment section] eq "start"}]
 

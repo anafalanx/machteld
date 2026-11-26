@@ -1,11 +1,13 @@
 --- a/sqlite/tclsqlite.c
 +++ b/sqlite/tclsqlite.c
-@@ -1389,8 +1389,12 @@
+@@ -1389,8 +1389,14 @@
  ** If successful, TCL_OK is returned. Otherwise, TCL_ERROR is returned
  ** and an error message loaded into interpreter pDb->interp.
  */
-+extern int MachteldSqlBind(Tcl_Interp *, sqlite3_stmt *, int, Tcl_Obj *);
++extern int MachteldSqlBind(Tcl_Interp *, sqlite3_stmt *, int, Tcl_Obj *, int);
 +extern Tcl_Obj *MachteldSqlColumnText(sqlite3_stmt *, int);
++extern int MachteldSqlInspect(Tcl_Interp *, sqlite3 *, Tcl_Obj *);
++extern int MachteldSqlTypedRow(Tcl_Interp *, sqlite3_stmt *, Tcl_Obj **);
 +
  static int dbPrepareAndBind(
    SqliteDb *pDb,                  /* Database object */
@@ -13,14 +15,14 @@
    char const *zIn,                /* SQL to compile */
    char const **pzOut,             /* OUT: Pointer to next SQL statement */
    SqlPreparedStmt **ppPreStmt     /* OUT: Object used to cache statement */
-@@ -1490,7 +1494,15 @@
+@@ -1490,7 +1496,15 @@
    /* Bind values to parameters that begin with $ or : */
    for(i=1; i<=nVar; i++){
      const char *zVar = sqlite3_bind_parameter_name(pStmt, i);
 -    if( zVar!=0 && (zVar[0]=='$' || zVar[0]==':' || zVar[0]=='@') ){
-+    if( zVar!=0 && zVar[0]=='?' ){
++    if( zVar==0 || zVar[0]=='?' ){
 +      if( parameters ){
-+        rc = MachteldSqlBind(interp, pStmt, i, parameters);
++        rc = MachteldSqlBind(interp, pStmt, i, parameters, zVar!=0);
 +        if( rc!=TCL_OK ) break;
 +      }else{
 +        /* A statement previously cached by -parameters may hold a value. */
@@ -30,15 +32,32 @@
        Tcl_Obj *pVar = Tcl_GetVar2Ex(interp, &zVar[1], 0, 0);
        if( pVar==0 && pDb->zBindFallback!=0 ){
          Tcl_Obj *pCmd;
-@@ -1627,6 +1639,7 @@
+@@ -1627,6 +1641,8 @@
  struct DbEvalContext {
    SqliteDb *pDb;                  /* Database handle */
    Tcl_Obj *pSql;                  /* Object holding string zSql */
 +  Tcl_Obj *parameters;            /* Owned across nested eval callbacks */
++  Tcl_Obj *typedRow;              /* Owned list of tagged cells for this row */
    const char *zSql;               /* Remaining SQL to execute */
    SqlPreparedStmt *pPreStmt;      /* Current statement */
    int nCol;                       /* Number of columns returned by pStmt */
-@@ -1770,7 +1783,7 @@
+@@ -1637,6 +1653,7 @@
+ 
+ #define SQLITE_EVAL_WITHOUTNULLS  0x00001  /* Unset array(*) for NULL */
+ #define SQLITE_EVAL_ASDICT        0x00002  /* Use dict instead of array */
++#define SQLITE_EVAL_TYPED         0x00004  /* Preserve storage classes */
+ 
+ /*
+ ** Release any cache of column names currently held as part of
+@@ -1766,11 +1783,15 @@
+ static int dbEvalStep(DbEvalContext *p){
+   const char *zPrevSql = 0;       /* Previous value of p->zSql */
+ 
++  if( p->typedRow ){
++    Tcl_DecrRefCount(p->typedRow);
++    p->typedRow = 0;
++  }
+   while( p->zSql[0] || p->pPreStmt ){
      int rc;
      if( p->pPreStmt==0 ){
        zPrevSql = (p->zSql==zPrevSql ? 0 : p->zSql);
@@ -47,15 +66,38 @@
        if( rc!=TCL_OK ) return rc;
      }else{
        int rcs;
-@@ -1837,6 +1850,7 @@
+@@ -1780,6 +1801,9 @@
+ 
+       rcs = sqlite3_step(pStmt);
+       if( rcs==SQLITE_ROW ){
++        if( p->evalFlags & SQLITE_EVAL_TYPED ){
++          return MachteldSqlTypedRow(pDb->interp, pStmt, &p->typedRow);
++        }
+         return TCL_OK;
+       }
+       if( p->pVarName ){
+@@ -1837,6 +1861,8 @@
      Tcl_DecrRefCount(p->pVarName);
      p->pVarName = 0;
    }
 +  if( p->parameters ) Tcl_DecrRefCount(p->parameters);
++  if( p->typedRow ) Tcl_DecrRefCount(p->typedRow);
    Tcl_DecrRefCount(p->pSql);
    dbReleaseColumnNames(p);
    delDatabaseRef(p->pDb);
-@@ -1872,6 +1886,7 @@
+@@ -1849,6 +1875,11 @@
+ */
+ static Tcl_Obj *dbEvalColumnValue(DbEvalContext *p, int iCol){
+   sqlite3_stmt *pStmt = p->pPreStmt->pStmt;
++  if( p->typedRow ){
++    Tcl_Obj *cell;
++    Tcl_ListObjIndex(NULL, p->typedRow, iCol, &cell);
++    return cell;
++  }
+   switch( sqlite3_column_type(pStmt, iCol) ){
+     case SQLITE_BLOB: {
+       int bytes = sqlite3_column_bytes(pStmt, iCol);
+@@ -1872,6 +1903,7 @@
      }
    }
  
@@ -63,7 +105,7 @@
    return Tcl_NewStringObj((char*)sqlite3_column_text(pStmt, iCol), -1);
  }
  
-@@ -2389,7 +2404,7 @@
+@@ -2389,7 +2421,7 @@
      SqlPreparedStmt *pStmt = 0;        /* Next statement to run */
      char *zErr = 0;                    /* Error message from QRF */
  
@@ -72,7 +114,59 @@
      if( rc ) goto format_failed;
      if( pStmt==0 ) continue;
      rc = sqlite3_format_query_result(pStmt->pStmt, &qrf, &zErr);
-@@ -3297,10 +3312,21 @@
+@@ -2451,7 +2483,7 @@
+     "status",                 "timeout",               "total_changes",
+     "trace",                  "trace_v2",              "transaction",
+     "unlock_notify",          "update_hook",           "version",
+-    "wal_hook",               0                        
++    "wal_hook",               "inspect",               "readonly", 0
+   };
+   enum DB_enum {
+     DB_AUTHORIZER,            DB_BACKUP,               DB_BIND_FALLBACK,
+@@ -2468,7 +2500,7 @@
+     DB_STATUS,                DB_TIMEOUT,              DB_TOTAL_CHANGES,
+     DB_TRACE,                 DB_TRACE_V2,             DB_TRANSACTION,
+     DB_UNLOCK_NOTIFY,         DB_UPDATE_HOOK,          DB_VERSION,
+-    DB_WAL_HOOK
++    DB_WAL_HOOK,              DB_INSPECT,              DB_READONLY
+   };
+   /* don't leave trailing commas on DB_enum, it confuses the AIX xlc compiler */
+ 
+@@ -2481,6 +2513,33 @@
+   }
+ 
+   switch( (enum DB_enum)choice ){
++
++  case DB_INSPECT: {
++    if( objc!=3 ){
++      Tcl_WrongNumArgs(interp, 2, objv, "SQL");
++      return TCL_ERROR;
++    }
++    addDatabaseRef(pDb);
++    rc = MachteldSqlInspect(interp, pDb->db, objv[2]);
++    delDatabaseRef(pDb);
++    return rc;
++  }
++
++  case DB_READONLY: {
++    if( objc!=2 && objc!=3 ){
++      Tcl_WrongNumArgs(interp, 2, objv, "?schema?");
++      return TCL_ERROR;
++    }
++    const char *schema = objc==3 ? Tcl_GetString(objv[2]) : "main";
++    int readonly = sqlite3_db_readonly(pDb->db, schema);
++    if( readonly<0 ){
++      Tcl_SetObjResult(interp, Tcl_ObjPrintf("unknown SQLite schema: %s", schema));
++      Tcl_SetErrorCode(interp, "MACHTELD", "SQLITE", "schema", (char *)0);
++      return TCL_ERROR;
++    }
++    Tcl_SetObjResult(interp, Tcl_NewBooleanObj(readonly));
++    return TCL_OK;
++  }
+ 
+   /*    $db authorizer ?CALLBACK?
+   **
+@@ -3297,11 +3356,24 @@
    ** accessible during the eval of $code.
    */
    case DB_EVAL: {
@@ -93,9 +187,12 @@
 +        objv++;
 +      }else if( strcmp(zOpt, "-withoutnulls")==0 ){
          evalFlags |= SQLITE_EVAL_WITHOUTNULLS;
++      }else if( strcmp(zOpt, "-typed")==0 ){
++        evalFlags |= SQLITE_EVAL_TYPED;
        }else if( strcmp(zOpt, "-asdict")==0 ){
          evalFlags |= SQLITE_EVAL_ASDICT;
-@@ -3313,7 +3339,7 @@
+       }else{
+@@ -3313,7 +3385,7 @@
      }
      if( objc<3 || objc>5 ){
        Tcl_WrongNumArgs(interp, 2, objv,
@@ -104,15 +201,17 @@
        return TCL_ERROR;
      }
  
-@@ -3322,6 +3348,7 @@
+@@ -3321,7 +3393,8 @@
+       DbEvalContext sEval;
        Tcl_Obj *pRet = Tcl_NewObj();
        Tcl_IncrRefCount(pRet);
-       dbEvalInit(&sEval, pDb, objv[2], 0, 0);
+-      dbEvalInit(&sEval, pDb, objv[2], 0, 0);
++      dbEvalInit(&sEval, pDb, objv[2], 0, evalFlags);
 +      if( parameters ){ sEval.parameters = parameters; Tcl_IncrRefCount(parameters); }
        while( TCL_OK==(rc = dbEvalStep(&sEval)) ){
          int i;
          int nCol;
-@@ -3350,6 +3377,7 @@
+@@ -3350,6 +3423,7 @@
  
        p = (DbEvalContext *)Tcl_Alloc(sizeof(DbEvalContext));
        dbEvalInit(p, pDb, objv[2], pVarName, evalFlags);
@@ -120,7 +219,7 @@
  
        cd2[0] = (void *)p;
        cd2[1] = (void *)pScript;
-@@ -4228,7 +4256,7 @@
+@@ -4228,7 +4302,7 @@
  ){
    Tcl_WrongNumArgs(interp, 1, objv,
      "HANDLE ?FILENAME? ?-vfs VFSNAME? ?-readonly BOOLEAN? ?-create BOOLEAN?"
@@ -129,7 +228,7 @@
      " ?-nomutex BOOLEAN? ?-fullmutex BOOLEAN? ?-uri BOOLEAN?"
    );
    return TCL_ERROR;
-@@ -4264,6 +4292,7 @@
+@@ -4264,6 +4338,7 @@
    const char *zVfs = 0;
    int flags;
    int bTranslateFileName = 1;
@@ -137,7 +236,7 @@
    Tcl_DString translatedFilename;
    int rc;
  
-@@ -4309,6 +4338,10 @@
+@@ -4309,6 +4384,10 @@
        /* no-op */
      }else if( strcmp(zArg, "-vfs")==0 ){
        zVfs = Tcl_GetString(objv[i]);
@@ -148,7 +247,7 @@
      }else if( strcmp(zArg, "-readonly")==0 ){
        int b;
        if( Tcl_GetBooleanFromObj(interp, objv[i], &b) ) return TCL_ERROR;
-@@ -4395,6 +4428,22 @@
+@@ -4395,6 +4474,22 @@
      Tcl_Free((char*)p);
      sqlite3_free(zErrMsg);
      return TCL_ERROR;

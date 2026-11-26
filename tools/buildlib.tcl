@@ -43,7 +43,7 @@ set ::machteld::build::SYSLIBS {
 # MetaDefine, and the version every later part reads); the generated manifest
 # is appended last by stage_prelude.
 set ::machteld::build::PRELUDE_PARTS {
-    machteld.tcl docs.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl hls.tcl
+    machteld.tcl docs.tcl inspect.tcl cli.tcl log.tcl worker.tcl pool.tcl pmap.tcl hls.tcl
 }
 
 proc ::machteld::build::werror {} {

@@ -46,11 +46,100 @@ namespace eval ::sqltest {
         puts "ok   sqlite3: $name"
     }
 
+    proc inspectAndRead {path} {
+        set suffix " /* café \U0001F31F */ SELECT missing FROM does_not_exist"
+        set sql {SELECT ?3 AS α, :name, :name, @other, $other, ?, '?90;?' AS literal /* ?77 */}
+        set info [db inspect "$sql;$suffix"]
+        check "prepared metadata includes SQLite slot names, Unicode column names and exact unprepared tail" [expr {
+            [dict get $info statement] && [dict get $info readonly] && [dict get $info explain] == 0 &&
+            [dict get $info columns] eq {α :name :name @other {$other} ? literal} &&
+            [dict get $info parameters] eq {{} {} ?3 :name @other {$other} {}} &&
+            [dict get $info tail] eq $suffix}]
+        foreach empty {{} { ; ; -- comment} {/* only a comment */}} {
+            set none [db inspect $empty]
+            check "empty SQL has no statement, slots, columns or tail" [expr {
+                ![dict get $none statement] && ![dict get $none readonly] &&
+                [dict get $none explain] == 0 && [dict get $none parameters] eq {} &&
+                [dict get $none columns] eq {} && [dict get $none tail] eq {}}]
+        }
+        db eval {CREATE TEMP TABLE inspected(n)}
+        set write [db inspect {INSERT INTO inspected VALUES(?1) RETURNING n;}]
+        check "inspection prepares a writable RETURNING statement without changing rows" [expr {
+            ![dict get $write readonly] && [dict get $write columns] eq {n} &&
+            [db onecolumn {SELECT count(*) FROM inspected}] == 0}]
+        check "inspection reports both explain modes" [expr {
+            [dict get [db inspect {EXPLAIN SELECT 1}] explain] == 1 &&
+            [dict get [db inspect {EXPLAIN QUERY PLAN SELECT 1}] explain] == 2}]
+        db authorizer {apply {{action args} {
+            expr {$action eq "SQLITE_READ" ? "SQLITE_DENY" : "SQLITE_OK"}
+        }}}
+        try {
+            check "inspection observes the connection authorizer" [expr {
+                [catch {db inspect {SELECT n FROM inspected}} msg opts] &&
+                [dict get $opts -errorcode] eq {MACHTELD SQLITE inspect}}]
+        } finally {db authorizer {}}
+        foreach bad [list {SELECT FROM} "SELECT 1\u0000; SELECT 2"] {
+            check "malformed SQL and embedded NUL fail inspection" [expr {
+                [catch {db inspect $bad} msg opts] && [dict get $opts -errorcode] eq {MACHTELD SQLITE inspect}}]
+        }
+        sqlite3 ::sqltest::reader $path -readonly 1 -create 0
+        try {
+            check "readonly reports the actual open mode and rejects an unknown schema" [expr {
+                ![db readonly] && ![db readonly temp] && [reader readonly main] &&
+                [catch {db readonly bogus} msg opts] && [dict get $opts -errorcode] eq {MACHTELD SQLITE schema}}]
+        } finally {reader close}
+
+        set unicode "é\u0000\U0001F31F"
+        set bytes [binary decode hex ff800017]
+        set bindings [dict create 1 [list text $unicode] 2 [list blob $bytes]]
+        set oldNull [db nullvalue]
+        db nullvalue legacy-null
+        try {
+            set cells [db eval -parameters $bindings -typed {
+                SELECT NULL, '', X'', -9223372036854775808, 9223372036854775807, 1.25, ?1, ?2
+            }]
+            check "typed results preserve NULL, bytearrays, Unicode, empty values, int64 limits and real" [expr {
+                $cells eq [list null {text {}} {blob {}} {integer -9223372036854775808} \
+                    {integer 9223372036854775807} {real 1.25} [list text $unicode] [list blob $bytes]] &&
+                [binary encode hex [lindex $cells 7 1]] eq "ff800017" &&
+                [db eval {SELECT NULL}] eq "legacy-null"}]
+        } finally {db nullvalue $oldNull}
+        set named named-value
+        set mixed {SELECT ?, ?3, ?, :named, ?3}
+        check "mixed anonymous, sparse, repeated and named slots bind on the actual prepared statement" [expr {
+            [db eval -typed -parameters {1 {text a} 3 {integer 17} 4 {text z}} $mixed] eq
+                {{text a} {integer 17} {text z} {text named-value} {integer 17}} &&
+            [db eval -typed -parameters {3 {text next}} $mixed] eq
+                {null {text next} null {text named-value} {text next}} &&
+            [db eval -typed $mixed] eq {null null null {text named-value} null}}]
+
+        set seen {}
+        db eval -typed -asdict {SELECT 1 AS n, NULL AS v UNION ALL SELECT 2, ''} row {
+            lappend seen [dict get $row n] [dict get $row v] [lindex [db eval -typed {SELECT X'61'}] 0]
+        }
+        check "typed dictionary callbacks survive nested queries" [expr {
+            $seen eq {{integer 1} null {blob a} {integer 2} {text {}} {blob a}}}]
+        db eval -typed -withoutnulls {SELECT NULL AS omitted, '' AS kept} fields {
+            check "array callbacks can omit nulls and retain empty text" [expr {
+                ![info exists fields(omitted)] && $fields(kept) eq {text {}}}]
+        }
+        db eval -typed {SELECT 19 AS local UNION ALL SELECT 99} {
+            check "scalar callback receives a tagged cell" [expr {$local eq {integer 19}}]
+            break
+        }
+        set visited 0
+        check "malformed UTF-8 fails before the row callback and preserves recovery via BLOB" [expr {
+            [catch {db eval -typed {SELECT CAST(X'FF80' AS TEXT)} {incr visited}} msg opts] &&
+            [dict get $opts -errorcode] eq {MACHTELD SQLITE text} && $visited == 0 &&
+            [binary encode hex [lindex [db eval -typed {SELECT CAST(CAST(X'FF80' AS TEXT) AS BLOB)}] 0 1]] eq "ff80"}]
+    }
+
     proc features {work} {
         package require machteld::sqlite
         set path [file join $work {profile and search.db}]
         sqlite3 ::sqltest::db $path -foreignkeys true -defensive true
         try {
+            inspectAndRead $path
             db eval {
                 CREATE TABLE parent(id INTEGER PRIMARY KEY);
                 CREATE TABLE child(parent INTEGER REFERENCES parent);

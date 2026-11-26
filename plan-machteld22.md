@@ -820,6 +820,20 @@ own repositories. Public regression fixtures use synthetic data.
 
 ### First engineering tasks
 
+#### Additional prerequisites agreed on 2026-11-26
+
+| Deliverable | Evidence required before signing |
+| --- | --- |
+| SQLite contracts on the open connection | Prepare statements without stepping them. Check tails, parameter slots, column metadata and SQLite's flags. Prove the five storage classes survive result retrieval, including NULL, empty text and empty BLOB. Verify read-only state and anonymous binding on the actual handle. |
+| Tcl-only application port | Run the application's migration, archive, child, model and host identity tests on its private branch. Exercise the packaged application without its own native extension. Run the original ELS tests separately and retain their deployment assertions. Keep application data and private fixtures local. |
+| Agent-facing host commands | Exercise script, manifest and archive checks with valid and invalid inputs. Confirm checking never evaluates the entry. Query the installed build's command and package contract from the shell and verify explicitly requested environment probes. |
+| Offline lookup and executable recipes | Resolve exact command spellings to their manifest section. Run a generated worker, headless child, archive and verified backup from examples retrieved from a relocated executable. |
+| Live test progress | Verify timestamped start and finish records for gate steps and application test cases, including failures, skips and elapsed times where applicable. Preserve console diagnostics. |
+
+Freeze the resulting source and run the full Windows gate and independent
+clean builds again. Compare the complete unsigned executable hashes across
+the build PC and hosted Windows before owner signing and attended validation.
+
 1. **Control the implicit linker input.** At the same epoch (`1795616467`)
    the PC's unsigned 22 executable started with SHA-256 `5f763b71` and the
    hosted executable with `663fcff1`. A local control replay reproduced

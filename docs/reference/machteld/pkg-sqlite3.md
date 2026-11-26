@@ -1,12 +1,12 @@
 ---
 id: machteld/package/sqlite3
 type: package
-title: SQLite connections, FTS5 and typed parameters
-summary: Query the shared SQLite engine from Tcl, bind numbered parameters, and enable verified connection settings.
-commands: sqlite3, package require sqlite3, sqlite3 eval, sqlite3 eval -parameters, FTS5, trigram, ::sqlite3
+title: SQLite connections, inspection, typed queries and FTS5
+summary: Inspect statements, bind parameters, read storage-class-tagged values and query FTS5 indexes through the shared SQLite engine.
+commands: sqlite3, package require sqlite3, sqlite3 eval, sqlite3 eval -parameters, sqlite3 eval -typed, sqlite3 inspect, sqlite3 readonly, FTS5, trigram, ::sqlite3
 ---
 
-# SQLite connections, FTS5 and typed parameters
+# SQLite connections, inspection, typed queries and FTS5
 
 ## Open a database
 
@@ -21,16 +21,40 @@ commands: sqlite3, package require sqlite3, sqlite3 eval, sqlite3 eval -paramete
 
 `sqlite3 -version` and `sqlite3 -sourceid` identify the engine. `sqlite3 -has-codec` returns 0. `db config enable_fkey` and `db config defensive` report the effective safeguards.
 
+`db readonly ?schema?` reports whether SQLite opened that database read-only. It defaults to `main` and accepts attached schema names. An unknown schema raises `MACHTELD SQLITE schema`. The result describes SQLite's open mode. A transaction, lock, authorizer or filesystem error can still prevent a write.
+
 The host registers `sqlite3` in the initialized script or archive interpreter
 and in each supervised worker. A plain `interp create` child starts without
 this registration. Run database work in an initialized interpreter and open
 its connection there.
 
+## Inspect one statement
+
+`db inspect sql` prepares the first statement on this connection, collects its metadata and finalizes it without stepping it. SQLite parses SQL under the connection's schema and authorizer, including quoted delimiters, comments and trigger bodies. The result is a Tcl dictionary.
+
+| Key | Value |
+| --- | --- |
+| `statement` | Boolean. Empty input, comments and empty statements alone produce 0. |
+| `tail` | Exact unprepared SQL after the statement. This can contain whitespace, comments or additional statements. Pass the tail back to inspect to check for a second statement. |
+| `readonly` | SQLite's statement-level read-only flag. This describes direct database writes. Functions and virtual tables may have additional effects. |
+| `explain` | 0 for ordinary SQL, 1 for EXPLAIN, 2 for EXPLAIN QUERY PLAN. |
+| `columns` | Result column labels from left to right, including duplicates. |
+| `parameters` | One list element per slot, through the largest slot number. Element zero describes slot 1. SQLite supplies names such as `?3`, `:name`, `@name` or `$name`. Empty entries can represent either a bare `?` or a gap before a numbered slot. Repeated names share a slot. |
+
+When `statement` is 0, the two flags are 0 and the lists are empty. Invalid SQL, a NUL in SQL or a denied prepare raises `MACHTELD SQLITE inspect`. Some PRAGMAs take effect during preparation. Apply the connection authorizer **before** inspecting SQL that is subject to application policy. Inspection leaves parameter values unbound. A later execution prepares or reuses its own statement and can fail if the database has changed.
+
+```tcl
+set info [db inspect {SELECT title FROM books WHERE id=?3; -- lookup}]
+set fields [dict get $info columns]
+set more [db inspect [dict get $info tail]]
+if {[dict get $more statement]} {error "expected one SQL statement"}
+```
+
 ## Query and bind
 
-`db eval ?-parameters bindings? ?-asdict? ?-withoutnulls? sql ?rowName? ?script?` returns a flat Tcl list in row and column order when there is no script. A row script runs in its caller's context. Give a name for a row array, or combine a row name with `-asdict` for a dictionary. `-withoutnulls` omits SQL NULL fields in a row callback. `db onecolumn sql` returns the first column of the first row. `db exists sql` reports whether SQL produced a row.
+`db eval ?-typed? ?-parameters bindings? ?-asdict? ?-withoutnulls? sql ?rowName? ?script?` returns a flat Tcl list in row and column order when there is no script. A row script runs in its caller's context. Give a name for a row array, or combine a row name with `-asdict` for a dictionary. `-withoutnulls` omits SQL NULL fields in a named row array or dictionary. `db onecolumn sql` returns the first column of the first row. `db exists sql` reports whether SQL produced a row.
 
-A numbered binding maps the positive decimal slot number to a typed Tcl list. Write `?1`, `?3` and so on in braced SQL. Gaps need no binding, and repeated uses of a slot read the same value. SQLite identifies the placeholders during preparation, including when the text contains comments or quoted question marks. Named SQLite placeholders keep their upstream variable binding.
+A binding maps the positive decimal slot number to a typed Tcl list. Write `?1`, `?3` and so on in braced SQL. Each explicit numbered slot needs an entry when using `-parameters`. A bare `?` takes the next slot and defaults to SQL NULL if omitted. Gaps need no binding, and repeated uses of a slot read the same value. SQLite identifies the placeholders during preparation, including when the text contains comments or quoted question marks. Named SQLite placeholders keep their upstream variable binding.
 
 | Binding | SQLite value |
 | --- | --- |
@@ -39,6 +63,10 @@ A numbered binding maps the positive decimal slot number to a typed Tcl list. Wr
 | `{real value}` | Floating-point number, excluding NaN |
 | `{text value}` | Valid Unicode encoded as UTF-8, preserving embedded NUL |
 | `{blob bytes}` | Binary data, including an empty bytearray |
+
+`-typed` returns every result cell in the same tagged form. SQLite supplies its actual storage class for each row and column. The result of `db eval -typed {SELECT NULL, '', X'', 7, 7.0}` is the list `null {text {}} {blob {}} {integer 7} {real 7.0}`. The cell `null` is a one-element Tcl list. An integer is a signed 64-bit Tcl integer, a real is a Tcl double, text is valid UTF-8 decoded to Tcl (including embedded NUL) and a blob is a Tcl bytearray. The connection's `nullvalue` setting affects ordinary evaluation. Typed callbacks receive these tagged cells in the usual row variables. To retain duplicate column labels by position, use the flat result and the `columns` list from inspection.
+
+Malformed UTF-8 in a SQLite TEXT value raises `MACHTELD SQLITE text` before that row's callback. To retrieve its original bytes, select `CAST(column AS BLOB)`. A conversion error can occur after earlier rows have run their callbacks. Use an explicit transaction when writes must roll back together.
 
 ```tcl
 package require sqlite3

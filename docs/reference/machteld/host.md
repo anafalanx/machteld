@@ -3,7 +3,7 @@ id: machteld/application/host
 type: application
 title: Running and packaging Tcl applications
 summary: Run an opted-in Tcl script, start an application archive or build a verified archive for the shared runtime.
-commands: machteld.exe, machteld pack, machteld --help, machteld --version, machteld --docs
+commands: machteld.exe, machteld pack, machteld --help, machteld --version, machteld --docs, machteld --check, machteld --manifest
 ---
 
 # Running and packaging Tcl applications
@@ -14,12 +14,35 @@ commands: machteld.exe, machteld pack, machteld --help, machteld --version, mach
 machteld.exe --help
 machteld.exe --version
 machteld.exe --docs status --json
+machteld.exe --check program.machteld --json
+machteld.exe --manifest command child wait --json
 machteld.exe program.tcl argument ...
 machteld.exe program.machteld argument ...
 machteld.exe pack source -o program.machteld
 ```
 
 The program receives the arguments after its name in Tcl's `argv` list. An attached interactive terminal can start a prompt by running the host with no program. For batch work, pass a UTF-8 program file. The first command is a literal `package require machteld`, optionally with a literal version requirement or `-exact`. The host rejects redirected program input, `-` and an explicit `-encoding` option. A direct application controls its own command-line options.
+
+## Check an application without running it
+
+`machteld.exe --check TARGET --json` accepts a UTF-8 script, a directory with
+`main.tcl`, a project dictionary, or a `.machteld` archive. Relative paths
+resolve from the caller's current directory. For directories and projects the
+host computes the same selected-file inventory as `pack`. For archives it
+verifies every member against the embedded sizes and hashes. It checks the
+entry's literal declaration and version requirement against this executable,
+then parses the entry's top-level Tcl command boundaries without evaluating it.
+Braced procedure bodies and other scripts constructed or sourced at runtime
+still require application tests.
+
+On success the host writes one JSON object to stdout and exits 0. The
+`result` contains `schema` (1), `kind`, absolute `path`, relative `entry`,
+selected application file count `files`, `executed` (false) and `doc`. On
+failure it writes `{"ok":false,"error":{...}}` to stderr and exits 1.
+Diagnostics carry `domain`, stable `code`, `message`, and `doc`. A file
+diagnostic includes its `path`, plus a one-based `line` when the parser can
+locate the error. Archive member diagnostics use `archive.machteld!/entry.tcl`.
+Omit `--json` for a Tcl dict on success and a plain message on failure.
 
 ## Archive inputs and results
 

@@ -1938,6 +1938,10 @@ proc ::ref::main {argv} {
                 if {![dictHasNocase $fragments "$id#$slug"]} {
                     dict set fragments "$id#$slug" [D id [S $id] section [S $slug]]
                 }
+                set spelling "[file tail $id] $slug"
+                if {[string match machteld/command/* $id] && $spelling in $commands} {
+                    dict set fragments [normalizeSearch $spelling] [D id [S $id] section [S $slug]]
+                }
             }
         }
         foreach name [lsort [lmap f [glob -nocomplain -type f -directory [file join $root docs] *.md] {file tail $f}]] {

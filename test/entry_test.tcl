@@ -473,6 +473,102 @@ after 0 entry_post_start
         [expr {[dict get $result exit] == 1 && ![file exists $stdinMarker]}] [dict get $result text]
 }
 
+proc ::et::inspectionTests {version} {
+    variable work
+    set home [file join $work {inspection café}]
+    set project [file join $home app]
+    file mkdir $project
+    set app [file join $project main.tcl]
+    set marker [file join $project executed]
+    writeText $app "package require -exact machteld $version\nclose \[open [list $marker] w\]\n"
+    writeText [file join $project project.dict] {schema 1 entry main.tcl files {main.tcl}}
+    set archive [file join $home sample.machteld]
+    set packed [host pack $app -o $archive]
+    check "static-check archive fixture packs" [expr {[dict get $packed exit] == 0}] [dict get $packed text]
+    foreach {source kind count} {app/main.tcl script 1 app/project.dict project 1 app directory 2 sample.machteld archive 1} {
+        set result [host -dir $home --check $source --json]
+        set decoded [decodeJson [dict get $result out]]
+        check "check $kind accepts a relative path and never executes its entry" \
+            [expr {[dict get $result exit] == 0 && [envelopeOk $decoded] &&
+                [dict get $decoded result kind] eq $kind && [dict get $decoded result files] == $count &&
+                [dict get $decoded result entry] eq "main.tcl" && ![dict get $decoded result executed] &&
+                ![file exists $marker]}] [dict get $result text]
+    }
+    set bad [file join $home bad.tcl]
+    foreach {source code line} [list "# comment\n\nputs bad\n" optin 3 \
+            "package require -exact machteld 99999\n" version 1 \
+            "package require machteld\n# comment\nset x \{" syntax 3] {
+        writeText $bad $source
+        set result [host --check $bad --json]
+        set decoded [decodeJson [dict get $result err]]
+        check "check reports ENTRY $code and the source line" \
+            [expr {[dict get $result exit] == 1 && $decoded ne "" && ![dict get $decoded ok] &&
+                [dict get $decoded error code] eq $code && [dict get $decoded error line] == $line &&
+                [dict get $decoded error path] eq $bad && [dict get $decoded error doc] eq "machteld/application/host"}] \
+            [dict get $result text]
+    }
+    set broken [file join $home broken.machteld]
+    zipfs lmkzip $broken [list $app main.tcl]
+    set badProject [file join $home broken.dict]
+    writeText $badProject {schema 1 entry main.tcl files {{[error should-not-run]}}}
+    set forged [file join $home forged.machteld]
+    set index [file join $home inventory.dict]
+    writeText $index [dict create schema 1 entry main.tcl files [dict create main.tcl \
+        [dict create bytes [file size $app] sha256 [string repeat 0 64]]]]
+    zipfs lmkzip $forged [list $app main.tcl $index machteld-inventory.dict]
+    foreach {args code} [list [list --check $broken] inventory [list --check $forged] inventory \
+            [list --check $badProject] notfound [list --check "$bad.missing"] notfound \
+            [list --check] usage [list --manifest command absent] notfound \
+            [list --manifest package Tk --probe] unsupported [list --manifest --json] usage] {
+        set result [host {*}$args --json]
+        set decoded [decodeJson [dict get $result err]]
+        check "inspection diagnostic for $args" [expr {[dict get $result exit] == 1 &&
+            $decoded ne "" && ![dict get $decoded ok] && [dict get $decoded error code] eq $code}] [dict get $result text]
+    }
+    set manifest [decodeJson [dict get [host --manifest --json] out]]
+    set contractScript [file join $home contract.tcl]
+    writeText $contractScript {package require machteld
+set contract [manifest]
+puts [list [lsort [dict keys $contract]] [dict get $contract child subcommands wait]]
+}
+    lassign [dict get [host $contractScript] out] names waitFacts
+    set expectedPackages {Tcl Tk cffi machteld sqlite3}
+    variable root
+    foreach dir [glob -directory [file join $root packages] -types d machteld-*] {
+        lappend expectedPackages machteld::[string range [file tail $dir] 9 end]
+    }
+    check "shell catalog lists live commands and bundled packages" [expr {[envelopeOk $manifest] &&
+        $names eq [dict get $manifest result commands] && [lsort $expectedPackages] eq [dict get $manifest result packages] &&
+        ![dict get $manifest result probed]}] $manifest
+    set contract [decodeJson [dict get [host --manifest command child wait --json] out]]
+    set equal [expr {[envelopeOk $contract] && [lsort [dict keys [dict get $contract result facts]]] eq [lsort [dict keys $waitFacts]]}]
+    if {$equal} {
+        dict for {key value} $waitFacts {
+            if {[dict get $contract result facts $key] ne $value} { set equal 0 }
+        }
+    }
+    check "single subcommand retains typed options and its exact documentation ID" [expr {[envelopeOk $contract] &&
+        $equal && [dict get $contract result facts doc] eq "machteld/command/child#wait"}] $contract
+    foreach package {Tk sqlite3 machteld::browser} {
+        set item [decodeJson [dict get [host --manifest package $package --json] out]]
+        check "$package catalog lookup keeps package lazy" [expr {[envelopeOk $item] &&
+            [llength [dict get $item result versions]] && ![dict get $item result loaded] && ![dict get $item result probed]}] $item
+    }
+    set sqlite [decodeJson [dict get [host --manifest package sqlite3 --probe --json] out]]
+    check "explicit sqlite3 probe exercises FTS5 trigram" [expr {[envelopeOk $sqlite] &&
+        [dict get $sqlite result loaded] && [dict get $sqlite result probed] && "trigram" in [dict get $sqlite result features]}] $sqlite
+    # Windows can derive ProgramFiles from ProgramW6432 when creating a child.
+    set noBrowser [dict create ProgramFiles $home ProgramFiles(x86) $home ProgramW6432 $home LOCALAPPDATA $home]
+    set browser [decodeJson [dict get [host -env $noBrowser --manifest package machteld::browser --probe --json] out]]
+    check "explicit browser probe reports an absent installed browser" [expr {[envelopeOk $browser] &&
+        [dict get $browser result probed] && ![dict get $browser result detected]}] $browser
+    set browserPath [file join $home Microsoft Edge Application msedge.exe]
+    writeText $browserPath "fixture metadata only"
+    set browser [decodeJson [dict get [host -env $noBrowser --manifest package machteld::browser --probe --json] out]]
+    check "browser discovery identifies an install without running it" [expr {[envelopeOk $browser] &&
+        [dict get $browser result detected] && [dict get $browser result executable] eq $browserPath}] $browser
+}
+
 proc ::et::hostModeTests {versionRe} {
     variable work
     set help [host --help]
@@ -669,6 +765,7 @@ proc ::et::main {argv} {
             puts "--   host-crash checks skipped (no --fixture)"
         }
         hostModeTests $versionRe
+        inspectionTests $version
         # Exercise payload refusal using the tested runtime's PE sections.
         # The release artifact itself remains untouched.
         set bare [file join $work stripped-runtime.exe]

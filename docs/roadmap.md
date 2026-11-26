@@ -26,6 +26,19 @@ An entry with `22-30` excludes it. Signed 0.21 drives builds and
 tests through acceptance of the signed 0.30 copy. Identify baseline artifacts by their
 hashes, verification receipts, `manifest`, and embedded reference.
 
+### Additional release requirements
+
+The owner added four release requirements on 2026-11-26. Qualify the actual
+Tcl-only application port against the candidate, including its archive
+operations, generated child programs and host identity checks. Keep the
+application's migrations, access decisions and backup policy in the application.
+Provide same-connection SQLite statement inspection, read-only status and
+per-cell storage classes. Let an agent check a script, manifest or archive
+without launching it and query the installed host's live capabilities.
+Make exact subcommand references and executable recipes discoverable in the
+SQLite manual, and stream machine-readable progress from both test runners.
+These changes require fresh clean-build comparisons and gate receipts.
+
 ### Unsigned development baseline
 
 The 22 baseline began as the 0.22 candidate (commit 8bcc1ec), the stabilization of

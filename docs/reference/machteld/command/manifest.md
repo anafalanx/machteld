@@ -52,6 +52,40 @@ puts [dict get $api child subcommands wait options]
 puts [dict get $api run codes]
 ```
 
+## Shell queries
+
+```text
+machteld.exe --manifest --json
+machteld.exe --manifest command child --json
+machteld.exe --manifest command child wait --json
+machteld.exe --manifest package Tk --json
+machteld.exe --manifest package sqlite3 --probe --json
+machteld.exe --manifest package machteld::browser --probe --json
+```
+
+The default query returns the runtime version, public command names, Tcl,
+Tk and Machteld's public bundled packages. A command or subcommand query returns its `facts`
+from the same `manifest` dict that Tcl programs see. Its `doc` value is
+an exact ID for `--docs get`. Package queries report the registered versions,
+whether the package is loaded in this process, and whether a probe ran.
+Reading a packaged index does not initialize Tk, start a browser, open a
+database or contact the network.
+
+The optional SQLite probe loads the shipped binding, creates an in-memory
+FTS5 table using the trigram tokenizer, inserts and matches text, and closes
+the database. Its response includes the engine version and checked features.
+The browser probe checks the same installation paths as `browser launch`.
+It returns `detected` and, when found, an `executable` path. It reads file
+metadata without launching a browser or using a profile or socket.
+Other package probes return `MANIFEST unsupported`. An unprobed package's
+presence describes what this executable ships. External services, browser
+installations, and desktop access depend on the environment.
+
+Successful queries write `{"ok":true,"result":{...}}` to stdout and exit 0.
+The result carries `schema: 1`. Failed queries write one JSON error to stderr
+and exit 1. The error includes `domain`, `code`, `message` and `doc`.
+Omitting `--json` returns the result as a Tcl dict.
+
 ## Constraints
 
 The manifest describes structural contract facts, not prose semantics or every

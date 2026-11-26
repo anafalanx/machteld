@@ -9,7 +9,7 @@ package require machteld 0.21
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
 #         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty? ?--cloud?
-#         ?--interactive-gui?
+#         ?--interactive-gui? ?--progress-jsonl FILE?
 #
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
 #
@@ -92,13 +92,13 @@ proc ::gate::parse {argv} {
     variable groups
     set settings [dict create runtime [file join $root out machteld.exe] \
         cache [file join $root .cache deps] msys "" skipBuild 0 \
-        tls 0 pty 0 gui 0 cloud 0]
+        tls 0 pty 0 gui 0 cloud 0 progress-jsonl "" progress ""]
     set requested {}
     set given {}
     while {[llength $argv]} {
         set argv [lassign $argv option]
         switch -- $option {
-            --group - --runtime - --cache - --msys {
+            --group - --runtime - --cache - --msys - --progress-jsonl {
                 if {![llength $argv]} {
                     fail "$option needs a value"
                 }
@@ -490,6 +490,26 @@ proc ::gate::checkEnvironment {} {
     }
 }
 
+proc ::gate::progressEvent {channel event kind name status {elapsed ""}} {
+    set record [dict create schema [expr {1}] at_ms [clock milliseconds] event $event \
+        kind $kind name $name status $status]
+    if {$elapsed ne ""} {dict set record elapsed_ms $elapsed}
+    puts $channel [json encode -dict $record]
+    flush $channel
+}
+
+# Keep the step executor replaceable for private-desktop console lanes. Emit
+# the finish only after execution and preserve Tcl error options for callers.
+proc ::gate::withProgress {channel kind name script} {
+    if {$channel eq ""} {return [uplevel 1 $script]}
+    set started [clock clicks -milliseconds]
+    progressEvent $channel start $kind $name running
+    set code [catch {uplevel 1 $script} result options]
+    progressEvent $channel finish $kind $name [expr {$code ? "failed" : "passed"}] \
+        [expr {max(0,[clock clicks -milliseconds]-$started)}]
+    return -options $options $result
+}
+
 proc ::gate::qualify {settings} {
     variable root
     set runtime [dict get $settings runtime]
@@ -513,7 +533,9 @@ proc ::gate::qualify {settings} {
     set steps [plan $settings]
     withLaneEnvironment $settings $compilerBin {
         foreach step $steps {
-            execute $step $runtime $identity
+            withProgress [dict get $settings progress] step [dict get $step label] {
+                execute $step $runtime $identity
+            }
         }
     }
     if {[dict size $identity]} {
@@ -526,9 +548,23 @@ proc ::gate::qualify {settings} {
 }
 
 proc ::gate::main {argv} {
+    set settings [parse $argv]
+    set path [dict get $settings progress-jsonl]
+    if {$path eq ""} {return [runGate $settings]}
+    # A new file keeps simultaneous and previous qualification evidence intact.
+    if {[catch {open $path {WRONLY CREAT EXCL}} channel]} {
+        fail "cannot create progress log [file nativename $path]: $channel"
+    }
+    try {
+        fconfigure $channel -encoding utf-8 -translation lf
+        dict set settings progress $channel
+        withProgress $channel suite gate {runGate $settings}
+    } finally {close $channel}
+}
+
+proc ::gate::runGate {settings} {
     variable root
     set started [clock milliseconds]
-    set settings [parse $argv]
     checkEnvironment
     set output [file normalize [dict get $settings runtime]]
     dict set settings runtime $output
@@ -552,9 +588,10 @@ proc ::gate::main {argv} {
             set stage [file tempdir [file join [file dirname $output] gate]]
             set candidate [file join $stage machteld.exe]
             dict set settings runtime $candidate
-            execute [dict create label "release build" argv [list [info nameofexecutable] \
+            set buildStep [dict create label "release build" argv [list [info nameofexecutable] \
                 [file join $root tools release.tcl] --output $candidate --cache [dict get $settings cache] \
-                --msys [dict get $settings msys]]] $candidate {}
+                --msys [dict get $settings msys]]]
+            withProgress [dict get $settings progress] step "release build" {execute $buildStep $candidate {}}
         }
         set count [qualify $settings]
         if {$stage ne ""} {

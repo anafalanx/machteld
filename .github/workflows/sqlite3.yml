@@ -111,10 +111,17 @@ jobs:
         if: github.ref_name == 'main'
         run: |
           $env:Path = "$env:SystemRoot/System32;$env:Path"
-          & .\dist\0.21\machteld.exe tools/gate.tcl --msys $env:MSYS2_ROOT --skip-build --runtime out/candidate/machteld.exe --interactive-gui
+          & .\dist\0.21\machteld.exe tools/gate.tcl --msys $env:MSYS2_ROOT --skip-build --runtime out/candidate/machteld.exe --interactive-gui --progress-jsonl out/candidate/gate.jsonl
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\out\candidate\machteld.exe test/clipboard_test.tcl --hosted-clipboard
           exit $LASTEXITCODE
+
+      - name: Show the last recorded gate steps on failure
+        if: failure() && github.ref_name == 'main'
+        run: |
+          if (Test-Path -LiteralPath out/candidate/gate.jsonl) {
+            Get-Content -LiteralPath out/candidate/gate.jsonl -Tail 12
+          }
 
       - name: Record native and embedded file hashes for the build PC comparison
         if: ${{ !cancelled() && steps.primary_build.outcome == 'success' }}

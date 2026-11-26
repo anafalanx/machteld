@@ -301,13 +301,13 @@
       "id": "sqlite-tcl-parameters-profile",
       "appliesTo": "sqlite-tcl@3.53.4",
       "kind": "machteld",
-      "reason": "Bind typed numbered parameters through SQLite's prepared slots and verify optional connection safeguards at open.",
+      "reason": "Inspect SQLite-prepared statements, return storage-class-tagged results, bind typed numbered parameters, and verify optional connection safeguards at open.",
       "regression": "test/sqlite3_test.tcl",
       "file": "patches/sqlite-3.53.4-tcl-parameters-profile.patch",
-      "sha256": "c6d6b3f54829ce01aca082cc438ee8e3ab678c6037de963733ba11885c4dfa89",
+      "sha256": "6de0837d07a4b29547a3fc0458baaf823fde93fb363f515e58b22783f7190d81",
       "target": "sqlite/tclsqlite.c",
       "beforeSha256": "036e8a6e692122a815e4b4bb0b1e18ad0aeb828d584571622611707d8225ceb6",
-      "afterSha256": "3f95ea12d90a9825b95909902c4751ba20a1e17e584e4a9268040732572c8eea"
+      "afterSha256": "60dcbe186b41ed433ec504791ccdaf3ca814a95b23e2eec179d095d0db815148"
     }
   ]
 }

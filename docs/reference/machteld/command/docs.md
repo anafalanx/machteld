@@ -403,7 +403,11 @@ pagination follow `list`.
 
 #### Results
 
-Returns ranked bounded summary items and pagination facts.
+Returns ranked bounded summary items and pagination facts. Each item has a
+`doc_ref` you can pass to `docs get`. For an exact subcommand such as
+`child wait`, the first result points to `machteld/command/child#wait`.
+The `id` field always identifies the page. Passing the natural spelling
+directly to `docs get` also opens the matching section.
 
 #### Errors
 

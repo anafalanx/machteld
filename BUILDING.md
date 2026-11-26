@@ -86,6 +86,12 @@ ZIP before the current CI policy was adopted.
    - `--skip-build` tests `out\machteld.exe` as it is, and `--skip-build
      --runtime FILE` another executable as it is. Use these modes to test
      an unsigned candidate or a signed file without publishing it.
+   - `--progress-jsonl FILE` creates a UTF-8 log at a new path. A reader can
+     follow it while the gate runs. Each line has `schema` (1), `at_ms` (Unix
+     milliseconds), `kind` (suite or step), `name`, `event` and `status`.
+     Start records report `running`. Finish records report `passed` or
+     `failed` and include `elapsed_ms`. An interrupted process can leave a
+     start without a finish.
    - `--group release` explicitly requests the full release gate. Other
      `--group NAME` selections can be repeated and test the selected groups
      on `out\machteld.exe` or `--runtime FILE`. The fast group needs no MSYS2.

@@ -177,6 +177,34 @@ try {
         check "reference example returns a success envelope: $line" [expr {
             [dict get $response ok] && [dict exists $response result]}]
     }
+    set isolated [file join $WORK runtime]
+    file mkdir $isolated
+    set runtime [file join $isolated machteld.exe]
+    file copy $HOST $runtime
+    cd $isolated
+    foreach {section expected} {
+        generate-a-worker 42
+        run-a-headless-child {two words}
+        package-an-application {from the archive}
+        back-up-sqlite Bruxelles
+    } {
+        set ref machteld/guide/agent-recipes#$section
+        set lookup [run -timeout 30s -- $runtime --docs get $ref --json]
+        set page [json decode [encoding convertfrom -profile strict utf-8 [dict get $lookup out]]]
+        if {![dict get $page ok]} {error "missing packaged recipe $ref"}
+        set body [dict get $page result text]
+        set blocks [regexp -all -inline -linestop -lineanchor {^```tcl\r?\n((?:[^`]|\n)*?)\r?\n```\r?$} $body]
+        if {[llength $blocks] != 2} {error "expected one Tcl program in $ref"}
+        set script [file join $WORK $section.tcl]
+        write_text $script [lindex $blocks 1]
+        set execution [run -timeout 120s -- $runtime $script]
+        check "standalone recipe $section prints its documented result" [expr {
+            [dict get $execution status] eq "ok" &&
+            [string trimright [dict get $execution out] \r\n] eq $expected}]
+        if {[dict get $execution status] ne "ok"} {puts stderr [dict get $execution err]}
+    }
+    check {the isolated runtime needs only the executable beside it} [expr {
+        [glob -tails -directory $isolated *] eq {machteld.exe}}]
 } finally {
     cd $previousDirectory
     if {[file dirname $WORK] eq $TEMP_ROOT &&

@@ -34,6 +34,7 @@ set dict [docs get tcl/command/dict]
 set hits [docs search {channel binary encoding} -scope tcl -limit 10]
 set outline [docs outline tcl/command/chan]
 set section [docs get tcl/command/chan -section description]
+set waitContract [docs get {child wait}]
 
 # 4. Enumerate predictably with pagination.
 set page [docs list -scope machteld -type command -offset 0 -limit 50]
@@ -49,12 +50,18 @@ From a shell, use the host route and JSON:
 machteld.exe --docs status --json
 machteld.exe --docs search "process tree timeout" --scope machteld --json
 machteld.exe --docs get machteld/command/child --section lifetime-and-timeouts --json
+machteld.exe --docs get machteld/guide/agent-recipes#generate-a-worker --json
 machteld.exe --docs extract C:\work\machteld-reference
 ```
 
 Host JSON is always enveloped as `{ok:true,result:...}` or
 `{ok:false,error:{domain:"DOCS",code:...,message:...}}`; test `ok` before reading
 `result`. Use `--output FILE` for an atomic file result.
+
+`machteld/guide/agent-recipes` contains four self-contained Tcl programs. Its
+sections cover generating a worker, running a headless child, packing an app
+and reopening a verified SQLite backup. The release gate retrieves and runs
+the four programs from a relocated executable.
 
 ## Query the extracted database
 

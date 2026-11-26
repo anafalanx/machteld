@@ -256,8 +256,45 @@ word_is(const Tcl_Parse *parse, Tcl_Size word, const char *expected)
            memcmp(start, expected, expected_len) == 0;
 }
 
+/* Preserve an entry-file line independently of Tcl's host-dispatch stack.
+ * Only the private static checker appends a line to its error code. */
+static void
+entry_check_code(Tcl_Interp *interp, const char *code, const char *start,
+                 const char *location)
+{
+    Tcl_WideInt line = 1;
+    for (const char *p = start; p < location; p++) {
+        if (*p == '\n') line++;
+    }
+    Tcl_Obj *parts[] = {Tcl_NewStringObj("MACHTELD", -1),
+        Tcl_NewStringObj("ENTRY", -1), Tcl_NewStringObj(code, -1),
+        Tcl_NewWideIntObj(line)};
+    Tcl_SetObjErrorCode(interp, Tcl_NewListObj(4, parts));
+}
+
 static int
-has_opt_in(Tcl_Interp *interp, Tcl_Obj *script)
+check_present_version(Tcl_Interp *interp, const Tcl_Parse *parse)
+{
+    const char *version;
+    Tcl_Size length;
+    if (!literal_word(parse, parse->numWords - 1, &version, &length)) {
+        return TCL_ERROR;
+    }
+    Tcl_Obj *args[5];
+    int n = 0;
+    args[n++] = Tcl_NewStringObj("::package", -1);
+    args[n++] = Tcl_NewStringObj("present", -1);
+    if (parse->numWords == 5) args[n++] = Tcl_NewStringObj("-exact", -1);
+    args[n++] = Tcl_NewStringObj("machteld", -1);
+    args[n++] = Tcl_NewStringObj(version, length);
+    for (int i = 0; i < n; i++) Tcl_IncrRefCount(args[i]);
+    int status = Tcl_EvalObjv(interp, n, args, TCL_EVAL_GLOBAL);
+    for (int i = 0; i < n; i++) Tcl_DecrRefCount(args[i]);
+    return status;
+}
+
+static int
+parse_entry(Tcl_Interp *interp, Tcl_Obj *script, int inspect)
 {
     Tcl_Size length;
     const char *bytes = Tcl_GetStringFromObj(script, &length);
@@ -268,15 +305,17 @@ has_opt_in(Tcl_Interp *interp, Tcl_Obj *script)
         length -= 3;
     }
 
+    const char *start = bytes;
     int valid = 0;
     while (length > 0) {
         Tcl_Parse parse;
         int status = Tcl_ParseCommand(interp, bytes, length, 0, &parse);
         if (status != TCL_OK) {
+            if (inspect) entry_check_code(interp, "syntax", start, parse.term);
             Tcl_FreeParse(&parse);
             return TCL_ERROR;
         }
-        if (parse.numWords != 0) {
+        if (!valid && parse.numWords != 0) {
             if (word_is(&parse, 0, "package") && word_is(&parse, 1, "require")) {
                 if (parse.numWords == 3 && word_is(&parse, 2, "machteld")) {
                     valid = 1;
@@ -291,10 +330,23 @@ has_opt_in(Tcl_Interp *interp, Tcl_Obj *script)
                     valid = literal_word(&parse, 4, &unused, &unused_len);
                 }
             }
-            Tcl_FreeParse(&parse);
-            break;
+            if (!valid) {
+                Machteld_EntryError(interp, "optin", "not a machteld program: the first executable command must be \"package require machteld\"");
+                if (inspect) entry_check_code(interp, "optin", start, parse.commandStart);
+                Tcl_FreeParse(&parse);
+                return TCL_ERROR;
+            }
+            if (!inspect) {
+                Tcl_FreeParse(&parse);
+                return TCL_OK;
+            }
+            if (parse.numWords > 3 && check_present_version(interp, &parse) != TCL_OK) {
+                entry_check_code(interp, "version", start, parse.commandStart);
+                Tcl_FreeParse(&parse);
+                return TCL_ERROR;
+            }
         }
-        Tcl_Size consumed = parse.commandSize;
+        Tcl_Size consumed = (parse.commandStart - bytes) + parse.commandSize;
         Tcl_FreeParse(&parse);
         if (consumed <= 0 || consumed > length) {
             break;
@@ -346,7 +398,7 @@ validate_file(Tcl_Interp *interp, Tcl_Obj *path)
         Tcl_DecrRefCount(script);
         return TCL_ERROR;
     }
-    int status = has_opt_in(interp, script);
+    int status = parse_entry(interp, script, 0);
     Tcl_DecrRefCount(script);
     return status;
 }
@@ -466,16 +518,28 @@ eval_captured_startup(Tcl_Interp *interp, Tcl_Obj *path, Tcl_Obj *script)
     return TCL_OK;
 }
 
+static int capture_archive_entry(Tcl_Interp *interp, Tcl_Obj *entry,
+                                 Tcl_Obj **script_out);
+
 static int
 EntryCheckCmd(void *client_data, Tcl_Interp *interp, int objc,
               Tcl_Obj *const objv[])
 {
     (void)client_data;
-    if (objc != 2) {
+    if (objc == 3 && strcmp(Tcl_GetString(objv[2]), "-inspect") == 0) {
+        Tcl_Obj *script;
+        int status = capture_native_startup(interp, objv[1], &script);
+        if (status == TCL_OK && script == NULL) {
+            status = capture_archive_entry(interp, objv[1], &script);
+        }
+        if (status != TCL_OK) return status;
+        status = parse_entry(interp, script, 1);
+        Tcl_DecrRefCount(script);
+        if (status != TCL_OK) return status;
+    } else if (objc != 2) {
         return Machteld_EntryError(interp, "badvalue",
-            "wrong # args: should be \"::machteld::EntryCheck program-file\"");
-    }
-    if (validate_file(interp, objv[1]) != TCL_OK) {
+            "wrong # args: should be \"::machteld::EntryCheck program-file ?-inspect?\"");
+    } else if (validate_file(interp, objv[1]) != TCL_OK) {
         return TCL_ERROR;
     }
     Tcl_SetObjResult(interp, objv[1]);
@@ -659,6 +723,12 @@ Machteld_EntryGate(Tcl_Interp *interp)
     if (host_mode == MACHTELD_HOST_DOCS) {
         dispatch_command(interp, "::machteld::DocsHost", 1);
     }
+    if (host_mode == MACHTELD_HOST_CHECK) {
+        dispatch_command(interp, "::machteld::CheckHost", 1);
+    }
+    if (host_mode == MACHTELD_HOST_MANIFEST) {
+        dispatch_command(interp, "::machteld::ManifestHost", 1);
+    }
     if (host_mode == MACHTELD_HOST_STDIN) {
         Machteld_EntryError(interp, "usage",
             "stdin programs are not accepted; use an opted-in program file");
@@ -738,7 +808,7 @@ Machteld_EntryGate(Tcl_Interp *interp)
     }
     Tcl_DecrRefCount(prefix);
     if (captured != NULL) {
-        if (has_opt_in(interp, captured) != TCL_OK) {
+        if (parse_entry(interp, captured, 0) != TCL_OK) {
             Tcl_DecrRefCount(captured);
             Machteld_Fatal(interp);
         }
