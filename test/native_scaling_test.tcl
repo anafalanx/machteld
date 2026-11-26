@@ -1,5 +1,6 @@
-# Measured, deliberately bounded worker scaling; timing is observational, not
-# a fragile CI performance gate. No platform-wide tracing/settings are used.
+# Measured, deliberately bounded worker scaling. The single-child check
+# detects a sustained busy loop. Throughput and larger pool timings are
+# observations. No platform-wide tracing or settings are used.
 # Invoke: machteld.exe test/native_scaling_test.tcl native_probe.dll process_fixture.exe
 package require machteld
 if {[llength $argv] != 2} {error "usage: native_scaling_test.tcl native_probe.dll process_fixture.exe"}
@@ -19,16 +20,18 @@ proc sample_idle {mode width} {
     # process counters, avoiding a misleading telemetry-induced idle CPU cost.
     set inventory [native_metrics]
     set first [native_cpu]
-    set started [clock microseconds]
+    set started [clock clicks -microseconds]
     after 1000
     set last [native_cpu]
-    set wall [expr {[clock microseconds]-$started}]
+    set wall [expr {[clock clicks -microseconds]-$started}]
     set cpu [expr {[dict get $last cpu_us]-[dict get $first cpu_us]}]
+    set core [expr {100.0 * $cpu / $wall}]
     puts [list SCALING mode $mode width $width wall_us $wall host_cpu_us $cpu \
-        core_percent [format %.3f [expr {100.0*$cpu/$wall}]] \
+        core_percent [format %.3f $core] \
         host_handles [dict get $last handles] host_threads [dict get $inventory threads] \
         host_private_bytes [dict get $last private_bytes] host_working_set [dict get $last working_set] \
         host_cycles [expr {[dict get $last cycles]-[dict get $first cycles]}]]
+    return $core
 }
 set baseline [native_metrics]
 try {
@@ -48,7 +51,14 @@ try {
                 lappend tokens [child start {*}$opts -timeout 10s -- $FIXTURE hang 10000]
             }
             puts [list SCALING mode $mode width $width launch_us [expr {[clock microseconds]-$start}]]
-            sample_idle $mode $width
+            set core [sample_idle $mode $width]
+            if {$width == 1} {
+                # The host has no Tcl work during either sample and the only
+                # child is sleeping. Repeat a high reading to tolerate a
+                # transient spike. A persistent half-core is a busy waiter.
+                if {$core >= 50.0} {set core [sample_idle $mode $width]}
+                check "$mode one sleeping child keeps host idle CPU below half a core" [expr {$core < 50.0}]
+            }
             set all_running 1
             foreach token $tokens {
                 if {![dict get [child info $token] running]} {set all_running 0}
