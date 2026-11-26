@@ -63,29 +63,32 @@ ZIP before the current CI policy was adopted.
 
 ## Build and test
 
-1. The gate builds `out\machteld.exe` and then tests it completely:
+1. Run the release gate to build, test and publish `out\machteld.exe`.
 
    ```text
    & .\dist\0.21\machteld.exe tools\gate.tcl --msys C:\dev\.z\r\msys2
    ```
 
    It bootstraps or verifies the dependency cache, generates the reference
-   corpus, compiles the shared runtime with `-Werror` and packages it
-   (`tools\release.tcl`, which runs `tools\build.tcl` on the cache's Tcl), and
-   publishes `out\machteld.exe`. It runs the fast, integration, packaging,
-   native-validation and reference-generator test groups on that executable.
+   corpus, compiles the shared runtime with `-Werror` and packages it as
+   `machteld.exe` in a fresh directory under `out\`. The fast, integration,
+   packaging, native-validation and reference-generator groups test this
+   candidate. After every selected step passes and its final SHA-256 matches
+   the one recorded before testing, the gate atomically publishes those bytes to
+   `out\machteld.exe`. A failed build or test preserves any previous release.
+   Gates that compile fixtures take one lock per checkout because they share
+   `out\test\`. A competing invocation reports the lock and exits.
    Native validation ends with `tools\native-analysis.tcl`, which writes its report to a fresh
    `out\native-analysis-<id>\`. The first failure stops it, and a green run
    ends with `ALL TEST LANES PASSED` and exit code 0. It names the tested
    executable by version and SHA-256, and fails if the file changes during
    the run. A full run takes about twenty-five minutes on the build PC.
    - `--skip-build` tests `out\machteld.exe` as it is, and `--skip-build
-     --runtime FILE` another executable as it is. The gate's build goes to
-     `out\machteld.exe` only: it refuses `--runtime` when it would build,
-     because the build would replace that file.
-   - `--group NAME`, repeatable, runs just those groups and builds nothing,
-     on `out\machteld.exe` or on `--runtime FILE`; the fast group needs no
-     MSYS2.
+     --runtime FILE` another executable as it is. Use these modes to test
+     an unsigned candidate or a signed file without publishing it.
+   - `--group release` explicitly requests the full release gate. Other
+     `--group NAME` selections can be repeated and test the selected groups
+     on `out\machteld.exe` or `--runtime FILE`. The fast group needs no MSYS2.
    - Optional lanes include `--public-tls` (public hosts),
      `--interactive-pty` (console input and output) and
      `--interactive-gui` (opens windows and compiles a Win32 window fixture).

@@ -97,31 +97,41 @@ jobs:
             if (!$result.Success) { throw "Media Foundation installation failed: $($result.ExitCode)" }
           }
 
+      - name: Build the first clean unsigned candidate on main
+        id: primary_build
+        if: github.ref_name == 'main'
+        run: |
+          $env:Path = "$env:SystemRoot/System32;$env:Path"
+          & .\dist\0.21\machteld.exe tools/release.tcl --msys $env:MSYS2_ROOT --output out/candidate/machteld.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath out/candidate/machteld.exe).Hash
+          "sha256=$digest" >> $env:GITHUB_OUTPUT
+
       - name: Run the full gate and desktop tests on main
         if: github.ref_name == 'main'
         run: |
           $env:Path = "$env:SystemRoot/System32;$env:Path"
-          & .\dist\0.21\machteld.exe tools/gate.tcl --msys $env:MSYS2_ROOT --interactive-gui
+          & .\dist\0.21\machteld.exe tools/gate.tcl --msys $env:MSYS2_ROOT --skip-build --runtime out/candidate/machteld.exe --interactive-gui
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & .\out\machteld.exe test/clipboard_test.tcl --hosted-clipboard
+          & .\out\candidate\machteld.exe test/clipboard_test.tcl --hosted-clipboard
           exit $LASTEXITCODE
 
       - name: Record native and embedded file hashes for the build PC comparison
-        id: inventory
-        if: github.ref_name == 'main' && !cancelled()
+        if: ${{ !cancelled() && steps.primary_build.outcome == 'success' }}
+        env:
+          BUILT_SHA256: ${{ steps.primary_build.outputs.sha256 }}
         run: |
-          if (Test-Path -LiteralPath out/machteld.exe) {
-            Write-Output '::group::Unsigned executable hash inventory'
-            & .\dist\0.21\machteld.exe tools/repro_report.tcl out/machteld.exe
-            $reportExit = $LASTEXITCODE
-            Write-Output '::endgroup::'
-            if ($reportExit -ne 0) { exit $reportExit }
-            "candidate=available" >> $env:GITHUB_OUTPUT
-          }
+          $afterTests = (Get-FileHash -Algorithm SHA256 -LiteralPath out/candidate/machteld.exe).Hash
+          Write-Output '::group::Unsigned executable hash inventory'
+          & .\dist\0.21\machteld.exe tools/repro_report.tcl out/candidate/machteld.exe
+          $reportExit = $LASTEXITCODE
+          Write-Output '::endgroup::'
+          if ($reportExit -ne 0) { exit $reportExit }
+          if ($afterTests -ne $env:BUILT_SHA256) { throw 'First candidate changed during tests' }
 
       - name: Check out an independent copy of the same source
         id: second_checkout
-        if: ${{ !cancelled() && steps.inventory.outputs.candidate == 'available' }}
+        if: ${{ !cancelled() && steps.primary_build.outcome == 'success' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repro
@@ -131,6 +141,8 @@ jobs:
       - name: Compare two independent clean unsigned builds
         if: ${{ !cancelled() && steps.second_checkout.outcome == 'success' }}
         working-directory: repro
+        env:
+          BUILT_SHA256: ${{ steps.primary_build.outputs.sha256 }}
         run: |
           $actual = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $actual -ne $env:GITHUB_SHA) { throw "Unexpected comparison checkout $actual" }
@@ -138,7 +150,7 @@ jobs:
           $env:Path = "$env:SystemRoot/System32;$env:Path"
           & "$env:GITHUB_WORKSPACE/dist/0.21/machteld.exe" tools/release.tcl --msys $env:MSYS2_ROOT --cache .cache/deps --output out/candidate/machteld.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $gated = (Get-FileHash -Algorithm SHA256 -LiteralPath "$env:GITHUB_WORKSPACE/out/machteld.exe").Hash
+          $gated = $env:BUILT_SHA256
           $rebuilt = (Get-FileHash -Algorithm SHA256 -LiteralPath out/candidate/machteld.exe).Hash
           $hashes = @("Commit: $env:GITHUB_SHA", "Gated executable SHA-256: $gated", "Independent executable SHA-256: $rebuilt")
           Write-Output $hashes

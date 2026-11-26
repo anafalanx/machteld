@@ -1,11 +1,11 @@
 package require machteld 0.21
 
 # tools/gate.tcl -- the release gate. With no --group it builds the runtime
-# (unless --skip-build) and runs the default groups on it; with --group it runs the
-# named groups, in that order, on the runtime as it is, and builds nothing.
-# --runtime names an executable to test as it is, so the gate refuses it when
-# it would build: the build would publish over that file, a signed copy
-# included. The gate's build goes to out/machteld.exe only.
+# (unless --skip-build) and runs the default groups on it. --group release
+# explicitly requests the same gate. Other named groups test an existing
+# executable in group order. --runtime selects the file for a test-only run.
+# A building gate promotes its private build to out/machteld.exe after all
+# selected tests have passed on those exact bytes.
 #
 #     machteld.exe tools/gate.tcl ?--group NAME ...? ?--runtime EXE? ?--cache DIR?
 #         ?--msys DIR? ?--skip-build? ?--public-tls? ?--interactive-pty? ?--cloud?
@@ -135,10 +135,9 @@ proc ::gate::parse {argv} {
     dict set settings release $release
     dict set settings groups [expr {$release ? $groups : $selected}]
     dict set settings build [expr {$release && ![dict get $settings skipBuild]}]
-    # The build publishes the runtime it then tests (tools/release.tcl
-    # --output), so a --runtime given with it would be replaced.
+    # Building gates publish only to the checkout's qualified output.
     if {[dict get $settings build] && "--runtime" in $given} {
-        fail "--runtime names an executable to test as it is, and the build would publish over it: add --skip-build, or select groups with --group"
+        fail "--runtime selects an existing executable for testing: add --skip-build or select a test group other than release"
     }
     set chosen [dict get $settings groups]
     if {([dict get $settings tls] || [dict get $settings pty] || [dict get $settings cloud]) && "integration" ni $chosen} {
@@ -491,28 +490,11 @@ proc ::gate::checkEnvironment {} {
     }
 }
 
-proc ::gate::main {argv} {
+proc ::gate::qualify {settings} {
     variable root
-    set started [clock milliseconds]
-    set settings [parse $argv]
-    checkEnvironment
-    dict set settings runtime [set runtime [file normalize [dict get $settings runtime]]]
-    dict set settings cache [set cache [file normalize [dict get $settings cache]]]
-    if {[needs $settings msys]} {
-        dict set settings msys [::boot::msysRoot [dict get $settings msys]]
-        set gcc [file join [dict get $settings msys] ucrt64 bin gcc.exe]
-        if {![file isfile $gcc]} {
-            fail "MSYS2 gcc not found: [file nativename $gcc]"
-        }
-    }
-    puts "gate: groups [join [dict get $settings groups] {, }][expr {[dict get $settings build] ? {, after the release build} : {}}]"
-    if {[dict get $settings build]} {
-        execute [dict create label "release build" argv [list [info nameofexecutable] \
-            [file join $root tools release.tcl] --output $runtime --cache $cache --msys [dict get $settings msys]]] \
-            $runtime {}
-    }
+    set runtime [dict get $settings runtime]
     if {[needs $settings tclsh]} {
-        set tclsh [file join $cache prefix bin tclsh90s.exe]
+        set tclsh [file join [dict get $settings cache] prefix bin tclsh90s.exe]
         if {![file isfile $tclsh]} {
             fail "the dependency cache's static tclsh not found: [file nativename $tclsh]"
         }
@@ -535,9 +517,66 @@ proc ::gate::main {argv} {
         }
     }
     if {[dict size $identity]} {
+        if {[hash file sha256 $runtime] ne [dict get $identity sha256]} {
+            fail "the tested executable changed before qualification finished"
+        }
         puts "\ntested executable unchanged: version [dict get $identity version], SHA-256 [dict get $identity sha256]"
     }
-    puts "[llength $steps] steps in [seconds $started]s"
+    return [llength $steps]
+}
+
+proc ::gate::main {argv} {
+    variable root
+    set started [clock milliseconds]
+    set settings [parse $argv]
+    checkEnvironment
+    set output [file normalize [dict get $settings runtime]]
+    dict set settings runtime $output
+    dict set settings cache [file normalize [dict get $settings cache]]
+    set lock ""
+    if {[needs $settings msys]} {
+        dict set settings msys [::boot::msysRoot [dict get $settings msys]]
+        set gcc [file join [dict get $settings msys] ucrt64 bin gcc.exe]
+        if {![file isfile $gcc]} {
+            fail "MSYS2 gcc not found: [file nativename $gcc]"
+        }
+        # Compiler lanes share out/test. A second release must also never
+        # overwrite a later checkout qualification with an older candidate.
+        set lock [file join $root out gate.lock]
+        if {[catch {::machteld::devcache::lock $lock} why]} { fail $why }
+    }
+    set stage ""
+    try {
+        puts "gate: groups [join [dict get $settings groups] {, }][expr {[dict get $settings build] ? {, after the release build} : {}}]"
+        if {[dict get $settings build]} {
+            set stage [file tempdir [file join [file dirname $output] gate]]
+            set candidate [file join $stage machteld.exe]
+            dict set settings runtime $candidate
+            execute [dict create label "release build" argv [list [info nameofexecutable] \
+                [file join $root tools release.tcl] --output $candidate --cache [dict get $settings cache] \
+                --msys [dict get $settings msys]]] $candidate {}
+        }
+        set count [qualify $settings]
+        if {$stage ne ""} {
+            if {[catch {::machteld::Publish $candidate $output} why]} {
+                fail "cannot publish the qualified executable to [file nativename $output]: $why"
+            }
+            puts "qualified executable: [file nativename $output]"
+        }
+    } finally {
+        # Never recurse into other tools' leftovers or sweep a previous run.
+        # Preserve the cause of a build, test or publication failure.
+        if {$stage ne "" && [catch {
+            file delete -- $candidate
+            file delete -- $stage
+        } why]} {
+            puts stderr "gate: could not clean [file nativename $stage]: $why"
+        }
+        if {$lock ne "" && [catch {::machteld::devcache::unlock $lock} why]} {
+            puts stderr "gate: could not release [file nativename $lock]: $why"
+        }
+    }
+    puts "$count steps in [seconds $started]s"
     puts "ALL TEST LANES PASSED"
 }
 

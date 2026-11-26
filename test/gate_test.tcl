@@ -1,12 +1,12 @@
 package require machteld 0.21
 
-# test/gate_test.tcl -- the gate's own choices, checked without running a lane:
+# test/gate_test.tcl -- the gate's own choices, checked with disposable lanes:
 # how --group selections expand and which options each needs; which steps each
 # group plans (fixtures only where they are used, the opt-in lanes only behind
 # their options, a shared step once); the lanes' environment (inherited opt-ins
 # and overlays removed, only the requested ones set, the caller's environment
 # back after success and after failure); and the tested executable's identity
-# held through every step.
+# held through every step, and publication of qualified bytes only.
 #
 #     machteld.exe test/gate_test.tcl
 #
@@ -92,15 +92,14 @@ check {the scaling lane and the full native analysis need no option: they are na
 set optins [::gate::parse {--group integration --public-tls --interactive-gui}]
 check {each option records only itself} \
     [expr {[dict get $optins tls] && ![dict get $optins pty] && [dict get $optins gui]}]
-# The build publishes the runtime it tests, so a file named with --runtime is
-# tested only as it is; a signed copy must never be built over.
+# Only the checkout's qualified name may be promoted by a building gate.
 set signed C:/release/signed/machteld.exe
-check {the build goes to out/machteld.exe} \
+check {the qualified output defaults to out/machteld.exe} \
     [expr {[dict get $default runtime] eq [file join $root out machteld.exe]}]
-check {--runtime is refused when the gate would build over it} \
-    [expr {[refused [list --runtime $signed] {*--runtime*would publish over it*--skip-build*}] &&
-        [refused [list --group release --runtime $signed] {*--runtime*would publish over it*}] &&
-        [refused [list --runtime $signed --interactive-gui] {*--runtime*would publish over it*}]}]
+check {--runtime is refused for a building gate} \
+    [expr {[refused [list --runtime $signed] {*--runtime*existing executable*--skip-build*}] &&
+        [refused [list --group release --runtime $signed] {*--runtime*existing executable*--skip-build*}] &&
+        [refused [list --runtime $signed --interactive-gui] {*--runtime*existing executable*--skip-build*}]}]
 set asIs [::gate::parse [list --skip-build --runtime $signed]]
 set grouped [::gate::parse [list --group fast --runtime $signed]]
 check {--runtime with --skip-build or --group tests that executable as it is} \
@@ -446,6 +445,86 @@ try {
     check {a step past its deadline is ended and fails the gate} \
         [expr {$failed && [dict get $options -errorcode] eq {GATE fail} &&
             [string match {*past its deadline failed (timeout,*} $message] && $took < 30000}] "$message ($took ms)"
+
+    # Exercise main, the signed driver's child execution and its native
+    # publication against a tiny checkout. Only the build recipe and lane
+    # selection are fixtures; the latter launches the actual staged image.
+    set ::gate::root [file join $work checkout]
+    set public [file join $::gate::root out machteld.exe]
+    set cache [file join $::gate::root cache]
+    set msys [file join $::gate::root msys]
+    writeText [file join $cache prefix bin tclsh90s.exe] ""
+    writeText [file join $msys ucrt64 bin gcc.exe] ""
+    writeText [file join $::gate::root tools release.tcl] {package require machteld
+        set output [dict get $argv --output]
+        file copy [info nameofexecutable] $output
+    }
+    set probe [file join $::gate::root probe.tcl]
+    writeText $probe {package require machteld
+        lassign $argv public expected candidate exitCode
+        if {[file normalize [info nameofexecutable]] ne $candidate} {error "wrong candidate"}
+        set actual [expr {[file exists $public] ? [hash file sha256 $public] : "absent"}]
+        if {$actual ne $expected} {error "qualified name changed before the lane finished"}
+        exit $exitCode
+    }
+    rename ::gate::plan ::gate::realPlan
+    proc ::gate::plan {settings} {
+        set ::observed [file normalize [dict get $settings runtime]]
+        list [dict create label "qualification probe" argv \
+            [list $::observed $::probe $::public $::expected $::observed $::exitCode]]
+    }
+    try {
+        set options [list --cache $cache --msys $msys]
+        set exitCode 7
+        set expected absent
+        set failed [catch {::gate::main $options} why]
+        check {an initial failed lane publishes nothing and removes its private candidate} [expr {
+            $failed && [string match {*qualification probe failed (error, exit code 0x00000007)*} $why] &&
+            ![file exists $public] && [file tail $observed] eq "machteld.exe" &&
+            [file dirname [file dirname $observed]] eq [file dirname $public] &&
+            ![file exists [file dirname $observed]]}] $why
+        set first $observed
+        writeText $public "prior qualified bytes"
+        set expected [hash file sha256 $public]
+        set failed [catch {::gate::main $options} why]
+        check {a later failed lane preserves the previous release and uses a fresh directory} [expr {
+            $failed && [string match {*qualification probe failed (error, exit code 0x00000007)*} $why] &&
+            [hash file sha256 $public] eq $expected && $observed ne $first &&
+            ![file exists [file dirname $observed]]}] $why
+        set exitCode 0
+        set held [open $public rb]
+        try {
+            set failed [catch {::gate::main $options} why]
+            check {a qualified candidate cannot displace an exclusively held output} [expr {
+                $failed && [string match {*cannot publish the qualified executable*} $why] &&
+                [hash file sha256 $public] eq $expected && ![file exists [file dirname $observed]]}] $why
+        } finally {close $held}
+        set failed [catch {::gate::main [concat $options [list --skip-build --runtime $driver]]} why]
+        check {testing an explicit executable leaves the qualified output alone} [expr {
+            !$failed && $observed eq [file normalize $driver] && [hash file sha256 $public] eq $expected}] $why
+        set lock [file join [file dirname $public] gate.lock]
+        ::machteld::devcache::lock $lock
+        try {
+            set failed [catch {::gate::main $options} why]
+            check {a contending release stops before it builds or changes the qualified output} [expr {
+                $failed && [string match {*lock*held*} $why] && [file exists $lock] &&
+                $observed eq [file normalize $driver] && [hash file sha256 $public] eq $expected}] $why
+        } finally {::machteld::devcache::unlock $lock}
+        set failed [catch {::gate::main $options} why]
+        check {a successful final lane replaces the previous release with the exact bytes it ran} [expr {
+            !$failed && [hash file sha256 $public] eq [dict get $identity sha256] &&
+            ![file exists [file dirname $observed]] && ![file exists $lock]}] $why
+        file delete -- $public
+        set expected absent
+        set failed [catch {::gate::main $options} why]
+        check {a successful gate can publish its first qualified release} [expr {
+            !$failed && [hash file sha256 $public] eq [dict get $identity sha256] &&
+            ![file exists [file dirname $observed]]}] $why
+    } finally {
+        rename ::gate::plan {}
+        rename ::gate::realPlan ::gate::plan
+        set ::gate::root $root
+    }
 } finally {
     file delete -force $work
 }
