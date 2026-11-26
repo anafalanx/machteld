@@ -53,7 +53,10 @@ proc exercise {exe profile origin} {
         file mkdir $copy
         file copy [file join $profile .machteld-browser-owner] $copy
         check "$name refuses a copied ownership marker" [refused {browser attach -profile $copy} ownership]
-        set receiptPath [file join $profile .machteld-browser-session]
+        # The public API accepts aliases, then verifies ownership records in
+        # the normalized profile directory. Use that same spelling for this
+        # test's direct read and the stale-receipt fixture below.
+        set receiptPath [file join [file normalize $profile] .machteld-browser-session]
         set receipt [::machteld::browser::ReadSmall $receiptPath]
         set port [lindex [fconfigure $::server -sockname] end]
         check "$name refuses a listener belonging to the test server" [refused {
@@ -139,7 +142,9 @@ try {
         set origin "http://127.0.0.1:[lindex [fconfigure $server -sockname] end]"
         try {
             foreach exe [lsort -unique $executables] {
-                exercise $exe [file join $scratch [file tail $exe]] $origin
+                # Exercise a path alias even on volumes without 8.3 names.
+                set profile [file join $scratch .. [file tail $scratch] [file tail $exe]]
+                exercise $exe $profile $origin
             }
         } finally {
             close $server
