@@ -77,19 +77,25 @@ int nts_connect(NtsJob *job, const wchar_t *host, unsigned short port, int type,
         ok = 0; nts_fail(job, "connect", WSAEHOSTUNREACH);
         for (ADDRINFOEXW *a = all; a; a = a->ai_next) {
             if (WaitForSingleObject(job->cancel, 0) == WAIT_OBJECT_0 || !nts_remaining(job)) break;
-            s->fd = WSASocketW(a->ai_family, type, a->ai_protocol, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
-            if (s->fd == INVALID_SOCKET) continue;
-            s->event = WSACreateEvent();
-            if (s->event != WSA_INVALID_EVENT && WSAEventSelect(s->fd, s->event, FD_CONNECT|FD_READ|FD_WRITE|FD_CLOSE) == 0) {
-                if (connect(s->fd, a->ai_addr, (int)a->ai_addrlen) == 0) ok = 1;
-                else if (WSAGetLastError() == WSAEWOULDBLOCK && net_event(s)) {
+            /* A failed address owns its socket and event until cleanup.
+             * Transfer both to the caller only after a successful connect. */
+            NtsSocket attempt = {.job = job};
+            attempt.fd = WSASocketW(a->ai_family, type, a->ai_protocol, NULL, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+            if (attempt.fd == INVALID_SOCKET) continue;
+            attempt.event = WSACreateEvent();
+            if (attempt.event != WSA_INVALID_EVENT && WSAEventSelect(attempt.fd, attempt.event, FD_CONNECT|FD_READ|FD_WRITE|FD_CLOSE) == 0) {
+                if (connect(attempt.fd, a->ai_addr, (int)a->ai_addrlen) == 0) ok = 1;
+                else if (WSAGetLastError() == WSAEWOULDBLOCK && net_event(&attempt)) {
                     int err = 0, n = sizeof err;
-                    if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, (char *)&err, &n) == 0 && !err) ok = 1;
+                    if (getsockopt(attempt.fd, SOL_SOCKET, SO_ERROR, (char *)&err, &n) == 0 && !err) ok = 1;
                     else nts_fail(job, "connect", (DWORD)err);
                 }
             }
-            if (ok) break;
-            nts_close(s);
+            if (ok) {
+                *s = attempt;
+                break;
+            }
+            nts_close(&attempt);
         }
     }
     if (all) FreeAddrInfoExW(all);

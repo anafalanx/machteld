@@ -30,6 +30,38 @@ static void check_deadline(DWORD end) {
 static const char *eval(Tcl_Interp *ip, const char *str) {
     require(Tcl_Eval(ip,str) == TCL_OK, Tcl_GetStringResult(ip)); return Tcl_GetStringResult(ip);
 }
+
+static void check_connect_ownership(struct sockaddr_in addr) {
+    /* Keep the port reserved, without listening. The TCP attempt must fail
+     * after acquiring its socket and event. UDP connect needs no listener. */
+    SOCKET reserved = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    addr.sin_port = 0;
+    require(reserved != INVALID_SOCKET && bind(reserved, (struct sockaddr *)&addr, sizeof addr) == 0,
+            "reserve loopback port");
+    int size = sizeof addr;
+    require(getsockname(reserved, (struct sockaddr *)&addr, &size) == 0, "reserved port");
+    NtsJob job = {0};
+    job.cancel = CreateEventW(NULL, TRUE, FALSE, NULL);
+    require(job.cancel != NULL, "cancellation event");
+    unsigned short port = ntohs(addr.sin_port);
+    DWORD before, after;
+    for (int i = 0; i < 6; ++i) {
+        if (i == 1) require(GetProcessHandleCount(GetCurrentProcess(), &before), "warmed handles");
+        NtsSocket result;
+        job.deadline = GetTickCount64() + 5000;
+        require(nts_connect(&job, L"127.0.0.1", port, SOCK_DGRAM, &result), "UDP connect");
+        require(result.fd != INVALID_SOCKET && result.event != WSA_INVALID_EVENT, "owned UDP handles");
+        nts_close(&result);
+        job.deadline = GetTickCount64() + 5000;
+        require(!nts_connect(&job, L"127.0.0.1", port, SOCK_STREAM, &result), "refused TCP connection");
+        require(result.fd == INVALID_SOCKET && result.event == WSA_INVALID_EVENT, "empty failed connection");
+    }
+    require(GetProcessHandleCount(GetCurrentProcess(), &after) && after <= before + 2,
+            "failed attempts released their sockets and events");
+    CloseHandle(job.cancel);
+    closesocket(reserved);
+}
+
 int main(int argc,char **argv) {
     (void)argc;
     check_deadline(WAIT_TIMEOUT); check_deadline(WAIT_OBJECT_0);
@@ -39,6 +71,7 @@ int main(int argc,char **argv) {
     struct sockaddr_in addr={0}; addr.sin_family=AF_INET; addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     require(bind(server,(struct sockaddr*)&addr,sizeof addr)==0 && listen(server,8)==0,"loopback listener");
     int n=sizeof addr; require(getsockname(server,(struct sockaddr*)&addr,&n)==0,"local port");
+    check_connect_ownership(addr);
     DWORD before=0,after=0; int timeouts=0;
     for(int i=0;i<96;i++) {
         if(i==32) require(GetProcessHandleCount(GetCurrentProcess(),&before),"initial handle count");
