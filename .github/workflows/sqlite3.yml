@@ -86,6 +86,17 @@ jobs:
           $actual = (Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash
           if ($actual -ne $expected) { throw "Build runtime SHA-256 mismatch: $actual" }
 
+      - name: Provide Windows Media Foundation for the AAC and HLS tests
+        if: github.ref_name == 'main'
+        shell: powershell
+        run: |
+          $media = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction Stop
+          Write-Output "Server-Media-Foundation before tests: $($media.InstallState)"
+          if (!$media.Installed) {
+            $result = Install-WindowsFeature -Name Server-Media-Foundation -ErrorAction Stop
+            if (!$result.Success) { throw "Media Foundation installation failed: $($result.ExitCode)" }
+          }
+
       - name: Run the full gate and desktop tests on main
         if: github.ref_name == 'main'
         run: |

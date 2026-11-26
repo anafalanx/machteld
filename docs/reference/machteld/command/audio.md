@@ -49,6 +49,10 @@ $output finish
 ## Constraints
 
 AAC decoding uses the installed Windows Media Foundation AAC transform.
+On Windows Server, `Get-WindowsFeature Server-Media-Foundation` shows whether
+the component is installed. An administrator can enable it with
+`Install-WindowsFeature Server-Media-Foundation`. Decoding to PCM works
+on a server with the transform and no audio device.
 WASAPI playback requires an available output endpoint.
 
 ## Subcommands
