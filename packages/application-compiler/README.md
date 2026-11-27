@@ -1,7 +1,8 @@
 # Application compiler
 
-This development package compiles typed source modules to Tcl 9. It runs in
-ordinary Tcl or in a Machteld Tcl script. The caller supplies a dictionary of
+The integrated Machteld host includes this package. The compiler also runs
+in ordinary Tcl 9 when its package directory is on `auto_path`. For the Tcl
+API, the caller supplies a dictionary of
 logical module names and source strings, so source files can also come from
 a mounted application archive.
 
@@ -11,7 +12,6 @@ extract the development driver and the original project.
 
 ```tcl
 package require machteld
-lappend auto_path [file join [file dirname [info script]] packages application-compiler]
 package require application-compiler 0.1
 
 set modules [dict create unit {
@@ -524,7 +524,12 @@ and imported functions. They execute with the project's declared Tcl packages.
 
 ## File-backed applications
 
-The development driver accepts a UTF-8 project dictionary. The following
+The integrated host runs the driver directly as `machteld.exe project`.
+Use `--project` to select it explicitly in a directory that also contains
+a script named `project`. The checkout and editable archives retain their
+standalone driver for use on earlier hosts.
+
+The driver accepts a UTF-8 project dictionary. The following
 manifest selects a module at `src/main.src` and an optional binary asset.
 Paths are relative to the manifest. Module identifiers are case-sensitive.
 
@@ -542,6 +547,60 @@ rules, and `minApi` sets the minimum Machteld version for building on a
 Machteld host and for running the generated program. Remove the `assets`
 line if the application has none. The manifest and its module table are Tcl
 dictionaries read as data. Use list quoting for paths containing spaces.
+
+### Migrating a Tcl/Tk project one file at a time
+
+Choose exactly one startup form. With `entry {app main}`, a typed function
+starts the application. With `tclEntry main.tcl`, the driver installs
+the compiled exports and sources the original UTF-8 Tcl entry at global
+scope. The Tcl file owns startup, Tk and the event loop. It appears in the
+archive automatically. Declare other inputs as assets or modules.
+
+```tcl
+schema 1
+edition 1
+minApi 30
+tclEntry main.tcl
+modules {captions captions.src}
+assets {lib/fields.tcl lib/captions.tcl lib/pkgIndex.tcl}
+packageDirs {lib}
+```
+
+Begin with `modules {}` and the original Tcl files. Move one piece of
+logic to a typed module, mark the function `export`, and forward the old
+Tcl command to it. A wrapper with the old formal parameters preserves
+Tcl introspection, wrong-argument errors and existing Tk callback names.
+
+```tcl
+proc ::cards::caption {field value} {
+    tailcall ::application::captions::caption $field $value
+}
+```
+
+Tcl calls exported functions with ordinary Tcl words. The boundary checks
+typed arguments. Lists use Tcl lists, records use dictionaries, optional
+values use `none` or `{some value}`, and results use `{ok value}` or
+`{err problemDictionary}` for a function returning `result<T,problem>`.
+A returned error result is data. Unexpected errors from a typed export
+raise a Tcl error; its options preserve the Tcl error code and carry
+`-appcompilerlocation` (module, line and column).
+
+In the other direction, declare an `extern fn` for an existing Tcl command,
+with a fixed command prefix and its types. Arguments preserve word boundaries
+and the return value is checked. An extern runs in global scope. Tcl commands
+that act on a caller's local variables, widget event substitutions, traces or
+dynamic scripts generally need a Tcl adapter with explicit arguments. Either
+language can supply an ordinary procedure used as a callback. Keep a GUI
+callback short, as both languages share Tcl's event loop.
+
+Run `machteld.exe project check project.dict` before packing. This checks
+all typed modules and checks the Tcl entry's UTF-8 encoding and command
+completeness. Tcl commands and lazy package indexes are exercised by running
+the application. `project test` runs the typed examples and leaves the Tcl
+entry idle. `project pack` and `project rebuild` preserve the originals.
+The example in `examples/mixed-migration` compares an all-Tcl baseline,
+one migrated module and a relocated archive, including an entry adapter
+for programs that compare `argv0` with `info script`.
 
 For a local pure-Tcl package, include its index and implementation in
 `assets` and name the directory containing the index in `packageDirs`.

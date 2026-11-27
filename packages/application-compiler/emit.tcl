@@ -648,6 +648,9 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
                 emitStatements [dict get $function body] $context body locations
             }
             lappend definitions [list ::proc $name $formals [join $body \n]]
+            if {[dict get $function exported]} {
+                lappend definitions [list ::namespace eval $moduleNamespace [list ::namespace export $functionName]]
+            }
             dict set sourceMap $name $locations
         }
     }

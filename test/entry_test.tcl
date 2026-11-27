@@ -532,7 +532,7 @@ set contract [manifest]
 puts [list [lsort [dict keys $contract]] [dict get $contract child subcommands wait]]
 }
     lassign [dict get [host $contractScript] out] names waitFacts
-    set expectedPackages {Tcl Tk cffi machteld sqlite3}
+    set expectedPackages {Tcl Tk application-compiler cffi machteld sqlite3}
     variable root
     foreach dir [glob -directory [file join $root packages] -types d machteld-*] {
         lappend expectedPackages machteld::[string range [file tail $dir] 9 end]
@@ -549,7 +549,7 @@ puts [list [lsort [dict keys $contract]] [dict get $contract child subcommands w
     }
     check "single subcommand retains typed options and its exact documentation ID" [expr {[envelopeOk $contract] &&
         $equal && [dict get $contract result facts doc] eq "machteld/command/child#wait"}] $contract
-    foreach package {Tk sqlite3 machteld::browser} {
+    foreach package {Tk sqlite3 machteld::browser application-compiler} {
         set item [decodeJson [dict get [host --manifest package $package --json] out]]
         check "$package catalog lookup keeps package lazy" [expr {[envelopeOk $item] &&
             [llength [dict get $item result versions]] && ![dict get $item result loaded] && ![dict get $item result probed]}] $item
@@ -581,6 +581,10 @@ proc ::et::hostModeTests {versionRe} {
     check "--help shows archive and standalone packaging" [expr {
         [string first {machteld.exe pack app-directory -o app.machteld} $out] >= 0 &&
         [string first {machteld.exe wrap app.dict -o MyApp.exe --gui} $out] >= 0
+    }]
+    check "--help shows the project driver and its reference page" [expr {
+        [string first {machteld.exe project check project.dict} $out] >= 0 &&
+        [string first {machteld/package/application-compiler} $out] >= 0
     }]
     set result [host --version]
     check "--version is a host mode" \

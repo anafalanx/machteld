@@ -40,6 +40,9 @@ proc ::machteld::InspectPackages {} {
     set packages [dict create Tcl tcl/command/package Tk tk/command/tk machteld machteld/application/host \
         sqlite3 machteld/package/sqlite3 cffi machteld/package/cffi]
     set library [file join [PayloadRoot] tcl_library]
+    set dir [file join $library application-compiler]
+    source -encoding utf-8 [file join $dir pkgIndex.tcl]
+    dict set packages application-compiler machteld/package/application-compiler
     foreach dir [glob -nocomplain -types d -directory $library machteld-*] {
         set name [string range [file tail $dir] [string length machteld-] end]
         source -encoding utf-8 [file join $dir pkgIndex.tcl]

@@ -127,6 +127,10 @@ _tmain(
         _tcscpy(argv[1], _T("docs"));
         Machteld_SetHostMode(MACHTELD_HOST_DOCS);
     } else if (startup == NULL && argc >= 2 &&
+            _tcscmp(argv[1], _T("--project")) == 0) {
+        _tcscpy(argv[1], _T("project"));
+        Machteld_SetHostMode(MACHTELD_HOST_PROJECT);
+    } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("--check")) == 0) {
         _tcscpy(argv[1], _T("check"));
         Machteld_SetHostMode(MACHTELD_HOST_CHECK);

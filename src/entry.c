@@ -762,6 +762,14 @@ Machteld_EntryGate(Tcl_Interp *interp, Tcl_Obj *payload_root)
 
     /* A real program file always wins over a convenience route.  A same-name
      * directory is not executable input and must not hide the host command. */
+    if (host_mode == MACHTELD_HOST_PROJECT ||
+            (strcmp(selected, "project") == 0 && !startup_path_is_regular_file(startup))) {
+        if (Tcl_EvalEx(interp, "::machteld::ProjectStartup", -1, TCL_EVAL_GLOBAL) != TCL_OK) {
+            Machteld_Fatal(interp);
+        }
+        Tcl_SetStartupScript(Tcl_GetObjResult(interp), "utf-8");
+        return TCL_OK;
+    }
     if (strcmp(selected, "pack") == 0 &&
             !startup_path_is_regular_file(startup)) {
         dispatch_command(interp, "::machteld::PackArchive", 1);

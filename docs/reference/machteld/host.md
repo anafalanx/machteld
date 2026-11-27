@@ -3,7 +3,7 @@ id: machteld/application/host
 type: application
 title: Running and packaging Tcl applications
 summary: Run Tcl scripts and application archives, or build a verified archive or branded Windows executable.
-commands: machteld.exe, machteld pack, machteld wrap, machteld --help, machteld --version, machteld --docs, machteld --check, machteld --manifest
+commands: machteld.exe, machteld pack, machteld wrap, machteld project, machteld --project, machteld --help, machteld --version, machteld --docs, machteld --check, machteld --manifest
 ---
 
 # Running and packaging Tcl applications
@@ -18,6 +18,9 @@ machteld.exe --check program.machteld --json
 machteld.exe --manifest command child wait --json
 machteld.exe program.tcl argument ...
 machteld.exe program.machteld argument ...
+machteld.exe project check project.dict
+machteld.exe project run project.dict argument ...
+machteld.exe project pack project.dict program.machteld
 machteld.exe pack source -o program.machteld
 machteld.exe wrap app.dict -o Program.exe --gui
 ```
@@ -25,6 +28,13 @@ machteld.exe wrap app.dict -o Program.exe --gui
 The program receives the arguments after its name in Tcl's `argv` list. An attached interactive terminal can start a prompt by running the host with no program. For batch work, pass a UTF-8 program file. The first command is a literal `package require machteld`, optionally with a literal version requirement or `-exact`. The host rejects redirected program input, `-` and an explicit `-encoding` option. A direct application controls its own command-line options.
 
 ## Check an application without running it
+
+For a typed or mixed project manifest, use `project check` to check the
+modules. Use `project test` for executable examples and `project pack` to
+compile and package the application. A real program file named `project`
+takes precedence over the shorthand. `--project` always selects the host
+driver. See `machteld/package/application-compiler` for the manifest,
+two-way Tcl calls and archive rebuilds.
 
 `machteld.exe --check TARGET --json` accepts a UTF-8 script, a directory with
 `main.tcl`, a project dictionary, or a `.machteld` archive. Relative paths

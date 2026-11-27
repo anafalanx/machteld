@@ -1,8 +1,8 @@
 ---
 type: plan
 title: Machteld release implementation plan
-status: Active 0.30 plan, updated 2026-11-25. Includes the decisions and evidence
-  from the unsigned 22 development milestone.
+status: Runtime implementation ledger and qualification gates for the integrated 0.50 release,
+  updated 2026-11-27. Includes the unsigned 22 and 30 development milestones.
 relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
   docs/direction.md, docs/creed.md, tools/stabilization.json
 ---
@@ -11,14 +11,14 @@ relates: README.md, BUILDING.md, commentary.md, docs/roadmap.md,
 
 ## 0. How to read this
 
-**Deliver 0.30 directly after signed 0.21.** The owner closed 0.22 as an
-unsigned development milestone on 2026-11-25. The 0.30 development checkout reports
-`30`. The
-existing signed 0.21 executable builds and tests every 0.30 candidate,
-including the signed release copy. Work-item numbers such as 30.4 identify
-milestones. October's records used the earlier number 23 for the successor.
-The final section contains the implementation and release gates.
-[Capability decisions](docs/roadmap.md)
+**Deliver 0.50 directly after signed 0.21.** The owner closed 0.22 as an
+unsigned development milestone on 2026-11-25 and selected an integrated
+compiler and runtime on 2026-11-27. The unsigned 0.30 baseline reports
+`30`. Signed 0.21 remains the build driver through the signed 0.50 checks.
+Work-item numbers such as 30.4 identify earlier runtime milestones. October's
+records used 23 for the successor. The final section carries the runtime and
+signing gates forward. The roadmap defines the compiler and mixed-project
+acceptance sequence for the combined product. [Integrated release roadmap](docs/roadmap.md)
 
 On 2026-11-25, the Windows acceptance run passed 72 release and desktop
 steps on unsigned Beta 1, built from `e0db215`. This candidate adds
@@ -28,8 +28,8 @@ The owner selected all those features for 0.22, including wrapped
 applications' custom Windows metadata and icons. The 72-step result
 applies to that beta. The reconciled baseline at `eccba70` passed local
 and hosted gates. Cross-host reproducibility and fresh acceptance of the
-complete 0.30 candidate are release requirements. Sections 6.3 and 6.4
-record the original preparation decisions and the direct-release decision.
+complete 0.50 candidate are release requirements. Sections 6.3 through 6.5
+record the original preparation decisions and their release successors.
 [Beta 1 and release checklist](https://github.com/anafalanx/machteld/pull/5) ·
 [Windows acceptance run](https://github.com/anafalanx/machteld/actions/runs/45597853161)
 
@@ -146,7 +146,7 @@ release."
 1. **The version** (c9cbff2): one natural number. Programs ask for `package
    require machteld 22-`; a program that must be read again before it runs on
    a newer runtime names an upper bound, which Tcl excludes (`22-30`). The
-   signed 0.21 executable remains the build driver through 0.30 acceptance.
+   signed 0.21 executable remains the build driver through 0.50 acceptance.
 2. **The creed and the direction** (`docs\creed.md`, `docs\direction.md`).
    The runtime uses Tcl/Tk with native C and C++. Tcl drives the build and
    tests. The hosted Windows workflows can use PowerShell to set up the
@@ -605,6 +605,17 @@ section, including publication, so a stale-lock contender cannot displace
 a live owner (B17). The signed 0.21 driver exercises failed promotion,
 bracketed cache paths, and competing lock owners.
 
+### 6.5. Integrated release decision (2026-11-27)
+
+Carry the runtime baseline, including the optional standalone packager
+restored after section 6.4, into 0.50. The shared executable is the normal
+tool for building and running applications. Integrate the Tcl-written
+application compiler and qualify Tcl-only, typed-only and mixed Tcl/Tk
+applications together. The first mixed port retains the Tcl entry, migrates
+one source file and exercises both call directions from a relocated archive.
+The earlier evidence and work-item numbers keep their original identities.
+[Release steps and acceptance](docs/roadmap.md)
+
 ## 7. Log
 
 <!-- machteld-version-history: begin -->
@@ -689,7 +700,7 @@ bracketed cache paths, and competing lock owners.
 
 <!-- machteld-version-history: end -->
 
-## 8. Plans for 0.30
+## 8. Runtime work items originally assigned to 0.30
 
 The roadmap records the 26 ownership decisions and their implementation sequence.
 The items below collect the earlier design rulings by topic.
@@ -795,9 +806,9 @@ and the ledger's deferred items (4.2) supply further design input. [Roadmap](doc
 Rejected: Tcl's Thread package (2026-10-29) and a GUI twin of `machteld.exe`
 (ruling 18). Ruling 9 keeps Tcl at 9.0.4 through 0.30.
 
-## Implementation and release gates for 0.30
+## Implementation and release gates for the integrated 0.50 candidate
 
-The build starts from `eccba70` on `main`. Signed 0.21 is the driver in
+Runtime development started from `eccba70` on `main`. Signed 0.21 is the driver in
 `dist/0.21`, the dependency cache supplies the static Tcl build interpreter,
 and the candidate is the executable under test. An implementation change
 is complete when its public Tcl contract, code, platform fixtures, reference
@@ -860,7 +871,7 @@ the build PC and hosted Windows before owner signing and attended validation.
    missing facility is an open test obligation. Raise a backend or support
    decision while there is still time to change the implementation.
 3. **Make development feedback reliable.** Extend the current main/legacy
-   branch jobs to run the fast lane and relevant integration lane on 0.30
+   branch jobs to run the fast lane and relevant integration lane on 0.50
    integration changes. Build independent cold candidates at integration
    milestones and at the release freeze. Keep unsigned executables on the
    build PC or inside their hosted job. Share checksums and test receipts.
@@ -884,7 +895,7 @@ the build PC and hosted Windows before owner signing and attended validation.
 | **Release candidate and deployment** | Use exact release-source and artifact hashes. Test the compact reference offline for command discovery and bounded retrieval. Compare two default app launches, an in-use archive update, managed proxy and SMB permissions, old/new sessions and recovery to the previous runtime/archive pair. Verify a clean desktop can launch using the runtime, app archive and documented Windows prerequisites. Use a signed copy on machines outside the build PC and hosted CI. |
 
 Existing gate entry points from the repository root are shown below. The
-0.30 work adds or replaces fixtures behind these lanes. The development
+compiler integration adds mixed-project fixtures to these lanes. The development
 command tests an already built candidate. Supply `--msys` or `MSYS2_ROOT`
 as described in the build guide. Use `--interactive-gui`, `--interactive-pty`
 and `--public-tls` in the environments that can exercise them.
@@ -904,8 +915,8 @@ starts a new candidate with fresh reproducibility and acceptance evidence.
 
 ### Signing, publication and recovery
 
-1. Freeze the release commit with public version 30, Windows file version
-   `30.0.0.0` and the prerelease flag clear. From independent clean
+1. Freeze the integrated release commit with public API `50`, Windows file
+   version `50.0.0.0` and the prerelease flag clear. From independent clean
    checkouts and fresh dependency caches, set `SOURCE_DATE_EPOCH` to the
    same commit timestamp and compare the **complete unsigned SHA-256**
    across the build PC and hosted CI. Compare incremental output separately,
@@ -922,5 +933,5 @@ starts a new candidate with fresh reproducibility and acceptance evidence.
    checksum, and publish the 0.21 upgrade and archive migration instructions.
    Retain the prior signed release and last known-good app archive. Exercise
    restore using a copy of external app data before approving a deployment
-   that changes its schema. Move the driver to verified signed 0.30 in a
+   that changes its schema. Move the driver to verified signed 0.50 in a
    separate change and run the gate again using the newly pinned driver.

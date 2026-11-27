@@ -1,0 +1,7 @@
+extern fn .field_name($field: text) -> text = ['::cards::fieldName'] from 'cards::fields'
+
+## Formats a caption using the field name supplied by the Tcl application.
+export fn .caption($field: text, $value: text) -> text =>
+    $"${.field_name($field)}: $value"
+example .caption('id', '007') => 'Inventory ID: 007'
+example .caption('shelf', '') => 'Shelf: '

@@ -1994,12 +1994,15 @@ proc ::ref::main {argv} {
             "" "```text" \
             "machteld.exe app.tcl" \
             "machteld.exe pack app-directory -o app.machteld" \
+            "machteld.exe project check project.dict" \
+            "machteld.exe project pack project.dict app.machteld" \
             "machteld.exe app.machteld" \
             "machteld.exe wrap app.dict -o MyApp.exe --gui" "```" \
             "" "Read and search the bundled manuals." \
             "" "```text" \
             "machteld.exe --docs search canvas" \
             "machteld.exe --docs get tk/command/canvas --section synopsis" \
+            "machteld.exe --docs get machteld/package/application-compiler" \
             "machteld.exe --docs get machteld/agent" "```" "" \
             "In a Tcl application, use `docs search canvas`, `docs get tk/command/canvas` and `docs schema` for the query contract." \
             "Read `machteld/command/docs` for query options and `tcl/application/tclsh` or `tk/application/wish` for the upstream shell manuals." \

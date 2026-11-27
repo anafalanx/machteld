@@ -1,0 +1,7 @@
+schema 1
+edition 1
+minApi 30
+tclEntry main.tcl
+modules {captions captions.src}
+assets {lib/fields.tcl lib/pkgIndex.tcl lib/captions.tcl}
+packageDirs {lib}

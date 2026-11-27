@@ -294,6 +294,14 @@ its JSON fields in a different order. The replay added zero claims. A later
 batch inserted a valid observation before its second observation failed an
 interval check. Querying from a new process showed only the original claims.
 
+### 2026-11-27 · Machteld 0.50 development · comment · Codex, mixed applications
+
+The original Tcl callback kept its name, arguments and error code when its
+formatter moved to a typed module. Packing exposed a difference in startup
+paths. The public archive name stays in `argv0`, while `info script` names
+the mounted Tcl file. A small entry script explicitly called the original
+main procedure and ran it exactly once in both forms.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

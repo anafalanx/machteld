@@ -6,9 +6,10 @@ and its packaged application examples. Keep those executables inside the job. CI
 publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
-0.30 is the next public release after signed 0.21. The unpublished 0.22
-candidate supplies the starting source. The current CLI and Tcl package
-both report `30`. The earlier Beta 1 run produced an unsigned test
+0.50 is the next public release after signed 0.21. It combines the
+application compiler with the Tcl/Tk runtime. The unsigned 0.30
+development baseline's CLI and Tcl package both report `30`. The
+earlier Beta 1 run produced an unsigned test
 ZIP before the current CI policy was adopted.
 [Beta 1 results](docs/releases/0.22-beta.1.md) ·
 [Implementation and release gates in the release plan](plan-machteld22.md)
@@ -20,8 +21,8 @@ ZIP before the current CI policy was adopted.
    `1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7`, signed
    by Open Source Developer Vincent Vercauteren). The build tools and the
    driver tests are machteld programs whose first line requires 0.21. Use
-   this signed driver through the 0.30 build and signed-file acceptance.
-   After publication, qualify any driver switch to signed 0.30 in a
+   this signed driver through the 0.50 build and signed-file acceptance.
+   After publication, qualify any driver switch to signed 0.50 in a
    separate change. Three interpreters share the work:
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
      `dev.tcl`, `reference.tcl` (the reference generator) and
@@ -144,8 +145,11 @@ Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
 
-For the final 0.30 commit, clear the prerelease marker in `src/machteld.h`
-and verify Windows file version `30.0.0.0`. Rebuild that commit on the build
+For 0.50, advance the runtime API to `50` across the header, Tcl package
+and documentation. Check exact and bounded version requirements before
+freezing the candidate. Clear the prerelease marker in `src/machteld.h`
+for the final release commit and verify Windows file version `50.0.0.0`.
+Rebuild that commit on the build
 PC and the hosted Windows runner, each from a clean checkout and a fresh
 dependency cache. Use the same locked inputs and the commit timestamp from
 `git show -s --format=%ct HEAD` as `SOURCE_DATE_EPOCH`. Compare the SHA-256
@@ -170,7 +174,9 @@ compare the runtime’s linked RT_MANIFEST with the authored file, and check
 the console subsystem and detached console allocation setting.
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
-Run the runtime checks and packaged sample applications for 0.30. The packaging gate builds and relocates standalone executables, reads their Windows resources and inspects their contents. Compare the console and GUI fixture hashes in the build-PC and hosted logs, in addition to the hash of the distribution executable. Automate
+Run the runtime checks, compiler suites and packaged applications for 0.50.
+Verify the Tcl-only, typed-only and mixed Tcl/X paths with the built candidate.
+The packaging gate builds and relocates standalone executables, reads their Windows resources and inspects their contents. Compare the console and GUI fixture hashes in the build-PC and hosted logs, in addition to the hash of the distribution executable. Automate
 repeatable GUI checks on an isolated desktop. Before release, verify
 user-visible behavior, including foreground window presentation, in an
 attended desktop session. Record the Windows target and result for each.
@@ -209,7 +215,7 @@ SDK and the Certum code-signing certificate of Open Source Developer Vincent
 Vercauteren. After acceptance, the owner signs a copy at a dedicated release
 path. The signature follows the appended payload. The signed 0.21 release
 demonstrated that the runtime could still find that payload. Verify the
-signature and signer on the 0.30 copy. Run the gate on that exact file
+signature and signer on the 0.50 copy. Run the gate on that exact file
 with `--skip-build --runtime FILE`, using the signed 0.21 driver. Record
 the signed file's SHA-256 and obtain the owner's publication decision.
 

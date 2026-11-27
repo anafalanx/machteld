@@ -2,24 +2,24 @@
 id: machteld/package/application-compiler
 type: package
 title: Checking, testing and packing typed applications
-summary: Use the source compiler from a checkout or an editable application archive to check examples, build an application and query its reference.
-commands: application-compiler, package require application-compiler, ::appcompiler::check, ::appcompiler::compile, ::appcompiler::project::test
+summary: Use the embedded compiler to check, test, pack and rebuild typed applications and mixed Tcl/Tk projects.
+commands: application-compiler, package require application-compiler, project, ::appcompiler::check, ::appcompiler::compile, ::appcompiler::project::test
 ---
 
 # Checking, testing and packing typed applications
 
-An editable application archive carries its development compiler under
-`compiler/` and its manifest and source files under `project/inputs/`.
-The repository supplies the same package in `packages/application-compiler/`.
-To use it in a Tcl script, add the compiler directory to `auto_path` and
-call `package require application-compiler 0.1`. The compiler comes from
-the project or checkout. The host supplies Tcl and the Machteld commands.
+The integrated host supplies the Tcl compiler package and the project driver.
+Use `machteld.exe project check project.dict`, then `project test`,
+`project run` or `project pack project.dict app.machteld`. Run the result
+with `machteld.exe app.machteld`. Use `--project` to select the built-in
+driver explicitly when the current directory contains a file named `project`.
+Editable archives also carry a copy of their compiler under `compiler/`
+and their manifest and original files under `project/inputs/`.
 
 ## Checking an example
 
 ```tcl
 package require machteld
-lappend auto_path [file normalize local-compiler]
 package require application-compiler 0.1
 
 set modules [dict create sample {
@@ -44,6 +44,24 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 `docs revised.machteld get ID`. To read the host's manual through this driver,
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
+
+## Keeping an existing Tcl/Tk entry
+
+Set `tclEntry main.tcl` in place of `entry {module function}`. Start with
+`modules {}` for an all-Tcl project. List the subsidiary Tcl files and
+assets used by the application, then add typed modules one at a time.
+An exported function becomes a Tcl command such as
+`::application::captions::caption`. In the other direction, a typed
+`extern fn` declaration identifies an existing Tcl command prefix and its
+argument and result types. Both run synchronously in the same interpreter.
+Tk widgets, bindings and the event loop can stay in their original Tcl files.
+
+In a source run, `argv0` identifies the Tcl entry. In a packed run it
+identifies the public archive. Use `file dirname [info script]` to find
+sibling files in both forms. If a legacy script starts only when its
+filename equals `argv0`, supply a short entry that sources it and calls
+its main procedure. The compiler guide describes this migration and the
+Tcl representations for typed values and failures.
 
 ## Reading SQLite rows
 

@@ -1,11 +1,14 @@
 package require machteld
 
-proc usage {} {
-    return -code error -errorcode {APPCOMPILER PROJECT USAGE} \
-        [format {usage: %s check ?--json? MANIFEST | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
+namespace eval ::projectDriver {}
+
+proc ::projectDriver::synopsis {} {
+    return [format {usage: %s check ?--json? MANIFEST | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
 }
 
-namespace eval ::projectDriver {}
+proc ::projectDriver::usage {} {
+    return -code error -errorcode {APPCOMPILER PROJECT USAGE} [synopsis]
+}
 
 proc ::projectDriver::jsonString {value} {
     set value [string map [list \\ {\\} \" {\"}] $value]
@@ -48,60 +51,89 @@ proc ::projectDriver::failure {message options compilerLoaded} {
     return [list [dict create code $code message $message]]
 }
 
-set jsonCheck [expr {[lrange $argv 0 1] eq {check --json}}]
-set diagnostics {}
-set compilerLoaded 0
-try {
-    source -encoding utf-8 [file join [file dirname [info script]] compiler.tcl]
-    set compilerLoaded 1
-    lassign $argv action input output
-    switch -exact -- $action {
-        check {
-            if {$jsonCheck} {
-                if {$argc != 3} {usage}
-                set input $output
-            } elseif {$argc != 2} {usage}
-            ::appcompiler::project::build $input
+proc ::projectDriver::main {argv driverDirectory} {
+    set argc [llength $argv]
+    set jsonCheck [expr {[lrange $argv 0 1] eq {check --json}}]
+    set diagnostics {}
+    set compilerLoaded 0
+    try {
+        set loadedVersion [package provide application-compiler]
+        if {$loadedVersion eq {}} {
+            uplevel #0 [list source -encoding utf-8 [file join $driverDirectory compiler.tcl]]
+        } elseif {$loadedVersion ne "0.1" || ![info exists ::appcompiler::compilerDirectory] ||
+                $::appcompiler::compilerDirectory ne $driverDirectory} {
+            error "a different application compiler is already loaded; run this project's driver in a fresh interpreter"
         }
-        test {
-            if {$argc != 2} {usage}
-            set report [::appcompiler::project::test $input]
-            foreach diagnostic [dict get $report failures] {
-                puts stderr [::appcompiler::formatDiagnostic $diagnostic]
+        set compilerLoaded 1
+        lassign $argv action input output
+        switch -exact -- $action {
+            --help {
+                if {$argc != 1} {usage}
+                puts [synopsis]
             }
-            puts [format {%d examples: %d passed, %d failed} [dict get $report total] \
-                [dict get $report passed] [dict get $report failed]]
-            if {[dict get $report failed]} {exit 1}
+            check {
+                if {$jsonCheck} {
+                    if {$argc != 3} {usage}
+                    set input $output
+                } elseif {$argc != 2} {usage}
+                ::appcompiler::project::build $input
+            }
+            test {
+                if {$argc != 2} {usage}
+                set report [::appcompiler::project::test $input]
+                foreach diagnostic [dict get $report failures] {
+                    puts stderr [::appcompiler::formatDiagnostic $diagnostic]
+                }
+                puts [format {%d examples: %d passed, %d failed} [dict get $report total] \
+                    [dict get $report passed] [dict get $report failed]]
+                if {[dict get $report failed]} {exit 1}
+            }
+            run {
+                if {$argc < 2} {usage}
+                set projectBuild [::appcompiler::project::build $input]
+                set ::argv0 [file normalize $input]
+                if {[lindex [file system $driverDirectory] 0] eq "native" && [llength [info commands ::machteld::app]]} {
+                    # A loose driver's worker needs the same compiler and
+                    # manifest even when the child starts in another directory.
+                    set ::machteld::launchPrefix [list [info nameofexecutable] \
+                        [file join $driverDirectory driver.tcl] run $::argv0]
+                }
+                if {[dict get $projectBuild project tclEntry] ne {}} {
+                    set ::argv0 [file join [file dirname $::argv0] [dict get $projectBuild project tclEntry]]
+                }
+                set ::argv [lrange $argv 2 end]
+                set ::argc [llength $::argv]
+                return [uplevel #0 [dict get $projectBuild artifact script]]
+            }
+            pack - rebuild {
+                if {$argc != 3} {usage}
+                puts [::appcompiler::project::$action $input $output]
+            }
+            docs {
+                if {$argc < 4} {usage}
+                set answer [::appcompiler::reference::query $input {*}[lrange $argv 2 end]]
+                if {$output eq "search" && $answer ne {}} {append answer \n}
+                chan configure stdout -translation binary
+                puts -nonewline stdout [encoding convertto -profile strict utf-8 $answer]
+            }
+            default {usage}
         }
-        run {
-            if {$argc < 2} {usage}
-            set projectBuild [::appcompiler::project::build $input]
-            set argv0 [file normalize $input]
-            set argv [lrange $argv 2 end]
-            set argc [llength $argv]
-            namespace eval :: [dict get $projectBuild artifact script]
+    } on error {message options} {
+        if {!$jsonCheck} {
+            if {[info exists projectBuild] && [dict get $projectBuild project tclEntry] ne {}} {
+                # Tcl's accumulated stack includes source file and line, plus
+                # the original typed location when a public export fails.
+                set message [dict getdef $options -errorinfo $message]
+            }
+            puts stderr $message
+            exit 1
         }
-        pack - rebuild {
-            if {$argc != 3} {usage}
-            puts [::appcompiler::project::$action $input $output]
-        }
-        docs {
-            if {$argc < 4} {usage}
-            set answer [::appcompiler::reference::query $input {*}[lrange $argv 2 end]]
-            if {$output eq "search" && $answer ne {}} {append answer \n}
-            chan configure stdout -translation binary
-            puts -nonewline stdout [encoding convertto -profile strict utf-8 $answer]
-        }
-        default {usage}
+        set diagnostics [::projectDriver::failure $message $options $compilerLoaded]
     }
-} on error {message options} {
-    if {!$jsonCheck} {
-        puts stderr $message
-        exit 1
+    if {$jsonCheck} {
+        ::projectDriver::writeReport $diagnostics
+        exit [expr {[llength $diagnostics] != 0}]
     }
-    set diagnostics [::projectDriver::failure $message $options $compilerLoaded]
 }
-if {$jsonCheck} {
-    ::projectDriver::writeReport $diagnostics
-    exit [expr {[llength $diagnostics] != 0}]
-}
+
+::projectDriver::main $::argv [file dirname [file normalize [info script]]]

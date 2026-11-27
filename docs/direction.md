@@ -26,6 +26,9 @@ Current decisions:
 
 - Programs begin with a parsed `package require machteld`. The full host runs
   direct Tcl files and the selected entry of a verified application archive.
+- The 0.50 release integrates a typed source language with Tcl/Tk. The
+  compiler is written in Tcl and emits Tcl. Existing programs can introduce
+  typed files incrementally and call across a declared command boundary.
 - One executable supplies the palette, SQLite, the offline reference and the
   license notices. `pack` publishes application files as a separate archive.
 - Documentation is a runtime interface: offline, versioned, machine-readable,
@@ -43,20 +46,20 @@ Current decisions:
 
 The compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and
 the engine-bound column library were removed. They leave no compatibility
-command or migration layer. The unpublished 0.22 candidate supplies the
-development baseline for a direct release from signed 0.21 to 0.30.
+command or migration layer. The unsigned 0.22 and 0.30 development
+baselines feed the integrated release planned directly after signed 0.21.
 Starting with 22, the runtime version is one natural number and advances
 when the runtime changes. The baseline includes explicit wrapper inventories,
 optional Windows metadata and icons for wrapped applications, and native
-hardening. The 0.30 runtime runs applications as
-scripts or archives running on the shared executable. The owner signs and
+hardening. The shared executable runs scripts and archives. The owner signs and
 authorizes publication after acceptance. [Roadmap](roadmap.md)
 
 Standing architectural decisions:
 
-- **Machteld is Tcl/Tk, with C/C++ underneath.** Tcl is the sole program,
-  composition, and orchestration language; Tk is the graphical toolkit; C and
-  C++ are the only admitted implementation languages for native facilities.
+- **Machteld executes Tcl and uses Tk for graphics.** Authors can write Tcl,
+  typed application modules that compile to Tcl, or a mixture of the two.
+  Both forms use the same interpreter, event loop and runtime commands.
+  C and C++ are the admitted implementation languages for native facilities.
 - When Machteld itself requires more, the implementation belongs in Tcl or in
   a narrow native palette command, vendored, pinned, bounded, and gated like
   SQLite and yyjson. A second embedded scripting language is not retained for

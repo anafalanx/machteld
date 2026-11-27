@@ -1,18 +1,48 @@
 ---
 type: roadmap
 title: Roadmap
-description: Direct delivery from signed 0.21 to 0.30, the unsigned 22 baseline, capability ownership and acceptance.
+description: The integrated compiler and runtime planned for release 0.50, the unsigned development baselines, and release acceptance.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 30 — Development
+## Next public release — 0.50
 
-**The next public release is 0.30, directly after signed 0.21.** On
-2026-11-25 the owner closed 0.22 as an unsigned development milestone.
-The reconciled Beta 1 work supplies the starting point for 0.30.
-The 0.30 runtime runs Tcl scripts and verified application archives. A project
+On 2026-11-27 the owner chose **one release integrating the application
+compiler with the Tcl/Tk runtime**. The upgrade is from signed 0.21 to 0.50.
+The work prepared under 0.30 continues as an unsigned development baseline.
+Its `30.x` work-item numbers and recorded measurements still identify that
+work. X is the working name of the typed source language. The compiler is
+written in Tcl and emits Tcl that runs in the application's interpreter.
+
+### Integration and acceptance
+
+| Step | What to demonstrate on the candidate |
+| --- | --- |
+| 1. Ship the compiler with the full host | On a clean supported Windows installation, use one executable and an application's sources to check, test, pack and run a typed or mixed application. Move the executable and archive to a fresh directory, run it, recover its editable sources, change a module and rebuild offline. Record the language edition, minimum host API and compiler identity used in the test. |
+| 2. Migrate one file | Start with a passing Tcl/Tk application. Keep its Tcl entry, widgets, callbacks and package layout. Port one leaf module to X, preserve its public Tcl commands, and run the same behavioral tests. Demonstrate a Tcl callback invoking the typed export and an X function invoking a remaining Tcl package. Repeat after relocating the packed app, and exercise the actual Tk callback on the qualified desktop. |
+| 3. Close the language and tools for the first edition | Compare the accepted language design with the compiler, tests and offline manual. Close or explicitly resolve each remaining gap before freezing the edition. Document Tcl and X value representations, export visibility, argument checks, error locations and callback lifetimes. Use malformed inputs in both directions and ensure the author can find the failing source file and line. |
+| 4. Compare behavior and cost | Run the Tcl-only corpus, existing typed projects and the mixed port on the same candidate. For the same workload, compare startup, checking and packing time, repeated callback cost, memory and executable/archive size. Record the data size, host and build identity with the results. The generated code executes in Tcl, so changes in a particular workload need measurement. |
+| 5. Qualify the combined product | Complete the runtime capability and application checks below, including full SQL and the subsequent Graphviz/Tk work. Compare independent clean builds with the compiler and reference embedded. Verify upgrades from signed 0.21, packaged source recovery, and execution on the supported x64 Windows targets. The owner signs a copy and authorizes publication after the signed desktop and share checks. |
+
+Choose a leaf with an observable input/output contract as the first conversion.
+Existing Tcl `source` calls load Tcl. Typed modules enter via the compiler's
+module inventory. Tcl code can keep its existing procedure names with thin
+wrappers around exported functions. X declares the Tcl commands it calls
+with typed `extern` signatures. Positional arguments and ordinary values are
+the simplest starting point. Keep a Tcl adapter for commands that modify
+their caller's variables with `upvar`, evaluate a script in the caller's
+scope, or rely on Tcl return options. Move such behavior only when its
+calling and error conventions have explicit tests. The window and its event
+loop can remain in Tcl/Tk throughout the migration.
+Find the current interfaces with `machteld.exe --docs get machteld/package/application-compiler`.
+
+## 30 — Unsigned runtime baseline
+
+On 2026-11-25 the owner closed 0.22 as an unsigned development milestone.
+The reconciled Beta 1 work supplied the starting point for the API-30
+runtime. It runs Tcl scripts and verified application archives. A project
 can also produce a standalone Windows executable with its own application
 name, file and product versions, and icon.
 Existing 0.21 wrapped executables carry their original runtime.
@@ -25,7 +55,7 @@ corrected Tcl control flow through `scope`. [Beta 1 scope and release checklist]
 The source and Tcl package report `30`, and the fixed Windows file version
 is `30.0.0.0`. An existing entry with a requirement of `22-` accepts 30.
 An entry with `22-30` excludes it. Signed 0.21 drives builds and
-tests through acceptance of the signed 0.30 copy. Identify baseline artifacts by their
+tests through acceptance of the signed 0.50 copy. Identify baseline artifacts by their
 hashes, verification receipts, `manifest`, and embedded reference.
 
 ### Additional release requirements
@@ -41,7 +71,7 @@ Make exact subcommand references and executable recipes discoverable in the
 SQLite manual, and stream machine-readable progress from both test runners.
 These changes require fresh clean-build comparisons and gate receipts.
 
-The owner restored optional standalone delivery for 0.30. Keep the shared
+The owner restored optional standalone delivery during the 0.30 work. Keep the shared
 runtime and `.machteld` path as the standard distribution. Exercise standalone
 console and GUI executables after relocation, verify Windows resources, and
 inspect their embedded files. The offline manual belongs to the full host.
@@ -90,8 +120,9 @@ and two local cold builds matched. Hosted Windows Server 2025 passed 72
 steps and its two builds matched each other. At the same commit timestamp,
 the PC and hosted binaries still differed. Substituting just the hosted
 MSYS2 `default-manifest.o` in a local replay reproduced the hosted SHA-256.
-The first build task for 0.30 is to control that link input and demonstrate
-whole-executable equality on both hosts. [Hosted verification](https://github.com/anafalanx/machteld/actions/runs/45636999191)
+Controlling that link input allowed later baselines to demonstrate
+whole-executable equality on both hosts. Subsequent comparisons are recorded
+in `docs/releases/0.30-qualification.md`. [Hosted verification](https://github.com/anafalanx/machteld/actions/runs/45636999191)
 
 The build PC and hosted CI may run unsigned builds. Executables produced in
 CI stay in the job and expire with it. Other machines use signed releases.
@@ -100,10 +131,11 @@ gate passes on the signed bytes.
 
 ## Delivery order
 
-The target is one signed `machteld.exe` that runs Tcl scripts, creates
-application-only `.machteld` archives with `pack`, and runs those archives.
-The milestone numbers below identify work items. The first implementation
-in release 0.30 is the foreign-function interface, numbered 30.9.
+The target is one signed `machteld.exe` that runs Tcl scripts, builds typed
+and mixed Tcl/X applications, creates `.machteld` archives and runs them.
+The milestone numbers below identify runtime work items carried into the
+integrated release. Their original implementation order began with the
+foreign-function interface, numbered 30.9.
 
 ### Start from signed 0.21 and the reconciled source
 
@@ -119,10 +151,10 @@ in release 0.30 is the foreign-function interface, numbered 30.9.
    feature, specify its Tcl inputs, binary/text handling, errors, limits,
    ownership, cancellation and fixtures. Keep reproducibility and feature
    acceptance as separate checks throughout the release.
-3. **Qualify 0.30 directly.** Run the runtime gate and packaged examples
+3. **Qualify 0.50 directly.** Run the integrated runtime and compiler gates and packaged examples
    on the candidate. Exercise application-owned profile migrations, restore,
    updates and managed sign-in in the porting project's environment. Before
-   publication, verify the exact signed 0.30 executable on the supported
+   publication, verify the exact signed 0.50 executable on the supported
    Windows targets and the signed desktop/share workflow. The owner decides
    when to publish. The repository's `plan-machteld22.md` gives the
    implementation and release gates.
@@ -145,12 +177,12 @@ probe overwrote an existing destination. A launcher and a radio
 directory both use FTS5 trigram indexes. Creating such an index on the
 candidate failed with `no such module: fts5`.
 
-Use these cases for the 0.30 porting work. For full-text search (30.5),
+Use these cases for integrated release qualification. For full-text search (30.5),
 exercise the consumers' external-content trigram indexes through the
 upstream Tcl binding. Verify that insert, update and delete keep search
 results correct and that a populated catalog reopens in a packaged app.
 
-### Which capabilities ship in 0.30
+### Runtime capabilities carried into 0.50
 
 The completed ownership poll assigns 25 capabilities to `machteld.exe`.
 Applications supply system-wide keyboard shortcuts. A capability can be
@@ -382,8 +414,10 @@ the test used a hardware device or the Windows software renderer.
 5. **Graphviz for Tk, immediately after SQL (30.5a).** Embed the static
    `dot` engine, orthogonal routing, HTML-like table labels and xdot drawing
    instructions. Lay out a graph with named table ports, render it on a Tk
-   canvas and verify that selection still works. Measure the size against
-   the matching full-SQL executable.
+   canvas and verify that selection still works. Use a history diagram as
+   the first editing example. Change the research instant or interval,
+   redraw the active occurrences and select one to see its source. Measure
+   the size against the matching full-SQL executable.
 6. **Desktop and files (30.6, 30.6b).** Add per-user storage and finish the
    process controls. Deliver browser control, window switching, installed-app
    discovery, Explorer file drops and opening a document with its associated
@@ -742,7 +776,7 @@ formats numbers, so nothing observable changes.
 
 ## Candidate studies
 
-- **Console control ownership** remains a candidate for 0.30. A program
+- **Console control ownership** remains a candidate for future work. A program
   handing its console to a child needs a way to let that child handle
   Ctrl-C. The proposal in `docs/proposals/console-ctrl/` describes
   `console ctrl ignore|default` and a query for the current mode. The

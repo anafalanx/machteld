@@ -1,13 +1,15 @@
 ---
 type: index
 title: machteld documentation
-description: The documentation map for machteld 30, in preparation.
+description: Documentation for the API-30 development runtime and the integrated 0.50 release plan.
 tags: [machteld, windows, tcl, runtime]
 ---
 
 # machteld 30
 
-These pages describe machteld 30, in preparation: not yet released or signed.
+These pages describe the unsigned development runtime, whose API number is
+`30`. The next public release, 0.50, integrates the typed application
+compiler with the Tcl/Tk runtime.
 The older signed release's own embedded reference and release notes
 describe its behavior. Use the selected executable's
 `manifest`, `docs status`, and (for incremental development builds)
@@ -28,6 +30,7 @@ Machteld's own exact command reference.
 - [Agent bootstrap](reference/machteld/agent.md) - how to query the embedded
   Machteld, Tcl, and Tk corpus efficiently.
 - [Palette](palette.md) - a compact composition-oriented command tour.
+- Application compiler — run `machteld.exe --docs get machteld/package/application-compiler` for typed modules, Tcl interoperability, project checks and editable archives.
 - [Contract](contract.md) - entry, values, errors, time, and handles.
 - [Execution model](execution-model.md) - blocking work, evented work, and lifetime.
 - [Parallel work](parallel.md) - `worker`, `pool`, and `pmap`.
@@ -41,7 +44,7 @@ Machteld's own exact command reference.
 - [Creed](creed.md) - the design tests.
 - [Ecosystem policy](ecosystem-policy.md) - what may enter the executable.
 - [Direction](direction.md) - current product decisions and non-goals.
-- [Roadmap](roadmap.md) - built now and possible next work.
+- [Roadmap](roadmap.md) - release sequence, file-by-file migration and acceptance on the integrated candidate.
 
 The source checkout also contains a responsive project inspector
 (`examples/project-inspector/README.md`) and an explicitly deployed external

@@ -73,6 +73,31 @@ proc externResult {location type value} {
     return $result
 }
 
+proc mappedLocation {options sourceMap {fallback {}}} {
+    set where [errorLocation $options]
+    if {$where ne {}} {return $where}
+    foreach frame [split [dict getdef $options -errorinfo {}] \n] {
+        if {[regexp {^\s*\(procedure "([^"]+)" line ([0-9]+)\)} $frame -> procName bodyLine]
+                && [dict exists $sourceMap $procName $bodyLine]} {
+            return [dict get $sourceMap $procName $bodyLine]
+        }
+    }
+    return $fallback
+}
+
+# Public Tcl commands in a mixed project call this bridge. Preserve Tcl's
+# message and error code for legacy catch handlers and Tk background errors.
+proc callExport {command declaration args} {
+    try {
+        $command {*}$args
+    } on error {message options} {
+        set where [mappedLocation $options [sourceMap] $declaration]
+        dict set options -appcompilerlocation $where
+        dict append options -errorinfo "\n    (typed source [string trimright [locationPrefix $where] {: }])"
+        return -options $options $message
+    }
+}
+
 proc launch {entry sourceMap arguments} {
     try {
         lassign [$entry $arguments] tag value
@@ -83,19 +108,8 @@ proc launch {entry sourceMap arguments} {
         puts stderr "$prefix[dict get $value message]"
         return 1
     } on error {message options} {
-        set where [errorLocation $options]
-        if {$where ne {}} {
-            puts stderr "[locationPrefix $where]application error: $message"
-            return 1
-        }
-        set prefix ""
-        foreach frame [split [dict get $options -errorinfo] \n] {
-            if {[regexp {^\s*\(procedure "([^"]+)" line ([0-9]+)\)} $frame -> procName bodyLine]
-                    && [dict exists $sourceMap $procName $bodyLine]} {
-                set prefix [locationPrefix [dict get $sourceMap $procName $bodyLine]]
-                break
-            }
-        }
+        set where [mappedLocation $options $sourceMap]
+        set prefix [expr {$where eq {} ? {} : [locationPrefix $where]}]
         puts stderr "${prefix}application error: $message"
         return 1
     }

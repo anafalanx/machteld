@@ -7,20 +7,24 @@ is Tcl/Tk 9.0.4 plus a small command palette implemented in Tcl and native C,
 with C/C++ as the admitted native languages; it starts no service and needs no
 installed Tcl. machteld is Vincent Vercauteren's own runtime and serves tools
 first; other people's adoption is welcome, but is not the design target. There
-are no compute engines, `macht`, or Lua. Development environments built with
-machteld live in their own repositories on the machines that use them; this
-repository holds the runtime only.
+are no compute engines, `macht`, or Lua. This repository also holds the
+application compiler, written in Tcl. It checks typed modules and compiles them
+to Tcl for this runtime.
 
-## 30 — in development
+## Next public release — 0.50
 
-**0.30 is the next public release after signed 0.21.** Development starts
-from the unpublished 0.22 candidate. The CLI and Tcl package in this checkout both report `30`.
+**0.50 will be the next public release after signed 0.21.** It brings the
+compiler and Tcl/Tk runtime into one development and delivery tool. Existing
+projects can keep a Tcl entry and migrate individual modules. The 0.30 work
+is an unsigned development baseline. Its CLI and Tcl package both report `30`.
 The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
 [Build guide](BUILDING.md)
 
-In the 0.30 checkout, one executable runs Tcl scripts and launches
-`.machteld` application archives. To distribute a standalone Windows app,
+The development runtime runs Tcl scripts and launches
+`.machteld` application archives. Use `machteld.exe project check project.dict`
+and `machteld.exe project pack project.dict app.machteld` for typed or mixed
+Tcl projects. To distribute a standalone Windows app,
 `machteld.exe wrap app.dict -o MyApp.exe --gui` embeds the selected app and
 runtime and can set the app's icon and Windows file properties. The full
 host keeps the offline reference. It covers the shipped
@@ -28,7 +32,8 @@ commands and packages and the Tcl/Tk 9.0.4 manuals. Run
 `machteld.exe --help` for the entry points, `machteld.exe --docs search FTS5`
 to find a topic, or `machteld.exe --docs extract DIRECTORY` to export the
 Markdown pages and their full-text index in a single SQLite database.
-[0.30 qualification record](docs/releases/0.30-qualification.md)
+[Unsigned baseline measurements](docs/releases/0.30-qualification.md) ·
+[Application compiler guide](packages/application-compiler/README.md)
 
 The development baseline includes the Beta 1 features. Tk applications can run
 cancellable jobs and SQL queries in supervised workers. Workers started
@@ -46,9 +51,9 @@ windows and clipboard ownership queries. The exact Beta 1 revision passed
 | Default pool attempts per job | Three | One; retries require explicit opt-in |
 | Transport/lifecycle hardening and native stress checks | Original release baseline | Later stabilization fixes and tests |
 
-In 0.30, the offline manual stays in the full host. Standalone apps can include their own help files and use their own Windows identity. [Standalone packaging](docs/reference/machteld/command/wrap.md)
+The offline manual stays in the full host. Standalone apps can include their own help files and use their own Windows identity. [Standalone packaging](docs/reference/machteld/command/wrap.md)
 
-Before signing 0.30, the build PC and hosted Windows CI must produce
+Before signing 0.50, the build PC and hosted Windows CI must produce
 byte-identical clean unsigned executables from the same revision and
 locked inputs. The runtime and packaged examples must pass acceptance,
 including attended checks of user-visible behavior. The owner signs a copy,
@@ -63,9 +68,9 @@ documentation in the executable you actually use.
 
 ## The plan and the commentary
 
-The roadmap records the approved 0.30 capabilities. The release plan sets
-the implementation order and acceptance gates for moving directly from
-signed 0.21 to 0.30. [Roadmap](docs/roadmap.md) ·
+The roadmap gives the compiler integration sequence, the file-by-file
+Tcl/Tk migration checks and the runtime capabilities required for 0.50.
+The implementation plan records the corresponding runtime gates. [Roadmap](docs/roadmap.md) ·
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
 Agents: what you find in the runtime while you use it or work on it, good or
@@ -85,7 +90,7 @@ The support contract is x64 Windows 11 25H2 (build 26200) and Windows Server
 2025 (build 26100), or newer. Windows 10, Server 2022/2019, and ARM64 are not
 targets. Stabilization checks ran on Windows 11 Pro build 26200, and Beta 1
 passed its Windows Server 2025 acceptance run. Record fresh results for each
-0.30 release candidate on the supported targets. Lower-level ConPTY availability on
+integrated release candidate on the supported targets. Lower-level ConPTY availability on
 older Windows does not extend the support contract.
 
 Use `store` for key/value data and `package require sqlite3` for SQL queries,

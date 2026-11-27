@@ -107,7 +107,7 @@ copy_tree $tclLib [file join $stage tcl_library]
 # Tcl looks for package indexes in the children of its library directory.
 # The runtime carries these opt-in packages alongside the Tcl library.
 set packages [file join [file dirname [file dirname [file normalize [info script]]]] packages]
-foreach {package files} {
+set bundledPackages {
     machteld-job {pkgIndex.tcl job.tcl}
     machteld-httpd {pkgIndex.tcl httpd.tcl}
     machteld-browser {pkgIndex.tcl browser.tcl wire.tcl}
@@ -116,7 +116,11 @@ foreach {package files} {
     machteld-files {pkgIndex.tcl}
     machteld-encoding {pkgIndex.tcl}
     machteld-network {pkgIndex.tcl}
-} {
+}
+# Use the same inventory when building the runtime and editable applications.
+source -encoding utf-8 [file join $packages application-compiler compiler.tcl]
+dict set bundledPackages application-compiler $::appcompiler::compilerFiles
+dict for {package files} $bundledPackages {
     set target [file join $stage tcl_library $package]
     file mkdir $target
     foreach name $files {file copy [file join $packages $package $name] [file join $target $name]}

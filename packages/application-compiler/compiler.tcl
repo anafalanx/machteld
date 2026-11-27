@@ -148,6 +148,42 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
     return $artifact
 }
 
+# A Tcl entry owns its interpreter and event loop. Only exported functions
+# get public Tcl commands. Typed-to-typed calls stay inside the implementation.
+proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
+    set analysis [analyze $sources]
+    set implementation ::machteld::compiledApplication
+    set artifact [emitChecked $analysis $implementation]
+    set script [applicationPrelude $minApi $packageDirs]
+    if {[dict size $sources]} {
+        append script [dict get $artifact script] \n
+        set rt ${implementation}::@rt
+        append script [list ::proc ${rt}::sourceMap {} [list ::return [dict get $artifact sourceMap]]] \n
+        dict for {module functions} [dict get $analysis resolved functions] {
+            set public ::application::${module}
+            append script [list ::namespace eval $public {}] \n
+            dict for {name function} $functions {
+                if {![dict get $function exported]} continue
+                set command [list ::tailcall ${rt}::callExport ${implementation}::${module}::${name} [emitLocation $function]]
+                set formals {}
+                foreach param [dict get $function params] {
+                    set local [emitLocalName [dict get $param name]]
+                    lappend formals $local
+                    append command " \$$local"
+                }
+                append script [list ::proc ${public}::${name} $formals $command] \n
+                append script [list ::namespace eval $public [list ::namespace export $name]] \n
+            }
+        }
+    }
+    # Loose projects supply an absolute path. A packed startup script
+    # resolves the original entry within its own verified archive.
+    append script [format {::source -encoding utf-8 [::file join [::file dirname [::info script]] %s]} [list $entryPath]] \n
+    dict set artifact script $script
+    dict set artifact modules [dict get $analysis modules]
+    return $artifact
+}
+
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}

@@ -161,12 +161,12 @@ proc compilerSuites {steps group runtime} {
 }
 set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
-set packed {archive {examples -pack} {io -pack} {project -pack} reference {sql -pack} {transaction -pack}}
+set packed {archive {examples -pack} host {io -pack} {migration -pack} {project -pack} reference {sql -pack} {transaction -pack}}
 check {fast runs in-process application compiler suites on the candidate} \
     [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
 check {integration alone runs the compiler's child-process and direct project, I/O, example and SQL tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
-        [lsort [concat $direct {project io examples sql transaction}]]}]
+        [lsort [concat $direct {project io examples sql transaction migration}]]}]
 check {packaging runs the compiler archive and the packed project, I/O, example and SQL cases} \
     [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
 foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {

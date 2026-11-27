@@ -96,10 +96,13 @@ proc ::appcompiler::project::load {manifest} {
     set manifestBytes [readBytes $manifest cache]
     set data [dataDict [decode $manifestBytes $manifest] manifest]
     dict for {key ignored} $data {
-        if {$key ni {schema edition minApi entry modules assets packageDirs}} {invalid "unknown manifest key [list $key]"}
+        if {$key ni {schema edition minApi entry tclEntry modules assets packageDirs}} {invalid "unknown manifest key [list $key]"}
     }
-    foreach key {schema edition minApi entry modules} {
+    foreach key {schema edition minApi modules} {
         if {![dict exists $data $key]} {invalid "missing manifest key [list $key]"}
+    }
+    if {[dict exists $data entry] == [dict exists $data tclEntry]} {
+        invalid "declare exactly one of entry (typed module and function) or tclEntry (Tcl script path)"
     }
     if {[dict get $data schema] ne "1"} {invalid "expected project schema 1"}
     set edition [dict get $data edition]
@@ -112,17 +115,24 @@ proc ::appcompiler::project::load {manifest} {
     if {$host ne "" && [package vcompare $host $minApi] < 0} {
         invalid "minimum Machteld API $minApi is required; this host provides $host"
     }
-    set entry [dict get $data entry]
-    if {[catch {llength $entry} count] || $count != 2} {invalid "entry must name a module and function"}
+    set entry [dict getdef $data entry {}]
+    set tclEntry {}
     set identifier {\A[A-Za-z_][A-Za-z_0-9]*\Z}
-    foreach name $entry {
-        if {![regexp $identifier $name]} {invalid "invalid entry identifier [list $name]"}
-    }
     set modules [dataDict [dict get $data modules] modules]
-    if {![dict exists $modules [lindex $entry 0]]} {invalid "entry module is absent from modules"}
     set inventory {}
     reserve application.dict inventory
     set selected {}
+    if {[dict exists $data tclEntry]} {
+        set tclEntry [relativePath [dict get $data tclEntry]]
+        reserve $tclEntry inventory
+        dict set selected $tclEntry {}
+    } else {
+        if {[catch {llength $entry} count] || $count != 2} {invalid "entry must name a module and function"}
+        foreach name $entry {
+            if {![regexp $identifier $name]} {invalid "invalid entry identifier [list $name]"}
+        }
+        if {![dict exists $modules [lindex $entry 0]]} {invalid "entry module is absent from modules"}
+    }
     set names {}
     dict for {module path} $modules {
         if {![regexp $identifier $module]} {invalid "invalid module identifier [list $module]"}
@@ -159,8 +169,11 @@ proc ::appcompiler::project::load {manifest} {
         set bytes [readBytes [file join $root $path] cache]
         dict set files $path $bytes
         if {$module ne ""} {dict set sources $module [decode $bytes $path]}
+        if {$path eq $tclEntry && ![info complete [decode $bytes $path]]} {
+            invalid "incomplete Tcl command in entry [list $path]"
+        }
     }
-    return [dict create edition $edition minApi $minApi sources $sources entry $entry \
+    return [dict create edition $edition minApi $minApi sources $sources entry $entry tclEntry $tclEntry \
         files $files manifestBytes $manifestBytes packageDirs $directories]
 }
 
@@ -168,8 +181,14 @@ proc ::appcompiler::project::build {manifest {packageRoot {}}} {
     set project [load $manifest]
     if {$packageRoot eq ""} {set packageRoot [file dirname [file normalize $manifest]]}
     set directories [packageDirectories $project $packageRoot]
-    set artifact [::appcompiler::application [dict get $project sources] {*}[dict get $project entry] \
-        [dict get $project minApi] $directories]
+    set sources [dict get $project sources]
+    set minApi [dict get $project minApi]
+    if {[dict get $project tclEntry] eq {}} {
+        set artifact [::appcompiler::application $sources {*}[dict get $project entry] $minApi $directories]
+    } else {
+        set path [file join $packageRoot [dict get $project tclEntry]]
+        set artifact [::appcompiler::tclApplication $sources $path $minApi $directories]
+    }
     return [dict create project $project artifact $artifact]
 }
 
@@ -180,6 +199,10 @@ proc ::appcompiler::project::packageDirectories {project root} {
 proc ::appcompiler::project::test {manifest} {
     set project [load $manifest]
     set directories [packageDirectories $project [file dirname [file normalize $manifest]]]
-    set analysis [::appcompiler::analyzeApplication [dict get $project sources] {*}[dict get $project entry]]
+    if {[dict get $project tclEntry] eq {}} {
+        set analysis [::appcompiler::analyzeApplication [dict get $project sources] {*}[dict get $project entry]]
+    } else {
+        set analysis [::appcompiler::analyze [dict get $project sources]]
+    }
     return [::appcompiler::runExamples $analysis [dict get $project minApi] $directories]
 }

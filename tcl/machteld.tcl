@@ -803,6 +803,15 @@ proc ::machteld::PackArchive {args} {
     return $out
 }
 
+# The host runs the same embedded driver as an editable archive. Preserve the
+# project selection when a source application starts a copy from another cwd.
+proc ::machteld::ProjectStartup {} {
+    if {[lindex $::argv 0] eq "run" && [llength $::argv] >= 2} {
+        variable launchPrefix [list [info nameofexecutable] --project run [file normalize [lindex $::argv 1]]]
+    }
+    return [file join [PayloadRoot] tcl_library application-compiler driver.tcl]
+}
+
 proc ::machteld::app {args} {
     if {[lindex $args 0] eq "data" && [llength $args] == 2} {
         return [AppDataRoot [lindex $args 1]]
