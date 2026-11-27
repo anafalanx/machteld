@@ -751,6 +751,24 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
     set kind [dict get $node kind]
     switch -exact -- $kind {
         int - decimal - text - bool - unit { return $kind }
+        interpolate {
+            set valid 1
+            foreach part [dict get $node parts] {
+                if {[dict get $part kind] eq "text"} { continue }
+                set value [dict get $part value]
+                set type [expressionType $value $scope $imports $world reports]
+                if {$type eq ""} {
+                    set valid 0
+                } elseif {$type ni {text int decimal bool}} {
+                    issue reports INTERPOLATION_TYPE $value "interpolation needs text, int, decimal or bool, got $type"
+                    set valid 0
+                } else {
+                    fact reports $part interpolationType $type
+                }
+            }
+            if {$valid} { return text }
+            return ""
+        }
         none { return {*?} }
         some {
             set type [expressionType [dict get $node value] $scope $imports $world reports]

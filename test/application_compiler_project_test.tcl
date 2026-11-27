@@ -45,6 +45,11 @@ proc ::projectTest::exercise {exe caller prefix} {
         "escaped source text preserves its dollar sign, Unicode and NUL"
     appCase $exe $caller $prefix [list --format {雪; [list] $x}] {} [bytes {<雪; [list] $x>}] \
         "extern passes one text argument to the project's own package"
+    appCase $exe $caller $prefix [list --caption {雪; [list] $x}] {} \
+        [bytes {雪; [list] $x | <雪; [list] $x> | 4.2 | true}] "interpolate a binding, a local Tcl call and typed expressions"
+    lassign [command $exe $caller [list {*}$prefix --caption-error] {} 0] failedOut failedErr
+    expect $failedOut {} "a failed interpolation produces no partial output"
+    expect [regexp {logic:[0-9]+:[0-9]+: .*absent} $failedErr] 1 "propagated error in an interpolation keeps a source location"
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
     appCase $exe $caller $prefix [list --pick {} {two words}] {} [bytes {two words}] \
         "labeled list iteration selects a complete argument"
@@ -72,6 +77,8 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
         ['label'] => ok('météo 雪')
         ["--literal"] => ok("first\n$price\t\u{1f642}\0")
         ['--format', $text] => ok(.format($text))
+        ['--caption', $text] => ok($"$text | ${.format($text)} | ${4.00 + 0.2} | ${true}")
+        ['--caption-error'] => ok($"prefix ${.lookup('absent', '')?} suffix")
         ['--flag', $value, ''] => ok($value)
         ['--pick', $first, $second] => ok(.pick($args))
         ['--lookup', $key] => .lookup($key, $data)

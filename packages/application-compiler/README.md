@@ -125,6 +125,26 @@ surrogates and values above U+10FFFF. It reports a malformed escape at
 its opening backslash. Run `machteld.exe test/application_compiler_text_test.tcl`
 for executable examples.
 
+Prefix a double-quoted string with `$` to insert a binding or an expression.
+For example, with `$x` equal to `5`, `$"next=${$x + 1}"` produces `next=6`.
+Use `$name` for a binding and `${...}` for an ordinary expression. Within
+the braces, calls, quoted strings and `match` use their usual syntax.
+
+```text
+fn .caption($name: text, $count: int) -> text {
+    return $"$name has ${$count + 1} items"
+}
+```
+
+The current formatting rules preserve text, write integers and decimals
+in canonical decimal notation and spell Booleans `true` or `false`. Use
+`underlying($id)` to display a distinct scalar. Convert a structured value
+explicitly by selecting the fields to display. Holes evaluate once, from
+left to right. A propagated failure stops the string at that hole. Use
+`\$` for a literal dollar sign in interpolated text. Ordinary double-quoted
+strings keep all dollar signs literal. See
+`test/application_compiler_interpolation_test.tcl` for executable examples.
+
 ## Calling Tcl commands
 
 Declare the commands a module uses. Each declaration gives the function a

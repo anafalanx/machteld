@@ -190,6 +190,23 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         int  {return [emitIntegerWord [dict get $node value]]}
         decimal {return [list [decimal::canonical [dict get $node value]]]}
         text {return [emitTextWord [dict get $node value]]}
+        interpolate {
+            # Each segment is one Tcl word. Command substitutions run from
+            # left to right and a propagated error skips the remaining words.
+            set words [list ::string cat]
+            foreach part [dict get $node parts] {
+                if {[dict get $part kind] eq "text"} {
+                    lappend words [emitTextWord [dict get $part value]]
+                    continue
+                }
+                set word [emitExpression [dict get $part value] $context $bindings $depth]
+                if {[dict get [emitFacts $part $context] interpolationType] eq "bool"} {
+                    set word [format {[::expr {%s ? "true" : "false"}]} $word]
+                }
+                lappend words $word
+            }
+            return [format {[%s]} [join $words { }]]
+        }
         unit {return {{}}}
         bool {
             switch -exact -- [dict get $node value] {

@@ -4,7 +4,7 @@ namespace eval ::appcompiler {}
 # not share source locations. The compiler consumes syntax trees, never source
 # text evaluated as Tcl.
 oo::class create ::appcompiler::ModuleParser {
-    variable module source offset line column token keywords localChoices
+    variable module source offset line column token keywords localChoices stringModes
 
     constructor {moduleName sourceText} {
         set module $moduleName
@@ -14,6 +14,7 @@ oo::class create ::appcompiler::ModuleParser {
         set column 1
         set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while}
         set localChoices {}
+        set stringModes {}
         # A Tcl caller can supply surrogate code points that strict UTF-8
         # source files cannot contain, even in comments or raw literals.
         if {[regexp -indices {[\uD800-\uDFFF]} $source invalid]} {
@@ -37,10 +38,23 @@ oo::class create ::appcompiler::ModuleParser {
         }
     }
 
-    method quotedText {opening} {
+    method location {} { dict create module $module line $line column $column }
+
+    method finishToken {start kind value} {
+        return [dict merge $start [dict create endLine $line endColumn $column kind $kind value $value]]
+    }
+
+    # Leave the closing quote (or a physical interpolation marker) for the
+    # caller. Decoded dollars never re-enter the lexer.
+    method quotedChunk {opening interpolated} {
         set value {}
         set escapes [list \" \" \\ \\ n \n r \r t \t 0 \u0000 b \b f \f]
-        while {[regexp -start $offset -indices {["\\]} $source marker]} {
+        set markers {["\\]}
+        if {$interpolated} {
+            dict set escapes {$} {$}
+            set markers {["\\$]}
+        }
+        while {[regexp -start $offset -indices $markers $source marker]} {
             set at [lindex $marker 0]
             if {$at > $offset} {
                 set chunk [string range $source $offset $at-1]
@@ -48,10 +62,18 @@ oo::class create ::appcompiler::ModuleParser {
                 my consume $chunk
             }
             set mark [string index $source $offset]
+            if {$mark eq "\""} { return $value }
+            if {$mark eq {$}} {
+                set next [string index $source $offset+1]
+                if {$next eq "\{" || [regexp {[A-Za-z_]} $next]} { return $value }
+                append value {$}
+                incr offset
+                incr column
+                continue
+            }
             set where [dict create module $module line $line column $column endLine $line endColumn [expr {$column + 1}]]
             incr offset
             incr column
-            if {$mark eq "\""} { return $value }
 
             set selector [string index $source $offset]
             if {[dict exists $escapes $selector]} {
@@ -81,7 +103,36 @@ oo::class create ::appcompiler::ModuleParser {
         ::appcompiler::fail E_PARSE_STRING $opening {unterminated double-quoted text literal}
     }
 
+    method interpolationToken {} {
+        set start [my location]
+        set mark [string index $source $offset]
+        set next [string index $source $offset+1]
+        if {$mark eq "\""} {
+            my consume \"
+            lpop stringModes
+            return [my finishToken $start interpolateEnd {}]
+        }
+        if {$mark eq {$} && $next eq "\{"} {
+            my consume "\$\{"
+            set opening [my finishToken $start holeStart {}]
+            lappend stringModes [list code $opening 0]
+            return $opening
+        }
+        if {$mark eq {$} && [regexp {[A-Za-z_]} $next]} {
+            regexp -start $offset -indices {[$][A-Za-z_][A-Za-z_0-9]*} $source bounds
+            set word [string range $source {*}$bounds]
+            my consume $word
+            return [my finishToken $start holeName [string range $word 1 end]]
+        }
+        set chunk [my quotedChunk [lindex $stringModes end 1] 1]
+        return [my finishToken $start interpolateText $chunk]
+    }
+
     method advance {} {
+        if {[lindex $stringModes end 0] eq "text"} {
+            set token [my interpolationToken]
+            return
+        }
         # The final alternative consumes every remaining character. A search
         # beginning at offset therefore always matches at that exact offset.
         set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|\.\.=?|::=|:=|::|->|=>|==|!=|.}
@@ -89,7 +140,7 @@ oo::class create ::appcompiler::ModuleParser {
             regexp -start $offset -indices -- $pattern $source bounds
             lassign $bounds first last
             set word [string range $source $first $last]
-            set location [dict create module $module line $line column $column]
+            set location [my location]
             my consume $word
             dict set location endLine $line
             dict set location endColumn $column
@@ -107,12 +158,26 @@ oo::class create ::appcompiler::ModuleParser {
                 }
                 \" {
                     set kind text
-                    set word [my quotedText $location]
+                    try {
+                        set word [my quotedChunk $location 0]
+                    } trap {APPCOMPILER DIAGNOSTIC E_PARSE_STRING} {message options} {
+                        if {![llength $stringModes]} { return -options $options $message }
+                        # In a hole the grammar distinguishes an unfinished
+                        # string operand from an outer quote after a value.
+                        set token [dict merge $location [dict create kind unterminatedText value {}]]
+                        return
+                    }
+                    my consume \"
                     dict set location endLine $line
                     dict set location endColumn $column
                 }
                 {$} - {.} {
-                    if {$word in {.. ..=}} {
+                    if {$word eq {$} && [string index $source $offset] eq "\""} {
+                        my consume \"
+                        set token [my finishToken $location interpolateStart {}]
+                        lappend stringModes [list text $token]
+                        return
+                    } elseif {$word in {.. ..=}} {
                         set kind $word
                     } elseif {[string length $word] == 1} {
                         ::appcompiler::fail E_PARSE_NAME $location "expected an identifier after '$word'"
@@ -133,10 +198,26 @@ oo::class create ::appcompiler::ModuleParser {
                     }
                 }
             }
+            if {[llength $stringModes] && $kind in {\{ \}}} {
+                set depth [lindex $stringModes end 2]
+                if {$kind eq "\{"} {
+                    lset stringModes end 2 [incr depth]
+                } elseif {$depth} {
+                    lset stringModes end 2 [incr depth -1]
+                } else {
+                    lpop stringModes
+                    set kind holeEnd
+                }
+            }
             set token [dict merge $location [dict create kind $kind value $word]]
             return
         }
-        set token [dict create kind eof value {} module $module line $line column $column endLine $line endColumn $column]
+        if {[llength $stringModes]} { my unclosedHole }
+        set token [my finishToken [my location] eof {}]
+    }
+
+    method unclosedHole {} {
+        ::appcompiler::fail E_PARSE_INTERPOLATION [lindex $stringModes end 1] {unterminated interpolation expression}
     }
 
     method at {kind} { expr {[dict get $token kind] eq $kind} }
@@ -157,19 +238,33 @@ oo::class create ::appcompiler::ModuleParser {
         while {[my at newline]} { my advance }
     }
 
-    method cursor {} { list $offset $line $column $token }
+    method cursor {} { list $offset $line $column $token $stringModes }
 
-    method restore {cursor} { lassign $cursor offset line column token }
+    method restore {cursor} { lassign $cursor offset line column token stringModes }
 
     method collectChoiceNames {} {
         # .name::member(...) can denote an imported function or a locally
         # declared choice. Collect declaration heads before parsing any uses.
-        # The lexer skips comments and keeps each string in one token.
+        # Skip complete interpolations using lexical tokens only. Their
+        # expressions can use names of choices declared later in this module.
         set beginning [my cursor]
         set depth 0
         set declarationStart 1
         while {![my at eof]} {
-            if {$declarationStart && [my at choice]} {
+            if {[my at interpolateStart]} {
+                set nesting 1
+                while {$nesting} {
+                    my advance
+                    if {[my at unterminatedText]} {
+                        my restore $beginning
+                        return
+                    }
+                    if {[my at interpolateStart]} { incr nesting }
+                    if {[my at interpolateEnd]} { incr nesting -1 }
+                }
+                my advance
+                set declarationStart 0
+            } elseif {$declarationStart && [my at choice]} {
                 set choice [my typeDeclaration 0]
                 set members {}
                 foreach variant [dict get $choice variants] { dict set members [dict get $variant name] 1 }
@@ -534,6 +629,47 @@ oo::class create ::appcompiler::ModuleParser {
         return $left
     }
 
+    method interpolated {} {
+        set opening $token
+        set parts {}
+        my advance
+        while {![my at interpolateEnd]} {
+            set start $token
+            switch -exact -- [dict get $token kind] {
+                interpolateText {
+                    lappend parts [my node $start text value [dict get $start value]]
+                    my advance
+                }
+                holeName {
+                    set value [my node $start var name [dict get $start value]]
+                    lappend parts [my node $start hole value $value]
+                    my advance
+                }
+                holeStart {
+                    my advance
+                    my skipLines
+                    if {[my at holeEnd]} {
+                        ::appcompiler::fail E_PARSE_INTERPOLATION $token {expected an expression inside interpolation}
+                    }
+                    set value [my expression]
+                    my skipLines
+                    if {[my at unterminatedText]} { my unclosedHole }
+                    if {![my at holeEnd]} {
+                        ::appcompiler::fail E_PARSE_INTERPOLATION $token {expected the closing brace after the interpolation expression}
+                    }
+                    lappend parts [my node $start hole value $value endLine [dict get $token endLine] endColumn [dict get $token endColumn]]
+                    my advance
+                }
+                default {
+                    ::appcompiler::fail E_PARSE_INTERPOLATION $token {expected interpolated text, an expression or the closing quote}
+                }
+            }
+        }
+        set closing $token
+        my advance
+        return [my node $opening interpolate parts $parts endLine [dict get $closing endLine] endColumn [dict get $closing endColumn]]
+    }
+
     method primary {} {
         set start $token
         switch -exact -- [dict get $token kind] {
@@ -562,6 +698,10 @@ oo::class create ::appcompiler::ModuleParser {
                 my advance
                 return [my node $start text value [dict get $start value]]
             }
+            unterminatedText {
+                ::appcompiler::fail E_PARSE_STRING $token {unterminated double-quoted text literal}
+            }
+            interpolateStart { return [my interpolated] }
             dataName {
                 my advance
                 return [my node $start var name [dict get $start value]]
