@@ -52,6 +52,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             return [list some [guard $first [lindex $value 1] $path $checkExtras]]
         }
         switch -exact -- $head {
+            callable {return [guardCallable $type $value $path]}
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -241,6 +242,24 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {[dict exists $bindings $name]} {return [dict get $bindings $name]}
             return [format {$%s} [emitLocalName $name]]
         }
+        functionValue {
+            set facts [emitFacts $node $context]
+            set name [dict get $node name]
+            if {[dict exists $facts constructor]} {return [list $name]}
+            set qualifier [dict get $node qualifier]
+            if {$qualifier eq ""} {set qualifier $module}
+            set types [emitTypeList [dict getdef $facts typeArguments {}] $context]
+            return [format {[::list %s %s %s {}]} [list ${targetNamespace}::@rt::invokeCallback] \
+                [list [list $qualifier $name]] $types]
+        }
+        invoke {
+            set prefix [emitExpression [dict get $node value] $context $bindings $depth]
+            set words [list "{*}$prefix"]
+            foreach argument [dict get $node args] {
+                lappend words [emitExpression $argument $context $bindings $depth]
+            }
+            return [format {[%s]} [join $words { }]]
+        }
         unary {
             set value [emitExpression [dict get $node value] $context $bindings $depth]
             if {[dict get [emitFacts $node $context] operandType] eq "decimal"} {
@@ -354,6 +373,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
             switch -exact -- $name {
                 unit {return [list ::list]}
                 map {return [list ::dict create]}
+                bind {return [list [list ${target}::@rt::bindCallback]]}
                 map_put {return [list ::dict replace]}
                 require_key {return [list [list ${target}::@rt::require_key]]}
                 sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}
@@ -684,6 +704,15 @@ proc ::appcompiler::emitExtern {function context formals bodyVar locationsVar} {
 
 proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
     set definitions [emitRuntime $targetNamespace [dict get $resolved schemas]]
+    set targets {}
+    foreach key [lsort -ascii [dict get $resolved callbackTargets]] {
+        lassign $key module name
+        set function [dict get $resolved functions $module $name]
+        set parameters [lmap param [dict get $function params] {dict get $param type}]
+        dict set targets $key [list ${targetNamespace}::${module}::${name} [dict get $function typeVariables] \
+            $parameters [dict get $function result]]
+    }
+    lappend definitions [list ::proc ${targetNamespace}::@rt::callbackTargets {} [list ::return $targets]]
     set sourceMap [dict create]
     foreach module [lsort -ascii [dict keys $modules]] {
         set context [dict create target $targetNamespace module $module facts $facts]
