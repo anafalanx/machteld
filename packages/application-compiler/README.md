@@ -151,6 +151,27 @@ left to right. A propagated failure stops the string at that hole. Use
 strings keep all dollar signs literal. See
 `test/application_compiler_interpolation_test.tcl` for executable examples.
 
+## Decoding imported bytes
+
+`decode_text($bytes, $encoding)` returns `result<text,problem>`. It
+strictly decodes the original bytes using the named Tcl encoding. A
+malformed sequence produces a problem with a zero-based `byteOffset`.
+An unavailable encoding produces an `ENCODING` problem. Keep the byte value
+when an import or a later review needs the original file.
+
+`preview_text($bytes, $encoding)` uses replacement decoding. For example,
+the three bytes `41 00 FF` in `utf-16le` produce `A` and U+FFFD in a
+preview. Strict decoding reports the final incomplete byte at offset 2.
+Use an explicit byte order such as `utf-16le` or `utf-16be` for portable
+imports. A byte-order mark is retained as text when the codec decodes it
+as U+FEFF. `decode_utf8($bytes)` remains the short form for strict UTF-8.
+
+Use a name available on the running host, such as `utf-8` or `cp1252`.
+The two tested hosts have a `cesu-8` decoder that can silently lose a
+surrogate. Both builtins report that encoding as unavailable. Run
+`machteld.exe test/application_compiler_decode_test.tcl` to exercise the
+strict and preview cases.
+
 ## Calling Tcl commands
 
 Declare the commands a module uses. Each declaration gives the function a

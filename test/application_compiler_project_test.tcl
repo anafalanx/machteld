@@ -50,6 +50,13 @@ proc ::projectTest::exercise {exe caller prefix} {
     lassign [command $exe $caller [list {*}$prefix --caption-error] {} 0] failedOut failedErr
     expect $failedOut {} "a failed interpolation produces no partial output"
     expect [regexp {logic:[0-9]+:[0-9]+: .*absent} $failedErr] 1 "propagated error in an interpolation keeps a source location"
+    appCase $exe $caller $prefix {--decode cp1252} [binary decode hex 636166e92080] [bytes {café €}] \
+        "strict decoding uses the explicitly selected legacy encoding"
+    appCase $exe $caller $prefix {--preview utf-16le} [binary decode hex 4100ff] [bytes "A\ufffd"] \
+        "preview replaces a trailing UTF-16 byte"
+    lassign [command $exe $caller [list {*}$prefix --decode utf-16le] [binary decode hex 4100ff] 0] failedOut failedErr
+    expect $failedOut {} "strict decoding emits nothing on malformed input"
+    expect [regexp {main:[0-9]+:[0-9]+: .*byte offset 2} $failedErr] 1 "strict failure locates the source and the byte"
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
     appCase $exe $caller $prefix [list --pick {} {two words}] {} [bytes {two words}] \
         "labeled list iteration selects a complete argument"
@@ -111,6 +118,13 @@ extern fn .unavailable() -> text = ['::missing::test_command'] from 'sample::unu
 alias .arguments = list<text>
 alias .outcome = result<unit,problem>
 fn .start($args: .arguments) -> .outcome {
+    return match $args {
+        ['--decode', $encoding] => write_stdout_utf8(decode_text(read_stdin_bytes()?, $encoding)?)
+        ['--preview', $encoding] => write_stdout_utf8(preview_text(read_stdin_bytes()?, $encoding)?)
+        _ => .run($args)
+    }
+}
+fn .run($args: .arguments) -> .outcome {
     $data ::= .logic::input()?
     $out ::= .logic::answer($args, $data)?
     write_stdout_utf8($out)?

@@ -314,6 +314,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
         problem - decode_json - write_stdout_utf8 { set params [list text] }
         decode_utf8 { set params [list bytes] }
+        decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
         map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
         quotient { set params {int int} }
@@ -354,7 +355,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         err { return [makeType result [list * [lindex $actual 0]]] }
         problem { return problem }
         read_stdin_bytes { return result<bytes,problem> }
-        decode_utf8 { return result<text,problem> }
+        decode_utf8 - decode_text - preview_text { return result<text,problem> }
         decode_json {
             fact reports $node schema $schema
             return [makeType result [list $schema problem]]

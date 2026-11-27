@@ -325,7 +325,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 decode_json - encode_json {
                     return [list [list ${target}::@rt::${name}] [list [dict get $facts schema]]]
                 }
-                problem - read_stdin_bytes - decode_utf8 - write_stdout_utf8 {
+                problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}

@@ -123,6 +123,51 @@ proc decode_utf8 {bytes} {
     return [list ok $text]
 }
 
+proc decode_text {bytes encodingName} {
+    if {$encodingName eq "utf-8"} {return [decode_utf8 $bytes]}
+    return [decodeNamed strict $encodingName $bytes]
+}
+
+proc preview_text {bytes encodingName} {
+    return [decodeNamed replace $encodingName $bytes]
+}
+
+proc decodeNamed {profile encodingName bytes} {
+    # Ordinary names can use Tcl's cached lookup directly. Only pass unusual
+    # spellings to Tcl when advertised; its file lookup accepts paths, and a
+    # NUL in a native-origin name can truncate the lookup on older hosts.
+    if {$encodingName eq {} || [string first \u0000 $encodingName] >= 0 ||
+            (![regexp {\A[A-Za-z0-9][A-Za-z0-9_.-]*\Z} $encodingName] && $encodingName ni [encoding names])} {
+        return [list err [dict create code ENCODING message {expected the name of an available Tcl encoding}]]
+    }
+    if {$encodingName eq "cesu-8"} {
+        return [list err [dict create code ENCODING \
+            message {cesu-8 is unavailable because the bundled converter cannot reliably preserve data}]]
+    }
+    try {
+        set text [encoding convertfrom -profile $profile -failindex offset $encodingName $bytes]
+    } trap {TCL LOOKUP ENCODING} {message options} {
+        return [list err [dict create code ENCODING message $message]]
+    } on error {message options} {
+        return [list err [dict create code DECODE message $message]]
+    }
+    if {$offset < 0} {return [list ok $text]}
+    set size [string length $bytes]
+    # Tcl 9.0.4's replacement profile can stop before one trailing byte
+    # after replacing an unpaired UTF-16 surrogate. That byte cannot form
+    # another code unit; preserve its position with its own replacement.
+    if {$profile eq "replace" && $offset == $size - 1 && $size % 2 == 1 &&
+            $encodingName in {utf-16 utf-16le utf-16be unicode ucs-2 ucs-2le ucs-2be}} {
+        return [list ok $text\ufffd]
+    }
+    if {$offset == $size} {
+        set message "incomplete $encodingName sequence at end of input (byte offset $offset)"
+    } else {
+        set message "invalid $encodingName sequence at byte offset $offset"
+    }
+    return [list err [dict create code DECODE byteOffset $offset message $message]]
+}
+
 proc write_stdout_utf8 {text} {
     if {[catch {
         set state [list -translation [chan configure stdout -translation] \
