@@ -20,7 +20,7 @@ oo::class create ::appcompiler::ModuleParser {
     method advance {} {
         # The final alternative consumes every remaining character. A search
         # beginning at offset therefore always matches at that exact offset.
-        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+|::=|:=|::|->|=>|==|!=|.}
+        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|::=|:=|::|->|=>|==|!=|.}
         while {$offset < [string length $source]} {
             regexp -start $offset -indices -- $pattern $source bounds
             lassign $bounds first last
@@ -57,10 +57,10 @@ oo::class create ::appcompiler::ModuleParser {
                 }
                 default {
                     if {[string match {[0-9]} $initial]} {
-                        set kind integer
+                        set kind [expr {[string first . $word] < 0 ? "integer" : "decimal"}]
                     } elseif {[regexp {^[a-zA-Z_]} $word]} {
                         set kind [expr {$word in $keywords ? $word : "identifier"}]
-                    } elseif {$word in {+ - * ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == !=}} {
+                    } elseif {$word in {+ - * / ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == !=}} {
                         set kind $word
                     } else {
                         ::appcompiler::fail E_PARSE_TOKEN $location "unexpected character '$word'"
@@ -316,19 +316,20 @@ oo::class create ::appcompiler::ModuleParser {
             }
             return [my node $start if condition $condition body $body otherwise $otherwise]
         }
-        if {[my at identifier] || [my at dotName]} {
-            return [my node $start expr value [my expression]]
+        if {[my at dataName]} {
+            set beginning [my cursor]
+            my advance
+            set op [dict get $token kind]
+            if {$op in {:= ::= =}} {
+                my advance
+                set name [dict get $start value]
+                set value [my expression]
+                if {$op eq "="} { return [my node $start assign name $name value $value] }
+                return [my node $start bind name $name mutable [expr {$op eq ":="}] value $value]
+            }
+            my restore $beginning
         }
-        set variable [my take dataName {a binding, assignment, call, if, or return}]
-        set name [dict get $variable value]
-        set op [dict get $token kind]
-        if {$op ni {:= ::= =}} {
-            ::appcompiler::fail E_PARSE_EXPECTED $token {expected ':=', '::=', or '=' after the binding name}
-        }
-        my advance
-        set value [my expression]
-        if {$op eq "="} { return [my node $variable assign name $name value $value] }
-        return [my node $variable bind name $name mutable [expr {$op eq ":="}] value $value]
+        return [my node $start expr value [my expression]]
     }
 
     method expression {{minimum 0}} {
@@ -348,7 +349,7 @@ oo::class create ::appcompiler::ModuleParser {
                 set left [my node $where update base $left fields $fields]
             }
         }
-        set precedences {== 1 != 1 + 2 - 2 * 3}
+        set precedences {== 1 != 1 + 2 - 2 * 3 / 3}
         while {[dict exists $precedences [dict get $token kind]]} {
             set op [dict get $token kind]
             set precedence [dict get $precedences $op]
@@ -365,15 +366,21 @@ oo::class create ::appcompiler::ModuleParser {
     method primary {} {
         set start $token
         switch -exact -- [dict get $token kind] {
-            integer - - {
-                set negative [my at -]
-                if {$negative} { my advance }
-                set digits [dict get [my take integer {a decimal integer}] value]
+            - {
+                my advance
+                return [my node $start unary op - value [my expression 4]]
+            }
+            decimal {
+                my advance
+                return [my node $start decimal value [dict get $start value]]
+            }
+            integer {
+                my advance
+                set digits [dict get $start value]
                 # Always decimal, even for a value such as 008. No native-word
                 # conversion is needed to represent a literal of any length.
                 set digits [string trimleft $digits 0]
                 if {$digits eq {}} { set digits 0 }
-                if {$negative && $digits ne "0"} { set digits -$digits }
                 return [my node $start int value $digits]
             }
             true - false {

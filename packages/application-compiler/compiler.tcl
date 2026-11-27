@@ -79,7 +79,9 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
     }
     set artifact [emitModules [dict get $analysis modules] $targetNamespace [dict get $analysis facts]]
     variable hostDefinitions
+    variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
+    dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt::decimal $decimalDefinitions]
     return $artifact
 }
 
@@ -131,17 +133,18 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl project.tcl project_pack.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl host.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl host.tcl decimal.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }
     unset module modules
-    set ch [open [file join $compilerDirectory host.tcl] rb]
-    try {
-        variable hostDefinitions [encoding convertfrom -profile strict utf-8 [read $ch]]
-    } finally {
-        close $ch
-        unset ch
+    foreach name {host decimal} {
+        set ch [open [file join $compilerDirectory $name.tcl] rb]
+        try {
+            set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]
+        } finally {close $ch}
     }
+    unset name ch
+    namespace eval decimal $decimalDefinitions
 }
 package provide application-compiler 0.1

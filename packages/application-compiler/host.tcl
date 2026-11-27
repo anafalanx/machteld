@@ -110,6 +110,13 @@ proc fromWire {type node path} {
     set actual [::machteld::json type $node]
     switch -exact -- $head {
         optional {return [list some [fromWire [lindex $parts 1] $node $path]]}
+        decimal {
+            if {$actual ne "number"} {invalidWire "$path expects a decimal number, got $actual"}
+            if {[catch {decimal::canonical [::machteld::json unwrap $node]} value]} {
+                invalidWire "$path expects a fixed-point JSON number"
+            }
+            return $value
+        }
         text {
             if {$actual ne "string"} {invalidWire "$path expects text, got $actual"}
             set value [::machteld::json unwrap $node]
@@ -164,6 +171,7 @@ proc toWire {type value path} {
     switch -exact -- [lindex $parts 0] {
         text {return [::machteld::json value string $value]}
         int  {return [::machteld::json value number [guard int $value $path]]}
+        decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
         list {
             set nodes {}
@@ -264,6 +272,7 @@ proc equal {type left right} {
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
         int - bool {return [expr {$left == $right}]}
+        decimal {return [string equal $left $right]}
         text {return [string equal $left $right]}
         optional {
             if {[lindex $left 0] ne [lindex $right 0]} {return 0}

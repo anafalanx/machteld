@@ -42,7 +42,7 @@ application namespace when loading generated code in a shared interpreter.
   first. Module names that differ only in case cannot coexist. Text values
   can contain Unicode.
 
-The current language subset includes typed functions, integers, text,
+The current language subset includes typed functions, integers, exact decimals, text,
 booleans, lists, records, closed choices, optionals and results. The entry
 can read bytes, decode UTF-8 strictly, decode a JSON record, update it,
 and write UTF-8. Record decoding retains unknown JSON members with their
@@ -63,6 +63,38 @@ same byte and error checks against a relocated archive. Run
 `machteld.exe test/application_compiler_archive_test.tcl` to check
 recompilation from bundled sources with only the executable and archive
 in the delivery directory.
+
+## Exact arithmetic
+
+A literal such as `0.10` is an exact decimal. Addition, subtraction and
+multiplication accept integers and decimals. Mixed operands produce a
+decimal. For example, `0.1 + 0.2 == 0.3` is true. At a Tcl boundary a
+decimal uses fixed-point text. The canonical spelling drops unnecessary
+zeros, so `+007.500` becomes `7.5`. Declared decimal JSON fields accept
+an integer or a fixed-point JSON number. Unknown members retain their
+original wire value, including numbers written with exponents.
+
+```text
+fn .share($total: int, $count: int) -> result<decimal,problem> {
+    return $total / $count
+}
+```
+
+`5 / 2` succeeds with `2.5`. `1 / 3` returns a typed problem because
+the quotient has no finite decimal representation. Division by zero also
+returns a problem. Use `($total / $count)?` to propagate a failure.
+`quotient(-5, 2)` succeeds with the integer `-2`, truncating toward zero.
+
+`divide_rounded(a, b, places, mode)` rounds the exact quotient once to
+the requested number of decimal places. `divide_rounded(2.345, 1, 2, 'half_even')`
+yields `2.34` on success. `'half_away'` yields `2.35` and rounds a negative
+tie away from zero as well. The mode and built-in names are provisional.
+This implementation supports up to 100,000 places when materializing a
+nonterminating quotient. Requesting more returns `ROUND_SCALE_LIMIT`.
+An exact quotient already within the requested scale returns without padding.
+
+Run `machteld.exe test/application_compiler_decimal_test.tcl` for the
+source-level and generated-Tcl arithmetic checks.
 
 ## File-backed applications
 

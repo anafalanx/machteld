@@ -12,6 +12,7 @@ proc example {} {
     version: int
     id: text
     note: text?
+    amount: decimal?
 }
 export choice .edit {
     keep
@@ -78,6 +79,13 @@ proc exercise {exe app} {
     runCase $exe $app {} [string map [list {"id":"007",} {}] $document] 1 {} \
         {entry:14:*: *missing required field id}
     runCase $exe $app {} [encoding convertto utf-8 "\{"] 1 {} {entry:14:*}
+    set amount {{"version":1,"id":"007","amount":-987654321012345678900.0012300,"future":1e+50}}
+    set expected [string map {.0012300 .00123} $amount]
+    runCase $exe $app {} [encoding convertto utf-8 $amount] 0 $expected {}
+    runCase $exe $app {} [string map [list -987654321012345678900.0012300 {"1.23"}] $amount] \
+        1 {} {entry:14:*: *amount*expects a decimal number*}
+    runCase $exe $app {} [string map {-987654321012345678900.0012300 1e99} $amount] \
+        1 {} {entry:14:*: *amount*expects a fixed-point JSON number}
 }
 
 proc writeArtifact {sources directory} {

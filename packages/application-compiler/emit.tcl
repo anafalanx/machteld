@@ -127,6 +127,10 @@ proc ::appcompiler::emitRuntime {targetNamespace modules} {
                 scan $value %lld number
                 return $number
             }
+            decimal {
+                if {[catch {decimal::canonical $value} normalized]} {reject $path decimal}
+                return $normalized
+            }
             bool {
                 if {$value ni {0 1 false true}} {reject $path bool}
                 return [expr {$value in {1 true}}]
@@ -177,6 +181,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
     set kind [dict get $node kind]
     switch -exact -- $kind {
         int  {return [emitIntegerWord [dict get $node value]]}
+        decimal {return [list [decimal::canonical [dict get $node value]]]}
         text {return [emitTextWord [dict get $node value]]}
         unit {return {{}}}
         bool {
@@ -191,10 +196,20 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {[dict exists $bindings $name]} {return [dict get $bindings $name]}
             return [format {$%s} [emitLocalName $name]]
         }
+        unary {
+            set value [emitExpression [dict get $node value] $context $bindings $depth]
+            if {[dict get [emitFacts $node $context] operandType] eq "decimal"} {
+                return [format {[%s - 0 %s]} [list ${targetNamespace}::@rt::decimal::calc] $value]
+            }
+            return [format {[::tcl::mathop::- %s]} $value]
+        }
         binary {
             set op [dict get $node op]
             set left [emitExpression [dict get $node left] $context $bindings $depth]
             set right [emitExpression [dict get $node right] $context $bindings $depth]
+            if {$op eq "/"} {
+                return [format {[%s %s %s]} [list ${targetNamespace}::@rt::decimal::divide] $left $right]
+            }
             if {$op in {== !=}} {
                 set type [dict get [emitFacts $node $context] operandType]
                 set comparison [format {[%s %s %s %s]} [list ${targetNamespace}::@rt::equal] [list $type] $left $right]
@@ -202,6 +217,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
                 return $comparison
             }
             if {$op ni {+ - *}} {error "unsupported application operator: [list $op]"}
+            if {[dict getdef [emitFacts $node $context] operandType {}] eq "decimal"} {
+                return [format {[%s %s %s %s]} [list ${targetNamespace}::@rt::decimal::calc] $op $left $right]
+            }
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
         call - construct - builtin {
@@ -265,6 +283,8 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 problem - read_stdin_bytes - decode_utf8 - write_stdout_utf8 {
                     return [list [list ${target}::@rt::${name}]]
                 }
+                quotient {return [list [list ${target}::@rt::decimal::quotient]]}
+                divide_rounded {return [list [list ${target}::@rt::decimal::rounded]]}
                 default {error "unsupported application builtin: [list $name]"}
             }
         }

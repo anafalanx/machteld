@@ -35,7 +35,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         if {"" in $args} { return "" }
         return [makeType $head $args]
     }
-    if {$type in {int text bool bytes problem unit}} { return $type }
+    if {$type in {int decimal text bool bytes problem unit}} { return $type }
     if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $type -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
@@ -162,7 +162,7 @@ proc ::appcompiler::checker::checkArguments {node name actual expected reportsVa
     foreach have $actual want $expected arg [dict get $node args] {
         if {$have eq "" || $want eq ""} {
             set valid 0
-        } elseif {![compatible $have $want]} {
+        } elseif {$want eq "numeric" ? $have ni {int decimal} : ![compatible $have $want]} {
             issue reports ARGUMENT_TYPE $arg "'$name' expects $want, got $have"
             set valid 0
         }
@@ -212,6 +212,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         problem - decode_json - write_stdout_utf8 { set params [list text] }
         decode_utf8 { set params [list bytes] }
         read_stdin_bytes { set params {} }
+        quotient { set params {int int} }
+        divide_rounded { set params {numeric numeric int text} }
         default {
             issue reports UNKNOWN_FUNCTION $node "unknown standard function '$name'"
             return ""
@@ -249,6 +251,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
             return result<text,problem>
         }
         write_stdout_utf8 { return result<unit,problem> }
+        quotient { return result<int,problem> }
+        divide_rounded { return result<decimal,problem> }
     }
 }
 
@@ -505,7 +509,7 @@ proc ::appcompiler::checker::comparable {type world} {
         if {[dict exists $seen $member]} { continue }
         dict set seen $member 1
         if {$member eq ""} { set known -1; continue }
-        if {$member in {int text bool}} { continue }
+        if {$member in {int decimal text bool}} { continue }
         set parts [::appcompiler::typeParts $member]
         if {[lindex $parts 0] in {optional list}} {
             lappend pending [lindex $parts 1]
@@ -527,9 +531,11 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
     set op [dict get $node op]
     set left [expressionType [dict get $node left] $scope $imports $world reports]
     set right [expressionType [dict get $node right] $scope $imports $world reports]
+    set numeric [expr {$left in {int decimal} && $right in {int decimal}}]
+    set common [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
     if {$op in {== !=}} {
         if {$left eq "" || $right eq ""} { return "" }
-        set type [joinTypes $left $right]
+        set type [expr {$numeric ? $common : [joinTypes $left $right]}]
         if {$type eq ""} {
             issue reports OPERAND_TYPE $node "'$op' needs operands of the same type, got $left and $right"
             return ""
@@ -543,28 +549,28 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         fact reports $node operandType $type
         return bool
     }
-    if {$op ni {+ - *}} {
+    if {$op ni {+ - * /}} {
         issue reports UNKNOWN_OPERATOR $node "unknown binary operator '$op'"
         return ""
     }
-    set valid 1
-    foreach side {left right} type [list $left $right] {
-        if {$type eq ""} {
-            set valid 0
-        } elseif {$type ne "int"} {
-            issue reports OPERAND_TYPE [dict get $node $side] "'$op' expects an int operand, got $type"
-            set valid 0
+    if {!$numeric} {
+        foreach side {left right} type [list $left $right] {
+            if {$type ni {{} int decimal}} {
+                issue reports OPERAND_TYPE [dict get $node $side] "'$op' expects an int or decimal operand, got $type"
+            }
         }
+        return ""
     }
-    if {$valid} { return int }
-    return ""
+    if {$op eq "/"} { return result<decimal,problem> }
+    if {$common eq "decimal"} { fact reports $node operandType decimal }
+    return $common
 }
 
 proc ::appcompiler::checker::expressionType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set kind [dict get $node kind]
     switch -exact -- $kind {
-        int - text - bool - unit { return $kind }
+        int - decimal - text - bool - unit { return $kind }
         none { return {*?} }
         some {
             set type [expressionType [dict get $node value] $scope $imports $world reports]
@@ -588,6 +594,17 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
                 [dict getdef $node ambiguous 0] $scope $imports $world reports]
         }
         binary { return [binaryType $node $scope $imports $world reports] }
+        unary {
+            set operand [dict get $node value]
+            set type [expressionType $operand $scope $imports $world reports]
+            if {$type eq ""} { return "" }
+            if {$type ni {int decimal}} {
+                issue reports OPERAND_TYPE $operand "unary '-' expects an int or decimal operand, got $type"
+                return ""
+            }
+            fact reports $node operandType $type
+            return $type
+        }
         propagate {
             set raw [expressionType [dict get $node value] $scope $imports $world reports]
             if {$raw eq ""} { return "" }
