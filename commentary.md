@@ -405,6 +405,12 @@ same file. A line beginning with `fn` inside a multiline string still
 belongs to the string. An importer can report its own misspelled binding
 while the imported file is being repaired.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, keeping the next error location
+
+Omitting a function body can put its diagnostic on the next function's
+`fn`. That function is checked again from its first token. An editor can
+now show the missing body and a separate error later on the same line.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
