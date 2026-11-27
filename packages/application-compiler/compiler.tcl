@@ -50,19 +50,14 @@ proc ::appcompiler::analyze {sources} {
         }
         dict set spelling $key $module
         try {
-            set parsed [parseModule $module $source diagnostics]
-            if {$parsed eq {}} {
-                dict set unavailable $module 1
-            } else {
-                dict set modules $module $parsed
-            }
+            dict set modules $module [parseModule $module $source diagnostics]
         } trap {APPCOMPILER DIAGNOSTIC} {message options} {
             lappend diagnostics [dict get $options -diagnostic]
             dict set unavailable $module 1
         }
     }
-    # Known but unparsed imports cannot justify unknown-export diagnostics.
-    # Check other declarations, including independent functions in their callers.
+    # A partial module still contributes complete declarations to checking.
+    # An entirely unreadable module cannot establish its exported names.
     set facts {}
     set resolved {}
     lappend diagnostics {*}[checkDiagnostics $modules $unavailable facts resolved]

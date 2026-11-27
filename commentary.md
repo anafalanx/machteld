@@ -446,6 +446,14 @@ original binding. A callback that captured the earlier list still sees
 its old contents. Optional and required index reads distinguish a missing
 row from a present row with an empty text value.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking intact declarations
+
+A malformed function can sit between two independent mistakes. Checking
+now reports errors in complete declarations on either side and checks calls
+to their exports from other modules. The checker remembers which names it
+could read in damaged declaration heads, so a caller can fix an unrelated
+misspelling in the same pass.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

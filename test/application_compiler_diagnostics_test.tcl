@@ -100,7 +100,7 @@ fn .ok() -> int => 9}
     writeUtf8 [file join $root a.src] [string map [list \n \r\n] $first]
     writeUtf8 [file join $root b.src] {import first
 fn .independent() -> int => $missing
-fn .dependent() -> int => .first::unknown()}
+fn .dependent() -> int => .first::a()}
     set r [invoke $root $driver --json $manifest]
     expect [dict get $r exit] 1 "damaged module fails project check"
     set items [json get [json decode -typed [dict get $r out]] diagnostics]
@@ -162,6 +162,74 @@ fn .inside() -> int => [3,,4]"} {{E_PARSE_ESCAPE 1 25 1 26} {E_PARSE_EXPECTED 3 
     }
 }
 
+proc ::diagnosticTest::partialModules {root driver manifest} {
+    set first {export fn .before() -> int => $missing_before
+export fn .broken() -> int => [1,,2]
+example .broken() => 7
+export fn .usable($n: int) -> int => $n
+fn .local() -> int => .broken()
+fn .after() -> int => 'wrong'
+export record .damaged { value: }
+fn .depends($r: .damaged) -> int => $r.field
+fn .private() -> int => 0
+fn .misspelled() -> int => .unknown()
+fn .unknown_type($v: .wrong) -> int => 7
+record .letter { payload: .damaged }
+worker .deliver($m: .letter) -> result<.damaged,problem> => err(problem('unavailable'))
+resource .damaged using .broken}
+    set second {import first
+fn .depends() -> int => .first::broken()
+fn .takes($r: .first::damaged) -> int => $r.field
+fn .argument() -> int => .first::usable('wrong')
+fn .access() -> int => .first::private()
+fn .healthy() -> int => .first::usable(7)}
+    foreach module {first second} file {a.src b.src} {
+        writeUtf8 [file join $root $file] [string map [list \n \r\n] [set $module]]
+    }
+    set r [invoke $root $driver --json $manifest]
+    expect [list [dict get $r exit] [dict get $r err]] {1 {}} "partial module structured failure"
+    set diagnostics [json unwrap [json get [json decode -typed [dict get $r out]] diagnostics]]
+    set positions {}
+    set messages {}
+    foreach item $diagnostics {
+        set code [dict get $item code]
+        set where [dict get $item node]
+        lassign [lmap key {module line column endLine endColumn} {dict get $where $key}] mod line col endLine endCol
+        set row [lindex [split [set $mod] \n] [expr {$line - 1}]]
+        lappend positions [list $code $mod $line [string range $row [expr {$col - 1}] [expr {$endCol - 2}]]]
+        lappend messages [format {%s:%s:%s..%s:%s [%s] %s} $mod $line $col $endLine $endCol $code [dict get $item message]]
+    }
+    set expected [list [list E_PARSE_EXPECTED first 2 ,] [list E_PARSE_EXPECTED first 7 \}] \
+        [list UNKNOWN_BINDING first 1 {$missing_before}] [list RETURN_TYPE first 6 {'wrong'}] \
+        [list UNKNOWN_FUNCTION first 10 .unknown] [list UNKNOWN_TYPE first 11 .wrong] \
+        [list ARGUMENT_TYPE second 4 {'wrong'}] [list NOT_EXPORTED second 5 .first]]
+    expect [lsort $positions] [lsort $expected] "independent syntax, binding, type, argument and visibility checks with their source spans"
+    plain $root $driver $manifest $messages
+    set archive [file join $root failed.machteld]
+    set packed [::machteld::run -dir $root -timeout 15s -- [info nameofexecutable] $driver pack $manifest $archive]
+    expect [list [dict get $packed exit] [file exists $archive]] {1 0} "incomplete declarations produce no archive"
+    set ran [::machteld::run -dir $root -timeout 15s -- [info nameofexecutable] $driver run $manifest]
+    expect [list [dict get $ran exit] [file exists [file join $root entry-ran]]] {1 0} "partial program cannot run"
+    writeUtf8 [file join $root b.src] {}
+    writeUtf8 [file join $root a.src] "fn .before() -> int => \$missing\nfn .broken() -> int \{"
+    set diagnostics [report $root $driver $manifest 0 2]
+    located $diagnostics UNKNOWN_BINDING {first 1 24 1 32}
+    writeUtf8 [file join $root b.src] {import first
+fn .maybe_in_tail() -> int => .first::possible()
+fn .independent($i: int) -> text => $i}
+    # An unclosed block hides the remainder of this source. A declaration
+    # there could explain a missing symbol, but cannot explain a bad return.
+    set diagnostics [report $root $driver $manifest 0 3]
+    located $diagnostics RETURN_TYPE {second 3 37 3 39}
+    writeUtf8 [file join $root a.src] {fn .edit($n: int) -> int => $n
+export fn .edit($s: text) -> text => [1,,2]
+fn .local() -> text => .edit('x')}
+    writeUtf8 [file join $root b.src] {import first
+fn .caller() -> text => .first::edit('x')}
+    set diagnostics [report $root $driver $manifest 0 1]
+    located $diagnostics E_PARSE_EXPECTED {first 2 41 2 42}
+}
+
 proc ::diagnosticTest::run {root driver} {
     set manifest [file join $root project.dict]
     set base [dict create schema 1 edition 1 minApi 0.21 entry {main start} \
@@ -213,6 +281,7 @@ fn .bad() -> int { return .take("雪🚀", $lost) }}
     set secondLine [located $diagnostics UNKNOWN_BINDING {second 2 39 2 44}]
     plain $root $driver $manifest [list $firstLine $secondLine]
     syntaxRecovery $root $driver $manifest
+    partialModules $root $driver $manifest
 
     # Project errors have no application source range. Use a dictionary key so
     # even characters that Windows forbids in filenames can reach the reporter.
