@@ -257,6 +257,29 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {retur
         "rebuilt using only the delivered files"
     appCase $relocatedExe $caller [list $fromPrompt] {--format portable} {} [bytes {<portable>}] \
         "the two-file rebuild includes the external Tcl package"
+
+    set editor [file join $work {recipient edits}]
+    file mkdir $editor
+    file copy $relocatedExe $shipped $editor
+    set kitExe [file join $editor machteld.exe]
+    set incoming [file join $editor [file tail $shipped]]
+    set originalHash [::machteld::hash file sha256 $incoming]
+    expect [lsort [glob -tails -directory $editor *]] {machteld.exe portable.machteld} "recipient starts with two files"
+    # These are the recipient's prompt commands. Change one expression in
+    # a writable copy, keeping the compiler mounted through the new build.
+    set edits [list \
+        {file copy [file dirname $manifest] working-source} \
+        {set manifest [file join working-source application.dict]} \
+        {set path [file join working-source code main.src]} \
+        {set in [open $path rb]} {set text [encoding convertfrom -profile strict utf-8 [read $in]]} {close $in} \
+        {set text [string map [list {.logic::answer($args, $data)?} {'edited by the recipient'}] $text]} \
+        {set out [open $path wb]} {puts -nonewline $out [encoding convertto -profile strict utf-8 $text]} {close $out}]
+    testEmbeddedRebuild $kitExe $editor [file tail $incoming] revised.machteld $edits
+    set revised [file join $editor revised.machteld]
+    appCase $kitExe $caller [list $revised] {label} {} [bytes {edited by the recipient}] "recipient's changed source executes"
+    expect [::machteld::hash file sha256 $incoming] $originalHash "recipient retains the delivered archive byte for byte"
+    set originals [dict replace $originals code/main.src [readBytes [file join $editor working-source code main.src]]]
+    inspectArchive $revised $originals
 }
 
 if {$argv ni {{} -pack}} {error "usage: [file tail [info script]] ?-pack?"}

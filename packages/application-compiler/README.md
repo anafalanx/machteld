@@ -404,6 +404,27 @@ try {
 } finally {zipfs unmount $root}
 ```
 
+To edit the delivered application, mount it at the Tcl prompt and copy its
+original inputs into a new working directory. This also copies the project
+manifest, assets and local Tcl packages.
+
+```tcl
+set root [zipfs mount sample.machteld build]
+::machteld::ArchiveEntry $root
+source -encoding utf-8 [file join $root compiler compiler.tcl]
+file copy [file join $root project inputs] working-source
+```
+
+Keep the prompt open while editing the files in `working-source`. Then build
+the revised archive from that directory. The original archive still runs
+with its original behavior.
+
+```tcl
+try {
+    ::appcompiler::project::pack working-source/application.dict revised.machteld
+} finally {zipfs unmount $root}
+```
+
 Run `machteld.exe test/application_compiler_project_test.tcl` to check
 the file-backed driver. Add `-pack` on an archive-capable host to include
 relocation, source-free rebuild and the two-file terminal workflow.
