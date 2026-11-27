@@ -497,6 +497,14 @@ window's scope. One test makes the operation fail immediately and another
 lets it reach a worker reply first. In both cases a second window can
 refresh its display, and the fault reaches the application's reporter once.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking existing rows during migration
+
+Adding a constrained column checks the values that existing rows would
+receive. If one fails, SQLite reports the constraint and the typed
+transaction rolls back the migration. A repeated FTS5 table declaration
+also preserves the existing index. The regression opens both an authored
+archive and its rebuild against a populated index and searches the original row.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

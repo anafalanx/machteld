@@ -254,7 +254,10 @@ and a worked JSON import with replay, provenance and historical disagreements.
 
 `sql_schema($tx, $sql, ...)` executes one bound transactional schema
 statement, including ordinary tables, indexes, views, triggers and FTS5
-tables. Use `sql_returning_one<.row>`, `sql_returning_optional<.row>` or
+tables. SQLite validates existing rows when a migration adds a column
+with a `CHECK` constraint. Migrations can repeat
+`CREATE VIRTUAL TABLE IF NOT EXISTS` for an existing FTS5 index.
+Use `sql_returning_one<.row>`, `sql_returning_optional<.row>` or
 `sql_returning_many<.row>` with a scoped transaction and DML with
 `RETURNING` to obtain one row, an optional row or a list of rows. The
 record columns use the same SQLite storage types as typed reads. Errors

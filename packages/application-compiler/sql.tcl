@@ -33,6 +33,25 @@ proc sqlAuthorizeChange {db mode action first second database context} {
     variable sqlKinds
     if {$mode eq "schema"} {
         switch -- $action {
+            SQLITE_INSERT {
+                # An existing virtual table can make IF NOT EXISTS report
+                # only this catalog check, with no CREATE_VTABLE callback.
+                # The connection uses SQLite's defensive mode.
+                if {$context eq "" && $first in {sqlite_master sqlite_temp_master}} {return SQLITE_OK}
+            }
+            SQLITE_ALTER_TABLE {
+                dict set sqlKinds($db) schema 1
+                dict set sqlKinds($db) alter [list $first $second]
+                return SQLITE_OK
+            }
+            SQLITE_PRAGMA {
+                # When adding a constrained column SQLite checks existing
+                # rows by running quick_check on this table during step.
+                if {$first eq "quick_check" && [dict exists $sqlKinds($db) alter] &&
+                    [dict get $sqlKinds($db) alter] eq [list $database $second]} {
+                    return SQLITE_OK
+                }
+            }
             SQLITE_CREATE_VTABLE - SQLITE_DROP_VTABLE {
                 if {![string equal -nocase $second fts5]} {return SQLITE_DENY}
                 dict set sqlKinds($db) schema 1
@@ -42,7 +61,7 @@ proc sqlAuthorizeChange {db mode action first second database context} {
             SQLITE_CREATE_TEMP_TABLE - SQLITE_CREATE_TEMP_INDEX - SQLITE_CREATE_TEMP_VIEW - SQLITE_CREATE_TEMP_TRIGGER -
             SQLITE_DROP_TABLE - SQLITE_DROP_INDEX - SQLITE_DROP_VIEW - SQLITE_DROP_TRIGGER -
             SQLITE_DROP_TEMP_TABLE - SQLITE_DROP_TEMP_INDEX - SQLITE_DROP_TEMP_VIEW - SQLITE_DROP_TEMP_TRIGGER -
-            SQLITE_ALTER_TABLE - SQLITE_REINDEX - SQLITE_ANALYZE {
+            SQLITE_REINDEX - SQLITE_ANALYZE {
                 dict set sqlKinds($db) schema 1
                 return SQLITE_OK
             }
@@ -318,8 +337,12 @@ proc sqlSchema {db sql bindTypes bindValues} {
         # IF [NOT] EXISTS can authorize nothing, and SQLite reports a no-op
         # DROP TRIGGER as read-only. Keep the authorizer active when stepping:
         # VACUUM also defers work and cannot run in our transaction.
-        if {[dict get $statement explain] || [llength [dict get $statement columns]]
-            || ([dict size $sqlKinds($db)] && ![dict exists $sqlKinds($db) schema])} {
+        # ALTER ADD COLUMN can expose SQLite's internal constraint-check
+        # expression as column metadata. The schema operation owns that work.
+        set kinds $sqlKinds($db)
+        if {[dict get $statement explain] ||
+            ([llength [dict get $statement columns]] && ![dict exists $kinds alter]) ||
+            ([dict size $kinds] && ![dict exists $kinds schema])} {
             sqlFail SQL_QUERY "expected one transactional SQLite schema statement"
         }
         $db eval -parameters [sqlBindings $statement $bindTypes $bindValues] $sql

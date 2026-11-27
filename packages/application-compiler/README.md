@@ -1148,6 +1148,11 @@ SQLite permits bound parameters only in value positions supported by the
 statement. Each statement and all its effects belong to the enclosing
 transaction.
 
+An `ALTER TABLE … ADD COLUMN` with a `CHECK` constraint validates the
+existing rows. A value that fails the check rolls back the migration.
+A repeated `CREATE VIRTUAL TABLE IF NOT EXISTS … USING fts5(…)`
+preserves the table and its indexed data.
+
 ```text
 record .inserted { id: int }
 fn .add($path: text, $label: text) -> result<int,problem> {

@@ -18,7 +18,9 @@ fn .migrate($path: text, $value: text) -> result<int,problem> {
         sql_schema($tx, 'CREATE TABLE IF NOT EXISTS log(n INTEGER NOT NULL)')?
         sql_schema($tx, 'CREATE TRIGGER IF NOT EXISTS audit AFTER INSERT ON item BEGIN INSERT INTO log(n) VALUES (NEW.id); END')?
         sql_schema($tx, 'CREATE VIEW IF NOT EXISTS labels AS SELECT label FROM item')?
+        sql_schema($tx, 'CREATE VIRTUAL TABLE IF NOT EXISTS words USING fts5(content)')?
         sql_schema($tx, 'CREATE TEMP TABLE input AS SELECT ?1 AS label', $value)?
+        sql_schema($tx, 'ALTER TABLE temp.input ADD COLUMN copies INTEGER NOT NULL DEFAULT 1 CHECK(copies > 0)')?
         $r ::= sql_returning_one<.number>($tx, 'WITH pending AS (SELECT label FROM input) INSERT INTO item(label) SELECT label FROM pending RETURNING id AS n')?
         sql_commit($tx)?
         return ok($r.n)
@@ -96,7 +98,9 @@ proc ::schemaTest::exercise {path} {
     set value "007; \[hello\] \u96ea\u0000last"
     equal [::schemaApp::app::migrate $path $value] {ok 1} "CTE write returns generated key"
     equal [db onecolumn {SELECT hex(label) FROM labels}] [string toupper [binary encode hex [encoding convertto utf-8 $value]]] "bound text reaches CTAS, view and main table intact"
+    db eval {INSERT INTO words(content) VALUES ('indexed fixture')}
     equal [::schemaApp::app::migrate $path second] {ok 2} "idempotent DDL with SQLite no-op index and trigger"
+    equal [db eval {SELECT rowid, content FROM words WHERE words MATCH 'fixture'}] {1 {indexed fixture}} "repeated virtual table declaration preserves indexed data"
     equal [db eval {SELECT n FROM log ORDER BY n}] {1 2} "trigger writes commit with the returned rows"
     equal [::schemaApp::app::maybe $path 77] {ok none} "zero returned rows"
     equal [::schemaApp::app::maybe $path 2] {ok {some {n 2}}} "one optional row"
@@ -106,9 +110,18 @@ proc ::schemaTest::exercise {path} {
     foreach sql {
         {ALTER TABLE log ADD COLUMN note TEXT} {CREATE UNIQUE INDEX by_log ON log(n)}
         {REINDEX by_log} {ANALYZE log} {DROP INDEX by_log} {DROP INDEX IF EXISTS by_log}
-        {CREATE VIRTUAL TABLE words USING fts5(content)} {DROP TABLE words}
+        {CREATE VIRTUAL TABLE transient_words USING fts5(content)} {DROP TABLE transient_words}
         {CREATE TRIGGER require_label BEFORE INSERT ON item WHEN NEW.label='' BEGIN SELECT RAISE(ABORT,'label required'); END}
     } {equal [::schemaApp::app::schema $path $sql] [list ok {}] "schema operation $sql"}
+    equal [::schemaApp::app::schema $path {ALTER TABLE LOG ADD COLUMN quality INTEGER NOT NULL DEFAULT 1 CHECK(quality > 0)}] [list ok {}] "SQLite validates existing rows during ALTER"
+    equal [db eval {SELECT quality FROM log ORDER BY n}] {1 1} "pre-existing rows read the validated default"
+    set invalid {ALTER TABLE log ADD COLUMN invalid_quality INTEGER NOT NULL DEFAULT 0 CHECK(invalid_quality > 0)}
+    set rejected [::schemaApp::app::schema $path $invalid]
+    problem $rejected SQL_QUERY
+    equal [string match {*CHECK constraint failed*} [dict get [lindex $rejected 1] message]] 1 "failure came from SQLite checking the rows"
+    problem [::schemaApp::app::schema_failure $path $invalid] SQL_TX_CLOSED
+    equal [db onecolumn {SELECT count(*) FROM sqlite_schema WHERE name='rolled_back'}] 0 "constraint failure rolls back the migration's earlier DDL"
+    equal [db onecolumn {SELECT count(*) FROM pragma_table_info('log') WHERE name='invalid_quality'}] 0 "failed column was not added"
     foreach {sql code} {
         {DELETE FROM item WHERE id=-1 RETURNING id AS n} CARDINALITY
         {INSERT INTO item(label) VALUES ('a'),('b') RETURNING id AS n} CARDINALITY
@@ -134,7 +147,9 @@ proc ::schemaTest::exercise {path} {
     equal [db onecolumn {SELECT count(*) FROM log}] 2 "late decode rolled back both trigger firings"
     foreach sql {
         {SELECT 1} {WITH c(x) AS (VALUES(1)) INSERT INTO log(n) SELECT x FROM c}
-        {COMMIT} {BEGIN} {SAVEPOINT x} {PRAGMA user_version=1} {VACUUM}
+        {COMMIT} {BEGIN} {SAVEPOINT x} {PRAGMA user_version=1} {PRAGMA main.quick_check(log)} {VACUUM}
+        {SELECT * FROM pragma_quick_check('log')} {EXPLAIN ALTER TABLE log ADD COLUMN plain INTEGER}
+        {INSERT INTO sqlite_master(type,name,tbl_name,rootpage,sql) VALUES('table','bogus','bogus',0,NULL)}
         {ATTACH ':memory:' AS extra} {CREATE TABLE x(n); DROP TABLE item}
     } {
         problem [::schemaApp::app::schema $path $sql] SQL_QUERY
@@ -163,6 +178,7 @@ proc ::schemaTest::packed {dir path} {
         set result [::machteld::run -dir $recipient -timeout 30s -- [info nameofexecutable] $delivery $path "item $id"]
         equal [list [dict get $result exit] [dict get $result err] [dict get $result out]] [list 0 {} $id] "relocated authored and rebuilt entries"
         equal [db onecolumn {SELECT max(n) FROM log}] $id "packed trigger state"
+        equal [db onecolumn {SELECT content FROM words WHERE words MATCH 'fixture'}] {indexed fixture} "packed migration keeps the existing FTS index"
     }
 }
 
