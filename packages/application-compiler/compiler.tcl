@@ -92,6 +92,7 @@ proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
     variable hostDefinitions
     variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
+    dict append artifact script \n [eventBridge $targetNamespace $targetNamespace]
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt::decimal $decimalDefinitions]
     if {[dict getdef $analysis resolved usesProcess 0]} {
         variable processDefinitions
@@ -150,6 +151,15 @@ proc ::appcompiler::tkBridge {public implementation} {
     set script [list ::namespace eval ${public}::@tk {}]
     foreach {name helper} {canvas_path tkCanvasPath attach_items tkTagItems} {
         append script \n [list ::interp alias {} ${public}::@tk::$name {} ${implementation}::@rt::$helper]
+    }
+    return $script
+}
+
+proc ::appcompiler::eventBridge {public implementation} {
+    set public ${public}::@events
+    set script [list ::namespace eval $public {}]
+    foreach {name helper} {on_fault onFault last_fault lastFault} {
+        append script \n [list ::interp alias {} ${public}::$name {} ${implementation}::@rt::$helper]
     }
     return $script
 }
@@ -233,6 +243,7 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs {toolRo
     if {[dict size $sources]} {
         append script [dict get $artifact script] \n
         set rt ${implementation}::@rt
+        append script [eventBridge ::application $implementation] \n
         if {[dict getdef $analysis resolved usesWorkers 0]} {
             append script [workerPrelude $implementation] \n
         }

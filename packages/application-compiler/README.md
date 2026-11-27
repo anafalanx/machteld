@@ -233,6 +233,35 @@ Event scripts keep arbitrary application keys and text as data.
 See `examples/graphviz-table/typed-window.dict` for the X-owned window
 that reuses the original graph drawing code.
 
+### Reporting an event fault
+
+An uncaught fault ends the current callback. Its scopes finish cleanup,
+including rollback of open transactions, before the application receives
+the diagnostic. Other windows continue to handle events. By default the
+runtime writes the source location, operation and message to stderr.
+
+A Tcl entry can direct diagnostics to a log or a nonmodal error pane.
+The command prefix receives a dictionary containing `operation`, `message`
+and `options`. The options preserve Tcl’s `-errorcode`, `-errorinfo`,
+custom options and the mapped `-appcompilerlocation` when available.
+The operation identifies the event boundary, such as `tk-action`,
+`tk-click`, `worker-event`, `worker-resume` or `process-done`.
+
+```tcl
+proc displayFault {label report} {
+    $label configure -text [dict get $report message]
+}
+::application::@events::on_fault [list ::displayFault .status]
+```
+
+Call `on_fault` without arguments to read the current prefix, or pass
+`{}` to restore stderr. `::application::@events::last_fault` returns the
+most recent report, including when a windowed launch has no stderr. It
+returns an empty dictionary before the first fault. A failing or reentered
+sink falls back to stderr. Each compiled application owns these settings.
+Tcl’s interpreter-wide background error handler remains under the caller’s
+control.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.
@@ -552,10 +581,11 @@ pipes. `on_done` then receives `ok(process_exit)`, with `status`, `exit`,
 `stdout_bytes` and `stderr_bytes`. Native statuses include `ok`, `error`,
 `timeout` and `killed`. A chunk callback can return `err(problem)` to stop
 delivery and pass that problem to `on_done`. A Tcl callback exception or
-expired captured reference produces `PROCESS_CALLBACK`. Pipe or supervision
-failure produces `PROCESS_IO`. Failure to start is returned to the caller
-before any callbacks run. A fault in `on_done` goes to Tcl's background
-error handler after the native child has been released.
+expired captured reference produces `PROCESS_CALLBACK`, with the mapped
+`origin` and Tcl return `options` available to the completion consumer.
+Pipe or supervision failure produces `PROCESS_IO`. Failure to start is
+returned to the caller before any callbacks run. A fault in `on_done` goes
+to the application's event fault sink after the native child has been released.
 
 `cancel_process(job)` stops the child and delivers one terminal result
 with status `canceled`, exit `-1`, and the delivered byte counts. A cancel
@@ -570,7 +600,7 @@ A stream started in a typed Tk button or canvas handler belongs to that
 window. Closing the window stops the child and suppresses further chunks
 and the terminal callback. A stream started by a chunk or terminal callback
 inherits the originating stream's owner. The same rules apply to a Tcl
-handler run through `::application::workers handle` with a window or
+handler run through `::application::workers event` or `workers handle` with a window or
 explicit owner. Streams started in an application-owned handler continue
 until completion or explicit closure.
 
@@ -1224,8 +1254,14 @@ proc showStation {database id} {
     }
 }
 set owner [::application::workers window .panel]
-.panel.lookup configure -command [list ::application::workers handle $owner showStation $database 007]
+.panel.lookup configure -command [list ::application::workers event $owner showStation $database 007]
 ```
+
+The `event` adapter sends an uncaught fault before the first pending
+`await` to the application's fault sink as `worker-event`. A fault after
+resumption is reported as `worker-resume`. For a direct Tcl call, use
+`workers handle $owner $prefix ...` to receive its synchronous result or
+catch an immediate Tcl error in the caller.
 
 The window owns work started by its handler. Destroying it releases those
 children and unwinds a suspended handler, including scoped cleanup. A reply

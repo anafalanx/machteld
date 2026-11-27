@@ -461,6 +461,12 @@ An application-owned worker kept running, and another handler collected
 its reply. The tests exercise the source project, packed archive and
 offline rebuild.
 
+A second recording window refreshed while a writer waited for a worker,
+and again after its reply handler failed. The diagnostic sink observed the
+original error code, source and a rolled-back SQLite write. An application
+can present that report in its own status pane without Tk opening a modal
+background-error dialog.
+
 ### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking intact declarations
 
 A malformed function can sit between two independent mistakes. Checking
@@ -483,6 +489,13 @@ write before it yields the first `RETURNING` row. If the application asks for
 one row and gets two, both inserts and their audit-trigger entries roll
 back. A second connection in the regression test checks the database after
 the application handles that error.
+
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, binding a mixed Tcl/Tk callback
+
+A Tcl/Tk button can call `workers event` to run an X operation in its
+window's scope. One test makes the operation fail immediately and another
+lets it reach a worker reply first. In both cases a second window can
+refresh its display, and the fault reaches the application's reporter once.
 
 <!-- machteld-version-history: end -->
 

@@ -66,7 +66,7 @@ proc tkRegister {kind id path window} {
     set tag mt_binding_$id
     set tkState($id) [dict create kind $kind path $path window $window generation 1 children {} closeHooks {}]
     if {$id ne $window} {dict set tkState($window) children $id 1}
-    ::bind $tag <Destroy> [list [namespace current]::tkGone $id]
+    ::bind $tag <Destroy> [list [namespace current]::eventBoundary tk-destroy [list [namespace current]::tkGone $id]]
     ::bindtags $path [linsert [::bindtags $path] 0 $tag]
     return [list $kind $id]
 }
@@ -231,14 +231,13 @@ proc tkBind {kind widget event callback location} {
     set path [tkPath $kind $widget]
     set id [lindex $widget 1]
     set version [tkId]
-    set script [list [namespace current]::tkDispatch $id $version]
+    set script [list [namespace current]::eventBoundary tk-$event [list [namespace current]::tkDispatch $id $version]]
     if {$event eq "click"} {
         ::bind mt_binding_$id <Button-1> [list {*}$script %x %y]
     } else {
         $path configure -command $script
     }
-    # Preserve callback errors for Tk's background error handler and add
-    # the mapped X source, falling back to this registration's location.
+    # Preserve the X source of a failing callback, falling back to its binding.
     lassign $callback command
     set dispatch [list [namespace current]::callExport $command $location {*}[lrange $callback 1 end]]
     dict set tkState($id) binding [list $version $event $dispatch]

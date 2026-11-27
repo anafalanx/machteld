@@ -167,6 +167,14 @@ reject further use. The compiler guide documents widget operations and the
 validated Tcl renderer bridge. The `examples/graphviz-table/typed-window.dict`
 project combines an X-owned UI with an existing Tcl Graphviz renderer.
 
+An uncaught callback fault ends its operation and runs scoped cleanup.
+Healthy windows keep receiving events. Use
+`::application::@events::on_fault $commandPrefix` in a Tcl entry to receive
+the fault dictionary with `operation`, `message` and the original Tcl
+`options`. A mapped X location appears in `-appcompilerlocation`.
+The default sink writes to stderr. `::application::@events::last_fault`
+returns the latest report even on a launch without a console.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type
@@ -292,8 +300,11 @@ with its function body. `start .lookup($request)` returns a
 handlers remain responsive. Each worker has a supervised process, private
 message pipes and its own live resources. A typed entry already has
 application scope. In mixed Tcl/Tk code, obtain the window owner from
-`::application::workers window .panel` and run the callback through
-`::application::workers handle $owner command ?arg ...?`.
+`::application::workers window .panel`. Use
+`::application::workers event $owner commandPrefix ?arg ...?` as the
+button command. The application fault sink receives both immediate faults
+and faults after a pending await. Use `workers handle` for direct calls
+whose synchronous result or exception belongs to the Tcl caller.
 
 Destroying the window cancels its tasks and unwinds waiting handlers.
 `start_app` selects application ownership, allowing a different handler to

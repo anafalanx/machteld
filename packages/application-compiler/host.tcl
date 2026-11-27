@@ -294,7 +294,7 @@ proc mappedLocation {options sourceMap {fallback {}}} {
 }
 
 # Public Tcl commands in a mixed project call this bridge. Preserve Tcl's
-# message and error code for legacy catch handlers and Tk background errors.
+# message and error code for legacy catch handlers and event diagnostics.
 proc callExport {command declaration args} {
     try {
         $command {*}$args
@@ -321,6 +321,49 @@ proc launch {entry sourceMap arguments} {
         puts stderr "${prefix}application error: $message"
         return 1
     }
+}
+
+# Each compiled application owns its own sink and last event fault.
+# Preserve an installed sink when code is sourced again in the same app.
+proc onFault {args} {
+    variable faultSink
+    if {[llength $args] > 1} {error {usage: on_fault ?commandPrefix?}}
+    if {[llength $args]} {
+        set prefix [lindex $args 0]
+        llength $prefix
+        set faultSink $prefix
+    }
+    if {[info exists faultSink]} {return $faultSink}
+    return {}
+}
+proc lastFault {} {
+    variable latestFault
+    if {[info exists latestFault]} {return $latestFault}
+    return {}
+}
+proc reportFault {operation message options {fallback {}}} {
+    variable latestFault
+    variable reportingFault
+    set where [mappedLocation $options [sourceMap] $fallback]
+    if {$where ne {}} {dict set options -appcompilerlocation $where}
+    set latestFault [dict create operation $operation message $message options $options]
+    set sink [onFault]
+    if {[llength $sink] && ![info exists reportingFault]} {
+        set reportingFault 1
+        try {
+            if {![catch {uplevel #0 [list {*}$sink $latestFault]} failure]} {return}
+        } finally {unset reportingFault}
+    }
+    # A Windows GUI launch can have no stderr. last_fault is still readable.
+    set prefix [expr {$where eq {} ? {} : [locationPrefix $where]}]
+    catch {puts stderr "${prefix}$operation error: $message"}
+    if {[info exists failure]} {catch {puts stderr "fault sink error: $failure"}}
+    return {}
+}
+proc eventBoundary {operation command args} {
+    if {![catch {{*}$command {*}$args} value options]} {return $value}
+    reportFault $operation $value $options
+    return {}
 }
 
 proc read_stdin_bytes {} {

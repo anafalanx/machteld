@@ -485,9 +485,10 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 await - cancel - problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
                 parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process -
-                stream_process - close_process - cancel_process - find_executable {
+                close_process - cancel_process - find_executable {
                     return [list [list ${target}::@rt::${name}]]
                 }
+                stream_process {return [list [list ${target}::@rt::stream_process] [list [emitLocation $node]]]}
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}
                 to_binary64 - exact_decimal {return [list [list ${target}::@rt::${name}]]}
                 divide_rounded {return [list [list ${target}::@rt::decimal::rounded]]}
