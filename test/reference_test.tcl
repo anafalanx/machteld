@@ -77,9 +77,10 @@ check {the compiler manual has its own outline and the short package lookup stil
 foreach {lookup section snippet} {
     { Project   Check } migrating-a-tcl-tk-project-one-file-at-a-time {project check project.dict}
     {project check --json} migrating-a-tcl-tk-project-one-file-at-a-time {diagnostics}
+    {project locate} locating-source-files {project locate}
     {project run} migrating-a-tcl-tk-project-one-file-at-a-time {forwards each argument}
     {project test} executable-examples {verifies the call and its expectation}
-    {project pack} migrating-a-tcl-tk-project-one-file-at-a-time {application.dict}
+    {project pack} migrating-a-tcl-tk-project-one-file-at-a-time {project pack examples/typed-text-length/project.dict sample.machteld}
     {project rebuild} migrating-a-tcl-tk-project-one-file-at-a-time {rebuild sample.machteld rebuilt.machteld}
     {project docs} reading-the-offline-application-reference {docs sample.machteld search}
     require_index list-values-and-lengths {INDEX_OUT_OF_RANGE}

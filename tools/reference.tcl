@@ -1927,6 +1927,7 @@ proc ::ref::main {argv} {
                 set lookups {
                     {project check} migrating-a-tcl-tk-project-one-file-at-a-time
                     {project check --json} migrating-a-tcl-tk-project-one-file-at-a-time
+                    {project locate} locating-source-files
                     {project run} migrating-a-tcl-tk-project-one-file-at-a-time
                     {project pack} migrating-a-tcl-tk-project-one-file-at-a-time
                     {project test} executable-examples
