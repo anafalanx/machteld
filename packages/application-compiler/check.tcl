@@ -16,6 +16,14 @@ proc ::appcompiler::checker::makeType {head arguments} {
     return [format {%s<%s>} $head [join $arguments ,]]
 }
 
+proc ::appcompiler::checker::typeFits {length node reportsVar} {
+    upvar 1 $reportsVar reports
+    set limit 8192
+    if {$length <= $limit} { return 1 }
+    issue reports TYPE_EXPANSION_LIMIT $node "expanded type exceeds $limit characters"
+    return 0
+}
+
 # Nominal types include the defining module. A '*' is an internal inference
 # variable for an absent payload. An empty type marks a prior diagnostic.
 proc ::appcompiler::checker::declaredType {type node world reportsVar} {
@@ -34,6 +42,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
             if {$location eq ""} { set location $node }
             lappend args [declaredType $child $location $world reports]
         }
+        if {[dict exists $reports aliasReferences]} { return "" }
         set key [lindex $args 0]
         if {$head eq "map" && $key ni {{} text int bool decimal}} {
             set location [lindex $locations 0]
@@ -46,6 +55,11 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
             issue reports RANGE_ELEMENT_TYPE $node "only ranges of int are supported"
             return ""
         }
+        # Count punctuation and canonical children before joining. Repeated
+        # aliases in a generic can otherwise double its spelling at each step.
+        set length [expr {$head eq "optional" ? 1 : [string length $head] + $arity + 1}]
+        foreach argument $args { incr length [string length $argument] }
+        if {![typeFits $length $node reports]} { return "" }
         return [makeType $head $args]
     }
     if {$type in {int decimal text bool bytes problem unit}} { return $type }
@@ -71,7 +85,54 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         issue reports NOT_EXPORTED $node "type '.$name' is private to module '$target'"
         return ""
     }
+    if {[dict get $schema kind] eq "alias"} {
+        if {[dict exists $reports aliasReferences]} {
+            dict set reports aliasReferences $key $node
+            return ""
+        }
+        return [dict getdef $reports aliases $key {}]
+    }
+    if {![typeFits [string length $key] $node reports]} { return "" }
     return $key
+}
+
+# Link visible alias references with the same name lookup used for actual
+# types. Nominal records and choices terminate expansion at their identity.
+# An explicit worklist also permits long chains without Tcl call-stack growth.
+proc ::appcompiler::checker::resolveAliases {world reportsVar} {
+    upvar 1 $reportsVar reports
+    set dependencies {}
+    dict for {key schema} [dict get $world schemas] {
+        if {$schema eq "" || [dict get $schema kind] ne "alias"} { continue }
+        set scan [dict create aliasReferences {} diagnostics {}]
+        declaredType [dict get $schema target] [dict get $schema targetLocation] $world scan
+        dict set dependencies $key [dict get $scan aliasReferences]
+    }
+    set active {}
+    foreach root [dict keys $dependencies] {
+        set stack [list [list enter $root {}]]
+        while {[llength $stack]} {
+            lassign [lpop stack] step key location
+            if {$step eq "resolve"} {
+                set schema [dict get $world schemas $key]
+                set type [declaredType [dict get $schema target] [dict get $schema targetLocation] $world reports]
+                dict set reports aliases $key $type
+                dict unset active $key
+            } elseif {![dict exists $reports aliases $key]} {
+                if {[dict exists $active $key]} {
+                    issue reports ALIAS_CYCLE $location "type alias '$key' refers back to itself"
+                    dict set reports aliases $key ""
+                    continue
+                }
+                dict set active $key 1
+                lappend stack [list resolve $key {}]
+                set references [dict get $dependencies $key]
+                foreach dependency [lreverse [dict keys $references]] {
+                    lappend stack [list enter $dependency [dict get $references $dependency]]
+                }
+            }
+        }
+    }
 }
 
 # Keep concrete information from both operands; e.g. result<int,*> joined
@@ -326,9 +387,14 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
     set target [dict get $node qualifier]
     set name [dict get $node name]
     set localChoice [format {.%s::%s} $caller $target]
-    if {$target ne "" && [dict getdef $world schemas $localChoice kind {}] eq "choice"
-            && ([dict exists $world schemas $localChoice members $name] || $target ni $imports)} {
-        return [constructType $node .$target $name 1 $scope $imports $world reports]
+    if {$target ne ""} {
+        set isAlias [dict exists $reports aliases $localChoice]
+        if {$isAlias} { set localChoice [dict get $reports aliases $localChoice] }
+        set isChoice [expr {[dict getdef $world schemas $localChoice kind {}] eq "choice"}]
+        if {($isChoice && [dict exists $world schemas $localChoice members $name])
+                || (($isAlias || $isChoice) && $target ni $imports)} {
+            return [constructType $node .$target $name 1 $scope $imports $world reports]
+        }
     }
     set actual [argumentTypes $node $scope $imports $world reports]
     if {$target eq ""} {
@@ -842,8 +908,8 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
     }
 }
 
-proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}}} {
-    set reports [dict create diagnostics {} facts {}]
+proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {resolvedVar {}}} {
+    set reports [dict create diagnostics {} facts {} aliases {}]
     set world [dict create modules $modules schemas {} functions {}]
     # Establish nominal identities before resolving any field or signature types.
     dict for {module definition} $modules {
@@ -857,9 +923,13 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}}} {
             }
         }
     }
+    checker::resolveAliases $world reports
+    set runtimeSchemas {}
     dict for {key schema} [dict get $world schemas] {
-        if {$schema ne ""} {
-            dict set world schemas $key members [checker::readMembers $schema $world reports]
+        if {$schema ne "" && [dict get $schema kind] ne "alias"} {
+            set members [checker::readMembers $schema $world reports]
+            dict set world schemas $key members $members
+            dict set runtimeSchemas $key [list [dict get $schema kind] $members]
         }
     }
     # Index normalized signatures before bodies to support forward and recursive calls.
@@ -897,6 +967,10 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}}} {
     if {$factsVar ne ""} {
         upvar 1 $factsVar facts
         set facts [dict get $reports facts]
+    }
+    if {$resolvedVar ne ""} {
+        upvar 1 $resolvedVar resolved
+        set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions]]
     }
     return [dict get $reports diagnostics]
 }

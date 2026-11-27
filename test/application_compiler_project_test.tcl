@@ -89,7 +89,9 @@ fn .lookup($key: text, $value: text) -> result<text,problem> {
     return require_key(map_put($entries, '7', ''), $key)
 }}
     set main {import logic
-fn .start($args: list<text>) -> result<unit,problem> {
+alias .arguments = list<text>
+alias .outcome = result<unit,problem>
+fn .start($args: .arguments) -> .outcome {
     $data ::= .logic::input()?
     $out ::= .logic::answer($args, $data)?
     write_stdout_utf8($out)?

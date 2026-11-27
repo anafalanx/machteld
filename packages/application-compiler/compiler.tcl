@@ -58,8 +58,9 @@ proc ::appcompiler::analyze {sources} {
     # Known but unparsed imports cannot justify unknown-export diagnostics.
     # Check other declarations, including independent functions in their callers.
     set facts {}
-    lappend diagnostics {*}[checkDiagnostics $modules $unavailable facts]
-    return [dict create modules $modules diagnostics $diagnostics facts $facts]
+    set resolved {}
+    lappend diagnostics {*}[checkDiagnostics $modules $unavailable facts resolved]
+    return [dict create modules $modules diagnostics $diagnostics facts $facts resolved $resolved]
 }
 
 proc ::appcompiler::check {sources} {
@@ -77,7 +78,8 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
         return -code error -errorcode {APPCOMPILER CHECK} \
             -diagnostics $diagnostics [join $lines \n]
     }
-    set artifact [emitModules [dict get $analysis modules] $targetNamespace [dict get $analysis facts]]
+    set artifact [emitModules [dict get $analysis modules] $targetNamespace [dict get $analysis facts] \
+        [dict get $analysis resolved]]
     variable hostDefinitions
     variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
@@ -93,23 +95,17 @@ proc ::appcompiler::compile {sources {targetNamespace ::application}} {
 # The selected entry may be private to its module.
 proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}}} {
     set analysis [analyze $sources]
-    set modules [dict get $analysis modules]
     if {![llength [dict get $analysis diagnostics]]} {
         set location [dict create module $entryModule line 1 column 1]
-        set found 0
-        foreach fn [dict getdef $modules $entryModule functions {}] {
-            if {[dict get $fn name] ne $entryFunction} {continue}
-            set found 1
-            set location $fn
+        set fn [dict getdef $analysis resolved functions $entryModule $entryFunction {}]
+        if {$fn ne {}} {
             set parameters [dict get $fn params]
             if {[llength $parameters] != 1 || [dict get [lindex $parameters 0] type] ne "list<text>" \
                     || [dict get $fn result] ne "result<unit,problem>"} {
-                dict lappend analysis diagnostics [diagnostic ENTRY_TYPE $location \
+                dict lappend analysis diagnostics [diagnostic ENTRY_TYPE $fn \
                     "entry requires one list<text> parameter and a result<unit,problem> return"]
             }
-            break
-        }
-        if {!$found} {
+        } else {
             dict lappend analysis diagnostics [diagnostic ENTRY_NAME $location \
                 "unknown application entry [list $entryModule $entryFunction]"]
         }

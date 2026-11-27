@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice match with some none if else unit for in break continue while}
+        set keywords {fn export import return true false record choice alias match with some none if else unit for in break continue while}
         set localChoices {}
         my advance
     }
@@ -112,6 +112,13 @@ oo::class create ::appcompiler::ModuleParser {
                 foreach variant [dict get $choice variants] { dict set members [dict get $variant name] 1 }
                 dict set localChoices [dict get $choice name] $members
                 set declarationStart 0
+            } elseif {$declarationStart && [my at alias]} {
+                my advance
+                set name [my take dotName {a dot-prefixed alias name}]
+                # Aliased variants are resolved during type checking. Keeping
+                # the name here lets a payload-free variant omit parentheses.
+                dict set localChoices [dict get $name value] {}
+                set declarationStart 0
             } else {
                 if {[my at \{]} { incr depth }
                 if {[my at \}]} { incr depth -1 }
@@ -129,7 +136,7 @@ oo::class create ::appcompiler::ModuleParser {
         set importLocations {}
         set functions {}
         set types {}
-        if {[string first choice $source] >= 0 && [string first :: $source] >= 0} {
+        if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 || [string first alias $source] >= 0)} {
             my collectChoiceNames
         }
         my skipLines
@@ -148,11 +155,11 @@ oo::class create ::appcompiler::ModuleParser {
                         my advance
                         lappend functions [my function $exported]
                     }
-                    record - choice {
+                    record - choice - alias {
                         lappend types [my typeDeclaration $exported]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, record or choice declaration, or an import}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, record, choice, alias or import declaration}
                     }
                 }
             }
@@ -285,7 +292,12 @@ oo::class create ::appcompiler::ModuleParser {
         my advance
         set name [my take dotName "a dot-prefixed $kind name"]
         my skipLines
-        if {$kind eq "record"} {
+        if {$kind eq "alias"} {
+            my take = {'=' before the alias target}
+            my skipLines
+            set target [my typeAnnotation]
+            set members [dict create target [dict get $target name] targetLocation $target]
+        } elseif {$kind eq "record"} {
             set members [dict create fields [my braced fieldDeclaration {record fields}]]
         } else {
             set members [dict create variants [my braced variantDeclaration {choice variants}]]
@@ -563,6 +575,7 @@ oo::class create ::appcompiler::ModuleParser {
         set start $token
         set name [dict get $token value]
         set qualifier {}
+        set locations {}
         my advance
         if {[my at ::]} {
             set qualifier $name
@@ -582,6 +595,10 @@ oo::class create ::appcompiler::ModuleParser {
                     (![my at (] && [dict exists $localChoices $qualifier])} {
                 set ambiguous [my at (]
             } else {
+                if {[dict exists $localChoices $qualifier]} {
+                    set locations [dict create typeLocation [my typeLocation $start $typeEnd $type] \
+                        variantLocation [my node $member variant name $name]]
+                }
                 set type {}
             }
             if {$type ne {}} {
@@ -592,7 +609,7 @@ oo::class create ::appcompiler::ModuleParser {
             }
         }
         set args [my parenthesized expression]
-        return [my node $start call name $name qualifier $qualifier args $args]
+        return [my node $start call name $name qualifier $qualifier args $args {*}$locations]
     }
 }
 

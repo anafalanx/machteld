@@ -23,42 +23,15 @@ proc ::appcompiler::emitLocalName {name} {
     return v_[binary encode hex [encoding convertto utf-8 $name]]
 }
 
-proc ::appcompiler::emitTypeName {module type} {
-    lassign [typeParts $type] head first second
-    switch -exact -- $head {
-        optional {return [emitTypeName $module $first]?}
-        list {return list<[emitTypeName $module $first]>}
-        map {return map<[emitTypeName $module $first],[emitTypeName $module $second]>}
-        result {return result<[emitTypeName $module $first],[emitTypeName $module $second]>}
-    }
-    if {[string index $type 0] eq "." && [string first :: $type] < 0} {
-        return .${module}::[string range $type 1 end]
-    }
-    return $type
-}
-
 # A generated program carries its own type descriptions and needs no compiler
 # at run time. @rt cannot be an application module name. Its procedures keep
 # no mutable state, so two applications may use different definitions.
-proc ::appcompiler::emitRuntime {targetNamespace modules} {
+proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
     set rt ${targetNamespace}::@rt
+    # Schema serialization must be reproducible across source dictionary orders.
     set schemas {}
-    foreach module [lsort -ascii [dict keys $modules]] {
-        foreach type [dict getdef $modules $module types {}] {
-            set members {}
-            set kind [dict get $type kind]
-            if {$kind eq "record"} {
-                foreach field [dict get $type fields] {
-                    dict set members [dict get $field name] [emitTypeName $module [dict get $field type]]
-                }
-            } else {
-                foreach variant [dict get $type variants] {
-                    set payload [lmap t [dict get $variant payload] {emitTypeName $module $t}]
-                    dict set members [dict get $variant name] $payload
-                }
-            }
-            dict set schemas .${module}::[dict get $type name] [list $kind $members]
-        }
+    foreach name [lsort -ascii [dict keys $checkedSchemas]] {
+        dict set schemas $name [dict get $checkedSchemas $name]
     }
     set definitions [list [list ::namespace eval $rt {}]]
     lappend definitions [list ::proc ${rt}::schemas {} [list ::return $schemas]]
@@ -531,18 +504,18 @@ proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
     }
 }
 
-proc ::appcompiler::emitModules {modules targetNamespace {facts {}}} {
-    set definitions [emitRuntime $targetNamespace $modules]
+proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
+    set definitions [emitRuntime $targetNamespace [dict get $resolved schemas]]
     set sourceMap [dict create]
     foreach module [lsort -ascii [dict keys $modules]] {
         set context [dict create target $targetNamespace module $module facts $facts]
         set moduleNamespace ${targetNamespace}::${module}
         lappend definitions [list ::namespace eval $moduleNamespace {}]
-        foreach function [dict get $modules $module functions] {
+        dict for {functionName function} [dict get $resolved functions $module] {
             set resultParts [typeParts [dict get $function result]]
             dict set context problemResult [expr {[lindex $resultParts 0] eq "result"
                 && [lindex $resultParts 2] eq "problem"}]
-            set name ${moduleNamespace}::[dict get $function name]
+            set name ${moduleNamespace}::${functionName}
             set formals {}
             set body {}
             set locations [dict create]
@@ -552,7 +525,7 @@ proc ::appcompiler::emitModules {modules targetNamespace {facts {}}} {
             foreach param [dict get $function params] {
                 set local [emitLocalName [dict get $param name]]
                 lappend formals $local
-                set type [emitTypeName $module [dict get $param type]]
+                set type [dict get $param type]
                 if {[dict get $function exported] && $type ne "text"} {
                     lappend body [format {::set %s [%s %s $%s %s]} $local \
                         [list ${targetNamespace}::@rt::guard] [list $type] $local \

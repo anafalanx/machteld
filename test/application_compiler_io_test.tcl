@@ -13,10 +13,11 @@ proc example {} {
     id: text
     note: text?
     amount: decimal?
-    metadata: map<text,.entry>?
+    metadata: .metadata?
     counts: map<int,int>?
 }
 record .entry { description: text }
+alias .metadata = map<text,.entry>
 export choice .edit {
     keep
     clear

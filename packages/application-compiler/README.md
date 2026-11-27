@@ -64,6 +64,23 @@ same byte and error checks against a relocated archive. Run
 recompilation from bundled sources with only the executable and archive
 in the delivery directory.
 
+## Type aliases
+
+`alias .titles = map<text,text>` gives an existing type a second name.
+A parameter declared as `.titles` accepts a `map<text,text>`, and its
+value can be passed directly to map operations. An alias can refer to a
+later declaration. Aliases can name choices, records and other aliases.
+The checker reports a cycle if following the aliases cannot reach a type.
+This compiler stores a resolved type in at most 8,192 characters. A type
+whose expanded generic arguments exceed that limit reports
+`TYPE_EXPANSION_LIMIT` at its declaration.
+
+Add `export` to expose an alias to other modules. For example, after
+`import labels` a caller can write `.labels::titles`. Imports in the
+module that declared the alias determine what its target name denotes.
+Run `machteld.exe test/application_compiler_alias_test.tcl` for these
+checks and their generated-Tcl behavior.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and
