@@ -145,6 +145,8 @@ proc sqlRead {cardinality rowType path sql bindTypes bindValues} {
         return [list ok $value]
     } trap {APPCOMPILER SQL} {message options} {
         return [list err [dict create code [lindex [dict get $options -errorcode] 2] message $message]]
+    } trap {MACHTELD SQLITE parameter} {message options} {
+        return [list err [dict create code SQL_BIND message $message]]
     } trap {MACHTELD SQLITE text} {message options} {
         return [list err [dict create code SQL_TYPE message $message]]
     } on error {message options} {

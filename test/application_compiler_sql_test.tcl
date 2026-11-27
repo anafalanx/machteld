@@ -144,11 +144,14 @@ fn .literal_null() -> result<int,problem> {
 }
 example .literal_null() => 1
 
+extern fn .character($codepoint: int) -> text = ['::format', '%c']
 fn .text_param($input: text) -> result<text,problem> {
     $row ::= sql_one<.model::string>('records.db', 'SELECT ?1 AS value', $input)?
     return ok($row.value)
 }
 example .text_param("007'); DROP TABLE history; -- $x [expr 1] 雪\0x") => "007'); DROP TABLE history; -- $x [expr 1] 雪\0x"
+
+example .text_param(.character(55296)) => error 'SQL_BIND'
 
 fn .invalid_utf8() -> result<.model::string,problem> {
     return sql_one<.model::string>('records.db', "SELECT CAST(X'FF' AS TEXT) AS value")
