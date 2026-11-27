@@ -6,6 +6,7 @@ proc problem {message} {return [dict create message $message]}
 # arguments of a generic export. Validate every name even for an empty list,
 # an absent optional, or a parameter that occurs only in the result type.
 proc concreteType {type schemas} {
+    if {$type in {tk_window tk_label tk_button tk_canvas tk_item}} {return 1}
     if {$type in {int decimal binary64 text bytes bool unit problem instant local_datetime}} {return 1}
     if {[string length $type] > 8192 || $type eq ""} {return 0}
     set parts [typeParts $type]

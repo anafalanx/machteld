@@ -54,6 +54,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
         switch -exact -- $head {
             callable {return [guardCallable $type $value $path]}
             ref {return [guardReference $first $value $path]}
+            tk_window - tk_label - tk_button - tk_canvas - tk_item {
+                if {![llength [info commands [namespace current]::tkGuard]]} {reject $path "a live $head from this application"}
+                return [tkGuard $head $value $path]
+            }
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -308,7 +312,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             }
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
-        call - construct - builtin - sqlBegin - refCreate {
+        call - construct - builtin - sqlBegin - refCreate - tkOpen {
             # These explicit conversions preserve the checked Tcl representation.
             if {$kind eq "builtin" && [dict get $node name] in {make underlying instant_text local_datetime_text}} {
                 return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
@@ -376,6 +380,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
     switch -exact -- [dict get $node kind] {
         sqlBegin {return [list [list ${target}::@rt::sqlBegin]]}
         refCreate {return [list [list ${target}::@rt::newReference] [emitTypeWord [dict get $facts elementType] $context]]}
+        tkOpen {return [list [list ${target}::@rt::tk_open]]}
         construct {return [list ::list [list [dict get $node variant]]]}
         call {
             set name [dict get $node name]
@@ -390,6 +395,11 @@ proc ::appcompiler::emitCallPrefix {node context} {
         }
         builtin {
             set name [dict get $node name]
+            if {[dict exists $facts tkOperation]} {
+                set prefix [list [list ${target}::@rt::${name}]]
+                if {$name in {tk_on_click tk_on_action}} {lappend prefix [list [emitLocation $node]]}
+                return $prefix
+            }
             switch -exact -- $name {
                 unit {return [list ::list]}
                 map {return [list ::dict create]}
@@ -651,6 +661,7 @@ proc ::appcompiler::emitUsing {node context bodyVar locationsVar} {
         emitLine "::try \{" $location body locations
         emitStatements [dict get $node body] $context body locations
         set closer [expr {[dict get $node value kind] eq "refCreate" ? "endReference" : "sqlEnd"}]
+        if {[dict exists $facts tkWindow]} {set closer tkEndWindow}
         emitLine [format {%c finally { %s $%s }} 125 [list ${target}::@rt::${closer}] $local] $location body locations
         return
     }

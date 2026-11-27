@@ -700,6 +700,9 @@ oo::class create ::appcompiler::ModuleParser {
                     if {[dict get $value kind] ne "propagate"} {
                         ::appcompiler::fail E_PARSE_EXPECTED $token {expected '?' to propagate failure when acquiring the resource}
                     }
+                    if {[dict get $value value kind] eq "builtin" && [dict get $value value name] eq "tk_open"} {
+                        dict set value value kind tkOpen
+                    }
                 }
                 my skipLines
                 return [my node $start using binding [my node $binding binding name [dict get $binding value]] \

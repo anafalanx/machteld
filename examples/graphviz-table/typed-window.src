@@ -1,0 +1,56 @@
+import timeline
+
+extern fn .paint($canvas: tk_canvas, $rows: list<.timeline::occurrence>) -> unit = ['::typedDiagram::paint'] from 'example::typed_diagram'
+
+fn .description($rows: list<.timeline::occurrence>, $key: text) -> text {
+    for $row in $rows {
+        if $row.occurrence_id == $key {
+            return $"${$row.occurrence_id} · ${$row.source_name} · ${$row.reference}"
+        }
+    }
+    return 'Select an occurrence'
+}
+
+fn .caption($rows: list<.timeline::occurrence>, $key: text?) -> text =>
+    match $key { none => 'Select an occurrence'
+        some($id) => .description($rows, $id) }
+
+fn .selected($rows: list<.timeline::occurrence>, $label: tk_label, $selected: ref<text?>, $event: tk_click) -> unit {
+    ref_set($selected, $event.occurrence)
+    tk_highlight($event.canvas, $event.occurrence)
+    return tk_label_text($label, .caption($rows, $event.occurrence))
+}
+
+fn .redraw($rows: list<.timeline::occurrence>, $canvas: tk_canvas, $selected: ref<text?>, $action: tk_action) -> unit {
+    tk_clear($canvas)
+    .paint($canvas, $rows)
+    tk_highlight($canvas, ref_get($selected))
+    return unit
+}
+
+fn .display($rows: list<.timeline::occurrence>) -> result<unit,problem> {
+    using $selected ::= ref<text?>(none) {
+        using $window ::= tk_open('Observations in time')? {
+            $canvas ::= tk_canvas($window, 640, 300)
+            $label ::= tk_label($window, 'Select an occurrence')
+            $redraw ::= tk_button($window, 'Redraw')
+            tk_grid($canvas, 0, 0)
+            tk_grid($label, 1, 0)
+            tk_grid($redraw, 2, 0)
+            .paint($canvas, $rows)
+            tk_on_click($canvas, bind(.selected, $rows, $label, $selected))
+            tk_on_action($redraw, bind(.redraw, $rows, $canvas, $selected))
+            tk_wait($window)
+            return ok(unit)
+        }
+    }
+}
+
+fn .rows($database: text, $at: text) -> result<list<.timeline::occurrence>,problem> =>
+    .timeline::occurrences($database, .timeline::at($at)?)
+
+fn .main($args: list<text>) -> result<unit,problem> => match $args {
+    ['--lookup', $database, $at, $key] => write_stdout_utf8(.description(.rows($database, $at)?, $key))
+    [$database, $at] => .display(.rows($database, $at)?)
+    _ => err(problem('expected DATABASE INSTANT or --lookup DATABASE INSTANT OCCURRENCE'))
+}

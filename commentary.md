@@ -391,6 +391,13 @@ binary64 and back exposes the extra decimal digits of the stored measurement.
 The calibration example reads a gain and offset from JSON. Its multiplication
 can report overflow before the offset is applied.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, typed Tk
+
+The X-owned research window displays the same Graphviz drawing as its
+Tcl counterpart. A headless test delivered clicks on a polygon and its
+text. Both selected the same source record. Redrawing replaced the canvas
+items and restored the highlight from the stored occurrence key.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
