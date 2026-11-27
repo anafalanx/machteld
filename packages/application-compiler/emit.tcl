@@ -548,6 +548,10 @@ proc ::appcompiler::emitLoop {node context bodyVar locationsVar} {
     set depth [dict getdef $context loopDepth 0]
     if {[dict get $node kind] eq "while"} {
         set test [emitExpression [dict get $node condition] $context]
+        if {[dict getdef $context locateScope 0]} {
+            # The condition runs again after the loop body has moved the marker.
+            set test [format {[::set m_scopeLine %d] && (%s)} [llength $body] $test]
+        }
         # Bracing defers variable and command substitutions until each test.
         set header [format {::while {%s} %c} $test 123]
     } else {
@@ -584,21 +588,60 @@ proc ::appcompiler::emitLoop {node context bodyVar locationsVar} {
     emitLine \} $location body locations
 }
 
+proc ::appcompiler::emitUsing {node context bodyVar locationsVar} {
+    upvar 1 $bodyVar body $locationsVar locations
+    set facts [emitFacts $node $context]
+    set local [emitLocalName [dict get $node binding name]]
+    set location [emitLocation $node]
+    set target [dict get $context target]
+    emitLine [format {::set %s %s} $local [emitExpression [dict get $node value] $context]] $location body locations
+    if {![dict exists $facts resourceCloser]} {
+        emitLine "::try \{" $location body locations
+        emitStatements [dict get $node body] $context body locations
+        emitLine [format {%c finally { %s $%s }} 125 [list ${target}::@rt::sqlEnd] $local] $location body locations
+        return
+    }
+
+    # Catch in the owning frame. A return, break or labelled jump must travel
+    # exactly as far as it did without the scope. Nested catches finish before
+    # these generated scratch variables acquire the enclosing scope's values.
+    emitLine [format {::set m_scopeCode [::catch %c} 123] $location body locations
+    dict set context locateScope 1
+    emitStatements [dict get $node body] $context body locations
+    emitLine [format {%c m_scopeValue m_scopeOptions]} 125] $location body locations
+    lassign [dict get $facts resourceCloser] module function
+    set call [list [list ${target}::${module}::${function}]]
+    set types [dict get $facts resourceTypeArguments]
+    if {[llength $types]} {lappend call [emitTypeList $types $context]}
+    lappend call [format {$%s} $local]
+    emitLine [format {::set m_closeCode [::catch {%s} m_closeValue m_closeOptions]} [join $call { }]] $location body locations
+    set closeLine [llength $body]
+    # An error caught inside the compiled function can lack its generated
+    # frame. Supply the last statement's line for the usual source-map lookup.
+    emitLine [format {::if {$m_scopeCode == 1} {::dict append m_scopeOptions -errorinfo [::format "\n    (procedure \"%%s\" line %%d)" %s $m_scopeLine]}} \
+        [list [dict get $context procedure]]] $location body locations
+    emitLine [format {::if {$m_closeCode == 1} {::dict append m_closeOptions -errorinfo %s}} \
+        [emitTextWord [format "\n    (procedure \"%s\" line %d)" [dict get $context procedure] $closeLine]]] $location body locations
+    set failed {$m_closeCode != 0}
+    if {[dict get $facts resourceFallible]} {append failed { || [::lindex $m_closeValue 0] eq "err"}}
+    emitLine [format {::if {%s} %c} $failed 123] $location body locations
+    emitLine [format {::lassign [%s $m_scopeCode $m_scopeValue $m_scopeOptions $m_closeCode $m_closeValue $m_closeOptions %s %s] m_scopeValue m_scopeOptions} \
+        [list ${target}::@rt::failedClose] [emitTypeWord [dict get $context errorType] $context] [list $location]] $location body locations
+    emitLine {::return -options $m_scopeOptions $m_scopeValue} $location body locations
+    emitLine \} $location body locations
+    emitLine {::if {$m_scopeCode != 0} {::return -options $m_scopeOptions $m_scopeValue}} $location body locations
+}
+
 proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
     upvar 1 $bodyVar body $locationsVar locations
     foreach statement $statements {
         set location [emitLocation $statement]
+        if {[dict getdef $context locateScope 0]} {
+            emitLine [format {::set m_scopeLine %d} [expr {[llength $body] + 1}]] $location body locations
+        }
         switch -exact -- [dict get $statement kind] {
             for - while {emitLoop $statement $context body locations}
-            using {
-                set local [emitLocalName [dict get $statement binding name]]
-                set open [emitExpression [dict get $statement value] $context]
-                emitLine [format {::set %s %s} $local $open] $location body locations
-                emitLine "::try \{" $location body locations
-                emitStatements [dict get $statement body] $context body locations
-                set cleanup [list [dict get $context target]::@rt::sqlEnd]
-                emitLine [format {%c finally { %s $%s }} 125 $cleanup $local] $location body locations
-            }
+            using {emitUsing $statement $context body locations}
             if {
                 set test [emitExpression [dict get $statement condition] $context]
                 emitLine [format {::if %s %c} $test 123] $location body locations
@@ -648,6 +691,8 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
             dict set context problemResult [expr {[lindex $resultParts 0] eq "result"
                 && [lindex $resultParts 2] eq "problem"}]
             set name ${moduleNamespace}::${functionName}
+            dict set context procedure $name
+            dict set context errorType [lindex $resultParts 2]
             set formals {}
             set body {}
             set locations [dict create]

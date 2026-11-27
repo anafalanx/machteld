@@ -117,6 +117,15 @@ an empty list. Unknown names give `INVALID_ZONE`. The rules reside in the
 executable and cover local and UTC years 0001 through 2099. The compiler
 guide documents range errors and historical offsets.
 
+## Releasing library resources
+
+For other library-owned resources, declare a closer in the type's own
+module with `resource .reader using .close`. A block beginning with
+`using $reader ::= .readers::open($path)?` acquires the value and releases
+it on every exit after successful acquisition. Nested scopes release in
+reverse order. The compiler guide documents cleanup failure reporting
+and the runnable file-reader project.
+
 ## Writing SQLite transactions
 
 Use `using $tx ::= sql_begin($path)? { ... }` inside a function returning

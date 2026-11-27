@@ -81,6 +81,10 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
     }
     set artifact [emitModules [dict get $analysis modules] $targetNamespace [dict get $analysis facts] \
         [dict get $analysis resolved]]
+    # The runtime uses one source map for entry faults, Tcl exports and
+    # secondary exceptions captured before a scoped cleanup can unwind.
+    dict append artifact script \n [list ::proc ${targetNamespace}::@rt::sourceMap {} \
+        [list ::return [dict get $artifact sourceMap]]]
     variable hostDefinitions
     variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
@@ -148,10 +152,10 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
     set analysis [analyzeApplication $sources $entryModule $entryFunction]
     set artifact [emitChecked $analysis ::application]
     set entry ::application::${entryModule}::${entryFunction}
-    set dispatch [list ::application::@rt::launch $entry [dict get $artifact sourceMap]]
+    set dispatch [list ::application::@rt::launch $entry]
     set script [applicationPrelude $minApi $packageDirs]
     append script "[dict get $artifact script]\n"
-    append script "::exit \[$dispatch \$::argv\]\n"
+    append script [format {::exit [%s [::application::@rt::sourceMap] $::argv]} $dispatch] \n
     dict set artifact script $script
     dict set artifact modules [dict get $analysis modules]
     return $artifact
@@ -167,7 +171,6 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
     if {[dict size $sources]} {
         append script [dict get $artifact script] \n
         set rt ${implementation}::@rt
-        append script [list ::proc ${rt}::sourceMap {} [list ::return [dict get $artifact sourceMap]]] \n
         dict for {module functions} [dict get $analysis resolved functions] {
             set public ::application::${module}
             append script [list ::namespace eval $public {}] \n

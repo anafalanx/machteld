@@ -66,6 +66,48 @@ proc propagate {result location} {
     }
 }
 
+# Carry an unwinding failure alongside a second failure from a finalizer.
+# Problems and Tcl errors can also come from foreign code; preserve an
+# existing extension value even when it was not supplied as a Tcl list.
+proc appendCleanup {data key detail} {
+    set previous [dict getdef $data $key {}]
+    if {[catch {llength $previous}]} {set previous [list $previous]}
+    lappend previous $detail
+    dict set data $key $previous
+    return $data
+}
+
+proc failedClose {bodyCode body bodyOptions closeCode close closeOptions errorType location} {
+    if {$closeCode == 0} {
+        set close [atResult $close $location]
+        set detail [lindex $close 1]
+        # A typed closer failure returns from the function owning the scope.
+        set closeOptions [dict create -code 0 -level 1]
+    } else {
+        set origin [mappedLocation $closeOptions [sourceMap] $location]
+        dict set closeOptions -appcompilerlocation $origin
+        set detail [dict create code CLEANUP_FAULT message $close \
+            errorCode [dict getdef $closeOptions -errorcode NONE] origin $origin]
+        if {[dict exists $closeOptions -appcompilercleanup]} {
+            dict set detail cleanupFailures [dict get $closeOptions -appcompilercleanup]
+        }
+    }
+    if {$bodyCode == 1} {
+        set bodyOptions [appendCleanup $bodyOptions -appcompilercleanup $detail]
+        return [list $body $bodyOptions]
+    }
+    if {$bodyCode == 2 && [lindex $body 0] eq "err"} {
+        if {$errorType eq "problem"} {
+            set primary [appendCleanup [lindex $body 1] cleanupFailures $detail]
+            return [list [list err $primary] $bodyOptions]
+        }
+        # A caller may have a scalar error type. Adding fields to that value
+        # would violate its contract. Keep it intact on the unexpected fault.
+        dict set closeOptions -appcompilerprimary $body
+    }
+    return [list $close $closeOptions]
+}
+
 proc locationPrefix {location} {
     return "[dict get $location module]:[dict get $location line]:[dict get $location column]: "
 }

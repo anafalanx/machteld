@@ -337,6 +337,12 @@ Two station names have the same type. A route declaration with required
 reference displayed both labels and its Tcl command still accepted the
 two names in order.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, scoped readers
+
+The first-line preview returns from inside the reader's scope. The library
+closes the file before that result reaches its caller, even when decoding
+the line fails. Its exported type page identifies the cleanup function.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

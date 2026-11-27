@@ -1,0 +1,7 @@
+schema 1
+edition 1
+minApi 30
+entry {preview main}
+modules {readers readers.src preview preview.src}
+assets {lib/pkgIndex.tcl lib/reader.tcl}
+packageDirs {lib}
