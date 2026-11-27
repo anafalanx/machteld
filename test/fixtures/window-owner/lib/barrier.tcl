@@ -1,6 +1,6 @@
 namespace eval ::windowFixture {}
 proc ::windowFixture::hold {name} {
-    if {$name ni {local app}} {error "unknown test barrier"}
+    if {$name ni {local app mixed}} {error "unknown test barrier"}
     close [open [file join [pwd] $name.started] {WRONLY CREAT EXCL}]
     set deadline [expr {[clock seconds] + 15}]
     while {![file exists [file join [pwd] $name.release]]} {

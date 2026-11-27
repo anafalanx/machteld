@@ -297,8 +297,9 @@ proc workerControl {subcommand args} {
             return $owner
         }
         handle {tailcall [namespace current]::workerHandle {*}$args}
+        event {tailcall [namespace current]::eventBoundary worker-event [namespace current]::workerHandle {*}$args}
         close {tailcall [namespace current]::workerCloseOwner {*}$args}
-        default {error {expected workers owner, window, handle, close or timeout}}
+        default {error {expected workers owner, window, handle, event, close or timeout}}
     }
 }
 

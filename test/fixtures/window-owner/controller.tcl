@@ -69,6 +69,36 @@ proc ::faultClicks {writer} {
     until {[$label cget -text] eq "ready"}
     assert {[llength $::reports] == 1 && $::notes eq {} && $::backgroundFaults eq {}} {duplicate or modal fault delivery}
     assert {[::machteld::child list] eq {}} {finished worker was retained}
+
+    set owner [::application::workers window $writer]
+    set prefix [list ::application::faults::write $::file]
+    set status [catch {::application::workers handle $owner $prefix early} message options]
+    assert {$status == 1 && [dict get $options -errorcode] eq {TEST WORKER_REPLY}} {direct call lost its synchronous error}
+    assert {[::application::workers handle $owner [list string cat {direct }] value] eq {direct value}} {direct call lost its result}
+    assert {[llength $::reports] == 1} {handled synchronous error was also reported}
+
+    set mixed [ttk::button $writer.mixed -text Mixed]
+    foreach name {early mixed} operation {worker-event worker-resume} {
+        set previous [llength $::reports]
+        $mixed configure -command [list ::application::workers event $owner $prefix $name]
+        after 0 [list $mixed invoke]
+        if {$name eq "mixed"} {
+            until {[file exists [file join $::work mixed.started]]}
+            release mixed
+        }
+        until {[llength $::reports] > $previous || [llength $::backgroundFaults]}
+        assert {![llength $::backgroundFaults]} {mixed callback reached interpreter bgerror}
+        set fault [lindex $::reports end]
+        set opts [dict get $fault options]
+        assert {[dict get $fault operation] eq $operation && [dict get $fault message] eq "cannot apply lookup"} {wrong mixed event fault}
+        assert {[dict get $opts -errorcode] eq {TEST WORKER_REPLY} && [dict get $opts -fixturevalue] eq $name} {lost mixed Tcl options}
+        assert {[dict get $opts -appcompilerlocation] eq $site && $::rolledBack} {wrong mixed fault origin or leaked transaction}
+        $label configure -text pending
+        after 0 [list $buttons(Refresh) invoke]
+        until {[$label cget -text] eq "ready"}
+        assert {[llength $::reports] == $previous + 1 && [::application::@events::last_fault] eq $fault} {mixed fault was redelivered}
+    }
+    assert {[::machteld::child list] eq {}} {mixed handler kept its finished worker}
     destroy $writer
 }
 if {$mode eq "faults"} {

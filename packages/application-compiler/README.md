@@ -245,7 +245,7 @@ The command prefix receives a dictionary containing `operation`, `message`
 and `options`. The options preserve Tcl’s `-errorcode`, `-errorinfo`,
 custom options and the mapped `-appcompilerlocation` when available.
 The operation identifies the event boundary, such as `tk-action`,
-`tk-click`, `worker-resume` or `process-done`.
+`tk-click`, `worker-event`, `worker-resume` or `process-done`.
 
 ```tcl
 proc displayFault {label report} {
@@ -600,7 +600,7 @@ A stream started in a typed Tk button or canvas handler belongs to that
 window. Closing the window stops the child and suppresses further chunks
 and the terminal callback. A stream started by a chunk or terminal callback
 inherits the originating stream's owner. The same rules apply to a Tcl
-handler run through `::application::workers handle` with a window or
+handler run through `::application::workers event` or `workers handle` with a window or
 explicit owner. Streams started in an application-owned handler continue
 until completion or explicit closure.
 
@@ -1153,8 +1153,14 @@ proc showStation {database id} {
     }
 }
 set owner [::application::workers window .panel]
-.panel.lookup configure -command [list ::application::workers handle $owner showStation $database 007]
+.panel.lookup configure -command [list ::application::workers event $owner showStation $database 007]
 ```
+
+The `event` adapter sends an uncaught fault before the first pending
+`await` to the application's fault sink as `worker-event`. A fault after
+resumption is reported as `worker-resume`. For a direct Tcl call, use
+`workers handle $owner $prefix ...` to receive its synchronous result or
+catch an immediate Tcl error in the caller.
 
 The window owns work started by its handler. Destroying it releases those
 children and unwinds a suspended handler, including scoped cleanup. A reply

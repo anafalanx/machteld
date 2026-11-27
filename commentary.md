@@ -445,6 +445,13 @@ original error code, source and a rolled-back SQLite write. An application
 can present that report in its own status pane without Tk opening a modal
 background-error dialog.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, binding a mixed Tcl/Tk callback
+
+A Tcl/Tk button can call `workers event` to run an X operation in its
+window's scope. One test makes the operation fail immediately and another
+lets it reach a worker reply first. In both cases a second window can
+refresh its display, and the fault reaches the application's reporter once.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
