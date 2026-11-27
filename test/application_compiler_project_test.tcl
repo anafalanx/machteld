@@ -84,9 +84,10 @@ fn .pick($values: list<text>) -> text {
     }
     return $selected
 }
+distinct .lookup_key = text
 fn .lookup($key: text, $value: text) -> result<text,problem> {
-    $entries ::= map_put(map<text,text>(), '007', $value)
-    return require_key(map_put($entries, '7', ''), $key)
+    $entries ::= map_put(map<.lookup_key,text>(), make<.lookup_key>('007'), $value)
+    return require_key(map_put($entries, make<.lookup_key>('7'), ''), make<.lookup_key>($key))
 }}
     set main {import logic
 alias .arguments = list<text>

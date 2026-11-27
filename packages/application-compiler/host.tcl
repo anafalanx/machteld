@@ -122,6 +122,15 @@ proc require_key {map key} {
     return [list err [dict create code MISSING_KEY message "missing map key [list $key]"]]
 }
 
+# Distinct scalar keys share the Tcl representation of their declared base.
+proc scalarBase {type} {
+    if {[string index $type 0] eq "."} {
+        lassign [dict get [schemas] $type] kind base
+        if {$kind eq "distinct"} {return $base}
+    }
+    return $type
+}
+
 # Both int and decimal keys are already canonical. For equal signs and
 # integer widths, lexical order of the digits gives their exact magnitude.
 # Tcl's integer sort is machine-width and real sort converts to double.
@@ -196,6 +205,7 @@ proc fromWire {type node path} {
             if {$actual ne "boolean"} {invalidWire "$path expects a boolean, got $actual"}
             return [::machteld::json unwrap $node]
         }
+        bytes {invalidWire "$path has no JSON representation for bytes"}
         list {
             if {$actual ne "array"} {invalidWire "$path expects an array, got $actual"}
             set out {}
@@ -206,7 +216,7 @@ proc fromWire {type node path} {
             return $out
         }
         map {
-            if {[lindex $parts 1] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
+            if {[scalarBase [lindex $parts 1]] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
             if {$actual ne "object"} {invalidWire "$path expects an object, got $actual"}
             set out {}
             dict for {key child} [typedMembers $node] {
@@ -217,12 +227,12 @@ proc fromWire {type node path} {
             return $out
         }
     }
-    set table [schemas]
-    if {![dict exists $table $type] || [lindex [dict get $table $type] 0] ne "record"} {
+    lassign [dict getdef [schemas] $type {}] kind members
+    if {$kind eq "distinct"} {return [fromWire $members $node $path]}
+    if {$kind ne "record"} {
         invalidWire "$path has no declared record wire format for $type"
     }
     if {$actual ne "object"} {invalidWire "$path expects an object, got $actual"}
-    set members [lindex [dict get $table $type] 1]
     set out [typedMembers $node]
     dict for {name fieldType} $members {
         if {![dict exists $out $name]} {
@@ -241,13 +251,14 @@ proc toWire {type value path} {
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
+        bytes {invalidWire "$path has no JSON representation for bytes"}
         list {
             set nodes {}
             foreach element $value {lappend nodes [toWire [lindex $parts 1] $element $path]}
             return [::machteld::json value array $nodes]
         }
         map {
-            if {[lindex $parts 1] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
+            if {[scalarBase [lindex $parts 1]] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
             set nodes {}
             dict for {key item} $value {
                 dict set nodes [nativeJsonText $key] [toWire [lindex $parts 2] $item "$path\[[list $key]\]"]
@@ -259,11 +270,11 @@ proc toWire {type value path} {
             return [toWire [lindex $parts 1] [lindex $value 1] $path]
         }
     }
-    set table [schemas]
-    if {![dict exists $table $type] || [lindex [dict get $table $type] 0] ne "record"} {
+    lassign [dict getdef [schemas] $type {}] kind members
+    if {$kind eq "distinct"} {return [toWire $members $value $path]}
+    if {$kind ne "record"} {
         invalidWire "$path has no declared record wire format for $type"
     }
-    set members [lindex [dict get $table $type] 1]
     set nodes {}
     dict for {name child} $value {
         if {[dict exists $members $name]} {
@@ -379,6 +390,7 @@ proc equal {type left right} {
         }
     }
     lassign [dict get [schemas] $type] kind members
+    if {$kind eq "distinct"} {return [equal $members $left $right]}
     if {$kind eq "choice"} {
         set tag [lindex $left 0]
         if {$tag ne [lindex $right 0]} {return 0}

@@ -81,6 +81,32 @@ module that declared the alias determine what its target name denotes.
 Run `machteld.exe test/application_compiler_alias_test.tcl` for these
 checks and their generated-Tcl behavior.
 
+## Distinct scalar types
+
+Use a distinct type when two identifiers have the same representation but
+belong to different domains. The following function accepts only a
+`.product_id`. To call it with a text value, write
+`.print_id(make<.product_id>('007'))`.
+
+```text
+distinct .product_id = text
+fn .print_id($id: .product_id) -> text { return underlying($id) }
+```
+
+The declaration may use `text`, `int`, `decimal`, `bool` or `bytes`,
+including an alias for one of these types. `make` and `underlying`
+convert explicitly in either direction. An alias for a distinct type
+retains its identity. A distinct type exported from another module keeps
+the identity of its defining module even if a local type shares its name.
+
+At a Tcl boundary the value uses the underlying scalar representation.
+Decoding a typed record field validates that representation. Text-backed
+IDs can be JSON object keys, and a map with numeric IDs sorts keys by
+their exact numeric value. Use `underlying` before arithmetic on a
+numeric ID. The declaration and conversion spellings are provisional.
+Run `machteld.exe test/application_compiler_distinct_test.tcl` to check
+construction, equality, module visibility and boundary behavior.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and

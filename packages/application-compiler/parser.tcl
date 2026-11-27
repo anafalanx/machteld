@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice alias match with some none if else unit for in break continue while}
+        set keywords {fn export import return true false record choice alias distinct match with some none if else unit for in break continue while}
         set localChoices {}
         my advance
     }
@@ -112,9 +112,9 @@ oo::class create ::appcompiler::ModuleParser {
                 foreach variant [dict get $choice variants] { dict set members [dict get $variant name] 1 }
                 dict set localChoices [dict get $choice name] $members
                 set declarationStart 0
-            } elseif {$declarationStart && [my at alias]} {
+            } elseif {$declarationStart && ([my at alias] || [my at distinct])} {
                 my advance
-                set name [my take dotName {a dot-prefixed alias name}]
+                set name [my take dotName {a dot-prefixed type name}]
                 # Aliased variants are resolved during type checking. Keeping
                 # the name here lets a payload-free variant omit parentheses.
                 dict set localChoices [dict get $name value] {}
@@ -136,7 +136,8 @@ oo::class create ::appcompiler::ModuleParser {
         set importLocations {}
         set functions {}
         set types {}
-        if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 || [string first alias $source] >= 0)} {
+        if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
+                [string first alias $source] >= 0 || [string first distinct $source] >= 0)} {
             my collectChoiceNames
         }
         my skipLines
@@ -155,11 +156,11 @@ oo::class create ::appcompiler::ModuleParser {
                         my advance
                         lappend functions [my function $exported]
                     }
-                    record - choice - alias {
+                    record - choice - alias - distinct {
                         lappend types [my typeDeclaration $exported]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, record, choice, alias or import declaration}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, record, choice, alias, distinct or import declaration}
                     }
                 }
             }
@@ -292,8 +293,8 @@ oo::class create ::appcompiler::ModuleParser {
         my advance
         set name [my take dotName "a dot-prefixed $kind name"]
         my skipLines
-        if {$kind eq "alias"} {
-            my take = {'=' before the alias target}
+        if {$kind in {alias distinct}} {
+            my take = "'=' before the $kind target"
             my skipLines
             set target [my typeAnnotation]
             set members [dict create target [dict get $target name] targetLocation $target]

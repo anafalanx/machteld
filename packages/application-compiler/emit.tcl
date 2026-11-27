@@ -67,9 +67,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 return $result
             }
             map {
-                if {$first ni {text int bool decimal} || [catch {dict size $value}]} {reject $path $type}
+                set keyType [scalarBase $first]
+                if {$keyType ni {text int bool decimal} || [catch {dict size $value}]} {reject $path $type}
                 # Text map keys require one representation for equivalent Tcl strings.
-                set keyGuard [expr {$first eq "text" ? "@textKey" : $first}]
+                set keyGuard [expr {$keyType eq "text" ? "@textKey" : $keyType}]
                 set result {}
                 dict for {external item} $value {
                     set key [guard $keyGuard $external "$path key"]
@@ -134,6 +135,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             text {return $value}
         }
         lassign [dict get [schemas] $type] kind members
+        if {$kind eq "distinct"} {return [guard $members $value $path]}
         if {$kind eq "record"} {
             if {[catch {dict size $value}]} {reject $path $type}
             dict for {field fieldType} $members {
@@ -228,6 +230,10 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
         call - construct - builtin {
+            # Checked nominal scalar conversions preserve the Tcl value.
+            if {$kind eq "builtin" && [dict get $node name] in {make underlying}} {
+                return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
+            }
             set words [emitCallPrefix $node $context]
             set arguments [lmap argument [dict get $node args] {
                 emitExpression $argument $context $bindings $depth

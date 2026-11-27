@@ -10,14 +10,17 @@ proc expect {actual expected label} {
 proc example {} {
     set model {export record .item {
     version: int
-    id: text
+    id: .item_id
     note: text?
-    amount: decimal?
+    amount: .amount?
     metadata: .metadata?
-    counts: map<int,int>?
+    counts: map<.index,int>?
 }
+distinct .item_id = text
+distinct .amount = decimal
+distinct .index = int
 record .entry { description: text }
-alias .metadata = map<text,.entry>
+alias .metadata = map<.item_id,.entry>
 export choice .edit {
     keep
     clear

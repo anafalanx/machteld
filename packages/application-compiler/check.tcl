@@ -42,12 +42,12 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
             if {$location eq ""} { set location $node }
             lappend args [declaredType $child $location $world reports]
         }
-        if {[dict exists $reports aliasReferences]} { return "" }
+        if {[dict exists $reports typeReferences]} { return "" }
         set key [lindex $args 0]
-        if {$head eq "map" && $key ni {{} text int bool decimal}} {
+        if {$head eq "map" && [dict getdef $reports distinctBases $key $key] ni {{} text int bool decimal}} {
             set location [lindex $locations 0]
             if {$location eq ""} { set location $node }
-            issue reports MAP_KEY_TYPE $location "map keys must be text, int, bool or decimal, got $key"
+            issue reports MAP_KEY_TYPE $location "map keys require text, int, bool or decimal storage, got $key"
             return ""
         }
         if {"" in $args} { return "" }
@@ -85,46 +85,65 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         issue reports NOT_EXPORTED $node "type '.$name' is private to module '$target'"
         return ""
     }
-    if {[dict get $schema kind] eq "alias"} {
-        if {[dict exists $reports aliasReferences]} {
-            dict set reports aliasReferences $key $node
+    if {[dict get $schema kind] in {alias distinct}} {
+        if {[dict exists $reports typeReferences]} {
+            dict set reports typeReferences $key $node
             return ""
         }
-        return [dict getdef $reports aliases $key {}]
+        return [dict getdef $reports typeNames $key {}]
     }
     if {![typeFits [string length $key] $node reports]} { return "" }
     return $key
 }
 
-# Link visible alias references with the same name lookup used for actual
-# types. Nominal records and choices terminate expansion at their identity.
-# An explicit worklist also permits long chains without Tcl call-stack growth.
-proc ::appcompiler::checker::resolveAliases {world reportsVar} {
+# Resolve aliases and distinct backing types after dependencies. References to
+# records and choices terminate at their identity, allowing recursive members.
+# An explicit worklist permits long chains without Tcl call-stack growth.
+proc ::appcompiler::checker::resolveTypeNames {world reportsVar} {
     upvar 1 $reportsVar reports
     set dependencies {}
     dict for {key schema} [dict get $world schemas] {
-        if {$schema eq "" || [dict get $schema kind] ne "alias"} { continue }
-        set scan [dict create aliasReferences {} diagnostics {}]
+        if {$schema eq "" || [dict get $schema kind] ni {alias distinct}} { continue }
+        set scan [dict create typeReferences {} diagnostics {}]
         declaredType [dict get $schema target] [dict get $schema targetLocation] $world scan
-        dict set dependencies $key [dict get $scan aliasReferences]
+        dict set dependencies $key [dict get $scan typeReferences]
     }
     set active {}
+    set path {}
     foreach root [dict keys $dependencies] {
         set stack [list [list enter $root {}]]
         while {[llength $stack]} {
             lassign [lpop stack] step key location
             if {$step eq "resolve"} {
                 set schema [dict get $world schemas $key]
-                set type [declaredType [dict get $schema target] [dict get $schema targetLocation] $world reports]
-                dict set reports aliases $key $type
+                set where [dict get $schema targetLocation]
+                set type [declaredType [dict get $schema target] $where $world reports]
+                if {[dict get $schema kind] eq "distinct" && $type ne ""} {
+                    if {$type ni {text int decimal bool bytes}} {
+                        issue reports DISTINCT_BASE_TYPE $where "a distinct type requires a primitive scalar base, got $type"
+                        set type ""
+                    } elseif {![typeFits [string length $key] $schema reports]} {
+                        set type ""
+                    } else {
+                        dict set reports distinctBases $key $type
+                        set type $key
+                    }
+                }
+                dict set reports typeNames $key $type
                 dict unset active $key
-            } elseif {![dict exists $reports aliases $key]} {
+                lpop path
+            } elseif {![dict exists $reports typeNames $key]} {
                 if {[dict exists $active $key]} {
-                    issue reports ALIAS_CYCLE $location "type alias '$key' refers back to itself"
-                    dict set reports aliases $key ""
+                    set code ALIAS_CYCLE
+                    foreach member [lrange $path [dict get $active $key] end] {
+                        if {[dict get $world schemas $member kind] eq "distinct"} { set code DISTINCT_CYCLE; break }
+                    }
+                    issue reports $code $location "type definition '$key' refers back to itself"
+                    dict set reports typeNames $key ""
                     continue
                 }
-                dict set active $key 1
+                dict set active $key [llength $path]
+                lappend path $key
                 lappend stack [list resolve $key {}]
                 set references [dict get $dependencies $key]
                 foreach dependency [lreverse [dict keys $references]] {
@@ -276,13 +295,23 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     set name [dict get $node name]
     set actual [argumentTypes $node $scope $imports $world reports]
     set generic [dict getdef $node typeArgs {}]
-    set count [dict getdef {decode_json 1 map 2} $name 0]
+    set count [dict getdef {decode_json 1 make 1 map 2} $name 0]
     if {[llength $generic] != $count} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
     }
     switch -exact -- $name {
-        ok - err - encode_json { set params [list *] }
+        ok - err - encode_json - underlying { set params [list *] }
+        make {
+            set location [lindex [dict getdef $node typeLocations {}] 0]
+            if {$location eq ""} { set location $node }
+            set nominal [declaredType [lindex $generic 0] $location $world reports]
+            set base [dict getdef $reports distinctBases $nominal {}]
+            if {$nominal ne "" && $base eq ""} {
+                issue reports EXPECTED_DISTINCT $location "make requires a distinct scalar type, got $nominal"
+            }
+            set params [list $base]
+        }
         problem - decode_json - write_stdout_utf8 { set params [list text] }
         decode_utf8 { set params [list bytes] }
         read_stdin_bytes - map { set params {} }
@@ -312,6 +341,15 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     }
     if {!$valid} { return "" }
     switch -exact -- $name {
+        make { return $nominal }
+        underlying {
+            set type [lindex $actual 0]
+            if {![dict exists $reports distinctBases $type]} {
+                issue reports EXPECTED_DISTINCT [lindex [dict get $node args] 0] "underlying requires a distinct scalar, got $type"
+                return ""
+            }
+            return [dict get $reports distinctBases $type]
+        }
         ok { return [makeType result [list [lindex $actual 0] *]] }
         err { return [makeType result [list * [lindex $actual 0]]] }
         problem { return problem }
@@ -373,7 +411,7 @@ proc ::appcompiler::checker::mapCall {node name actual reportsVar} {
         }
     }
     if {!$valid} { return "" }
-    fact reports $node keyType $keyType
+    fact reports $node keyType [dict getdef $reports distinctBases $keyType $keyType]
     switch -exact -- $name {
         map_put { return $mapType }
         require_key { return [makeType result [list $valueType problem]] }
@@ -388,11 +426,11 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
     set name [dict get $node name]
     set localChoice [format {.%s::%s} $caller $target]
     if {$target ne ""} {
-        set isAlias [dict exists $reports aliases $localChoice]
-        if {$isAlias} { set localChoice [dict get $reports aliases $localChoice] }
+        set declaredKind [dict getdef $world schemas $localChoice kind {}]
+        if {$declaredKind eq "alias"} { set localChoice [dict get $reports typeNames $localChoice] }
         set isChoice [expr {[dict getdef $world schemas $localChoice kind {}] eq "choice"}]
         if {($isChoice && [dict exists $world schemas $localChoice members $name])
-                || (($isAlias || $isChoice) && $target ni $imports)} {
+                || (($declaredKind in {alias distinct} || $isChoice) && $target ni $imports)} {
             return [constructType $node .$target $name 1 $scope $imports $world reports]
         }
     }
@@ -648,7 +686,9 @@ proc ::appcompiler::checker::comparable {type world} {
         }
         if {![dict exists $world schemas $member]} { return 0 }
         set schema [dict get $world schemas $member]
-        if {[dict get $schema kind] eq "choice"} {
+        if {[dict get $schema kind] eq "distinct"} {
+            lappend pending [dict get $schema members]
+        } elseif {[dict get $schema kind] eq "choice"} {
             foreach payload [dict values [dict get $schema members]] { lappend pending {*}$payload }
         } else {
             lappend pending {*}[dict values [dict get $schema members]]
@@ -725,7 +765,7 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
             set keyType [expressionType $key $scope $imports $world reports]
             set parts [mapParts $mapType $base reports]
             if {![llength $parts] || ![mapKeyMatches $keyType [lindex $parts 1] $key reports]} { return "" }
-            fact reports $node keyType $keyType
+            fact reports $node keyType [dict getdef $reports distinctBases $keyType $keyType]
             return [makeType optional [list [lindex $parts 2]]]
         }
         match { return [matchType $node $scope $imports $world reports] }
@@ -909,7 +949,7 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
 }
 
 proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {resolvedVar {}}} {
-    set reports [dict create diagnostics {} facts {} aliases {}]
+    set reports [dict create diagnostics {} facts {} typeNames {} distinctBases {}]
     set world [dict create modules $modules schemas {} functions {}]
     # Establish nominal identities before resolving any field or signature types.
     dict for {module definition} $modules {
@@ -923,11 +963,15 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             }
         }
     }
-    checker::resolveAliases $world reports
+    checker::resolveTypeNames $world reports
     set runtimeSchemas {}
     dict for {key schema} [dict get $world schemas] {
         if {$schema ne "" && [dict get $schema kind] ne "alias"} {
-            set members [checker::readMembers $schema $world reports]
+            if {[dict get $schema kind] eq "distinct"} {
+                set members [dict getdef $reports distinctBases $key {}]
+            } else {
+                set members [checker::readMembers $schema $world reports]
+            }
             dict set world schemas $key members $members
             dict set runtimeSchemas $key [list [dict get $schema kind] $members]
         }
