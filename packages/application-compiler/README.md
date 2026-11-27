@@ -617,10 +617,30 @@ fn .lengths($word: text, $notes: list<text>) -> list<int> =>
 ```
 
 A parameter, return type or existing binding can supply the element type
-of `[]`. A new local list binding needs a concrete element type. For
-example, `$names := .empty_names()` declares an initially empty, mutable
-`list<text>`. A Tcl caller receives an ordinary Tcl list with one word per
-element, including empty strings and strings that contain spaces.
+of `[]`. Write `list<T>()` to supply it explicitly. A Tcl caller receives
+an ordinary Tcl list with one word per element, including empty strings
+and strings that contain spaces.
+
+`list_append($items, $value)` returns a list with one new element at the
+end. Earlier copies, callback captures and active iterations retain the
+list they started with. Assigning the result back to the same local lets
+the generated Tcl append in place when the local owns its list.
+
+```text
+fn .named($names: list<text>) -> list<text> {
+    $result := list<text>()
+    for $name in $names {
+        if $name != '' { $result = list_append($result, $name) }
+    }
+    return $result
+}
+```
+
+`$items[$i]` takes a zero-based `int` and returns `some($value)` for a
+present element. Negative indices and indices at or beyond the length
+return `none`. An empty text element returns `some('')`. For a required
+element, `require_index($items, $i)` returns `result<T,problem>` with the
+code `INDEX_OUT_OF_RANGE` for any missing index.
 
 `len(value)` returns an `int`. It counts list elements, map entries, raw
 bytes or Unicode code points, according to the type of its argument.

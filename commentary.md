@@ -430,6 +430,15 @@ Omitting a function body can put its diagnostic on the next function's
 `fn`. That function is checked again from its first token. An editor can
 now show the missing body and a separate error later on the same line.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, building a list of selected rows
+
+A function can now collect rows that meet a condition using a typed empty
+list and an append inside a loop. The compiler emits Tcl's local list
+append instruction when a function assigns the new list back to its
+original binding. A callback that captured the earlier list still sees
+its old contents. Optional and required index reads distinguish a missing
+row from a present row with an empty text value.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

@@ -430,6 +430,18 @@ proc nativeJsonText {value} {
     return [::machteld::json decode "\"[join $interiors {\u0000}]\""]
 }
 
+proc listLookup {items index} {
+    # X integers can exceed the Tcl list index range. Compare before lindex.
+    if {$index < 0 || $index >= [llength $items]} {return [list none]}
+    return [list some [lindex $items $index]]
+}
+
+proc require_index {items index} {
+    lassign [listLookup $items $index] tag item
+    if {$tag eq "some"} {return [list ok $item]}
+    return [list err [dict create code INDEX_OUT_OF_RANGE message "index $index is outside a list of length [llength $items]"]]
+}
+
 proc mapLookup {map key} {
     if {[dict exists $map $key]} {return [list some [dict get $map $key]]}
     return [list none]

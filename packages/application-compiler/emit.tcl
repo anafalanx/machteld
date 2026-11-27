@@ -354,6 +354,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set arguments [lmap argument [dict get $node args] {
                 emitExpression $argument $context $bindings $depth
             }]
+            if {$kind eq "builtin" && [dict get $node name] eq "list_append"} {
+                set arguments [linsert $arguments 1 end]
+            }
             if {$kind eq "builtin" && [dict get $node name] in {map_put require_key}} {
                 lset arguments 1 [emitMapKeyWord $node $context [lindex $arguments 1]]
             }
@@ -388,6 +391,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         index {
             set base [emitExpression [dict get $node base] $context $bindings $depth]
             set key [emitExpression [dict get $node key] $context $bindings $depth]
+            if {[dict exists [emitFacts $node $context] listIndex]} {
+                return [format {[%s %s %s]} [list ${targetNamespace}::@rt::listLookup] $base $key]
+            }
             set key [emitMapKeyWord $node $context $key]
             return [format {[%s %s %s]} [list ${targetNamespace}::@rt::mapLookup] $base $key]
         }
@@ -431,7 +437,8 @@ proc ::appcompiler::emitCallPrefix {node context} {
         builtin {
             set name [dict get $node name]
             switch -exact -- $name {
-                unit {return [list ::list]}
+                unit - list {return [list ::list]}
+                list_append {return [list ::linsert]}
                 map {return [list ::dict create]}
                 bind {return [list [list ${target}::@rt::bindCallback]]}
                 len {
@@ -443,7 +450,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 }
                 ref_get - ref_set - ref_same {return [list [list ${target}::@rt::${name}]]}
                 map_put {return [list ::dict replace]}
-                require_key {return [list [list ${target}::@rt::require_key]]}
+                require_key - require_index {return [list [list ${target}::@rt::${name}]]}
                 sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}
                 ok - err {return [list ::list $name]}
                 decode_json - encode_json {
@@ -569,14 +576,15 @@ proc ::appcompiler::emitStatement {node context} {
         return [list ::return -level 0 -code $code]
     }
     set value [dict get $node value]
-    # A checked update of the same variable can use Tcl's copy-on-write
-    # dictionary instruction. Other holders keep the previous dictionary.
-    if {$kind eq "assign" && [dict get $value kind] eq "builtin" && [dict get $value name] eq "map_put"} {
-        lassign [dict get $value args] base key item
+    # Direct updates of the same checked local use Tcl's copy-on-write
+    # instructions. Argument substitutions finish before the local changes.
+    if {$kind eq "assign" && [dict get $value kind] eq "builtin" && [dict get $value name] in {list_append map_put}} {
+        lassign [dict get $value args] base argument item
         if {[dict get $base kind] eq "var" && [dict get $base name] eq [dict get $node name]} {
-            set keyWord [emitMapKeyWord $value $context [emitExpression $key $context]]
-            return [format {::dict set %s %s %s} [emitLocalName [dict get $node name]] \
-                $keyWord [emitExpression $item $context]]
+            set local [emitLocalName [dict get $node name]]
+            set word [emitExpression $argument $context]
+            if {[dict get $value name] eq "list_append"} {return [format {::lappend %s %s} $local $word]}
+            return [format {::dict set %s %s %s} $local [emitMapKeyWord $value $context $word] [emitExpression $item $context]]
         }
     }
     set word [emitExpression $value $context]
