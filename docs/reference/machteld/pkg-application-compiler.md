@@ -90,13 +90,21 @@ Use `match` on a `result<T,E>` to handle each outcome locally.
 are required. A nested match can inspect an application's declared error
 variants. Use `?` to propagate the typed failure to the caller.
 
-## List literals and length
+## List construction, lookup and length
 
 `[1, 2, 3]` builds a `list<int>`. Elements evaluate once from left to
 right. The declared return type in `fn .names() -> list<text> => []`
 supplies the type of the empty list. In `[[], ['007']]`, the second
 element supplies the missing type. Use `len(value)` to count list
 elements, map entries, bytes or Unicode code points in text.
+
+Start a mutable collector with `$names := list<text>()`, then use
+`$names = list_append($names, $name)` in a loop. Each append preserves
+earlier copies and captures. `$names[$i]` uses a zero-based `int` and
+returns `some($name)` when present, including `some('')` for empty text.
+Negative or out-of-range indices return `none`. Use
+`require_index($names, $i)?` to propagate an `INDEX_OUT_OF_RANGE` problem
+when an element is required.
 
 ## Argument labels
 

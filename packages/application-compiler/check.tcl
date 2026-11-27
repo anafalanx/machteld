@@ -491,7 +491,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         return ""
     }
     set generic [dict getdef $node typeArgs {}]
-    set count [dict getdef {decode_json 1 make 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
+    set count [dict getdef {decode_json 1 make 1 list 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
     if {[llength $generic] != $count} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
@@ -540,7 +540,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         find_executable {set params {text}}
         decode_utf8 { set params [list bytes] }
         decode_text - preview_text { set params {bytes text} }
-        read_stdin_bytes - map { set params {} }
+        read_stdin_bytes - list - map { set params {} }
+        list_append - require_index {return [listCall $node $name $actual reports]}
         map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
         sql_one - sql_optional - sql_many - sql_exec - sql_commit {
             return [sqlCall $node $name $actual $world reports]
@@ -559,8 +560,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
     }
     set valid [checkArguments $node $name $actual $params reports]
-    if {$name eq "map"} {
-        set type [declaredType [makeType map $generic] $node $world reports]
+    if {$name in {list map}} {
+        set type [declaredType [makeType $name $generic] $node $world reports]
         if {!$valid} { return "" }
         return $type
     }
@@ -715,6 +716,25 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
         sql_many { set row [makeType list [list $row]] }
     }
     return [makeType result [list $row problem]]
+}
+
+proc ::appcompiler::checker::listCall {node name actual reportsVar} {
+    upvar 1 $reportsVar reports
+    set expected [expr {$name eq "require_index" ? {* int} : {* *}}]
+    if {![checkArguments $node $name $actual $expected reports]} {return ""}
+    lassign $actual sequence argument
+    lassign [::appcompiler::typeParts $sequence] head element
+    if {$head ne "list"} {
+        issue reports EXPECTED_LIST [lindex [dict get $node args] 0] "'$name' expects a list, got $sequence"
+        return ""
+    }
+    if {$name eq "require_index"} {return [checkedType result [list $element problem] $node reports]}
+    set joined [joinTypes $element $argument]
+    if {$joined eq ""} {
+        issue reports ARGUMENT_TYPE [lindex [dict get $node args] 1] "'$name' expects a $element element, got $argument"
+        return ""
+    }
+    return [checkedType list [list $joined] $node reports]
 }
 
 proc ::appcompiler::checker::mapParts {type base reportsVar} {
@@ -1561,12 +1581,26 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
         index {
             set base [dict get $node base]
             set key [dict get $node key]
-            set mapType [expressionType $base $scope $imports $world reports]
+            set baseType [expressionType $base $scope $imports $world reports]
             set keyType [expressionType $key $scope $imports $world reports]
-            set parts [mapParts $mapType $base reports]
-            if {![llength $parts] || ![mapKeyMatches $keyType [lindex $parts 1] $key reports]} { return "" }
+            if {$baseType eq ""} {return ""}
+            lassign [::appcompiler::typeParts $baseType] head first second
+            if {$head eq "list"} {
+                if {$keyType eq ""} {return ""}
+                if {$keyType ne "int"} {
+                    issue reports LIST_INDEX_TYPE $key "a list index must be int, got $keyType"
+                    return ""
+                }
+                fact reports $node listIndex 1
+                return [checkedType optional [list $first] $node reports]
+            }
+            if {$head ne "map"} {
+                issue reports EXPECTED_MAP $base "indexing requires a list or map, got $baseType"
+                return ""
+            }
+            if {![mapKeyMatches $keyType $first $key reports]} {return ""}
             fact reports $node keyType [dict getdef $reports distinctBases $keyType $keyType]
-            return [makeType optional [list [lindex $parts 2]]]
+            return [checkedType optional [list $second] $node reports]
         }
         match { return [matchType $node $scope $imports $world reports] }
         var {
