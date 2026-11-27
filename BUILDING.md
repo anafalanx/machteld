@@ -220,6 +220,9 @@ demonstrated that the runtime could still find that payload. Verify the
 signature and signer on the 0.50 copy. Run the gate on that exact file
 with `--skip-build --runtime FILE`, using the signed 0.21 driver. Record
 the signed file's SHA-256 and obtain the owner's publication decision.
+The owner procedure covers a clean Windows installation, mixed Tcl/X source
+recovery, terminal and Tk behavior, and a live archive update on the managed
+share. [Signed 0.50 acceptance on Windows](docs/releases/0.50-attended.md)
 
 ## Incremental builds and version numbers
 
