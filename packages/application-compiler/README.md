@@ -135,6 +135,48 @@ procedure as a callable, give it an X `extern fn` declaration and take that
 declaration as a value. A callable has no value equality, SQL column type
 or JSON representation.
 
+## Shared state and its owner
+
+`ref<T>` names a mutable cell containing a `T`. Create it inside a
+`using` block. Copying the reference or binding it into a callback copies
+the handle. A read in the callback sees whatever the cell contains when
+the callback runs.
+
+```text
+fn .read($state: ref<text>) -> text => ref_get($state)
+fn .identity($value: text) -> text => $value
+
+fn .captions() -> text {
+    using $state ::= ref('draft') {
+        $snapshot ::= bind(.identity, ref_get($state))
+        $live ::= bind(.read, $state)
+        ref_set($state, 'final')
+        return $"${$snapshot()} / ${$live()}"
+    }
+}
+example .captions() => 'draft / final'
+```
+
+`.captions()` returns `draft / final`. An explicit type is useful when
+the initial value carries too little type information, for example
+`using $station ::= ref<text?>(none) { ... }`. The element type stays
+fixed. `ref_set` returns `unit`. Use `ref_same($left, $right)` for
+identity between live references of the same type. To compare their
+contents, call `ref_get` and compare the returned values.
+
+The owning block releases its cell on every exit, including an early
+return, a loop jump or a fault. A callback may read it after the callback's
+creating function returns, provided the owning block is still active.
+For a window callback, keep its owner active while the window dispatches
+events. A longer-lived window owner would need its own explicit close
+point. A retained ticket or callback used after its owner exits raises
+`APPCOMPILER REFERENCE EXPIRED`.
+
+Tcl can pass a live reference back to a typed export in the same application
+and interpreter. The boundary checks its owner and element type. A worker
+that needs the current contents can receive a serializable value obtained
+with `ref_get`. References themselves have no JSON or SQL representation.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.

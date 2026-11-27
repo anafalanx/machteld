@@ -82,6 +82,20 @@ invocation. Tcl can invoke the returned prefix with `{*}$prefix 42`.
 Declare an existing Tcl procedure as an `extern fn` to use it as a
 typed callback. The compiler guide includes a complete capture example.
 
+## Sharing state with a callback
+
+Create a typed cell with `using $state ::= ref('draft') { ... }`. A
+`ref<text>` parameter accepts its reference. Read it with `ref_get($state)`
+and update it with `ref_set($state, 'final')`. Binding the reference into
+a callback lets each invocation read the latest value. Binding the result
+of `ref_get` captures an ordinary snapshot.
+
+Tcl can retain and pass back the reference during the owner's scope.
+Leaving that block closes the cell on every exit. Subsequent access raises
+`APPCOMPILER REFERENCE EXPIRED`. A reference belongs to one generated
+application and interpreter. Use `ref_same` to compare two live references
+for identity.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type

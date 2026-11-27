@@ -75,7 +75,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         }
         return [dict get $world typeBindings $head]
     }
-    if {$head in {result list optional range map callable}} {
+    if {$head in {result list optional range map callable ref}} {
         if {$head eq "callable"} {
             set arity [expr {[llength $parts] - 1}]
             if {$arity == 0} {
@@ -319,6 +319,12 @@ proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
     if {$type in {{} @transaction}} {return}
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
+    if {$head eq "ref"} {
+        if {[dict get $node value kind] ne "refCreate"} {
+            issue reports REF_SCOPE [dict get $node value] {only ref(initial) creates an owning reference scope}
+        }
+        return
+    }
     if {![dict exists $world resources $head]} {
         issue reports RESOURCE_REQUIRED [dict get $node value] "no scoped cleanup function is declared for $type"
         return
@@ -471,6 +477,10 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     set name [dict get $node name]
     set sqlTarget [expr {$name in {sql_one sql_optional sql_many sql_exec sql_commit}}]
     set actual [argumentTypes $node $scope $imports $world reports $sqlTarget]
+    if {$name eq "ref"} {
+        issue reports REF_SCOPE $node {create a reference with 'using $cell ::= ref(initial)'}
+        return ""
+    }
     set generic [dict getdef $node typeArgs {}]
     set count [dict getdef {decode_json 1 make 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
     if {[llength $generic] != $count} {
@@ -478,6 +488,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         return ""
     }
     switch -exact -- $name {
+        ref_get - ref_set - ref_same {return [referenceOperation $node $name $actual reports]}
         bind {return [callableOperation $node bind $actual reports]}
         ok - err - encode_json - underlying - len { set params [list *] }
         make {
@@ -887,6 +898,25 @@ proc ::appcompiler::checker::callableOperation {node operation actual reportsVar
     }
     if {![checkArguments $node $operation $supplied $expected reports]} {return ""}
     return [lindex $parts end]
+}
+
+proc ::appcompiler::checker::referenceOperation {node operation actual reportsVar} {
+    upvar 1 $reportsVar reports
+    set type [lindex $actual 0]
+    set parts [::appcompiler::typeParts $type]
+    if {$type ne "" && [lindex $parts 0] ne "ref"} {
+        issue reports EXPECTED_REF [lindex [dict get $node args] 0] "expected a shared reference, got $type"
+        return ""
+    }
+    set element [lindex $parts 1]
+    set expected [list $type]
+    switch -exact -- $operation {
+        ref_get {set result $element}
+        ref_set {lappend expected $element; set result unit}
+        ref_same {lappend expected $type; set result bool}
+    }
+    if {![checkArguments $node $operation $actual $expected reports]} {return ""}
+    return $result
 }
 
 proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
@@ -1428,6 +1458,26 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             if {![checkArguments $node sql_begin $actual {text} reports]} { return "" }
             dict set reports usesSql 1
             return result<@transaction,problem>
+        }
+        refCreate {
+            set actual [argumentTypes $node $scope $imports $world reports]
+            set locations [dict get $node typeLocations]
+            if {[llength $locations] > 1} {
+                issue reports TYPE_ARITY $node {ref accepts one element type}
+                return ""
+            }
+            set type [lindex $actual 0]
+            if {[llength $locations]} {
+                set where [lindex $locations 0]
+                set type [declaredType [dict get $where name] $where $world reports]
+            }
+            if {![checkArguments $node ref $actual [list $type] reports]} {return ""}
+            if {[string first * $type] >= 0} {
+                issue reports TYPE_INFERENCE $node {supply an explicit type for the initial reference value}
+                return ""
+            }
+            fact reports $node elementType $type
+            return [checkedType ref [list $type] $node reports]
         }
         call - functionValue { return [callType $node $scope $imports $world reports] }
         invoke {

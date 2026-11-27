@@ -53,6 +53,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
         }
         switch -exact -- $head {
             callable {return [guardCallable $type $value $path]}
+            ref {return [guardReference $first $value $path]}
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -296,7 +297,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             }
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
-        call - construct - builtin - sqlBegin {
+        call - construct - builtin - sqlBegin - refCreate {
             # These explicit conversions preserve the checked Tcl representation.
             if {$kind eq "builtin" && [dict get $node name] in {make underlying instant_text local_datetime_text}} {
                 return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
@@ -363,6 +364,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
     set target [dict get $context target]
     switch -exact -- [dict get $node kind] {
         sqlBegin {return [list [list ${target}::@rt::sqlBegin]]}
+        refCreate {return [list [list ${target}::@rt::newReference] [emitTypeWord [dict get $facts elementType] $context]]}
         construct {return [list ::list [list [dict get $node variant]]]}
         call {
             set name [dict get $node name]
@@ -388,6 +390,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                         text - bytes {return [list ::string length]}
                     }
                 }
+                ref_get - ref_set - ref_same {return [list [list ${target}::@rt::${name}]]}
                 map_put {return [list ::dict replace]}
                 require_key {return [list [list ${target}::@rt::require_key]]}
                 sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}
@@ -635,7 +638,8 @@ proc ::appcompiler::emitUsing {node context bodyVar locationsVar} {
     if {![dict exists $facts resourceCloser]} {
         emitLine "::try \{" $location body locations
         emitStatements [dict get $node body] $context body locations
-        emitLine [format {%c finally { %s $%s }} 125 [list ${target}::@rt::sqlEnd] $local] $location body locations
+        set closer [expr {[dict get $node value kind] eq "refCreate" ? "endReference" : "sqlEnd"}]
+        emitLine [format {%c finally { %s $%s }} 125 [list ${target}::@rt::${closer}] $local] $location body locations
         return
     }
 

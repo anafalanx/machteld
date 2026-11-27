@@ -16,7 +16,7 @@ proc concreteType {type schemas} {
             if {[string index $type end] ne "?"} {return 0}
             set arity 1
         }
-        list {set arity 1}
+        list - ref {set arity 1}
         callable {
             set arity [llength $children]
             if {$arity == 0} {return 0}
@@ -78,6 +78,64 @@ proc guardCallable {type value path} {
 proc bindCallback {callback args} {
     lassign $callback dispatch key types captures
     return [list $dispatch $key $types [list {*}$captures {*}$args]]
+}
+
+# A scope owns the only table entry. Tcl copies carry its opaque ticket,
+# never the cell or its cleanup. Even mutually referring cells expire.
+proc newReference {type initial} {
+    variable referenceOwner
+    variable referenceCells
+    variable referenceSerial
+    if {![info exists referenceOwner]} {
+        set referenceOwner [binary encode hex [::machteld::hash random 16]]
+    }
+    set key [incr referenceSerial]-[binary encode hex [::machteld::hash random 16]]
+    set referenceCells($key) [list $type $initial]
+    return [list $referenceOwner $key]
+}
+
+proc referenceKey {ticket path} {
+    variable referenceOwner
+    variable referenceCells
+    if {[catch {llength $ticket} size] || $size != 2 ||
+            ![info exists referenceOwner] || [lindex $ticket 0] ne $referenceOwner} {
+        reject $path {a live reference from this application}
+    }
+    set key [lindex $ticket 1]
+    if {![info exists referenceCells($key)]} {
+        return -code error -errorcode {APPCOMPILER REFERENCE EXPIRED} "shared reference at $path is no longer live"
+    }
+    return $key
+}
+
+proc guardReference {type ticket path} {
+    variable referenceCells
+    set key [referenceKey $ticket $path]
+    if {[lindex $referenceCells($key) 0] ne $type} {reject $path "ref<$type>"}
+    return $ticket
+}
+
+proc ref_get {ticket} {
+    variable referenceCells
+    set key [referenceKey $ticket ref_get]
+    return [lindex $referenceCells($key) 1]
+}
+
+proc ref_set {ticket value} {
+    variable referenceCells
+    set key [referenceKey $ticket ref_set]
+    set type [lindex $referenceCells($key) 0]
+    set referenceCells($key) [list $type [guard $type $value {ref_set value}]]
+    return {}
+}
+
+proc ref_same {left right} {
+    return [expr {[referenceKey $left ref_same] eq [referenceKey $right ref_same]}]
+}
+
+proc endReference {ticket} {
+    variable referenceCells
+    unset referenceCells([lindex $ticket 1])
 }
 
 # Tcl packages and Tk may call an exported prefix directly. Validate all
@@ -455,7 +513,7 @@ proc fromWire {type node path} {
             if {$actual ne "boolean"} {invalidWire "$path expects a boolean, got $actual"}
             return [::machteld::json unwrap $node]
         }
-        bytes - callable {invalidWire "$path has no JSON representation for $head"}
+        bytes - callable - ref {invalidWire "$path has no JSON representation for $head"}
         list {
             if {$actual ne "array"} {invalidWire "$path expects an array, got $actual"}
             set out {}
@@ -506,7 +564,7 @@ proc toWire {type value path} {
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
-        bytes - callable {invalidWire "$path has no JSON representation for $head"}
+        bytes - callable - ref {invalidWire "$path has no JSON representation for $head"}
         list {
             set nodes {}
             foreach element $value {lappend nodes [toWire [lindex $parts 1] $element $path]}

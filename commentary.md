@@ -376,6 +376,14 @@ text values. An empty inner list in `[[], [7]]` takes its integer element
 type from the second row. The same `len` call counts rows in this table,
 octets in a file or Unicode code points in a decoded name.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, shared state
+
+Two callbacks registered against the same value returned different
+answers. The first retained the original `007`. The second captured an
+explicit reference and observed two later updates during event delivery.
+After the owning block returned, invoking the retained callback reported
+an expired reference.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

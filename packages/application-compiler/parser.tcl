@@ -686,7 +686,10 @@ oo::class create ::appcompiler::ModuleParser {
                 set binding $token
                 my advance
                 my take ::= {'::=' after the scoped binding}
-                if {[my at identifier] && [dict get $token value] eq "sql_begin"} {
+                if {[my at identifier] && [dict get $token value] eq "ref"} {
+                    set value [my primary]
+                    dict set value kind refCreate
+                } elseif {[my at identifier] && [dict get $token value] eq "sql_begin"} {
                     set resource $token
                     my advance
                     set begin [my node $resource sqlBegin args [my parenthesized expression]]
