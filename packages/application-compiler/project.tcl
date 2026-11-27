@@ -96,7 +96,7 @@ proc ::appcompiler::project::load {manifest} {
     set manifestBytes [readBytes $manifest cache]
     set data [dataDict [decode $manifestBytes $manifest] manifest]
     dict for {key ignored} $data {
-        if {$key ni {schema edition minApi entry modules assets}} {invalid "unknown manifest key [list $key]"}
+        if {$key ni {schema edition minApi entry modules assets packageDirs}} {invalid "unknown manifest key [list $key]"}
     }
     foreach key {schema edition minApi entry modules} {
         if {![dict exists $data $key]} {invalid "missing manifest key [list $key]"}
@@ -140,6 +140,18 @@ proc ::appcompiler::project::load {manifest} {
         reserve $path inventory
         dict set selected $path {}
     }
+    set packageDirs [dict getdef $data packageDirs {}]
+    if {[catch {llength $packageDirs}]} {invalid "packageDirs must be a list of relative directories"}
+    set directories {}
+    foreach item $packageDirs {
+        set path [relativePath $item]
+        set index "$path/pkgIndex.tcl"
+        if {![dict exists $selected $index] || [dict get $selected $index] ne ""} {
+            invalid "package directory [list $path] requires [list $index] in assets"
+        }
+        if {$path in $directories} {invalid "duplicate package directory [list $path]"}
+        lappend directories $path
+    }
     set root [file dirname $manifest]
     set files {}
     set sources {}
@@ -149,12 +161,14 @@ proc ::appcompiler::project::load {manifest} {
         if {$module ne ""} {dict set sources $module [decode $bytes $path]}
     }
     return [dict create edition $edition minApi $minApi sources $sources entry $entry \
-        files $files manifestBytes $manifestBytes]
+        files $files manifestBytes $manifestBytes packageDirs $directories]
 }
 
-proc ::appcompiler::project::build {manifest} {
+proc ::appcompiler::project::build {manifest {packageRoot {}}} {
     set project [load $manifest]
+    if {$packageRoot eq ""} {set packageRoot [file dirname [file normalize $manifest]]}
+    set directories [lmap path [dict get $project packageDirs] {file join $packageRoot $path}]
     set artifact [::appcompiler::application [dict get $project sources] {*}[dict get $project entry] \
-        [dict get $project minApi]]
+        [dict get $project minApi] $directories]
     return [dict create project $project artifact $artifact]
 }

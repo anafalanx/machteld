@@ -941,6 +941,7 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
     foreach param [dict get $function params] {
         bindLocal scope $param [dict get $param type] 0 reports
     }
+    if {[dict getdef $function kind fn] eq "extern"} { return }
     dict set world returnType [dict get $function result]
     if {![checkBlock [dict get $function body] $scope $imports $world reports]} {
         set name [dict get $function name]

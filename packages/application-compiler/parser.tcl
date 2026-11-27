@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice alias distinct match with some none if else unit for in break continue while}
+        set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while}
         set localChoices {}
         my advance
     }
@@ -152,15 +152,17 @@ oo::class create ::appcompiler::ModuleParser {
                 set exported [my at export]
                 if {$exported} { my advance }
                 switch -exact -- [dict get $token kind] {
-                    fn {
+                    fn - extern {
+                        set kind [dict get $token kind]
                         my advance
-                        lappend functions [my function $exported]
+                        if {$kind eq "extern"} { my take fn "'fn' after 'extern'" }
+                        lappend functions [my function $exported $kind]
                     }
                     record - choice - alias - distinct {
                         lappend types [my typeDeclaration $exported]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, record, choice, alias, distinct or import declaration}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct or import declaration}
                     }
                 }
             }
@@ -207,15 +209,59 @@ oo::class create ::appcompiler::ModuleParser {
         return $entries
     }
 
-    method function {exported} {
+    method function {exported kind} {
         set name [my take dotName {a dot-prefixed function name}]
         set params [my parenthesized parameter]
         my take -> {'->' before the result type}
         set result [my typeAnnotation]
         my skipLines
-        set body [my braced statement {function body}]
-        return [my node $name fn name [dict get $name value] exported $exported params $params \
-                result [dict get $result name] resultLocation $result body $body]
+        set node [my node $name $kind name [dict get $name value] exported $exported params $params \
+                result [dict get $result name] resultLocation $result body {}]
+        if {$kind eq "extern"} { return [dict merge $node [my externalBinding]] }
+        dict set node body [my braced statement {function body}]
+        return $node
+    }
+
+    method externalBinding {} {
+        my take = {'=' before the external command prefix}
+        my skipLines
+        my take {[} {an opening bracket before the external command prefix}
+        my skipLines
+        if {[my at {]}]} {
+            ::appcompiler::fail E_EXTERN_COMMAND $token {the external command prefix must contain a command name}
+        }
+        set first [my take text {a single-quoted absolute Tcl command name}]
+        set command [dict get $first value]
+        if {![string match ::* $command] || [string match *:: $command] ||
+                [string first :::: $command] >= 0 || [string first \u0000 $command] >= 0} {
+            ::appcompiler::fail E_EXTERN_COMMAND $first {expected an absolute Tcl command name with nonempty namespace components and no NUL}
+        }
+        set prefix [list $command]
+        my skipLines
+        while {[my at ,]} {
+            my advance
+            my skipLines
+            lappend prefix [dict get [my take text {a single-quoted fixed command argument}] value]
+            my skipLines
+        }
+        my take {]} {a closing bracket after the external command prefix}
+        set binding [dict create prefix $prefix prefixLocation [my node $first command] package {}]
+        set after [my cursor]
+        my skipLines
+        if {[my at identifier] && [dict get $token value] eq "from"} {
+            my advance
+            my skipLines
+            set word [my take text {a single-quoted package name after 'from'}]
+            set package [dict get $word value]
+            if {$package eq "" || [string index $package 0] eq "-" || [string first \u0000 $package] >= 0} {
+                ::appcompiler::fail E_EXTERN_PACKAGE $word {expected a nonempty package name without a NUL or leading hyphen}
+            }
+            dict set binding package $package
+            dict set binding packageLocation [my node $word package]
+        } else {
+            my restore $after
+        }
+        return $binding
     }
 
     method typeAnnotation {} {

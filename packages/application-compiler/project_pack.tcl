@@ -51,7 +51,7 @@ proc ::appcompiler::project::stageBytes {path bytes} {
 
 proc ::appcompiler::project::pack {manifest output} {
     requirePacker
-    set built [build $manifest]
+    set built [build $manifest project/inputs]
     set manifest [file normalize $manifest]
     set project [dict get $built project]
     set inputs [dict get $project files]

@@ -93,7 +93,7 @@ proc ::appcompiler::compile {sources {targetNamespace ::application}} {
 
 # Produce a complete Machteld Tcl entry without running the application.
 # The selected entry may be private to its module.
-proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}}} {
+proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}}} {
     set analysis [analyze $sources]
     if {![llength [dict get $analysis diagnostics]]} {
         set location [dict create module $entryModule line 1 column 1]
@@ -120,7 +120,13 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
         }
         lappend requirement "$minApi-"
     }
-    set script "$requirement\n[dict get $artifact script]\n"
+    set script "$requirement\n"
+    # Tcl reads a package index on demand. Embedded paths resolve beside the
+    # generated entry; the source driver supplies absolute project paths.
+    foreach path [lreverse $packageDirs] {
+        append script [format {set ::auto_path [linsert $::auto_path 0 [file join [file dirname [info script]] %s]]} [list $path]] \n
+    }
+    append script "[dict get $artifact script]\n"
     append script "::exit \[$dispatch \$::argv\]\n"
     dict set artifact script $script
     return $artifact

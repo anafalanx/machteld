@@ -107,6 +107,36 @@ numeric ID. The declaration and conversion spellings are provisional.
 Run `machteld.exe test/application_compiler_distinct_test.tcl` to check
 construction, equality, module visibility and boundary behavior.
 
+## Calling Tcl commands
+
+Declare the commands a module uses. Each declaration gives the function a
+source name, typed parameters, a return type and a Tcl command prefix.
+
+```text
+extern fn .character_count($value: text) -> int = ['::string', 'length']
+export fn .count_title($title: text) -> int { return .character_count($title) }
+
+extern fn .format_title($title: text) -> text = ['::catalogue::title'] from 'catalogue'
+```
+
+Put the fully qualified Tcl command name first. Any remaining literal words
+select a subcommand or supply fixed arguments. Each source argument becomes
+one more Tcl word. For example, the first declaration calls
+`::string length` and preserves spaces and brackets in the title.
+
+Callers use the same argument and import rules as for an ordinary function.
+The compiler can check the declaration and its callers on a machine where
+the package is absent. At execution, `from` requires the named Tcl package
+when the function is called. The wrapper checks the returned Tcl value
+against the declared type. A Tcl command returning an empty value can have
+return type `unit`. A function returning `result<T,problem>` accepts the
+tagged Tcl lists `{ok value}` and `{err problemDictionary}`. For commands
+with variable signatures, a short Tcl procedure can present a fixed
+interface. Native exceptions and invalid returns report their declaration
+location. A problem carrying its own valid source position retains it.
+Run `machteld.exe test/application_compiler_extern_test.tcl` for boundary
+examples and failure cases. The declaration spelling is provisional.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and
@@ -232,6 +262,22 @@ rules, and `minApi` sets the minimum Machteld version for building on a
 Machteld host and for running the generated program. Remove the `assets`
 line if the application has none. The manifest and its module table are Tcl
 dictionaries read as data. Use list quoting for paths containing spaces.
+
+For a local pure-Tcl package, include its index and implementation in
+`assets` and name the directory containing the index in `packageDirs`.
+For example, a project exposing the `catalogue` package above can use
+these two manifest entries.
+
+```tcl
+assets {plugins/catalogue/pkgIndex.tcl plugins/catalogue/catalogue.tcl}
+packageDirs {plugins/catalogue}
+```
+
+Directories are added to Tcl's package search path in the order given.
+The source driver resolves them beside the manifest. Packaged applications
+resolve them inside the archive. Include any other scripts or data the
+package reads in `assets`. Checking and packing preserve their bytes
+without loading the package.
 
 From the repository root, run the development driver with the local executable.
 

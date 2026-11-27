@@ -40,14 +40,14 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
     lappend definitions [list ::proc ${rt}::reject {path expected} {
         return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} "expected $expected at $path"
     }]
-    lappend definitions [list ::proc ${rt}::guard {type value path} {
+    lappend definitions [list ::proc ${rt}::guard {type value path {checkExtras 0}} {
         lassign [typeParts $type] head first second
         if {$head eq "optional"} {
             if {[catch {llength $value} size]} {reject $path $type}
             set tag [lindex $value 0]
             if {$tag eq "none" && $size == 1} {return [list none]}
             if {$tag ne "some" || $size != 2} {reject $path $type}
-            return [list some [guard $first [lindex $value 1] $path]]
+            return [list some [guard $first [lindex $value 1] $path $checkExtras]]
         }
         switch -exact -- $head {
             range {
@@ -61,7 +61,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 set index 0
                 set result {}
                 foreach item $value {
-                    lappend result [guard $first $item $path.$index]
+                    lappend result [guard $first $item $path.$index $checkExtras]
                     incr index
                 }
                 return $result
@@ -78,7 +78,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                         return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} \
                             "map keys at $path normalize to the same $first key [list $key]"
                     }
-                    dict set result $key [guard $second $item "$path\[[list $key]\]"]
+                    dict set result $key [guard $second $item "$path\[[list $key]\]" $checkExtras]
                 }
                 return $result
             }
@@ -86,8 +86,8 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 if {[catch {llength $value} size] || $size != 2} {reject $path $type}
                 lassign $value tag payload
                 switch -exact -- $tag {
-                    ok  {return [list ok  [guard $first $payload $path.ok]]}
-                    err {return [list err [guard $second $payload $path.err]]}
+                    ok  {return [list ok  [guard $first $payload $path.ok $checkExtras]]}
+                    err {return [list err [guard $second $payload $path.err $checkExtras]]}
                     default {reject $path $type}
                 }
             }
@@ -107,13 +107,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                     dict set value byteOffset $offset
                 }
                 if {[dict exists $value origin]} {
-                    set origin [dict get $value origin]
-                    if {[catch {dict size $origin}] || ![dict exists $origin module]} {reject $path.origin {a source location}}
-                    foreach field {line column} {
-                        if {![dict exists $origin $field]} {reject $path.origin.$field int}
-                        dict set origin $field [guard int [dict get $origin $field] $path.origin.$field]
-                    }
-                    dict set value origin $origin
+                    dict set value origin [guardLocation [dict get $value origin] $path.origin]
                 }
                 return $value
             }
@@ -138,12 +132,21 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
         if {$kind eq "distinct"} {return [guard $members $value $path]}
         if {$kind eq "record"} {
             if {[catch {dict size $value}]} {reject $path $type}
+            # Unknown record fields from an extern must remain usable by
+            # structural equality and by the JSON writer without type guessing.
+            if {$checkExtras} {
+                dict for {name extra} $value {
+                    if {![dict exists $members $name] && [catch {::machteld::json type $extra}]} {
+                        reject "$path\[[list $name]\]" {a retained typed JSON value}
+                    }
+                }
+            }
             dict for {field fieldType} $members {
                 if {![dict exists $value $field]} {
                     if {[string index $fieldType end] eq "?"} {continue}
                     reject $path.$field $fieldType
                 }
-                dict set value $field [guard $fieldType [dict get $value $field] $path.$field]
+                dict set value $field [guard $fieldType [dict get $value $field] $path.$field $checkExtras]
             }
             return $value
         }
@@ -156,7 +159,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
         set index 0
         foreach fieldType $payload {
             incr index
-            lappend result [guard $fieldType [lindex $value $index] $path.$tag.$index]
+            lappend result [guard $fieldType [lindex $value $index] $path.$tag.$index $checkExtras]
         }
         return $result
     }]
@@ -343,6 +346,7 @@ proc ::appcompiler::emitMatch {node context bindings depth} {
 
 proc ::appcompiler::emitListMatch {scrutinee slot arms context bindings depth} {
     set branches {}
+    set equalText [list [dict get $context target]::@rt::equal text]
     foreach arm $arms {
         set scope $bindings
         if {[dict get $arm kind] eq "fallback"} {
@@ -354,7 +358,7 @@ proc ::appcompiler::emitListMatch {scrutinee slot arms context bindings depth} {
             foreach pattern $elements {
                 set item [format {[::lindex $%s %d]} $slot $index]
                 if {[dict get $pattern kind] eq "patternText"} {
-                    lappend conditions [format {[::string equal %s %s]} $item [emitTextWord [dict get $pattern value]]]
+                    lappend conditions [format {[%s %s %s]} $equalText $item [emitTextWord [dict get $pattern value]]]
                 } else {
                     dict set scope [dict get $pattern name] $item
                 }
@@ -510,6 +514,28 @@ proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
     }
 }
 
+proc ::appcompiler::emitExtern {function context formals bodyVar locationsVar} {
+    upvar 1 $bodyVar body $locationsVar locations
+    set rt [dict get $context target]::@rt
+    set invoke [list ${rt}::externInvoke]
+    set package [dict get $function package]
+    if {$package ne {}} {
+        set where [emitLocation [dict get $function packageLocation]]
+        emitLine [format {%s %s {::package require} %s} $invoke [list $where] [emitTextWord $package]] \
+            $where body locations
+    }
+    set where [emitLocation [dict get $function prefixLocation]]
+    # Encode the whole prefix as one literal list on one generated source line.
+    set call [list $invoke [list $where] [emitTextWord [dict get $function prefix]]]
+    foreach formal $formals {lappend call [format {$%s} $formal]}
+    set value [format {[%s %s %s [%s]]} [list ${rt}::externResult] [list $where] \
+        [list [dict get $function result]] [join $call { }]]
+    if {[dict get $context problemResult]} {
+        set value [format {[%s %s %s]} [list ${rt}::atResult] $value [list $where]]
+    }
+    emitLine [format {::return %s} $value] $where body locations
+}
+
 proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
     set definitions [emitRuntime $targetNamespace [dict get $resolved schemas]]
     set sourceMap [dict create]
@@ -525,9 +551,6 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
             set formals {}
             set body {}
             set locations [dict create]
-            set targets {}
-            findOuterJumps [dict get $function body] {} {} targets
-            dict set context outerJumps $targets
             foreach param [dict get $function params] {
                 set local [emitLocalName [dict get $param name]]
                 lappend formals $local
@@ -539,7 +562,14 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
                     dict set locations [llength $body] [emitLocation $param]
                 }
             }
-            emitStatements [dict get $function body] $context body locations
+            if {[dict get $function kind] eq "extern"} {
+                emitExtern $function $context $formals body locations
+            } else {
+                set targets {}
+                findOuterJumps [dict get $function body] {} {} targets
+                dict set context outerJumps $targets
+                emitStatements [dict get $function body] $context body locations
+            }
             lappend definitions [list ::proc $name $formals [join $body \n]]
             dict set sourceMap $name $locations
         }

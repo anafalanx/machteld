@@ -27,6 +27,52 @@ proc locationPrefix {location} {
     return "[dict get $location module]:[dict get $location line]:[dict get $location column]: "
 }
 
+proc guardLocation {location path} {
+    if {[catch {dict size $location}] || [dict getdef $location module {}] eq {}} {
+        reject $path {a source location with a nonempty module}
+    }
+    foreach field {line column} {
+        if {![dict exists $location $field]} {reject $path.$field {a positive integer}}
+        set position [guard int [dict get $location $field] $path.$field]
+        if {$position < 1} {reject $path.$field {a positive integer}}
+        dict set location $field $position
+    }
+    return $location
+}
+
+# A nested extern may already have located the failing command. Native Tcl
+# can also supply arbitrary error options, so validate before retaining one.
+proc errorLocation {options {fallback {}}} {
+    if {[dict exists $options -appcompilerlocation]
+            && ![catch {guardLocation [dict get $options -appcompilerlocation] {error location}} location]} {
+        return $location
+    }
+    return $fallback
+}
+
+# The prefix and arguments are Tcl list elements. Run the command in the
+# global scope, even when the wrapper was called from another Tcl namespace.
+proc externInvoke {location prefix args} {
+    set code [catch {uplevel #0 [list {*}$prefix {*}$args]} value options]
+    if {$code == 0} {return $value}
+    if {$code == 1} {
+        dict set options -appcompilerlocation [errorLocation $options $location]
+        return -options $options $value
+    }
+    # A nonstandard completion must not escape the wrapper's return checks.
+    return -code error -errorcode [list APPCOMPILER EXTERN COMPLETION $code] \
+        -appcompilerlocation $location "extern command returned Tcl completion code $code"
+}
+
+proc externResult {location type value} {
+    if {[catch {guard $type $value {extern result} 1} result options]} {
+        dict set options -appcompilerlocation $location
+        dict set options -errorcode {APPCOMPILER EXTERN RESULT}
+        return -options $options $result
+    }
+    return $result
+}
+
 proc launch {entry sourceMap arguments} {
     try {
         lassign [$entry $arguments] tag value
@@ -37,6 +83,11 @@ proc launch {entry sourceMap arguments} {
         puts stderr "$prefix[dict get $value message]"
         return 1
     } on error {message options} {
+        set where [errorLocation $options]
+        if {$where ne {}} {
+            puts stderr "[locationPrefix $where]application error: $message"
+            return 1
+        }
         set prefix ""
         foreach frame [split [dict get $options -errorinfo] \n] {
             if {[regexp {^\s*\(procedure "([^"]+)" line ([0-9]+)\)} $frame -> procName bodyLine]

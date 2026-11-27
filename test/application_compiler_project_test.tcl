@@ -41,6 +41,8 @@ proc ::projectTest::exercise {exe caller prefix} {
     appCase $exe $caller $prefix [list --flag {two words} {}] {} [bytes {two words}] \
         "flag, spaced value and trailing empty argument in order"
     appCase $exe $caller $prefix {label} {} [bytes {météo 雪}] "source literal decoded as UTF-8"
+    appCase $exe $caller $prefix [list --format {雪; [list] $x}] {} [bytes {<雪; [list] $x>}] \
+        "extern passes one text argument to the project's own package"
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
     appCase $exe $caller $prefix [list --pick {} {two words}] {} [bytes {two words}] \
         "labeled list iteration selects a complete argument"
@@ -56,7 +58,8 @@ proc ::projectTest::exercise {exe caller prefix} {
 }
 
 proc ::projectTest::writeProject {project} {
-    file mkdir [file join $project lib] [file join $project code] [file join $project assets]
+    set packageDir {extensions/text $format}
+    file mkdir [file join $project lib] [file join $project code] [file join $project assets] [file join $project $packageDir]
     set logic {export fn .input() -> result<text,problem> {
     $raw ::= read_stdin_bytes()?
     return decode_utf8($raw)
@@ -65,6 +68,7 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
     return match $args {
         [] => ok($data)
         ['label'] => ok('météo 雪')
+        ['--format', $text] => ok(.format($text))
         ['--flag', $value, ''] => ok($value)
         ['--pick', $first, $second] => ok(.pick($args))
         ['--lookup', $key] => .lookup($key, $data)
@@ -88,7 +92,11 @@ distinct .lookup_key = text
 fn .lookup($key: text, $value: text) -> result<text,problem> {
     $entries ::= map_put(map<.lookup_key,text>(), make<.lookup_key>('007'), $value)
     return require_key(map_put($entries, make<.lookup_key>('7'), ''), make<.lookup_key>($key))
-}}
+}
+extern fn .format($text: text) -> text = ['::sample::format'] from 'sample::format'
+fn .unused() -> text { return .unavailable() }
+extern fn .unavailable() -> text = ['::missing::test_command'] from 'sample::unused'
+}
     set main {import logic
 alias .arguments = list<text>
 alias .outcome = result<unit,problem>
@@ -98,10 +106,17 @@ fn .start($args: .arguments) -> .outcome {
     write_stdout_utf8($out)?
     return ok(unit)
 }}
-    set manifest "schema 1\r\nedition 1\r\nminApi 0.21\r\nentry {main start}\r\nmodules {logic lib/a.src main code/main.src}\r\nassets {assets/blob.bin}\r\n"
+    set implementation {format [impl].tcl}
+    set assets [list assets/blob.bin $packageDir/pkgIndex.tcl $packageDir/$implementation]
+    set manifest "schema 1\r\nedition 1\r\nminApi 0.21\r\nentry {main start}\r\nmodules {logic lib/a.src main code/main.src}\r\nassets [list $assets]\r\npackageDirs [list [list $packageDir]]\r\n"
     set originals [dict create application.dict [bytes $manifest] \
         lib/a.src [bytes [string map [list "\n" "\r\n"] "$logic\n"]] \
-        code/main.src [bytes "$main\n"] assets/blob.bin [binary decode hex 00ff0d0a807f00]]
+        code/main.src [bytes "$main\n"] assets/blob.bin [binary decode hex 00ff0d0a807f00] \
+        $packageDir/pkgIndex.tcl [bytes {close [open package-index-visited w]
+package ifneeded sample::format 1.0 [list source -encoding utf-8 [file join $dir {format [impl].tcl}]]}] \
+        $packageDir/$implementation [bytes {namespace eval ::sample {}
+proc ::sample::format {text} {return "<$text>"}
+package provide sample::format 1.0}]]
     dict for {relative data} $originals {writeBytes [file join $project $relative] $data}
     return $originals
 }
@@ -129,8 +144,11 @@ proc ::projectTest::runSuite {work driver pack} {
     set manifest [file join $project application.dict]
     set path [file join $project lib a.src]
     set direct [list $driver run $manifest]
+    set marker [file join $caller package-index-visited]
     command $exe $caller [list $driver check $manifest] {}
+    expect [file exists $marker] 0 "checking leaves the external package index unevaluated"
     exercise $exe $caller $direct
+    expect [file exists $marker] 1 "runtime can read the explicitly declared local package index"
 
     set manifestBytes [dict get $originals application.dict]
     foreach {field old new expected} {
@@ -144,6 +162,14 @@ proc ::projectTest::runSuite {work driver pack} {
             "unsupported $field is diagnosed before the application reads stdin"
     }
     writeBytes $manifest $manifestBytes
+    foreach wrong [list {{extensions/missing}} {{../outside}} {{extensions/TEXT $format}} \
+            [list {extensions/text $format} {extensions/text $format}]] {
+        writeBytes $manifest [bytes [dict replace $manifestBytes packageDirs $wrong]]
+        lassign [command $exe $caller [list $driver check $manifest] {} 0] out err
+        expect $out {} "bad package directory starts no application output"
+        expect [regexp -nocase {directory|component|relative|unsafe|path} $err] 1 "bad package directory explains the error"
+    }
+    writeBytes $manifest $manifestBytes
 
     writeBytes $path [binary decode hex 23ff0a]
     lassign [command $exe $caller [list $driver check $manifest] {} 0] out err
@@ -154,7 +180,9 @@ proc ::projectTest::runSuite {work driver pack} {
     if {!$pack} {return}
 
     set archive [file join $work original.machteld]
+    file delete -- $marker
     command $exe $caller [list $driver pack $manifest $archive] {}
+    expect [file exists $marker] 0 "packing leaves the external package index unevaluated"
     inspectArchive $archive $originals
     set builtHash [::machteld::hash file sha256 $archive]
 
@@ -190,6 +218,8 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {retur
     set fromPrompt [file join $delivery fresh-from-prompt.machteld]
     appCase $relocatedExe $caller [list $fromPrompt] {} [bytes "delivered\n"] [bytes "delivered\n"] \
         "rebuilt using only the delivered files"
+    appCase $relocatedExe $caller [list $fromPrompt] {--format portable} {} [bytes {<portable>}] \
+        "the two-file rebuild includes the external Tcl package"
 }
 
 if {$argv ni {{} -pack}} {error "usage: [file tail [info script]] ?-pack?"}
