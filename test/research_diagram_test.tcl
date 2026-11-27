@@ -159,7 +159,7 @@ proc ::researchTest::portable {project root work} {
 # An owner-attended check on a real canvas. Only --tk enters this path.
 proc ::researchTest::tkClick {db} {
     package require Tk
-    pack [canvas .c -width 640 -height 300]
+    pack [::canvas .c -width 640 -height 300]
     bind .c <Button-1> {::research::click .c}
     set ::research::input 2026-11-01T09:15:00Z
     ::research::apply $db .c
