@@ -495,9 +495,16 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
             set location [lindex [dict getdef $node typeLocations {}] 0]
             if {$location eq ""} { set location $node }
             set nominal [declaredType [lindex $generic 0] $location $world reports]
+            if {$nominal eq ""} {return ""}
+            set head [lindex [::appcompiler::typeParts $nominal] 0]
+            set declaration [dict getdef $world schemas $head {}]
+            if {[dict getdef $declaration kind {}] eq "record" && [dict exists $declaration module]} {
+                return [makeRecord $node $nominal $actual $world reports]
+            }
             set base [dict getdef $reports distinctBases $nominal {}]
-            if {$nominal ne "" && $base eq ""} {
-                issue reports EXPECTED_DISTINCT $location "make requires a distinct scalar type, got $nominal"
+            if {$base eq ""} {
+                issue reports EXPECTED_DISTINCT $location "make requires a distinct scalar or an application-declared record, got $nominal"
+                return ""
             }
             set params [list $base]
         }
@@ -931,6 +938,55 @@ proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
     if {$alternatives eq ""} { set alternatives "(none)" }
     issue reports UNKNOWN_FIELD $field "unknown field '$name' on $record; declared fields: $alternatives"
     return ""
+}
+
+proc ::appcompiler::checker::makeRecord {node record actual world reportsVar} {
+    upvar 1 $reportsVar reports
+    set fields [schemaMembers $record $world]
+    set seen {}
+    set valid 1
+    set knownLabels 1
+    foreach argument [dict get $node args] type $actual {
+        if {![dict exists $argument argumentLabel]} {
+            issue reports ARGUMENT_LABEL $argument "make<$record> requires a field label for this value"
+            set knownLabels 0
+            set valid 0
+            continue
+        }
+        set label [dict get $argument argumentLabel]
+        set name [dict get $label name]
+        if {[dict exists $seen $name]} {
+            issue reports DUPLICATE_FIELD $label "field '$name' on $record is supplied more than once"
+            set valid 0
+            continue
+        }
+        dict set seen $name 1
+        set expected [lookupField $fields $label $record reports]
+        if {$expected eq ""} {
+            set knownLabels 0
+            set valid 0
+        } elseif {$type eq ""} {
+            set valid 0
+        } elseif {![compatible $type $expected]} {
+            issue reports FIELD_TYPE $argument "field '$name' on $record expects $expected, got $type"
+            set valid 0
+        }
+    }
+    if {$knownLabels} {
+        set missing {}
+        dict for {name type} $fields {
+            if {![dict exists $seen $name] && $type ne "" && [string index $type end] ne "?"} {
+                lappend missing $name
+            }
+        }
+        if {[llength $missing]} {
+            issue reports MISSING_FIELD [lindex [dict get $node typeLocations] 0] "required fields missing from $record: [join $missing {, }]"
+            set valid 0
+        }
+    }
+    if {!$valid} {return ""}
+    fact reports $node recordConstructor 1
+    return $record
 }
 
 proc ::appcompiler::checker::recordExpression {node scope imports world reportsVar} {

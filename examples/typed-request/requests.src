@@ -1,0 +1,16 @@
+## Parameters for a lookup with an optional note.
+export record .lookup {
+    asset_id: text
+    sample_limit: int
+    note: text?
+}
+
+## Builds a request directly from a caller's typed values.
+export fn .request($asset: text, $limit: int) -> .lookup =>
+    make<.lookup>(sample_limit: $limit, asset_id: $asset)
+example .request('007', 3) => make<.lookup>(asset_id: '007', sample_limit: 3, note: none)
+
+fn .main($args: list<text>) -> result<unit,problem> => match $args {
+    [$asset] => write_stdout_utf8(encode_json(.request($asset, 3))?)
+    _ => err(problem('expected one asset identifier'))
+}

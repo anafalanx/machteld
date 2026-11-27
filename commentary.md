@@ -411,6 +411,13 @@ Omitting a function body can put its diagnostic on the next function's
 `fn`. That function is checked again from its first token. An editor can
 now show the missing body and a separate error later on the same line.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, constructing a lookup request
+
+A caller can build a lookup request directly from the text identifier
+`007` and an integer limit. A missing optional note stays absent in the
+serialized request. When the caller edits a received request with `with`,
+fields supplied by a newer writer survive the edit.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
