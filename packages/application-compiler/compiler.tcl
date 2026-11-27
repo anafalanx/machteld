@@ -1,21 +1,22 @@
 package require Tcl 9.0
 namespace eval ::appcompiler {}
 
+proc ::appcompiler::diagnosticSpan {node} {
+    set line [dict get $node line]
+    set column [dict get $node column]
+    return [dict create module [dict get $node module] line $line column $column \
+        endLine [dict getdef $node endLine $line] endColumn [dict getdef $node endColumn $column]]
+}
+
 proc ::appcompiler::diagnostic {code node message} {
-    set where [dict create]
-    foreach key {module line column} {
-        dict set where $key [dict get $node $key]
-    }
-    foreach key {endLine endColumn} {
-        if {[dict exists $node $key]} {dict set where $key [dict get $node $key]}
-    }
-    return [dict create code $code node $where message $message]
+    return [dict create code $code node [diagnosticSpan $node] message $message]
 }
 
 proc ::appcompiler::formatDiagnostic {diagnostic} {
-    set where [dict get $diagnostic node]
-    return [format {%s:%d:%d [%s] %s} [dict get $where module] \
+    set where [diagnosticSpan [dict get $diagnostic node]]
+    return [format {%s:%d:%d..%d:%d [%s] %s} [dict get $where module] \
         [dict get $where line] [dict get $where column] \
+        [dict get $where endLine] [dict get $where endColumn] \
         [dict get $diagnostic code] [dict get $diagnostic message]]
 }
 

@@ -384,6 +384,21 @@ empty arguments, and the application inherits standard input and output.
 `pack` and `rebuild` require an archive-capable host. A working archive
 is replaced only after the replacement has been built and checked.
 
+`check --json` writes one UTF-8 JSON document to standard output. A clean
+check exits with status 0 and prints an empty `diagnostics` array. A failed
+check exits with status 1. Each compiler diagnostic contains `code`,
+`message` and a `node` with the logical `module`, `line`, `column`,
+`endLine` and `endColumn`. Source positions are one-based. The end is
+exclusive. A project error without a source position has a null `node`.
+
+```text
+machteld.exe tools/application_project.tcl check --json examples/typed-text-length/project.dict
+```
+
+```json
+{"schema":1,"ok":true,"diagnostics":[]}
+```
+
 The archive contains the generated `main.tcl` with its source map, the
 compiler under `compiler/`, and the original manifest at
 `project/inputs/application.dict`. The declared source and asset files keep
