@@ -1466,7 +1466,10 @@ declaration. Complete functions and types before and after the error
 are still checked, including calls to intact exports from another module.
 References to a declaration lost during recovery suppress dependent errors.
 A misspelled name unrelated to a recognized damaged declaration still has
-its own diagnostic. A broken token or an unclosed block can make the
+its own diagnostic. Extra closing delimiters at the top level permit a
+restart on the next declaration. A missing alias target or function body
+also leaves a named declaration on the following line available to check.
+A broken token or an unclosed block can make the
 remaining declarations unknowable. The checker still checks the complete
 declarations it recovered and leaves uncertain references unresolved. A successful
 check exits with status 0 and prints an empty `diagnostics` array. A failed

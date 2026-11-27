@@ -335,7 +335,12 @@ oo::class create ::appcompiler::ModuleParser {
                 ( {lappend expected )}
                 interpolateStart {lappend expected interpolateEnd}
                 \} - {]} - ) - interpolateEnd {
-                    if {![llength $expected] || [lpop expected] ne $kind} {return -1}
+                    # A spare closer at depth zero cannot enclose a later line.
+                    if {[llength $expected]} {
+                        if {[lpop expected] ne $kind} {return -1}
+                    } elseif {$kind eq "interpolateEnd"} {
+                        return -1
+                    }
                 }
             }
             set atLineStart [expr {$kind eq "newline"}]
@@ -358,6 +363,11 @@ oo::class create ::appcompiler::ModuleParser {
         my restore $beginning
         if {[my at start]} {my advance}
         my skipLines
+        if {[dict get $token kind] in {\} {]} )}} {
+            while {[dict get $token kind] in {\} {]} )}} {my advance}
+            if {[my at newline] || [my at eof]} {return {}}
+            return {* *}
+        }
         if {[my at export]} {my advance}
         set kind [dict get $token kind]
         if {$kind eq "identifier"} {set kind [dict get $token value]}
@@ -366,7 +376,7 @@ oo::class create ::appcompiler::ModuleParser {
             record - choice - alias - distinct {set section types}
             import {set section imports}
             resource {set section resources}
-            example {return {examples *}}
+            example {set section examples}
             default {return {* *}}
         }
         try {
@@ -377,6 +387,20 @@ oo::class create ::appcompiler::ModuleParser {
             return [list $section [dict get $token value]]
         }
         return [list $section *]
+    }
+
+    # A new line can continue a value or a type. Do not consume a named
+    # declaration head as an operand of an incomplete preceding declaration.
+    method continueOperand {description} {
+        if {![my at newline]} {return}
+        my skipLines
+        set beginning [my cursor]
+        try {
+            set name [lindex [my missingDeclaration $beginning] 1]
+        } trap {APPCOMPILER DIAGNOSTIC} {} {
+            set name *
+        } finally {my restore $beginning}
+        if {$name ni {{} *}} {::appcompiler::fail E_PARSE_EXPECTED $token "expected $description"}
     }
 
     # Return one fully parsed declaration. The caller commits it only after
@@ -457,10 +481,10 @@ oo::class create ::appcompiler::ModuleParser {
                 try {
                     lassign [my missingDeclaration $beginning] missing name
                 } trap {APPCOMPILER DIAGNOSTIC} {} {set missing *; set name *}
-                dict set definition partial $missing $name 1
+                if {$missing ne {}} {dict set definition partial $missing $name 1}
                 if {$missing eq "functions" && $name ne "*"} {
                     set owner $name
-                } elseif {$missing ne "examples"} {set owner @unavailable}
+                } elseif {$missing ni {{} examples}} {set owner @unavailable}
                 try {
                     set resume [my nextDeclaration $beginning [dict get $error node]]
                 } trap {APPCOMPILER DIAGNOSTIC} {message options} {
@@ -504,7 +528,7 @@ oo::class create ::appcompiler::ModuleParser {
         set actual [my node $name call name [dict get $name value] qualifier {} {*}$types args [my parenthesized callArgument]]
         set actualLocation [my consumedSpan $name]
         my take => {'=>' before the example expectation}
-        my skipLines
+        my continueOperand {an example expectation}
         set expectedStart $token
         if {[my at identifier] && [dict get $token value] eq "error"} {
             my advance
@@ -591,7 +615,7 @@ oo::class create ::appcompiler::ModuleParser {
         if {$kind eq "extern"} { return [dict merge $node [my externalBinding]] }
         if {[my at =>]} {
             my advance
-            my skipLines
+            my continueOperand {a value expression}
             set start $token
             dict set node body [list [my node $start return value [my expression]]]
         } else {
@@ -770,7 +794,7 @@ oo::class create ::appcompiler::ModuleParser {
         my skipLines
         if {$kind in {alias distinct}} {
             my take = "'=' before the $kind target"
-            my skipLines
+            my continueOperand "a type name after the $kind '='"
             set target [my typeAnnotation]
             set members [dict create target [dict get $target name] targetLocation $target]
         } elseif {$kind eq "record"} {

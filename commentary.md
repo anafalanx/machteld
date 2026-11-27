@@ -475,6 +475,11 @@ to their exports from other modules. The checker remembers which names it
 could read in damaged declaration heads, so a caller can fix an unrelated
 misspelling in the same pass.
 
+An extra closing bracket at top level now permits the next declaration to
+be checked. A regression also covers an unfinished alias followed by a
+private record. A caller of that record receives its visibility diagnostic
+at the original source location.
+
 ### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking an edit
 
 Checking an edit used to generate the Tcl program and discard it. The project
