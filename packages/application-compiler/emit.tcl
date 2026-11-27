@@ -389,12 +389,12 @@ proc ::appcompiler::emitLine {line location bodyVar locationsVar} {
 }
 
 # Only a jump across another loop needs a handler. Resolve the lexical target
-# once during compilation so ordinary foreach/for bodies have no try overhead.
+# once during compilation so ordinary loop bodies have no try overhead.
 proc ::appcompiler::findOuterJumps {statements active nearest targetsVar} {
     upvar 1 $targetsVar targets
     foreach node $statements {
         switch -exact -- [dict get $node kind] {
-            for {
+            for - while {
                 set label [dict get $node label]
                 set scope $active
                 if {$label ne {}} {dict set scope $label [emitLocation $node]}
@@ -423,18 +423,24 @@ proc ::appcompiler::loopCode {depth kind} {
 proc ::appcompiler::emitLoop {node context bodyVar locationsVar} {
     upvar 1 $bodyVar body $locationsVar locations
     set location [emitLocation $node]
-    set iterable [emitExpression [dict get $node iterable] $context]
-    set type [dict get [emitFacts $node $context] iterableType]
-    set local [emitLocalName [dict get $node name]]
     set depth [dict getdef $context loopDepth 0]
-    if {$type eq "range<int>"} {
-        set limit m_limit_$depth
-        set closed m_closed_$depth
-        emitLine [format {::lassign %s %s %s %s} $iterable $local $limit $closed] $location body locations
-        emitLine [format {::incr %s $%s} $limit $closed] $location body locations
-        set header [format {::for {} {$%s < $%s} {::incr %s} %c} $local $limit $local 123]
+    if {[dict get $node kind] eq "while"} {
+        set test [emitExpression [dict get $node condition] $context]
+        # Bracing defers variable and command substitutions until each test.
+        set header [format {::while {%s} %c} $test 123]
     } else {
-        set header [format {::foreach %s %s %c} $local $iterable 123]
+        set iterable [emitExpression [dict get $node iterable] $context]
+        set type [dict get [emitFacts $node $context] iterableType]
+        set local [emitLocalName [dict get $node name]]
+        if {$type eq "range<int>"} {
+            set limit m_limit_$depth
+            set closed m_closed_$depth
+            emitLine [format {::lassign %s %s %s %s} $iterable $local $limit $closed] $location body locations
+            emitLine [format {::incr %s $%s} $limit $closed] $location body locations
+            set header [format {::for {} {$%s < $%s} {::incr %s} %c} $local $limit $local 123]
+        } else {
+            set header [format {::foreach %s %s %c} $local $iterable 123]
+        }
     }
     emitLine $header $location body locations
     set label [dict get $node label]
@@ -459,7 +465,7 @@ proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
     foreach statement $statements {
         set location [emitLocation $statement]
         switch -exact -- [dict get $statement kind] {
-            for {emitLoop $statement $context body locations}
+            for - while {emitLoop $statement $context body locations}
             if {
                 set test [emitExpression [dict get $statement condition] $context]
                 emitLine [format {::if %s %c} $test 123] $location body locations

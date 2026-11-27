@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice match with some none if else unit for in break continue}
+        set keywords {fn export import return true false record choice match with some none if else unit for in break continue while}
         set localChoices {}
         my advance
     }
@@ -302,13 +302,21 @@ oo::class create ::appcompiler::ModuleParser {
             return [my node $start return value [my expression]]
         }
         set kind [dict get $start kind]
-        if {$kind in {for break continue}} {
+        if {$kind in {for while break continue}} {
             my advance
             set node [my node $start $kind label {}]
             if {[my at dotName]} {
-                dict set node label [dict get $token value]
-                dict set node labelLocation [my node $token label]
+                set beginning [my cursor]
+                set candidate $token
                 my advance
+                # A while condition can itself start with a dotted function.
+                if {$kind eq "while" && ![my at :]} {
+                    my restore $beginning
+                } else {
+                    dict set node label [dict get $candidate value]
+                    dict set node labelLocation [my node $candidate label]
+                    if {$kind in {for while} && [my at :]} { my advance }
+                }
             }
             if {$kind eq "for"} {
                 set binding [my take dataName {a loop binding beginning with '$'}]
@@ -317,6 +325,10 @@ oo::class create ::appcompiler::ModuleParser {
                 dict set node binding [my node $binding binding name $name]
                 my take in {'in' before the iterable}
                 dict set node iterable [my expression]
+            } elseif {$kind eq "while"} {
+                dict set node condition [my expression]
+            }
+            if {$kind in {for while}} {
                 my skipLines
                 dict set node body [my braced statement {loop body}]
             }

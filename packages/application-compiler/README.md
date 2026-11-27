@@ -116,12 +116,19 @@ fn .sum($start: int, $end: int) -> int {
 }
 ```
 
-The type of `$values` is `range<int>`. The iteration binding is fixed
-and visible only inside the body. `break` and `continue` select the
+The type of `$values` is `range<int>`. An exported function accepts that
+type from Tcl as a three-element list of start, end and a closed flag
+(`0` or `1`). Range equality and a JSON wire format are still open.
+The iteration binding is fixed and visible only inside the body.
+`break` and `continue` select the
 innermost loop. Give a loop a label, as in `for .outer $item in $items`,
 to target it from an inner loop with `break .outer` or `continue .outer`.
-`return` and a propagated failure still exit the function.
-Range and label spellings are provisional.
+`while` tests a `bool` expression before every iteration. For example,
+`while $remaining != 0 { $remaining = $remaining - 1 }` counts a positive
+integer down to zero. Use `while .outer: .ready()` to label a loop whose
+condition calls a function. `continue .outer` rechecks that condition.
+`return` and a propagated failure still exit the function. Range and
+label spellings are provisional.
 
 Run `machteld.exe test/application_compiler_iteration_test.tcl` for the
 iteration, scope and control-flow regressions.

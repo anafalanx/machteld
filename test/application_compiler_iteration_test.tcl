@@ -56,6 +56,22 @@ proc ::iterationTest::direct {sources} {
         equal [call $app snapshot {4 5} {8 9}] 12345 "mutating inputs in the loop keeps its initial bounds and items"
         equal [call $app break [dict create in 17]] 17 "loop keywords as field and function names"
         equal [call $app keyword] continue "import for, .for::break() and .choice::continue"
+        equal [call $app keyword_while [dict create while true]] 1 "while stays valid as a module, function, field and variant name"
+        $app eval {trace add execution ::iterationApp::walk::while enter {mark condition}}
+        set calls {}
+        equal [call $app recheck 0] 13 "continue reevaluates a dotted boolean function against changed state"
+        equal $calls {condition condition condition condition} "one condition call per pass and one final false call"
+        set calls {}
+        equal [call $app recheck 3] 0 "initial false condition skips the body"
+        equal $calls condition "initial false condition runs once"
+        equal [call $app while_outer] 138138 "for continues and breaks its labeled outer while"
+        equal [call $app for_outer] 13 "while continues and breaks its colon-labeled outer for"
+        equal [call $app condition_result 2] {ok 2} "a false propagated boolean ends the loop"
+        lassign [call $app condition_result 1] tag problem
+        set line [lineOf [dict get $sources walk] {$q ::= quotient(1, $n)?}]
+        set origin [dict get $problem origin]
+        equal [list $tag [dict get $problem code] [dict get $origin module] [dict get $origin line]] \
+            [list err DIVIDE_BY_ZERO walk $line] "propagation on a later condition evaluation preserves its original source"
 
         set special {two words; [error BAD] $still_text}
         set labels [list {} 007 7 {} $special 雪]
@@ -97,6 +113,14 @@ proc ::iterationTest::runnable {sources} {
         equal [list [dict get $run exit] [dict get $run out]] {1 {}} "runnable loop exits on typed failure"
         equal [string match "walk:$line:*: rejected item" [string trimright [dict get $run err] "\r\n"]] 1 \
             "runnable failure remains at its source line inside the loop"
+        set run [::machteld::run -timeout 10s -- $exe $path --while-ok]
+        equal [list [dict get $run exit] [dict get $run out] [dict get $run err]] {0 done {}} \
+            "runnable while checks the typed condition before entering"
+        set run [::machteld::run -timeout 10s -- $exe $path --while-error]
+        set line [lineOf [dict get $sources walk] {$q ::= quotient(1, $n)?}]
+        equal [list [dict get $run exit] [dict get $run out]] {1 {}} "runnable exits on failed while condition"
+        equal [string match "walk:$line:*: *zero*" [string trimright [dict get $run err] "\r\n"]] 1 \
+            "runnable condition error identifies the originating helper line"
     } finally {file delete -- $path}
 }
 
@@ -147,6 +171,24 @@ proc ::iterationTest::negative {} {
         MISSING_RETURN {fn .x($values: list<int>) -> int {
     for $i in $values { return $i }
 }}
+        CONDITION_TYPE {fn .x() -> unit { while 0 { break }
+    return unit
+}}
+        CONDITION_TYPE {fn .x() -> unit { while 'true' { break }
+    return unit
+}}
+        CONDITION_TYPE {fn .x($b: bool?) -> unit { while $b { break }
+    return unit
+}}
+        MISSING_RETURN {fn .x($b: bool) -> int { while $b { return 7 } }}
+        DUPLICATE_LOOP_LABEL {fn .x() -> unit {
+    while .active: true { for .active $i in 0..1 { break } }
+    return unit
+}}
+        UNKNOWN_LOOP_LABEL {fn .x() -> unit {
+    while true { break .unknown }
+    return unit
+}}
     } {
         set errors [::appcompiler::check [dict create invalid $source]]
         equal [lmap d $errors {dict get $d code}] [list $code] "loop diagnostic $code"
@@ -156,7 +198,10 @@ proc ::iterationTest::negative {} {
 namespace eval ::iterationTest {
     set names {export choice .choice { continue }
 export fn .break() -> .choice { return .choice::continue }}
+    set legacy {export choice .state { while }
+export fn .while() -> .state { return .state::while }}
     set walk {import for
+import while
 export record .holder { in: int }
 export fn .break($record: .holder) -> int { return $record.in }
 export fn .keyword() -> .for::choice { return .for::break() }
@@ -238,12 +283,75 @@ export fn .pick($items: list<text>) -> result<text,problem> {
     }
     return ok('empty')
 }}
+    append walk \n {export record .flags { while: bool }
+export fn .keyword_while($f: .flags) -> bool {
+    if $f.while { return .while::while() == .while::state::while }
+    return false
+}
+fn .while($n: int) -> bool { return $n != 3 }
+export fn .recheck($start: int) -> int {
+    $n := $start
+    $digits := 0
+    while .while($n) {
+        $n = $n + 1
+        if $n == 2 { continue }
+        $digits = $digits * 10 + $n
+    }
+    while false { return -1 }
+    return $digits
+}
+export fn .while_outer() -> int {
+    $n := 0
+    $digits := 0
+    while .outer: true {
+        $n = $n + 1
+        for $i in 1..=3 {
+            if $n == 2 { continue .outer }
+            if $n == 4 { break .outer }
+            if $i == 2 { continue }
+            $digits = $digits * 10 + $i
+        }
+        $digits = $digits * 10 + 8
+    }
+    return $digits
+}
+export fn .for_outer() -> int {
+    $digits := 0
+    for .outer: $i in 1..=4 {
+        while true {
+            if $i == 2 { continue .outer }
+            if $i == 4 { break .outer }
+            $digits = $digits * 10 + $i
+            break
+        }
+    }
+    return $digits
+}
+fn .enabled($n: int) -> result<bool,problem> {
+    $q ::= quotient(1, $n)?
+    return ok($q == 1)
+}
+export fn .condition_result($start: int) -> result<int,problem> {
+    $n := $start
+    while .enabled($n)? { $n = $n - 1 }
+    return ok($n)
+}}
     set entry {import walk
 fn .main($args: list<text>) -> result<unit,problem> {
+    $start ::= match $args {
+        ['--while-ok'] => 2
+        ['--while-error'] => 1
+        _ => 0
+    }
+    if $start != 0 {
+        $n ::= .walk::condition_result($start)?
+        if $n == 2 { return write_stdout_utf8('done') }
+        return err(problem('unexpected condition result'))
+    }
     $chosen ::= .walk::pick($args)?
     return write_stdout_utf8($chosen)
 }}
-    set sources [dict create walk $walk entry $entry for $names]
+    set sources [dict create walk $walk entry $entry for $names while $legacy]
     direct $sources
     runnable $sources
     negative

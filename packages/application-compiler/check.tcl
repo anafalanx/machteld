@@ -643,6 +643,30 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
     }
 }
 
+proc ::appcompiler::checker::checkCondition {statement scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set condition [dict get $statement condition]
+    set actual [expressionType $condition $scope $imports $world reports]
+    if {$actual ne "" && $actual ne "bool"} {
+        issue reports CONDITION_TYPE $condition "[dict get $statement kind] requires bool, got $actual"
+    }
+}
+
+proc ::appcompiler::checker::iteratedElement {statement scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set iterable [dict get $statement iterable]
+    set type [expressionType $iterable $scope $imports $world reports]
+    set parts [::appcompiler::typeParts $type]
+    if {[lindex $parts 0] eq "list" || $type eq "range<int>"} {
+        fact reports $statement iterableType $type
+        return [lindex $parts 1]
+    }
+    if {$type ne ""} {
+        issue reports ITERABLE_TYPE $iterable "for requires a list or an integer range, got $type"
+    }
+    return ""
+}
+
 proc ::appcompiler::checker::checkBlock {statements scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set result [dict get $world returnType]
@@ -692,25 +716,18 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                 }
             }
             if {
-                set condition [dict get $statement condition]
-                set actual [expressionType $condition $scope $imports $world reports]
-                if {$actual ne "" && $actual ne "bool"} {
-                    issue reports CONDITION_TYPE $condition "if requires bool, got $actual"
-                }
+                checkCondition $statement $scope $imports $world reports
                 set thenReturns [checkBlock [dict get $statement body] $scope $imports $world reports]
                 set elseReturns [checkBlock [dict get $statement otherwise] $scope $imports $world reports]
                 if {$thenReturns && $elseReturns} { set returns 1 }
             }
-            for {
-                set iterable [dict get $statement iterable]
-                set type [expressionType $iterable $scope $imports $world reports]
-                set parts [::appcompiler::typeParts $type]
-                set element ""
-                if {[lindex $parts 0] eq "list" || $type eq "range<int>"} {
-                    set element [lindex $parts 1]
-                    fact reports $statement iterableType $type
-                } elseif {$type ne ""} {
-                    issue reports ITERABLE_TYPE $iterable "for requires a list or an integer range, got $type"
+            for - while {
+                set innerScope $scope
+                if {$kind eq "while"} {
+                    checkCondition $statement $scope $imports $world reports
+                } else {
+                    set element [iteratedElement $statement $scope $imports $world reports]
+                    bindLocal innerScope [dict get $statement binding] $element 0 reports
                 }
                 set label [dict get $statement label]
                 if {$label ne "" && $label in [dict getdef $world loops {}]} {
@@ -718,8 +735,6 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                 }
                 set nested $world
                 dict lappend nested loops $label
-                set innerScope $scope
-                bindLocal innerScope [dict get $statement binding] $element 0 reports
                 checkBlock [dict get $statement body] $innerScope $imports $nested reports
             }
             break - continue {
