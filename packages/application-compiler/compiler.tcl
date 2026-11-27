@@ -6,6 +6,9 @@ proc ::appcompiler::diagnostic {code node message} {
     foreach key {module line column} {
         dict set where $key [dict get $node $key]
     }
+    foreach key {endLine endColumn} {
+        if {[dict exists $node $key]} {dict set where $key [dict get $node $key]}
+    }
     return [dict create code $code node $where message $message]
 }
 

@@ -94,5 +94,66 @@ fn .waiting() -> int {return .broken::unknown()}}]
     set numbers {fn .n() -> int {return (009 + 1) * 99999999999999999999999999999}}
     namespace eval :: [dict get [::appcompiler::compile [dict create n $numbers] ::exact] script]
     equal [::exact::n::n] 999999999999999999999999999990 "exact decimal integer arithmetic"
+
+    set model {export record .item {
+    id: text
+    note: text?
+}
+export choice .edit {
+    keep
+    clear
+    set(text)
+}
+export fn .apply($item: .item, $edit: .edit) -> .item {
+    return match $edit {
+        .edit::keep       => $item
+        .edit::clear      => $item with { note = none }
+        .edit::set($text) => $item with { note = some($text) }
+    }
+}}
+    set client {import model
+export fn .change($item: .model::item, $edit: .model::edit) -> .model::item {
+    return .model::apply($item, $edit)
+}
+export fn .read_note($item: .model::item) -> text? {return $item.note}}
+    set project [dict create entry $client model $model]
+    equal [codes $project] {} "two-module record and closed choice"
+    set emitted [::appcompiler::compile $project ::typed]
+    namespace eval :: [dict get $emitted script]
+    set input [dict create id 007 note [list some old] future [dict create extraKey "mémo"]]
+    equal [::typed::entry::change $input keep] $input "keep every field"
+    set cleared [::typed::entry::change $input clear]
+    equal [dict get $cleared note] none "clear the optional"
+    set setEmpty [::typed::entry::change $input [list set {}]]
+    equal [dict get $setEmpty note] [list some {}] "present empty differs from absent"
+    equal [dict get $setEmpty id] 007 "text identifier preserves leading zeros"
+    equal [dict get $setEmpty future] [dict get $input future] "unknown nested data survives"
+    equal [dict get $input note] {some old} "record updates have value semantics"
+    set missing [dict remove $input note]
+    equal [::typed::entry::change $missing keep] $missing "keep an omitted optional field"
+    equal [::typed::entry::read_note $missing] none "absent optional read"
+    equal [::typed::entry::read_note $setEmpty] [list some {}] "present empty optional read"
+    equal [catch {::typed::entry::change $input {set}}] 1 "ill-shaped external choice"
+    equal [catch {::typed::entry::change [dict create note none] keep}] 1 "missing required field"
+    equal [catch {::typed::entry::change [dict replace $input note unexpected] keep}] 1 \
+        "strict optional at Tcl boundary"
+
+    set typo [string map [list {note = some} {notes = some}] $model]
+    set mistakes [::appcompiler::check [dict replace $project model $typo]]
+    set mistake [lindex $mistakes 0]
+    equal [dict get $mistake code] UNKNOWN_FIELD "misspelled record field"
+    equal [dict get $mistake node line] 14 "field diagnostic in original module"
+    equal [dict get $mistake node module] model "field diagnostic source identity"
+    equal [expr {[string first "notes" [dict get $mistake message]] >= 0
+        && [string match {*declared fields:*note*} [dict get $mistake message]]}] \
+        1 "field diagnostic lists the declared alternatives"
+    equal [expr {[dict get $mistake node endColumn] - [dict get $mistake node column]}] \
+        5 "field diagnostic underlines only the invalid name"
+    set dropped [regsub -line {^ *\.edit::clear[^\n]*\n} $model {}]
+    equal [codes [dict replace $project model $dropped]] MATCH_NONEXHAUSTIVE "missing choice variant"
+    set unrelated {record .first { id: text }
+record .second { id: text }
+fn .mix($one: .first) -> .second { return $one }}
+    equal [codes [dict create types $unrelated]] RETURN_TYPE "same-shaped records are nominal"
     puts "application compiler: $count assertions passed"
 }
