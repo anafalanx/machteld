@@ -73,6 +73,16 @@ typed SQLite interface, documented under `machteld/package/sqlite3`.
 The compiler guide includes the type mappings, error codes and a runnable
 historical lookup.
 
+For temporal evidence, `local_datetime` holds a recorded calendar date
+and wall time. `instant` holds a point on the UTC timeline. Call
+`parse_local_datetime` for a clock reading, `resolve_offset` to apply known
+minutes east of UTC, and `parse_instant` for text carrying a known UTC
+offset. An unresolved wall time can remain a local date-time. The runtime
+uses the same rules on every machine. The Tcl, JSON and SQL representations
+of instants are UTC strings with nine fractional digits, for example
+`2026-10-25T00:30:00.000000001Z`. This preserves nanosecond precision and
+chronological ordering in a SQLite TEXT index with BINARY collation.
+
 ## Writing SQLite transactions
 
 Use `using $tx ::= sql_begin($path)? { ... }` inside a function returning

@@ -7,7 +7,7 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-The development baseline, machteld 30, is a compact Windows runtime for Tcl/Tk 9
+Machteld 0.50-dev is a compact Windows runtime for Tcl/Tk 9
 programs. It is strongest at what tools do: supervised processes and
 terminals, files, HTTP, JSON, hashing and SQLite, in one executable that
 installs nothing. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY,

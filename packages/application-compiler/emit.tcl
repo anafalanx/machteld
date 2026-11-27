@@ -121,6 +121,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 if {[catch {decimal::canonical $value} normalized]} {reject $path decimal}
                 return $normalized
             }
+            instant - local_datetime {
+                if {[catch {temporalCanonical $type $value}]} {reject $path "canonical $type"}
+                return $value
+            }
             bool {
                 if {$value ni {0 1 false true}} {reject $path bool}
                 return [expr {$value in {1 true}}]
@@ -250,8 +254,8 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
         call - construct - builtin - sqlBegin {
-            # Checked nominal scalar conversions preserve the Tcl value.
-            if {$kind eq "builtin" && [dict get $node name] in {make underlying}} {
+            # These explicit conversions preserve the checked Tcl representation.
+            if {$kind eq "builtin" && [dict get $node name] in {make underlying instant_text local_datetime_text}} {
                 return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
             }
             set words [emitCallPrefix $node $context]
@@ -342,7 +346,8 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 }
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
-                problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 {
+                problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
+                parse_instant - parse_local_datetime - resolve_offset {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}

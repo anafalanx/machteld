@@ -62,6 +62,10 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         if {![typeFits $length $node reports]} { return "" }
         return [makeType $head $args]
     }
+    if {$type in {instant local_datetime}} {
+        dict set reports usesTemporal 1
+        return $type
+    }
     if {$type in {int decimal text bool bytes problem unit}} { return $type }
     if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $type -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
@@ -119,7 +123,7 @@ proc ::appcompiler::checker::resolveTypeNames {world reportsVar} {
                 set where [dict get $schema targetLocation]
                 set type [declaredType [dict get $schema target] $where $world reports]
                 if {[dict get $schema kind] eq "distinct" && $type ne ""} {
-                    if {$type ni {text int decimal bool bytes}} {
+                    if {$type ni {text int decimal bool bytes instant local_datetime}} {
                         issue reports DISTINCT_BASE_TYPE $where "a distinct type requires a primitive scalar base, got $type"
                         set type ""
                     } elseif {![typeFits [string length $key] $schema reports]} {
@@ -319,7 +323,10 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
             }
             set params [list $base]
         }
-        problem - decode_json - write_stdout_utf8 { set params [list text] }
+        problem - decode_json - write_stdout_utf8 - parse_instant - parse_local_datetime { set params [list text] }
+        instant_text { set params {instant} }
+        local_datetime_text { set params {local_datetime} }
+        resolve_offset { set params {local_datetime int} }
         decode_utf8 { set params [list bytes] }
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
@@ -384,6 +391,15 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
             return result<text,problem>
         }
         write_stdout_utf8 { return result<unit,problem> }
+        instant_text - local_datetime_text { return text }
+        parse_instant - resolve_offset {
+            dict set reports usesTemporal 1
+            return result<instant,problem>
+        }
+        parse_local_datetime {
+            dict set reports usesTemporal 1
+            return result<local_datetime,problem>
+        }
         quotient { return result<int,problem> }
         divide_rounded { return result<decimal,problem> }
     }
@@ -391,7 +407,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
 
 proc ::appcompiler::checker::sqlScalar {type distinctBases} {
     if {[string index $type end] eq "?"} { set type [string range $type 0 end-1] }
-    return [expr {[dict getdef $distinctBases $type $type] in {int decimal text bytes bool}}]
+    return [expr {[dict getdef $distinctBases $type $type] in {int decimal text bytes bool instant local_datetime}}]
 }
 
 proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
@@ -860,7 +876,7 @@ proc ::appcompiler::checker::comparable {type world} {
         if {[dict exists $seen $member]} { continue }
         dict set seen $member 1
         if {$member eq ""} { set known -1; continue }
-        if {$member in {int decimal text bool}} { continue }
+        if {$member in {int decimal text bool instant local_datetime}} { continue }
         set parts [::appcompiler::typeParts $member]
         if {[lindex $parts 0] eq "range"} { return 0 }
         if {[lindex $parts 0] in {optional list map}} {
@@ -1294,7 +1310,7 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     if {$resolvedVar ne ""} {
         upvar 1 $resolvedVar resolved
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
-            usesSql [dict getdef $reports usesSql 0]]
+            usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0]]
     }
     return [dict get $reports diagnostics]
 }

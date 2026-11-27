@@ -837,7 +837,7 @@ proc ::machteld::help {args} {
                     [dict get $options -errorcode] ne {MACHTELD DOCS unsupported}} {
                 DocsHelpError $page $options
             }
-            return "machteld [::machteld::version]\n\nThis executable carries no embedded reference pack.\nUse the full Machteld [::machteld::version] executable for offline documentation.\n\nRuntime commands remain available. Use `manifest` for command metadata\nand `docs schema` for the documentation query contract."
+            return "Machteld [version -product]\n\nThis executable carries no embedded reference pack.\nUse the full Machteld [version -product] executable for offline documentation.\n\nRuntime commands remain available. Use `manifest` for command metadata\nand `docs schema` for the documentation query contract."
         }
         return [dict get $page text]
     }

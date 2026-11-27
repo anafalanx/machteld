@@ -163,7 +163,7 @@ proc ::et::aclTests {versionRe} {
         check "ACL regression fixture permits exact open but denies parent enumeration" \
             [expr {$directOpen && $enumerationDenied}]
 
-        set result [host -exe $aclHost --version]
+        set result [host -exe $aclHost --version --api]
         check "standalone zipfs starts below an ACL-denied parent" \
             [expr {[dict get $result exit] == 0 && [regexp $versionRe [dict get $result out]]}] [dict get $result text]
 
@@ -569,13 +569,13 @@ puts [list [lsort [dict keys $contract]] [dict get $contract child subcommands w
         [dict get $browser result detected] && [dict get $browser result executable] eq $browserPath}] $browser
 }
 
-proc ::et::hostModeTests {versionRe} {
+proc ::et::hostModeTests {version versionRe product} {
     variable work
     set help [host --help]
     set out [dict get $help out]
     check "--help is a host mode" [expr {[dict get $help exit] == 0 && [string length $out] > 0}] [dict get $help err]
     check "--help identifies the complete Machteld, Tcl, and Tk reference" \
-        [expr {[regexp -nocase {complete offline reference} $out] && [regexp "Machteld $versionRe" $out] &&
+        [expr {[regexp -nocase {complete offline reference} $out] && [string trimright [lindex [split $out \n] 0] \r] eq "# Machteld $product" &&
                [regexp {Tcl 9\.0\.4} $out] && [regexp {Tk 9\.0\.4} $out] &&
                [regexp -nocase -- {--docs} $out] && [regexp -nocase {search} $out]}] [dict get $help text]
     check "--help shows archive and standalone packaging" [expr {
@@ -587,8 +587,18 @@ proc ::et::hostModeTests {versionRe} {
         [string first {machteld/package/application-compiler} $out] >= 0
     }]
     set result [host --version]
-    check "--version is a host mode" \
-        [expr {[dict get $result exit] == 0 && [regexp $versionRe [dict get $result out]]}] [dict get $result err]
+    check "--version returns the exact product label" \
+        [expr {[dict get $result exit] == 0 && [string trimright [dict get $result out] "\r\n"] eq $product &&
+            [dict get $result err] eq {}}] [dict get $result text]
+    set result [host --version --api]
+    check "--version --api returns the exact Tcl package API" \
+        [expr {[dict get $result exit] == 0 && [string trimright [dict get $result out] "\r\n"] eq $version &&
+            [dict get $result err] eq {}}] [dict get $result text]
+    foreach invalid {{--product} {--api extra}} {
+        set result [host --version {*}$invalid]
+        check "--version rejects $invalid" [expr {[dict get $result exit] == 1 &&
+            [dict get $result out] eq {} && [string match {*usage: machteld.exe --version*} [dict get $result err]]}]
+    }
 
     set status [host --docs status --json]
     set decoded [expr {[dict get $status exit] == 0 ? [decodeJson [dict get $status out]] : ""}]
@@ -760,6 +770,9 @@ proc ::et::main {argv} {
     # The version is one natural number, matched as a whole word: 22 does not
     # match inside 220 or 122.
     set versionRe "\\m$version\\M"
+    if {![regexp -line {^#define\s+MACHTELD_PRODUCT_VERSION\s+"([^"]+)"} $header -> product]} {
+        error "entry test: src/machteld.h has no canonical MACHTELD_PRODUCT_VERSION"
+    }
 
     set work [file join [file normalize $::env(TEMP)] machteld-entry-test-[pid]]
     file mkdir $work
@@ -772,7 +785,7 @@ proc ::et::main {argv} {
         } else {
             puts "--   host-crash checks skipped (no --fixture)"
         }
-        hostModeTests $versionRe
+        hostModeTests $version $versionRe $product
         inspectionTests $version
         # Exercise payload refusal using the tested runtime's PE sections.
         # The release artifact itself remains untouched.

@@ -13,6 +13,7 @@ commands: machteld.exe, machteld pack, machteld wrap, machteld project, machteld
 ```text
 machteld.exe --help
 machteld.exe --version
+machteld.exe --version --api
 machteld.exe --docs status --json
 machteld.exe --check program.machteld --json
 machteld.exe --manifest command child wait --json
@@ -24,6 +25,10 @@ machteld.exe project pack project.dict program.machteld
 machteld.exe pack source -o program.machteld
 machteld.exe wrap app.dict -o Program.exe --gui
 ```
+
+`--version` prints the product version on one line, currently `0.50-dev`.
+`--version --api` prints the Tcl package API number (`30`) used by
+`package require machteld` and the project manifest's `minApi`.
 
 The program receives the arguments after its name in Tcl's `argv` list. An attached interactive terminal can start a prompt by running the host with no program. For batch work, pass a UTF-8 program file. The first command is a literal `package require machteld`, optionally with a literal version requirement or `-exact`. The host rejects redirected program input, `-` and an explicit `-encoding` option. A direct application controls its own command-line options.
 

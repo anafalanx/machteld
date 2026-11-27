@@ -7,10 +7,13 @@ tags: [machteld, roadmap, windows]
 
 # Roadmap
 
-## Next public release — 0.50
+## 0.50-dev
 
 On 2026-11-27 the owner chose **one release integrating the application
-compiler with the Tcl/Tk runtime**. The upgrade is from signed 0.21 to 0.50.
+compiler with the Tcl/Tk runtime**. Development builds display `0.50-dev`.
+The next public release is `0.50` and subsequent releases continue with
+`0.51`, `0.52` and so on. Existing Tcl applications use package API `30`.
+The upgrade is from signed 0.21 to 0.50.
 The work prepared under 0.30 continues as an unsigned development baseline.
 Its `30.x` work-item numbers and recorded measurements still identify that
 work. X is the working name of the typed source language. The compiler is
@@ -52,7 +55,7 @@ locks. The desktop changes cover metadata-only path inspection, quiet workers,
 attended child windows and process-scoped clipboard ownership. The beta also
 corrected Tcl control flow through `scope`. [Beta 1 scope and release checklist](https://github.com/anafalanx/machteld/blob/e0db215ede968d3255415613d86c66abda210249/docs/releases/0.22-beta.1.md)
 
-The source and Tcl package report `30`, and the fixed Windows file version
+The Tcl package reports `30`, and the fixed Windows file version
 is `30.0.0.0`. An existing entry with a requirement of `22-` accepts 30.
 An entry with `22-30` excludes it. Signed 0.21 drives builds and
 tests through acceptance of the signed 0.50 copy. Identify baseline artifacts by their

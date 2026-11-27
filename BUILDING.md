@@ -7,8 +7,9 @@ publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
 0.50 is the next public release after signed 0.21. It combines the
-application compiler with the Tcl/Tk runtime. The unsigned 0.30
-development baseline's CLI and Tcl package both report `30`. The
+application compiler with the Tcl/Tk runtime. The integrated development
+build reports `0.50-dev` from `machteld.exe --version`. Its Tcl package
+API is `30`, also available from `machteld.exe --version --api`. The
 earlier Beta 1 run produced an unsigned test
 ZIP before the current CI policy was adopted.
 [Beta 1 results](docs/releases/0.22-beta.1.md) ·
@@ -145,10 +146,11 @@ Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
 
-For 0.50, advance the runtime API to `50` across the header, Tcl package
-and documentation. Check exact and bounded version requirements before
-freezing the candidate. Clear the prerelease marker in `src/machteld.h`
-for the final release commit and verify Windows file version `50.0.0.0`.
+For release, set `MACHTELD_PRODUCT_VERSION` to `0.50` in `src/machteld.h`.
+Verify the CLI and Windows version strings report that value and the Windows
+prerelease flag is clear. Keep the Tcl package API at `30` and the fixed
+Windows version fields at `30.0.0.0`. Test exact and bounded Tcl package
+requirements before freezing the candidate.
 Rebuild that commit on the build
 PC and the hosted Windows runner, each from a clean checkout and a fresh
 dependency cache. Use the same locked inputs and the commit timestamp from
@@ -227,7 +229,6 @@ the signed file's SHA-256 and obtain the owner's publication decision.
    objects and whole reference generations by content in `.cache\dev`.
    A documentation edit regenerates the reference, which takes about a minute
    on the build PC. An unchanged reference reuses its cached generation.
-2. The development source uses runtime number `30`. Keep
-   `MACHTELD_VERSION` in `src\machteld.h`, `variable version` in
-   `tcl\machteld.tcl`, and the current-runtime heading in `docs\roadmap.md`
-   consistent. The gate checks these values with `tools\check_version.tcl`.
+2. `src\machteld.h` declares the product label in `MACHTELD_PRODUCT_VERSION`
+   and the Tcl package API in `MACHTELD_VERSION`. The version gate checks the
+   roadmap's current heading and the package declaration in `tcl\machteld.tcl`.

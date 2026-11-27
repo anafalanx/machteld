@@ -11,12 +11,14 @@ are no compute engines, `macht`, or Lua. This repository also holds the
 application compiler, written in Tcl. It checks typed modules and compiles them
 to Tcl for this runtime.
 
-## Next public release — 0.50
+## Machteld 0.50-dev
 
 **0.50 will be the next public release after signed 0.21.** It brings the
 compiler and Tcl/Tk runtime into one development and delivery tool. Existing
-projects can keep a Tcl entry and migrate individual modules. The 0.30 work
-is an unsigned development baseline. Its CLI and Tcl package both report `30`.
+projects can keep a Tcl entry and migrate individual modules.
+`machteld.exe --version` prints `0.50-dev`. To check the Tcl package API
+used by existing applications, run `machteld.exe --version --api` (currently `30`).
+The 0.30 work was an unsigned development baseline.
 The build tools use the signed executable at `dist/0.21/machteld.exe`.
 [Signed 0.21 release](https://github.com/anafalanx/machteld/releases/tag/v0.21) ·
 [Build guide](BUILDING.md)
@@ -59,9 +61,8 @@ locked inputs. The runtime and packaged examples must pass acceptance,
 including attended checks of user-visible behavior. The owner signs a copy,
 the gate checks those signed bytes, and the owner decides when to publish.
 
-The rest of this README and the current guides describe **30**, unless
-explicitly marked as history. Different builds can share that version:
-incremental builds embed `build-info.dict` with source/input and reference
+The current guides describe this development build. Different builds can share a version.
+Incremental builds embed `build-info.dict` with source/input and reference
 identities; clean reconstruction omits that development-only record. Compare
 artifact hashes and verification receipts, and query `manifest` and the
 documentation in the executable you actually use.
@@ -188,7 +189,7 @@ describe composition and limits, including retries and cancellation.
 
 ## Application archives
 
-To distribute an application to someone who already has Machteld 30, put its
+To distribute an application to someone who already has a runtime with API 30, put its
 opted-in `main.tcl` and assets in a staging directory. The full host can pack
 that tree into a plain ZIP and run it with the usual program arguments.
 
@@ -254,8 +255,8 @@ marked README examples themselves.
 The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
 [ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
 versions, source hashes, and the backport identity are recorded in
-[the lock](tools/dependencies.lock.json). Machteld's Windows file/product
-version is exactly `30`, and 30.0.0.0 as Windows' fixed version; its author,
+[the lock](tools/dependencies.lock.json). The file and product version strings in
+Windows show `0.50-dev`. The fixed numeric fields encode the API as `30.0.0.0`. Its author,
 publisher, and copyright holder are Vincent Vercauteren. Build paths are
 scrubbed from the packaged runtime.
 

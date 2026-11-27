@@ -334,7 +334,7 @@ proc ::gate::plan {settings} {
                 }
                 # The packaging forms also run the direct cases for these suites.
                 if {"packaging" ni $chosen} {
-                    foreach suite {project io examples sql transaction migration} {
+                    foreach suite {project io examples sql transaction migration temporal} {
                         addLane steps $runtime integration "application compiler $suite" application_compiler_${suite}_test.tcl
                     }
                 }
@@ -354,7 +354,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "application compiler offline reference" application_compiler_reference_test.tcl
                 addLane steps $runtime packaging "embedded project driver" application_compiler_host_test.tcl
                 addLane steps $runtime packaging "typed colleague import" typed_import_test.tcl
-                foreach suite {project io examples sql transaction migration} {
+                foreach suite {project io examples sql transaction migration temporal} {
                     addLane steps $runtime packaging "application compiler $suite (direct and packed)" application_compiler_${suite}_test.tcl -pack
                 }
             }
@@ -458,14 +458,29 @@ proc ::gate::withLaneEnvironment {settings compilerBin script} {
     }
 }
 
-# The tested executable's identity: its --version and SHA-256.
-proc ::gate::identify {runtime} {
-    set result [run -timeout 1m -- $runtime --version]
+# Product and package API shared one value through the signed 0.21 and the
+# later integer-only development builds. Those hosts have no API selector.
+proc ::gate::readVersion {runtime args} {
+    set result [run -timeout 1m -- $runtime --version {*}$args]
     if {[dict get $result status] ne "ok" || [dict get $result exit] != 0} {
         fail "cannot identify the tested executable: [file nativename $runtime]"
     }
-    dict create version [string trim [encoding convertfrom utf-8 [dict get $result out]]] \
-        sha256 [hash file sha256 $runtime]
+    string trim [encoding convertfrom utf-8 [dict get $result out]]
+}
+
+proc ::gate::identify {runtime} {
+    set version [readVersion $runtime]
+    if {[regexp {^[1-9][0-9]*$} $version] ||
+            ([regexp {^0\.[0-9]+(?:\.[0-9]+)?$} $version] &&
+             [package vcompare $version 0.21] <= 0)} {
+        set api $version
+    } elseif {[regexp {^(?:0|[1-9][0-9]*)\.[0-9]{2}(?:-dev)?$} $version]} {
+        set api [readVersion $runtime --api]
+        if {![regexp {^[1-9][0-9]*$} $api]} {fail "invalid Tcl package API: $api"}
+    } else {
+        fail "invalid product version: $version"
+    }
+    dict create version $version api $api sha256 [hash file sha256 $runtime]
 }
 
 proc ::gate::seconds {started} {

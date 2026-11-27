@@ -146,10 +146,10 @@ _tmain(
             _tcscmp(argv[1], _T("--help")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_HELP);
         argc = 1;
-    } else if (startup == NULL && argc == 2 &&
+    } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("--version")) == 0) {
+        _tcscpy(argv[1], _T("version"));
         Machteld_SetHostMode(MACHTELD_HOST_VERSION);
-        argc = 1;
     } else if (startup == NULL && argc >= 2 &&
             _tcscmp(argv[1], _T("-encoding")) == 0) {
         Machteld_SetHostMode(MACHTELD_HOST_ENCODING);

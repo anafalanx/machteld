@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public machteld 30 commands and their intended composition.
+description: The public commands in Machteld 0.50-dev and how to use them together.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -14,7 +14,7 @@ This page is a composition tour. The [complete reference](reference/machteld/ind
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the embedded Machteld, Tcl, Tk and cffi manuals.
 
-This describes machteld 30, in preparation, not the older signed release. Its
+This describes Machteld 0.50-dev and its Tcl package API 30. Its
 acceptance is in progress; check the selected executable's live `manifest`,
 artifact identity, and embedded reference.
 

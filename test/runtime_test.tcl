@@ -78,6 +78,10 @@ check "help advertises bounded embedded-reference discovery" [expr {
     [string match {*docs get*} [help]] && [string match {*docs search*} [help]] &&
     [string match {*docs schema*} [help]]}]
 check "version command agrees with machteld.h" [expr {[version] eq $expectedVersion}]
+check "Tcl can display the product label separately from the package API" [expr {
+    [regexp -line {^#define\s+MACHTELD_PRODUCT_VERSION\s+"([^"]+)"} $headerText -> expectedProduct] &&
+    [version -product] eq $expectedProduct}]
+check "version rejects unknown selectors" [expr {[catch {version -unknown}]}]
 set embedded_module_path [file normalize \
     [file join [file dirname [info library]] tcl9 9.0]]
 check "embedded Tcl modules include msgcat" [expr {

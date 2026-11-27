@@ -718,7 +718,7 @@ Machteld_EntryGate(Tcl_Interp *interp, Tcl_Obj *payload_root)
         dispatch_command(interp, "::machteld::help", 0);
     }
     if (host_mode == MACHTELD_HOST_VERSION) {
-        dispatch_command(interp, "::machteld::version", 0);
+        dispatch_command(interp, "::machteld::VersionHost", 1);
     }
     if (host_mode == MACHTELD_HOST_DOCS) {
         dispatch_command(interp, "::machteld::DocsHost", 1);

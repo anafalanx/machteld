@@ -378,7 +378,7 @@ set fixtureStatus [catch {
     set noPackHelp [help]
     check {omitted reference help gives honest same-version recovery guidance} [expr {
         [string match {*carries no embedded reference pack*} $noPackHelp] &&
-        [string match "*full Machteld [version] executable*" $noPackHelp] &&
+        [string match "*full Machteld [version -product] executable*" $noPackHelp] &&
         [string match {*offline documentation*docs schema*} $noPackHelp] &&
         ![string match {*contains the complete*} $noPackHelp]}]
     set fixtureResult ""

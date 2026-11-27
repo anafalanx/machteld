@@ -3,9 +3,8 @@
 # Usage:
 #   tclsh generate-version-resource.tcl HEADER OUTPUT.rc
 #
-# machteld's version is one natural number, and the string version is exactly
-# as authored in the header. Windows' fixed numeric version has four fields,
-# so the other three are zero: 30 is 30.0.0.0.
+# Windows displays the product label. The four fixed numeric fields retain
+# the runtime API numbering used by existing tools (API 30 is 30.0.0.0).
 
 if {[llength $argv] != 2} {
     puts stderr "usage: generate-version-resource.tcl HEADER OUTPUT.rc"
@@ -26,6 +25,10 @@ if {![regexp $pattern $text -> version]} {
     puts stderr "generate-version-resource.tcl: canonical MACHTELD_VERSION is absent"
     exit 1
 }
+if {![regexp -line {^#define[ \t]+MACHTELD_PRODUCT_VERSION[ \t]+"([0-9][0-9A-Za-z.-]*)"[ \t]*\r?$} $text -> productVersion]} {
+    puts stderr "generate-version-resource.tcl: canonical MACHTELD_PRODUCT_VERSION is absent"
+    exit 1
+}
 
 set numeric {}
 foreach component [list $version 0 0 0] {
@@ -38,10 +41,8 @@ foreach component [list $version 0 0 0] {
 }
 set fixed [join $numeric ,]
 set flags 0
-set milestone {}
-if {[regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text -> beta]} {
+if {[string match *-dev $productVersion]} {
     set flags 2
-    set milestone [list Comments "Machteld $version Beta $beta"]
 }
 
 file mkdir [file dirname [file normalize $output]]
@@ -67,12 +68,12 @@ try {
             Author "Vincent Vercauteren" \
             CompanyName "Vincent Vercauteren" \
             FileDescription "machteld runtime" \
-            FileVersion $version \
+            FileVersion $productVersion \
             InternalName machteld \
             LegalCopyright "Copyright 2026 Vincent Vercauteren" \
             OriginalFilename machteld.exe \
             ProductName Machteld \
-            ProductVersion $version {*}$milestone] {
+            ProductVersion $productVersion] {
         puts $channel "            VALUE \"$name\", \"$value\\0\""
     }
     puts $channel {        END}
@@ -86,4 +87,4 @@ try {
     close $channel
 }
 
-puts "version-resource: machteld $version -> [file nativename $output]"
+puts "version-resource: Machteld $productVersion -> [file nativename $output]"

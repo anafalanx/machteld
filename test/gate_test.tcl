@@ -161,12 +161,12 @@ proc compilerSuites {steps group runtime} {
 }
 set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
-set packed {archive {examples -pack} host {io -pack} {migration -pack} {project -pack} reference {sql -pack} {transaction -pack}}
+set packed {archive {examples -pack} host {io -pack} {migration -pack} {project -pack} reference {sql -pack} {temporal -pack} {transaction -pack}}
 check {fast runs in-process application compiler suites on the candidate} \
     [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
 check {integration alone runs the compiler's child-process and direct project, I/O, example and SQL tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
-        [lsort [concat $direct {project io examples sql transaction migration}]]}]
+        [lsort [concat $direct {project io examples sql transaction migration temporal}]]}]
 check {packaging runs the compiler archive and the packed project, I/O, example and SQL cases} \
     [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
 foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {
@@ -454,8 +454,9 @@ try {
 }
 
 set identity [::gate::identify [info nameofexecutable]]
-check {the gate names a runtime by its --version and SHA-256} \
-    [expr {[dict get $identity version] eq [package require machteld] &&
+check {the gate identifies the signed build driver and its package API} \
+    [expr {[dict get $identity api] eq [package require machteld] &&
+        [dict get $identity version] eq [string trim [dict get [run -- [info nameofexecutable] --version] out]] &&
         [dict get $identity sha256] eq [hash file sha256 [info nameofexecutable]]}]
 
 set work [file join [file normalize $::env(TEMP)] machteld-gate-test-[pid]-[binary encode hex [hash random 8]]]
@@ -474,6 +475,33 @@ try {
 
     set tested [file join $work tested.bin]
     writeText $tested "tested bytes"
+    rename ::gate::readVersion ::gate::realReadVersion
+    proc ::gate::readVersion {runtime args} {
+        if {![llength $args]} {return $::fixtureVersion}
+        if {$args ne {--api} || $::fixtureApi eq "unavailable"} {
+            error "unexpected API query for $::fixtureVersion"
+        }
+        return $::fixtureApi
+    }
+    try {
+        foreach {fixtureVersion fixtureApi expectedApi} {
+            0.21 unavailable 0.21
+            30 unavailable 30
+            0.50-dev 30 30
+            0.50 30 30
+            0.51 30 30
+        } {
+            set reported [::gate::identify $tested]
+            check "gate identifies $fixtureVersion with API $expectedApi" \
+                [expr {[dict get $reported api] eq $expectedApi && [dict get $reported version] eq $fixtureVersion}]
+        }
+        foreach fixtureApi {unavailable 0.50-dev bogus} {
+            check "modern gate refuses a missing or invalid --api answer ($fixtureApi)" [catch {::gate::identify $tested}]
+        }
+    } finally {
+        rename ::gate::readVersion {}
+        rename ::gate::realReadVersion ::gate::readVersion
+    }
     set testedIdentity [dict create version fixture sha256 [hash file sha256 $tested]]
     set exits [file join $work exits.tcl]
     writeText $exits "package require machteld\nexit \[lindex \$argv 0\]\n"

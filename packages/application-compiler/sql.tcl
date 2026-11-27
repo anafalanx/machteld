@@ -40,7 +40,7 @@ proc sqlBinding {type value slot} {
             return [list integer $value]
         }
         bool {return [list integer [expr {$value ? 1 : 0}]]}
-        text - decimal {return [list text $value]}
+        text - decimal - instant - local_datetime {return [list text $value]}
         bytes {return [list blob $value]}
     }
     sqlFail SQL_BIND "parameter $slot has unsupported type $type"
@@ -53,13 +53,20 @@ proc sqlCell {type cell column} {
         if {$storage eq "null"} {return [list none]}
         set type [string range $type 0 end-1]
     }
-    switch -- [scalarBase $type] {
+    set base [scalarBase $type]
+    switch -- $base {
         int {set valid [expr {$storage eq "integer"}]}
         bool {set valid [expr {$storage eq "integer" && $value in {0 1}}]}
         text {set valid [expr {$storage eq "text"}]}
         bytes {set valid [expr {$storage eq "blob"}]}
         decimal {
             set valid [expr {$storage in {text integer} && ![catch {decimal::canonical $value} value]}]
+        }
+        instant - local_datetime {
+            set valid [expr {$storage eq "text"}]
+            if {$valid && [catch {temporalCanonical $base $value}]} {
+                sqlFail SQL_TYPE "column [list $column] requires canonical $base text"
+            }
         }
         default {set valid 0}
     }

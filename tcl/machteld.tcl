@@ -12,9 +12,20 @@ namespace eval ::machteld {
     variable TCL_MANIFEST {}
 }
 
-proc ::machteld::version {} {
+proc ::machteld::version {args} {
     variable version
-    return $version
+    if {![llength $args]} {return $version}
+    if {$args eq {-product}} {
+        variable productVersion
+        return $productVersion
+    }
+    return -code error -errorcode {TCL WRONGARGS} {wrong # args: should be "version ?-product?"}
+}
+
+proc ::machteld::VersionHost {args} {
+    if {![llength $args]} {return [version -product]}
+    if {$args eq {--api}} {return [version]}
+    return -code error {usage: machteld.exe --version ?--api?}
 }
 
 # Explicit public facts for Tcl-authored verbs. Command bodies are programs,
@@ -97,7 +108,7 @@ proc ::machteld::manifest {} {
     return $m
 }
 
-::machteld::MetaDefine version [dict create kind tcl args {} doc machteld/command/version]
+::machteld::MetaDefine version [dict create kind tcl args {?-product?} options {-product} doc machteld/command/version]
 ::machteld::MetaDefine manifest [dict create kind tcl args {} doc machteld/command/manifest]
 ::machteld::MetaDefine scope [dict create kind tcl args {body} doc machteld/command/scope]
 
@@ -648,7 +659,7 @@ proc ::machteld::ArchiveEntry {root {countVar ""} {inventoryVar ""}} {
     set indexName machteld-inventory.dict
     set index [file join $root $indexName]
     if {![file isfile $index]} {
-        Fail ENTRY inventory "archive has no $indexName; pack the original application sources with Machteld 30"
+        Fail ENTRY inventory "archive has no $indexName; rebuild from the original application sources with machteld.exe pack"
     }
     try {
         if {[file size $index] > 4194304} { error "inventory exceeds 4 MiB" }
@@ -877,7 +888,7 @@ package provide machteld $::machteld::version
 # (tcl_prompt1 is never invoked in non-interactive/script mode, so scripts stay
 # silent.)
 set ::tcl_prompt1 {
-    puts "machteld [::machteld::version] - compact Windows runtime for Tcl/Tk 9 (Tcl [info patchlevel])"
+    puts "Machteld [::machteld::version -product] - compact Windows runtime for Tcl/Tk 9 (Tcl [info patchlevel])"
     set ::tcl_prompt1 {puts -nonewline "machteld % "; flush stdout}
     puts -nonewline "machteld % "
     flush stdout

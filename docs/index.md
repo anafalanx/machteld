@@ -5,7 +5,7 @@ description: Documentation for the API-30 development runtime and the integrated
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# machteld 30
+# Machteld 0.50-dev
 
 These pages describe the unsigned development runtime, whose API number is
 `30`. The next public release, 0.50, integrates the typed application

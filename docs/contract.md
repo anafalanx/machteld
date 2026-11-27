@@ -10,9 +10,9 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-This contract describes the 0.30 development source, which reports
-runtime version `30`. Signed 0.21 is the public release and 0.30 is the
-next delivery target. Consult the selected executable's embedded reference
+This contract describes Machteld 0.50-dev and its Tcl package API `30`.
+Signed 0.21 is the public release and 0.50 is the next delivery target.
+Consult the selected executable's embedded reference
 and artifact identity for the commands it actually provides. [Roadmap](roadmap.md)
 
 ## Platform
@@ -22,7 +22,7 @@ Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor, and ARM64 is not a target. These are the platform policy,
 not a claim of acceptance on every listed OS. The baseline was tested on the
 Windows 11 build PC and in hosted Windows Server 2025 CI. Record fresh
-acceptance results for the 0.30 candidate on both target families.
+acceptance results for the 0.50 candidate on both target families.
 The binary may start on older builds — ConPTY has existed since Windows 10
 1809 — but that API minimum does not widen the supported platform policy.
 
@@ -37,8 +37,8 @@ package require machteld 30-
 package require -exact machteld 30
 ```
 
-The unpublished 0.22 candidate and planned 0.30 release correspond to Tcl
-package versions `22` and `30`. Tcl treats each whole number as a major
+The unpublished 0.22 and 0.30 baselines used Tcl package versions `22`
+and `30`. The integrated build keeps package API `30`. Tcl treats each whole number as a major
 version. A request for `22` accepts only major version 22. The range
 `22-` accepts 22 and all later runtimes. Use `22-30` for a program that
 must be reviewed before running on 30. Its upper bound excludes 30.
@@ -365,4 +365,7 @@ Repack an unpublished 22 archive from its original sources before using it on 30
 
 A later runtime number may still remove a mistaken surface; a program that must
 be read again before it runs on one names an upper bound (see Entry and
-package). Within a release, `version`, `manifest`, package version, docs and the Windows file version must agree.
+package). `version`, the manifest, the Tcl package version and the reference
+corpus identify the API. Windows' fixed numeric fields encode that API.
+`version -product`, `machteld.exe --version` and the Windows file and product
+version strings identify the public version.

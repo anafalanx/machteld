@@ -302,6 +302,13 @@ paths. The public archive name stays in `argv0`, while `info script` names
 the mounted Tcl file. A small entry script explicitly called the original
 main procedure and ran it exactly once in both forms.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, temporal evidence
+
+The same recorded 02:30 selected two different observations when supplied
+with two different UTC offsets. With the offset omitted, it stayed
+unresolved. Fixed-width fractional seconds also let SQLite distinguish two
+adjacent one-nanosecond intervals using its ordinary TEXT comparison.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

@@ -915,8 +915,9 @@ starts a new candidate with fresh reproducibility and acceptance evidence.
 
 ### Signing, publication and recovery
 
-1. Freeze the integrated release commit with public API `50`, Windows file
-   version `50.0.0.0` and the prerelease flag clear. From independent clean
+1. Freeze the integrated release commit with product version `0.50`,
+   Tcl package API `30`, Windows fixed version `30.0.0.0` and the prerelease
+   flag clear. From independent clean
    checkouts and fresh dependency caches, set `SOURCE_DATE_EPOCH` to the
    same commit timestamp and compare the **complete unsigned SHA-256**
    across the build PC and hosted CI. Compare incremental output separately,

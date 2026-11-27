@@ -14,7 +14,7 @@ errors, resource lifetime, constraints, and examples. Use `manifest` for a
 structured inventory of the running API and the documentation interface for
 exact lookup and search.
 
-This tree reports runtime version 30, in preparation and not yet released.
+This tree builds Machteld 0.50-dev with Tcl package API 30.
 Match these pages to the executable's corpus and artifact identity, not merely
 its package version: builds can change without a new version number.
 Conceptual guides state design intent and history separately from the

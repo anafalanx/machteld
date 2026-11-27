@@ -361,6 +361,11 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldbrowser", Machteldbrowser_Init, NULL);
+    if (Tcl_SetVar2Ex(interp, "::machteld::productVersion", NULL,
+            Tcl_NewStringObj(MACHTELD_PRODUCT_VERSION, -1),
+            TCL_GLOBAL_ONLY | TCL_LEAVE_ERR_MSG) == NULL) {
+        return TCL_ERROR;
+    }
     /* The prelude registers `package require Tk` against the statically
      * linked Tk. It reads the library's own patch level from this variable,
      * so no hand-maintained literal can drift from what `load {} Tk` provides. */

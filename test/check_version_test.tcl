@@ -25,10 +25,10 @@ proc fixture {changes {current 22}} {
     incr ::serial
     set root [file join $::work case-$::serial]
     set files [dict create \
-        src/machteld.h "#define MACHTELD_VERSION \"$current\"\n" \
+        src/machteld.h "#define MACHTELD_VERSION \"$current\"\n#define MACHTELD_PRODUCT_VERSION \"0.50-dev\"\n" \
         tcl/machteld.tcl "namespace eval ::machteld \{\n    variable version $current\n\}\n" \
-        README.md "# Machteld\nMachteld $current is the runtime.\n" \
-        docs/roadmap.md "---\ndescription: Current Machteld $current development.\n---\n\n## $current development\n"]
+        README.md "# Machteld\nMachteld 0.50-dev is the runtime.\n" \
+        docs/roadmap.md "---\ndescription: Current Machteld 0.50-dev development.\n---\n\n## 0.50-dev development\n"]
     dict for {name value} [dict merge $files $changes] { text [file join $root $name] $value }
     return $root
 }
@@ -61,6 +61,15 @@ set end {<!-- machteld-version-history: end -->}
 set currentMarker {<!-- machteld-version-current -->}
 try {
     case "current minimal checkout" {} {}
+    case "product and package API can appear together" [dict create README.md {Machteld 0.50-dev provides package require machteld 22.}] {}
+    case "the numeric API cannot stand in for a product label" [dict create README.md {Machteld 22 is the current build.}] {*claims 22*}
+    case "a prose Tcl package name can use its numeric API" [dict create README.md {It provides package `machteld 22`.}] {}
+    case "unreleased product requires its suffix" [dict create README.md {Machteld 0.50 is current.}] {*claims 0.50*}
+    case "stale product suffix is rejected" [dict create README.md {Machteld 0.50-beta is current.}] {*claims 0.50-beta*}
+    case "a public label cannot be used as a Tcl package floor" [dict create README.md {package require machteld 0.50-dev}] {*claims 0.50-dev*}
+    case "release label needs no stage" [dict create \
+        src/machteld.h "#define MACHTELD_VERSION \"22\"\n#define MACHTELD_PRODUCT_VERSION \"0.50\"\n" \
+        docs/roadmap.md {## 0.50} README.md {Machteld 0.50}] {}
     case "single-digit natural versions are supported" {} {} 9
     case "longer natural versions are supported" {} {} 105
     case "dotted header version is refused" [dict create src/machteld.h "#define MACHTELD_VERSION \"0.22\"\n"] {*one canonical MACHTELD_VERSION*}
@@ -96,12 +105,12 @@ try {
     case "tilde-fenced app version is not runtime prose" [dict create README.md "~~~~tcl\nversion 1.0\n~~~~\n"] {}
     case "short inner fence cannot turn app value into prose" [dict create README.md "````tcl\n```\nversion 1.0\n````\n"] {}
     case "claims after a matching fence remain checked" [dict create README.md "```tcl\nversion 1.0\n```\nVersion 21 is current.\n"] {*claims 21*}
-    case "annotation examples inside code are inert" [dict create README.md "```html\n$begin\n```\nMachteld 22\n"] {}
+    case "annotation examples inside code are inert" [dict create README.md "```html\n$begin\n```\nMachteld 0.50-dev\n"] {}
     case "roadmap heading inside code is not current section" [dict create docs/roadmap.md "```markdown\n## 22 development\n```\n"] {*no current-version heading outside history*}
     case "dependency does not exempt same-line stale claim" [dict create README.md {yyjson 0.12.0 is built into Machteld 21.}] {*claims 21*}
     case "app version does not exempt same-line stale claim" [dict create README.md {Use -appversion 0.42 with Machteld 21.}] {*claims 21*}
-    case "one matching claim does not hide another stale claim" [dict create README.md {Machteld 22 supersedes Machteld 0.21.}] {*claims 0.21*}
-    case "explicit historical prose retains old releases" [dict create docs/history.md "$begin\n## 0.21 consolidation\nMachteld 0.11.0 preceded Machteld 0.21.\n$end\nMachteld 22 is current.\n"] {}
+    case "one matching claim does not hide another stale claim" [dict create README.md {Machteld 0.50-dev supersedes Machteld 0.21.}] {*claims 0.21*}
+    case "explicit historical prose retains old releases" [dict create docs/history.md "$begin\n## 0.21 consolidation\nMachteld 0.11.0 preceded Machteld 0.21.\n$end\nMachteld 0.50-dev is current.\n"] {}
     case "history does not exempt following current prose" [dict create docs/history.md "$begin\nMachteld 0.11.0 was released.\n$end\nMachteld 0.21 is current.\n"] {*docs/history.md:4 claims 0.21*}
     case "history cannot supply the current roadmap heading" [dict create docs/roadmap.md "$begin\n## 22 released\n$end\n"] {*no current-version heading outside history*}
     case "roadmap heading matches the exact version" [dict create docs/roadmap.md {## 0x22 development}] {*no current-version heading*}
@@ -129,7 +138,7 @@ try {
 package require machteld $::machteld::version}] {}
     case "duplicate header declarations are rejected" [dict create src/machteld.h "#define MACHTELD_VERSION \"22\"\n#define MACHTELD_VERSION \"22\"\n"] {*one canonical MACHTELD_VERSION*}
     case "duplicate prelude declarations are rejected" [dict create tcl/machteld.tcl "variable version 22\nvariable version 22\n"] {*one canonical version variable*}
-    case "non-ASCII UTF-8 prose is accepted" [dict create README.md "Machteld 22 — Vincent Vercauteren; héél duidelijk.\n"] {}
+    case "non-ASCII UTF-8 prose is accepted" [dict create README.md "Machteld 0.50-dev — Vincent Vercauteren; héél duidelijk.\n"] {}
     case "CRLF claims remain checked" [dict create README.md "# Machteld\r\nMachteld 21\r\n"] {*README.md:2 claims 21*}
     foreach name {README.md docs/roadmap.md docs/deep/page.md examples/tool/README.md src/machteld.h tcl/machteld.tcl} {
         set root [fixture {}]

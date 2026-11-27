@@ -23,6 +23,10 @@ proc read_bytes {path} {
     set ch [open $path rb]
     try { return [read $ch] } finally { close $ch }
 }
+proc write_version_header {api product} {
+    write_bytes [file join $::fixtureRoot src machteld.h] \
+        "#define MACHTELD_VERSION \"$api\"\n#define MACHTELD_PRODUCT_VERSION \"$product\"\n"
+}
 proc fixture_entries {root {relative ""}} {
     set entries {}
     set children [concat [glob -nocomplain -directory [file join $root $relative] *] \
@@ -570,7 +574,7 @@ try {
     } {
         write_bytes [file join $::fixtureRoot {*}[split $relative /]] "fixture:$relative"
     }
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "22"}
+    write_version_header 22 0.50-dev
     write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 22}
     foreach relative {
         lock.sha256 artifacts.sha256 downloads/tcl904-src.zip downloads/tk904-src.zip
@@ -658,7 +662,11 @@ try {
     check {main Tcl implementation edit does not regenerate the reference} \
         [expr {$before eq [production_key reference]}]
     set capturedReferenceSpec [production_spec reference]
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "23"}
+    write_version_header 22 0.50
+    check {changing only the product label regenerates the reference} [expr {$before ne [production_key reference]}]
+    check {reference rechecks product label before publication} \
+        [catch {::machteld::devcache::fingerprint $capturedReferenceSpec}]
+    write_version_header 23 0.50-dev
     check {reference rejects inconsistent runtime versions} [catch {production_key reference}]
     write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 23}
     check {reference rechecks semantic version at publication time} \
@@ -667,10 +675,10 @@ try {
     # The version is one natural number; the dotted form of 0.21 and before is
     # no canonical version any more, even when both declarations agree.
     set naturalKey [production_key reference]
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "0.23"}
+    write_version_header 0.23 0.50-dev
     write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 0.23}
     check {reference refuses a dotted runtime version} [catch {production_key reference}]
-    write_bytes [file join $::fixtureRoot src machteld.h] {#define MACHTELD_VERSION "23"}
+    write_version_header 23 0.50-dev
     write_bytes [file join $::fixtureRoot tcl machteld.tcl] {variable version 23}
     check {restored natural version keys the reference as before} \
         [expr {$naturalKey eq [production_key reference]}]

@@ -59,6 +59,25 @@ try {
     check "identity reader refuses invalid UTF-8" \
         [catch {::machteld::buildidentity::read [file join $work utf8.dict]}]
 
+    set header [file join $work machteld.h]
+    set rc [file join $work version.rc]
+    set generator [list [info nameofexecutable] [file join $ROOT tools generate-version-resource.tcl] $header $rc]
+    foreach {label flags} {0.50-dev 2 0.50 0} {
+        bytes $header "#define MACHTELD_VERSION \"$runtime\"\n#define MACHTELD_PRODUCT_VERSION \"$label\"\n"
+        exec {*}$generator
+        set resource [slurp $rc]
+        check "PE generator displays $label and encodes its release state" [expr {
+            [string first "VALUE \"ProductVersion\", \"$label\\0\"" $resource] >= 0 &&
+            [string first "VALUE \"FileVersion\", \"$label\\0\"" $resource] >= 0 &&
+            [string first "FILEFLAGS 0x${flags}L" $resource] >= 0 &&
+            [string first "FILEVERSION $runtime,0,0,0" $resource] >= 0 &&
+            [string first "PRODUCTVERSION $runtime,0,0,0" $resource] >= 0}]
+    }
+    bytes $header "#define MACHTELD_VERSION \"$runtime\"\n"
+    check "an API-only header cannot accidentally label a new build for release" [expr {
+        [catch {exec {*}$generator 2>@1} message] &&
+        [string match {*canonical MACHTELD_PRODUCT_VERSION is absent*} $message]}]
+
     # Exercise the actual packager with deliberately tiny dependency fixtures.
     set prefix [file join $work prefix]
     bytes [file join $prefix lib tcl9.0 init.tcl] {# fixture}

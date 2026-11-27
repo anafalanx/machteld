@@ -286,6 +286,11 @@ proc fromWire {type node path} {
     set actual [::machteld::json type $node]
     switch -exact -- $head {
         optional {return [list some [fromWire [lindex $parts 1] $node $path]]}
+        instant - local_datetime {
+            set value [fromWire text $node $path]
+            if {[catch {temporalCanonical $head $value}]} {invalidWire "$path expects canonical $head text"}
+            return $value
+        }
         decimal {
             if {$actual ne "number"} {invalidWire "$path expects a decimal number, got $actual"}
             if {[catch {decimal::canonical [::machteld::json unwrap $node]} value]} {
@@ -358,6 +363,10 @@ proc toWire {type value path} {
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
         text {return [::machteld::json value string [nativeJsonText $value]]}
+        instant - local_datetime {
+            if {[catch {temporalCanonical $type $value}]} {invalidWire "$path expects canonical $type text"}
+            return [::machteld::json value string $value]
+        }
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
@@ -473,7 +482,7 @@ proc equal {type left right} {
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
         int - bool {return [expr {$left == $right}]}
-        decimal {return [string equal $left $right]}
+        decimal - instant - local_datetime {return [string equal $left $right]}
         text {
             if {[string equal $left $right]} {return 1}
             if {[string first \u0000 $left] < 0} {return 0}

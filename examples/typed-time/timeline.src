@@ -1,0 +1,54 @@
+record .request {
+    observed: text
+    offset_minutes: int?
+}
+
+## A source observation whose start and end are absolute instants.
+export record .period {
+    starts: instant
+    ends: instant
+    source: text
+}
+
+## Returns the observation covering an instant. The start is inclusive
+## and the end exclusive. An uncovered instant returns none.
+export fn .active_at($path: text, $at: instant) -> result<.period?,problem> =>
+    sql_optional<.period>($path,
+        'SELECT starts, ends, source FROM periods WHERE starts <= ?1 AND ?1 < ends', $at)
+
+fn .known($path: text, $at: instant) -> result<text,problem> {
+    $found ::= .active_at($path, $at)?
+    return ok(match $found {
+        none => $"gap at ${instant_text($at)}"
+        some($period) => $"${$period.source} at ${instant_text($at)}"
+    })
+}
+
+## Interprets a recorded wall time using the supplied minutes east of UTC.
+## A missing offset keeps the observation unresolved.
+export fn .describe($path: text, $observed: text, $offset: int?) -> result<text,problem> {
+    $local ::= parse_local_datetime($observed)?
+    return match $offset {
+        none => ok($"unresolved local time ${local_datetime_text($local)}")
+        some($minutes) => .known($path, resolve_offset($local, $minutes)?)
+    }
+}
+example .describe('timeline.db', '2026-10-25T02:30:00', none) => 'unresolved local time 2026-10-25T02:30:00'
+example .describe('timeline.db', '2026-10-25T02:30:00', some(120)) => 'first log at 2026-10-25T00:30:00.000000000Z'
+example .describe('timeline.db', '2026-10-25T02:30:00.000000001', some(120)) => 'next log at 2026-10-25T00:30:00.000000001Z'
+example .describe('timeline.db', '2026-10-25T02:30:00.000000002', some(120)) => 'gap at 2026-10-25T00:30:00.000000002Z'
+example .describe('timeline.db', '2026-10-25T02:30:00', some(60)) => 'second log at 2026-10-25T01:30:00.000000000Z'
+example .describe('timeline.db', '2026-02-29T00:00:00', none) => error 'INVALID_LOCAL_DATETIME'
+example .describe('timeline.db', '2026-10-25T02:30:00', some(841)) => error 'INVALID_OFFSET'
+
+fn .lookup($path: text) -> result<unit,problem> {
+    $request ::= decode_json<.request>(decode_utf8(read_stdin_bytes()?)?)?
+    $description ::= .describe($path, $request.observed, $request.offset_minutes)?
+    return write_stdout_utf8($"$description\n")
+}
+
+fn .main($args: list<text>) -> result<unit,problem> =>
+    match $args {
+        [$path] => .lookup($path)
+        _ => err(problem('usage: timeline.machteld DATABASE (supply a JSON observation on stdin)'))
+    }

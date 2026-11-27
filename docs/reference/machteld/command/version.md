@@ -2,7 +2,7 @@
 id: machteld/command/version
 type: command
 title: version
-summary: Return the Machteld package and runtime API version.
+summary: Query the runtime API or the product version.
 commands: version
 ---
 
@@ -11,22 +11,23 @@ commands: version
 ## Synopsis
 
 ```tcl
-version
+version ?-product?
 ```
 
 ## Arguments and options
 
-Takes no arguments or options.
+Omit the option to query the Tcl package API. Use `-product` to get the
+version shown in the host's help and Windows file properties.
 
 ## Results
 
-Returns `30`, the same value returned by `package require machteld` in this <!-- machteld-version-current -->
-tree. The version is one natural number, and only a change to the runtime
-makes a new one.
+`version` returns the same value as `package require machteld` and
+`machteld.exe --version --api`, currently `30`.
+`version -product` and `machteld.exe --version` return `0.50-dev`.
 
 ## Errors
 
-Only Tcl wrong arity is expected.
+An unsupported option or extra arguments raise `TCL WRONGARGS`.
 
 ## Lifetime and timeouts
 
@@ -36,15 +37,14 @@ Pure constant query with no retained state or timeout.
 
 ```tcl
 package require machteld 30-
-puts "Machteld [version]"
+puts "Machteld [version -product]"
 ```
 
 ## Constraints
 
 This reports Machteld, not Tcl, Tk, SQLite, Windows, or documentation-schema
 versions. Use `docs status` and `store version` for related exact versions.
-Machteld 30, in preparation, is unsigned and distinct from the previously signed
-`dist/0.21` release. A version number does not identify the exact source state,
+The development build is unsigned. A version number does not identify the exact source state,
 prove that a build passed acceptance, or authenticate a publisher. Use
 artifact hashes and verification receipts, the executable's own `manifest`, and
 its reference corpus when provenance matters. Incremental builds also carry an

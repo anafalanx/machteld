@@ -103,8 +103,9 @@ distinct .product_id = text
 fn .print_id($id: .product_id) -> text { return underlying($id) }
 ```
 
-The declaration may use `text`, `int`, `decimal`, `bool` or `bytes`,
-including an alias for one of these types. `make` and `underlying`
+The declaration may use `text`, `int`, `decimal`, `bool`, `bytes`,
+`instant` or `local_datetime`, including an alias for one of these types.
+`make` and `underlying`
 convert explicitly in either direction. An alias for a distinct type
 retains its identity. A distinct type exported from another module keeps
 the identity of its defining module even if a local type shares its name.
@@ -333,6 +334,61 @@ map built-in names are provisional.
 Run `machteld.exe test/application_compiler_map_test.tcl` for the map
 regressions.
 
+## Local date-times and instants
+
+Use `local_datetime` for the date and time recorded on a clock. Use
+`instant` for a known point on the UTC timeline. They are distinct scalar
+types. Both support equality, optional values and record fields. Convert
+explicitly when crossing a text boundary.
+
+| Operation | Result |
+| --- | --- |
+| `parse_local_datetime(text)` | `result<local_datetime,problem>` |
+| `parse_instant(text)` | `result<instant,problem>` |
+| `resolve_offset(local_datetime, int)` | `result<instant,problem>`, using minutes east of UTC |
+| `local_datetime_text(local_datetime)`, `instant_text(instant)` | Canonical `text` |
+
+The input form is `YYYY-MM-DDTHH:MM:SS`, optionally followed by a dot and
+one to nine fractional digits. An instant also requires `Z` or a known
+numeric offset from `-14:00` through `+14:00`. Years range from 0001
+through 9999 on the Gregorian calendar. Hours run from 00 through 23 and
+seconds from 00 through 59. The unknown offset `-00:00` is rejected.
+Syntax and calendar failures return `INVALID_LOCAL_DATETIME` or
+`INVALID_INSTANT`. An out-of-range minutes argument gives `INVALID_OFFSET`.
+Conversion outside the supported UTC years gives `INSTANT_RANGE`.
+
+For example, `2026-10-25T02:30:00` with offset 120 resolves to
+`2026-10-25T00:30:00.000000000Z`. With offset 60, it resolves to
+`2026-10-25T01:30:00.000000000Z`. Keep the recorded time unresolved when
+the offset is missing. Named time-zone and daylight-saving rules are outside
+this interface.
+
+Canonical instants always contain nine fractional digits and a final `Z`.
+Canonical local date-times omit trailing fractional zeroes and the fraction
+on whole seconds. Tcl arguments, JSON string fields and SQLite TEXT columns
+typed as either scalar require its canonical form. For input with other
+accepted spellings, read text and call the parser. A normal SQLite TEXT
+index with BINARY collation orders canonical instants chronologically down
+to a nanosecond, including the boundary between a whole and fractional second.
+
+### Try a historical lookup
+
+From the repository root, choose a fresh database filename and run these
+commands using the integrated development host.
+
+```powershell
+machteld.exe examples/typed-time/create_sample.tcl timeline.db
+machteld.exe project test examples/typed-time/project.dict
+machteld.exe project pack examples/typed-time/project.dict timeline.machteld
+'{"observed":"2026-10-25T02:30:00","offset_minutes":120}' | machteld.exe timeline.machteld timeline.db
+'{"observed":"2026-10-25T02:30:00","offset_minutes":60}' | machteld.exe timeline.machteld timeline.db
+'{"observed":"2026-10-25T02:30:00"}' | machteld.exe timeline.machteld timeline.db
+```
+
+The requests find `first log`, find `second log`, and report the unresolved
+local time respectively. The seven executable examples also check adjacent
+one-nanosecond intervals and the gap after their exclusive end.
+
 ## Typed SQLite reads
 
 Declare a record for one result row and supply a path to an existing
@@ -385,6 +441,7 @@ from field order.
 | `bytes` | BLOB |
 | `bool` | INTEGER 0 or 1 |
 | `decimal` | Binds as exact decimal TEXT. Reads accept decimal TEXT or INTEGER. |
+| `instant`, `local_datetime` | Canonical TEXT in the temporal type's format |
 | `T?` | SQL NULL or the storage class for `T` |
 
 Type aliases and distinct scalars use their underlying representation.

@@ -9,15 +9,15 @@ commands: docs, help
 # Agent documentation bootstrap
 
 The Machteld distribution contains the complete, exact-version offline
-references for Machteld 30, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
+references for Machteld 0.50-dev, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
 `docs get cffi/manual/intro` for foreign calls and the Foreign calls section
 of the runtime contract for the bundled build's restrictions. The corpus includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not
 merely a short Machteld guide. Programs share the same reference in the runtime.
 
 Use the matching embedded corpus to ground Machteld API claims and code changes;
-recalled or online documentation may describe a different release. While 30
-is in preparation, different artifacts can report the same runtime version.
+recalled or online documentation may describe a different release. Different
+artifacts can report the same product version and Tcl package API.
 Check the corpus/build identity and live `manifest`, not version alone.
 Design guides and historical notes are context, not additional command options.
 

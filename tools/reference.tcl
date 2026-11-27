@@ -1743,6 +1743,9 @@ proc ::ref::main {argv} {
     if {![regexp -nocase "(?n)^#define${S}+MACHTELD_VERSION${S}+\"(\[1-9\]\[0-9\]*)\"${S}*\$" $headerText -> version]} {
         fail "src/machteld.h has no canonical MACHTELD_VERSION"
     }
+    if {![regexp -line {^#define[ \t]+MACHTELD_PRODUCT_VERSION[ \t]+"([0-9][0-9A-Za-z.-]*)"[ \t]*\r?$} $headerText -> productVersion]} {
+        fail "src/machteld.h has no canonical MACHTELD_PRODUCT_VERSION"
+    }
     set preludeText [readUtf8Strict [file join $root tcl machteld.tcl]]
     if {![regexp -nocase "(?n)^${S}*variable${S}+version${S}+(\[1-9\]\[0-9\]*)${S}*\$" $preludeText -> preludeVersion]} {
         fail "tcl/machteld.tcl has no canonical version variable"
@@ -1988,10 +1991,11 @@ proc ::ref::main {argv} {
             }
         }
 
-        set bootstrap [join [list "# Machteld $version" "" \
-            "The complete offline reference covers Machteld $version, Tcl [productVersion tcl $version], Tk [productVersion tk $version] and cffi [productVersion cffi $version]." \
+        set bootstrap [join [list "# Machteld $productVersion" "" \
+            "The complete offline reference covers Machteld $productVersion (Tcl package API $version), Tcl [productVersion tcl $version], Tk [productVersion tk $version] and cffi [productVersion cffi $version]." \
             "" "Run a Tcl script, launch an application archive, or build a standalone Windows app." \
             "" "```text" \
+            "machteld.exe --version" \
             "machteld.exe app.tcl" \
             "machteld.exe pack app-directory -o app.machteld" \
             "machteld.exe project check project.dict" \

@@ -1,7 +1,7 @@
 # Check explicit current-runtime claims, not arbitrary version-shaped numbers.
 # Root Markdown, docs/**/*.md and examples/**/README.md are strict UTF-8.
-# machteld's version is one natural number, 22 the first; the releases before
-# it were dotted, 0.21 the last. A claim names either form: "machteld 22",
+# The product has a dotted version with an optional "-dev" suffix. The Tcl
+# package API is a natural number. A claim can name either form: "machteld 22",
 # "package require machteld 22-" (a floor, or the floor of a range such as
 # 22-24), "Machteld 0.21". A number joined to a word ("22x", "x64") is none.
 # Named Machteld/runtime claims and version-first root/docs headings are current
@@ -61,6 +61,12 @@ if {[llength $declarations] != 2} {
     fail "src/machteld.h must have one canonical MACHTELD_VERSION"
 }
 set current [lindex $declarations 1]
+set declarations [regexp -all -inline -line \
+    {^#define[ \t]+MACHTELD_PRODUCT_VERSION[ \t]+"((?:0|[1-9][0-9]*)\.[0-9]{2}(?:-dev)?)"[ \t]*\r?$} $header]
+if {[llength $declarations] != 2} {
+    fail "src/machteld.h must have one canonical MACHTELD_PRODUCT_VERSION"
+}
+set product [lindex $declarations 1]
 
 # The prelude owns the authored package literal.
 set prelude [slurp [file join $ROOT tcl machteld.tcl]]
@@ -85,7 +91,7 @@ lappend pages {*}[authored_pages [file join $ROOT examples] 1]
 # a line has more than one matching form. In particular a dependency/app number
 # never exempts a separate Machteld claim on the same line. VERSION is a natural
 # number or a dotted one of up to three parts, ending where a word would not.
-set versionToken {([0-9]+(?:\.[0-9]+){0,2})(?![[:alnum:]_]|\.[0-9])}
+set versionToken {([0-9]+(?:\.[0-9]+){0,2}(?:-[[:alpha:]][[:alnum:]]*)?)(?![[:alnum:]_]|\.[0-9])}
 proc claimPattern {template} {
     string map [list VERSION $::versionToken] $template
 }
@@ -185,12 +191,20 @@ foreach page $pages {
         }
         if {$relative eq "docs/roadmap.md" && $fenceChar eq {} &&
                 [regexp -nocase $headingPattern $row -> headingVersion] &&
-                $headingVersion eq $current} {
+                $headingVersion eq $product} {
             set roadmapCurrent 1
         }
         dict for {position version} $found {
             incr claims
-            if {$version ne $current} {
+            set before [string range $row 0 $position-1]
+            if {[regexp -nocase {\mpackage[ \t]+(?:(?:provide|require)[ \t]+(?:-exact[ \t]+)?)?[`*]*machteld[ \t]+[`*]*$} $before]} {
+                set allowed [list $current]
+            } elseif {[regexp -nocase {\mmachteld[ \t]+(?:version[ \t]+)?[`*]*$} $before]} {
+                set allowed [list $product]
+            } else {
+                set allowed [list $product $current]
+            }
+            if {$version ni $allowed} {
                 lappend problems "$relative:$line claims $version"
             }
         }
@@ -199,9 +213,9 @@ foreach page $pages {
     if {$frontMatter} { fail "$relative has unterminated front matter" }
 }
 if {[llength $problems]} {
-    fail "stale current-runtime claims (current is $current):\n  [join $problems "\n  "]"
+    fail "stale current-runtime claims (product $product, Tcl package API $current):\n  [join $problems "\n  "]"
 }
 if {!$roadmapCurrent} {
-    fail "docs/roadmap.md has no current-version heading outside history for $current"
+    fail "docs/roadmap.md has no current-version heading outside history for $product"
 }
-puts "check_version: $claims explicit current-runtime claims agree with src/machteld.h ($current); $historicalClaims historical claims retained; prelude and roadmap agree"
+puts "check_version: $claims claims agree with src/machteld.h (product $product, API $current); $historicalClaims historical claims retained; prelude and roadmap agree"

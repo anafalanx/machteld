@@ -26,7 +26,7 @@ proc ::vr::check {name condition {detail ""}} {
     }
 }
 
-proc ::vr::checkResource {label path description internalName originalFilename version numeric beta} {
+proc ::vr::checkResource {label path description internalName originalFilename version numeric} {
     if {![file isfile $path]} {
         check "$label exists" 0 $path
         return
@@ -65,12 +65,9 @@ proc ::vr::checkResource {label path description internalName originalFilename v
                [field $info OriginalFilename] eq $originalFilename}] \
         "description={[field $info FileDescription]} internal={[field $info InternalName]} original={[field $info OriginalFilename]}"
     # VS_FF_DEBUG, PRERELEASE, PATCHED, PRIVATEBUILD, SPECIALBUILD.
-    set expectedFlags [expr {$beta eq {} ? 0 : 2}]
+    set expectedFlags [expr {[string match *-dev $version] ? 2 : 0}]
     check "$label carries the declared prerelease flag" \
         [expr {([dict get $info flags] & [dict get $info flagsMask] & 0x2f) == $expectedFlags}] "flags=[dict get $info flags]"
-    if {$beta ne {}} {
-        check "$label identifies the beta milestone" [expr {[field $info Comments] eq "Machteld $version Beta $beta"}]
-    }
 }
 
 proc ::vr::embeddedBuildPaths {path cache} {
@@ -117,16 +114,16 @@ proc ::vr::main {argv} {
     set header [open [file join $root src machteld.h] r]
     set text [read $header]
     close $header
-    # machteld's version is one natural number; Windows' fixed version pads it
-    # with three zeros (22 is 22.0.0.0), and the string versions are exact.
+    # Windows' fixed version keeps the package API; the strings display the product.
     if {![regexp {(?n)^#define\s+MACHTELD_VERSION\s+"([1-9][0-9]*)"\s*$} $text -> version]} {
         error "src/machteld.h has no canonical MACHTELD_VERSION"
     }
     set numeric [list $version 0 0 0]
-    set beta {}
-    regexp -line {^#define[ \t]+MACHTELD_BETA[ \t]+([1-9][0-9]*)[ \t]*$} $text -> beta
+    if {![regexp -line {^#define\s+MACHTELD_PRODUCT_VERSION\s+"([^"]+)"} $text -> product]} {
+        error "src/machteld.h has no canonical MACHTELD_PRODUCT_VERSION"
+    }
 
-    checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $version $numeric $beta
+    checkResource "full executable" $runtime "machteld runtime" machteld machteld.exe $product $numeric
     set paths [embeddedBuildPaths $runtime $cache]
     check "full executable carries no repository or dependency-cache path" [expr {[llength $paths] == 0}] [join $paths {, }]
     if {$failures} {
