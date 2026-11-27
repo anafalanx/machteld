@@ -324,6 +324,12 @@ identifier `007` from another. The item type followed the value through
 the shared function and its choice result. At the Tcl boundary a caller
 could request text explicitly and retain both leading zeroes.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, handling results
+
+A packed lookup returned the identifier `007` unchanged. When the source
+reported a held item, its caller matched the typed reason and printed
+`pending: review`. The same caller handled a missing item separately.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

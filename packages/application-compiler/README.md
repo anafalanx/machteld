@@ -269,6 +269,32 @@ location. A problem carrying its own valid source position retains it.
 Run `machteld.exe test/application_compiler_extern_test.tcl` for boundary
 examples and failure cases. The declaration spelling is provisional.
 
+## Handling a typed result
+
+Match a `result<T,E>` when the caller can recover from an expected failure.
+The `ok` arm binds a value of type `T`. The `err` arm binds the declared
+error type `E`, which can be another module's closed choice.
+
+```text
+choice .lookup_error {
+    unavailable
+    held(text)
+}
+fn .describe($lookup: result<text,.lookup_error>) -> text => match $lookup {
+    ok($name) => $name
+    err($reason) => match $reason {
+        .lookup_error::unavailable => 'missing source'
+        .lookup_error::held($why) => $"pending: $why"
+    }
+}
+```
+
+Write both `ok` and `err` exactly once, in either order. Use `err(_)`
+when the error value itself is irrelevant. Grouped alternatives follow the
+same binding rules as choice variants. For example, a `result<text,text>`
+can match `ok($message) | err($message) => $message`. Use postfix `?`
+when the caller should propagate the original typed failure.
+
 ## Grouping choice variants
 
 A `match` on a closed choice must name every variant. Use `|` to give

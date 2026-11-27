@@ -45,6 +45,13 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
 
+## Recovering from a typed failure
+
+Use `match` on a `result<T,E>` to handle each outcome locally.
+`ok($value)` binds a `T`, and `err($reason)` binds an `E`. Both cases
+are required. A nested match can inspect an application's declared error
+variants. Use `?` to propagate the typed failure to the caller.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type

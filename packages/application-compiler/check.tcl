@@ -847,8 +847,10 @@ proc ::appcompiler::checker::listMatchType {node element scope imports world rep
 }
 
 proc ::appcompiler::checker::matchVariants {type world} {
-    if {[string index $type end] eq "?"} {
-        return [dict create none {} some [list [string range $type 0 end-1]]]
+    lassign [::appcompiler::typeParts $type] head first second
+    switch -- $head {
+        optional {return [dict create none {} some [list $first]]}
+        result {return [dict create ok [list $first] err [list $second]]}
     }
     return [schemaMembers $type $world]
 }
@@ -859,10 +861,12 @@ proc ::appcompiler::checker::choicePattern {arm choice world seenVar coverageVar
     set valid 1
     set location [dict getdef $arm typeLocation $arm]
     set variantLocation [dict getdef $arm variantLocation $arm]
-    if {[dict get $arm kind] eq "optionalArm"} {
+    set kind [dict get $arm kind]
+    if {$kind in {optionalArm resultArm}} {
         set pattern $choice
-        if {$choice ne "" && [string index $choice end] ne "?"} {
-            issue reports PATTERN_TYPE $arm "an optional pattern cannot match $choice"
+        set expected [expr {$kind eq "resultArm" ? "result" : "optional"}]
+        if {$choice ne "" && [lindex [::appcompiler::typeParts $choice] 0] ne $expected} {
+            issue reports PATTERN_TYPE $arm "pattern '[dict get $arm variant]' expects $expected, got $choice"
             set pattern ""
         }
     } else {
@@ -988,15 +992,15 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
         return [listMatchType $node [lindex $parts 1] $scope $imports $world reports]
     }
     set arms [dict get $node arms]
-    if {$head ne "optional" && [llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
+    if {$head ni {optional result} && [llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
             && [schemaKind $choice $world] ne "choice"} {
         if {$choice ne ""} {
             issue reports EXPECTED_LIST $value "expected a list for these patterns, got $choice"
         }
         return [listMatchType $node "" $scope $imports $world reports]
     }
-    if {$choice ne "" && $head ne "optional" && [schemaKind $choice $world] ne "choice"} {
-        issue reports EXPECTED_CHOICE $value "expected a closed choice or optional, got $choice"
+    if {$choice ne "" && $head ni {optional result} && [schemaKind $choice $world] ne "choice"} {
+        issue reports EXPECTED_CHOICE $value "expected a closed choice, optional or result, got $choice"
         set choice ""
     }
     set seen {}
@@ -1004,7 +1008,7 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     set valid [expr {$choice ne ""}]
     set coverageKnown $valid
     foreach arm [dict get $node arms] {
-        if {[dict get $arm kind] in {arm optionalArm armGroup}} {
+        if {[dict get $arm kind] in {arm optionalArm resultArm armGroup}} {
             set alternatives [dict getdef $arm alternatives [list $arm]]
             set local [choiceArmScope $alternatives $choice $world seen coverageKnown valid reports]
         } else {

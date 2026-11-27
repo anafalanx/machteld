@@ -958,15 +958,16 @@ oo::class create ::appcompiler::ModuleParser {
 
     method choicePattern {} {
         set start $token
-        if {[my at none] || [my at some]} {
-            set kind optionalArm
+        set name [dict get $start value]
+        if {[my at none] || [my at some] || ([my at identifier] && $name in {ok err})} {
+            set kind [expr {$name in {ok err} ? "resultArm" : "optionalArm"}]
             set annotation {}
             set variant $start
             my advance
         } else {
             # A local pattern has two components (.type::case); an imported
             # pattern has three (.module::type::case).
-            my take dotName {a dot-prefixed choice type, none or some in a match pattern}
+            my take dotName {a dot-prefixed choice type, none, some, ok or err in a match pattern}
             set kind arm
             set location [my appliedType $start $start ".[dict get $start value]"]
             my take :: {'::' before the choice variant}
