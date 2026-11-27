@@ -17,6 +17,10 @@ proc concreteType {type schemas} {
             set arity 1
         }
         list {set arity 1}
+        task {
+            if {![llength [info commands [namespace current]::guardTask]]} {return 0}
+            set arity 1
+        }
         map - result {set arity 2}
         range {return [expr {$type eq "range<int>"}]}
         default {

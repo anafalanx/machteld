@@ -136,3 +136,20 @@ operation succeeds. Leaving the scope before commit rolls back every write,
 including on an early success return. Failed writes and failed commits also
 end the transaction. The compiler guide includes the stable problem codes
 and a worked JSON import with replay, provenance and historical disagreements.
+
+## Waiting for typed workers
+
+Declare `worker .lookup($request: .query) -> result<.answer,problem>`
+with its function body. `start .lookup($request)` returns a
+`task<.answer>`. `await($task)` returns the checked result while other
+handlers remain responsive. Each worker has a supervised process, private
+message pipes and its own live resources. A typed entry already has
+application scope. In mixed Tcl/Tk code, obtain the window owner from
+`::application::workers window .panel` and run the callback through
+`::application::workers handle $owner command ?arg ...?`.
+
+Destroying the window cancels its tasks and unwinds waiting handlers.
+`start_app` selects application ownership, allowing a different handler to
+await the result after that window closes. `cancel($task)` requests explicit
+cancellation. Worker messages have a 65,536-byte limit. The compiler guide
+describes the portable types, timeout setting and problem codes.

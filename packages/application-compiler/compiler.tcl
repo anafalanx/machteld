@@ -89,6 +89,25 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
     variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt::decimal $decimalDefinitions]
+    if {[dict getdef $analysis resolved usesWorkers 0]} {
+        variable workerDefinitions
+        set rt ${targetNamespace}::@rt
+        dict append artifact script \n [list ::namespace eval $rt $workerDefinitions]
+        set table {}
+        set messages {}
+        dict for {module functions} [dict get $analysis resolved functions] {
+            dict for {name fn} $functions {
+                if {[dict get $fn kind] ne "worker"} continue
+                set request [dict get [lindex [dict get $fn params] 0] type]
+                set reply [dict get $fn result]
+                dict set table $module.$name [list ${targetNamespace}::${module}::${name} $request $reply [emitLocation $fn]]
+                dict set messages $request 1
+                dict set messages $reply 1
+            }
+        }
+        dict append artifact script \n [list ::set ${rt}::workerTable $table]
+        dict append artifact script \n [list ::set ${rt}::workerMessageTypes $messages]
+    }
     if {[dict getdef $analysis resolved usesTemporal 0]} {
         variable temporalDefinitions
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $temporalDefinitions]
@@ -115,7 +134,7 @@ proc ::appcompiler::analyzeApplication {sources entryModule entryFunction} {
         set fn [dict getdef $analysis resolved functions $entryModule $entryFunction {}]
         if {$fn ne {}} {
             set parameters [dict get $fn params]
-            if {[llength [dict getdef $fn typeParams {}]] ||
+            if {[dict get $fn kind] eq "worker" || [llength [dict getdef $fn typeParams {}]] ||
                     [llength $parameters] != 1 || [dict get [lindex $parameters 0] type] ne "list<text>" \
                     || [dict get $fn result] ne "result<unit,problem>"} {
                 dict lappend analysis diagnostics [diagnostic ENTRY_TYPE $fn \
@@ -147,6 +166,14 @@ proc ::appcompiler::applicationPrelude {minApi packageDirs} {
 }
 
 # Produce a complete Machteld Tcl entry without running the application.
+proc ::appcompiler::workerPrelude {implementation} {
+    set rt ${implementation}::@rt
+    set lines [list [list ::namespace eval ::application {}] \
+        [list ::interp alias {} ::application::workers {} ${rt}::workerControl]]
+    lappend lines [format {if {$::argv eq "--machteld-typed-worker-v1"} {%s; ::exit 0}} [list ${rt}::workerServe]]
+    return [join $lines \n]
+}
+
 # The selected entry may be private to its module.
 proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}}} {
     set analysis [analyzeApplication $sources $entryModule $entryFunction]
@@ -155,6 +182,10 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
     set dispatch [list ::application::@rt::launch $entry]
     set script [applicationPrelude $minApi $packageDirs]
     append script "[dict get $artifact script]\n"
+    if {[dict getdef $analysis resolved usesWorkers 0]} {
+        append script [workerPrelude ::application] \n
+        set dispatch [list ::application::@rt::workerMain {*}$dispatch]
+    }
     append script [format {::exit [%s [::application::@rt::sourceMap] $::argv]} $dispatch] \n
     dict set artifact script $script
     dict set artifact modules [dict get $analysis modules]
@@ -171,11 +202,14 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
     if {[dict size $sources]} {
         append script [dict get $artifact script] \n
         set rt ${implementation}::@rt
+        if {[dict getdef $analysis resolved usesWorkers 0]} {
+            append script [workerPrelude $implementation] \n
+        }
         dict for {module functions} [dict get $analysis resolved functions] {
             set public ::application::${module}
             append script [list ::namespace eval $public {}] \n
             dict for {name function} $functions {
-                if {![dict get $function exported]} continue
+                if {![dict get $function exported] || [dict get $function kind] eq "worker"} continue
                 set command [list ::tailcall ${rt}::callExport ${implementation}::${module}::${name} [emitLocation $function]]
                 set formals {}
                 if {[llength [dict getdef $function typeParams {}]]} {
@@ -203,12 +237,12 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl worker.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }
     unset module modules
-    foreach name {host decimal sql temporal zone} {
+    foreach name {host decimal sql temporal zone worker} {
         set ch [open [file join $compilerDirectory $name.tcl] rb]
         try {
             set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]

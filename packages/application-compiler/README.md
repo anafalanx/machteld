@@ -725,6 +725,89 @@ the query gives exactly the same two claims. This disagreement policy belongs
 to the example application. The compiler supplies the transaction and typed
 SQL operations.
 
+## Typed workers and window handlers
+
+A `worker` declares one request type and returns `result<Reply,problem>`.
+Starting it launches a supervised process. `await` suspends the calling
+handler while Tcl processes other events. The following lookup opens its
+SQLite database in the child.
+
+```text
+record .query {
+    database: text
+    id: text
+}
+record .row { label: text }
+
+worker .station($q: .query) -> result<.row,problem> =>
+    sql_one<.row>($q.database, 'SELECT label FROM stations WHERE id=?1', $q.id)
+
+export fn .lookup($q: .query) -> result<.row,problem> {
+    $task ::= start .station($q)
+    return await($task)
+}
+```
+
+In a mixed project the Tcl entry can use the same typed operation from a
+Tk command. The window below already contains a button and a status label.
+
+```tcl
+proc showStation {database id} {
+    lassign [::application::stations::lookup [dict create database $database id $id]] tag value
+    if {$tag eq "ok"} {
+        .panel.status configure -text [dict get $value label]
+    } else {
+        .panel.status configure -text [dict get $value message]
+    }
+}
+set owner [::application::workers window .panel]
+.panel.lookup configure -command [list ::application::workers handle $owner showStation $database 007]
+```
+
+The window owns work started by its handler. Destroying it releases those
+children and unwinds a suspended handler, including scoped cleanup. A reply
+already queued for delivery is discarded for that handler. Use
+`start_app .station($q)` for work that should survive the window. Another
+live handler can await that task. A handler consumes its task's result once.
+`cancel($task)` terminates an outstanding task and a surviving waiter
+receives `WORKER_CANCELED`. Cancellation cannot undo external side effects.
+
+A typed program's main function already runs in a managed application
+handler. For a Tcl entry, use `::application::workers handle application`
+with a command prefix for application lifetime, or `workers window` as
+above. For a headless controller, `::application::workers owner` creates an
+owner to pass to `handle` and `::application::workers close $owner` releases
+it. A pending `await` yields its coroutine to the host event loop. Ordinary
+Tcl callbacks use the bridge to establish their scope before starting work.
+
+The compiler checks named workers and both message types. Scalars,
+records, choices, lists, maps, optionals, ranges and concrete generic
+data can be exchanged. Application-local resource types and task handles
+are rejected, including inside containers. A worker opens its own database
+connection. Each end checks the declared shape against its generated
+schema. Unknown record fields are refused. A transported `problem` carries
+its message and any standard code, source location and byte offset.
+
+Request and reply data travel through private pipes. Each typed message
+is limited to 65,536 UTF-8 bytes including its type and Tcl list framing.
+Each task launches one worker tree and makes one attempt. A lost reply
+returns `WORKER_FAILED` because the operation may already have run.
+`WORKER_START` reports startup or request encoding failure,
+`WORKER_PROTOCOL` an invalid typed reply, `WORKER_LIMIT` a frame limit,
+and `WORKER_FAULT` an unexpected exception in the worker body.
+`::application::workers timeout` returns the default tree deadline in
+milliseconds (300,000). Pass 1 through 4,294,967,294 to change it for
+subsequent tasks. Process stdout is reserved for the reply protocol.
+
+Use `minApi 30` for runnable worker projects. Worker checking also runs
+with the standalone compiler on signed 0.21. Runtime dispatch uses
+`app launch`, `pool call -command` and `worker serve -maxframe`. The
+generated entry recognizes the sole argument `--machteld-typed-worker-v1`
+before entering application startup. Include worker dependencies as
+declared packages or typed modules so they are available in the child.
+Run `machteld.exe test/application_compiler_workers_test.tcl -pack` for
+typed and mixed entry examples, relocation, cancellation and faulty children.
+
 ## Executable examples
 
 Place an `example` immediately after the function it calls. A function may

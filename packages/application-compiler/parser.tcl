@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while}
+        set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while worker}
         set localChoices {}
         set stringModes {}
         set docLines {}
@@ -344,7 +344,7 @@ oo::class create ::appcompiler::ModuleParser {
                 set exported [my at export]
                 if {$exported} { my advance }
                 switch -exact -- [dict get $token kind] {
-                    fn - extern {
+                    fn - extern - worker {
                         set kind [dict get $token kind]
                         my advance
                         if {$kind eq "extern"} { my take fn "'fn' after 'extern'" }
@@ -357,7 +357,7 @@ oo::class create ::appcompiler::ModuleParser {
                         lappend types [my documented $start [my typeDeclaration $exported]]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct, resource or import declaration}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, worker, external function, record, choice, alias, distinct, resource or import declaration}
                     }
                 }
             }
@@ -895,6 +895,14 @@ oo::class create ::appcompiler::ModuleParser {
             dotName { return [my call] }
             identifier {
                 my advance
+                if {[dict get $start value] in {start start_app} && [my at dotName]} {
+                    set call [my call]
+                    if {[dict get $call kind] ne "call"} {
+                        ::appcompiler::fail WORKER_REQUIRED $start {start requires a named worker call}
+                    }
+                    dict set call workerStart [dict get $start value]
+                    return $call
+                }
                 set types {}
                 set locations {}
                 if {[my at <]} {
