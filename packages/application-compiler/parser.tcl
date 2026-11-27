@@ -330,7 +330,15 @@ oo::class create ::appcompiler::ModuleParser {
                 set start $token
                 set exported [my at export]
                 if {$exported} { my advance }
-                switch -exact -- [dict get $token kind] {
+                set declaration [dict get $token kind]
+                if {[my at identifier] && [dict get $token value] eq "tool"} {set declaration tool}
+                switch -exact -- $declaration {
+                    tool {
+                        my advance
+                        set function [my documented $start [my tool $exported]]
+                        lappend functions $function
+                        set owner [dict get $function name]
+                    }
                     fn - extern {
                         set kind [dict get $token kind]
                         my advance
@@ -344,7 +352,7 @@ oo::class create ::appcompiler::ModuleParser {
                         lappend types [my documented $start [my typeDeclaration $exported]]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct or import declaration}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, tool, record, choice, alias, distinct or import declaration}
                     }
                 }
             }
@@ -459,6 +467,21 @@ oo::class create ::appcompiler::ModuleParser {
             dict set node body [my braced statement {function body}]
         }
         return $node
+    }
+
+    method tool {exported} {
+        set name [my take dotName {a dot-prefixed tool name}]
+        my take = {'=' before the relative executable path}
+        set path [my take text {a literal executable path relative to the application}]
+        if {[catch {::appcompiler::project::relativePath [dict get $path value]} relative] ||
+                ![string equal -nocase [file extension $relative] .exe]} {
+            ::appcompiler::fail TOOL_PATH $path {tool requires a portable relative .exe path}
+        }
+        set lookup [my node $path toolPath value $relative]
+        set result [my node $name type name result<text,problem>]
+        return [my node $name tool name [dict get $name value] exported $exported typeParams {} \
+            typeParamLocations {} params {} result result<text,problem> resultLocation $result \
+            path $relative body [list [my node $path return value $lookup]]]
     }
 
     method externalBinding {} {

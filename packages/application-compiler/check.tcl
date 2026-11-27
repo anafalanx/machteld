@@ -106,7 +106,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         dict set reports usesTemporal 1
         return $type
     }
-    if {$type in {int decimal text bool bytes problem unit}} { return $type }
+    if {$type in {int decimal text bool bytes problem unit process_output}} { return $type }
     if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $head -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
@@ -403,6 +403,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         local_datetime_text { set params {local_datetime} }
         resolve_offset { set params {local_datetime int} }
         resolve_zone { set params {local_datetime text} }
+        capture_process { set params {text list<text> bytes int int} }
         decode_utf8 { set params [list bytes] }
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
@@ -452,6 +453,10 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         err { return [makeType result [list * [lindex $actual 0]]] }
         problem { return problem }
         read_stdin_bytes { return result<bytes,problem> }
+        capture_process {
+            dict set reports usesProcess 1
+            return result<process_output,problem>
+        }
         decode_utf8 - decode_text - preview_text { return result<text,problem> }
         decode_json {
             fact reports $node schema $schema
@@ -1191,6 +1196,10 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
     set kind [dict get $node kind]
     switch -exact -- $kind {
         int - decimal - text - bool - unit { return $kind }
+        toolPath {
+            dict set reports usesProcess 1
+            return result<text,problem>
+        }
         interpolate {
             set valid 1
             foreach part [dict get $node parts] {
@@ -1509,6 +1518,10 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             }
         }
     }
+    set outputFields {status text exit int stdout bytes stderr bytes stdout_retained int stderr_retained int
+        stdout_truncated bool stderr_truncated bool}
+    dict set world schemas process_output [dict create kind record members $outputFields]
+    dict set runtimeSchemas process_output [list record $outputFields]
     dict set world runtimeSchemas $runtimeSchemas
     dict set world equalitySummaries [checker::equalitySummaries $runtimeSchemas]
     # Index normalized signatures before bodies to support forward and recursive calls.
@@ -1554,7 +1567,7 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
         upvar 1 $resolvedVar resolved
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
             usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
-            usesZone [dict getdef $reports usesZone 0]]
+            usesZone [dict getdef $reports usesZone 0] usesProcess [dict getdef $reports usesProcess 0]]
     }
     return [dict get $reports diagnostics]
 }

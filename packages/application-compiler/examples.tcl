@@ -52,11 +52,11 @@ proc ::appcompiler::compareExample {example context} {
     return {}
 }
 
-proc ::appcompiler::runExamples {analysis minApi packageDirs} {
+proc ::appcompiler::runExamples {analysis minApi packageDirs {toolRoot {}}} {
     variable exampleSerial
     set target ::appcompiler::exampleRun[incr exampleSerial]
     while {[namespace exists $target]} {set target ::appcompiler::exampleRun[incr exampleSerial]}
-    set artifact [emitChecked $analysis $target]
+    set artifact [emitChecked $analysis $target $toolRoot]
     set total 0
     set failures {}
     set savedPath $::auto_path

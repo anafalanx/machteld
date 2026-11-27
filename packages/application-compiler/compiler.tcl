@@ -68,7 +68,7 @@ proc ::appcompiler::check {sources} {
     return [dict get [analyze $sources] diagnostics]
 }
 
-proc ::appcompiler::emitChecked {analysis targetNamespace} {
+proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
     if {![regexp {^::[A-Za-z_][A-Za-z_0-9]*(::[A-Za-z_][A-Za-z_0-9]*)*$} $targetNamespace]} {
         return -code error -errorcode {APPCOMPILER CONFIG NAMESPACE} \
             "expected an absolute application namespace, got [list $targetNamespace]"
@@ -85,6 +85,20 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
     variable decimalDefinitions
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $hostDefinitions]
     dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt::decimal $decimalDefinitions]
+    if {[dict getdef $analysis resolved usesProcess 0]} {
+        variable processDefinitions
+        set runtime ${targetNamespace}::@rt
+        dict append artifact script \n [list ::namespace eval $runtime $processDefinitions]
+        dict append artifact script \n [list ::unset -nocomplain ${runtime}::toolDirectory]
+        if {$toolRoot eq "@startup"} {
+            # The archive's public, native argv0 is set before main.tcl runs.
+            # Capture it before an application can change cwd or argv0.
+            dict append artifact script \n [format {if {[file pathtype $::argv0] eq "absolute"} {::set %s [::file dirname $::argv0]}} \
+                [list ${runtime}::toolDirectory]]
+        } elseif {$toolRoot ne ""} {
+            dict append artifact script \n [list ::set ${runtime}::toolDirectory $toolRoot]
+        }
+    }
     if {[dict getdef $analysis resolved usesTemporal 0]} {
         variable temporalDefinitions
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $temporalDefinitions]
@@ -144,9 +158,9 @@ proc ::appcompiler::applicationPrelude {minApi packageDirs} {
 
 # Produce a complete Machteld Tcl entry without running the application.
 # The selected entry may be private to its module.
-proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}}} {
+proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}} {toolRoot @startup}} {
     set analysis [analyzeApplication $sources $entryModule $entryFunction]
-    set artifact [emitChecked $analysis ::application]
+    set artifact [emitChecked $analysis ::application $toolRoot]
     set entry ::application::${entryModule}::${entryFunction}
     set dispatch [list ::application::@rt::launch $entry [dict get $artifact sourceMap]]
     set script [applicationPrelude $minApi $packageDirs]
@@ -159,10 +173,10 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
 
 # A Tcl entry owns its interpreter and event loop. Only exported functions
 # get public Tcl commands. Typed-to-typed calls stay inside the implementation.
-proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
+proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs {toolRoot @startup}} {
     set analysis [analyze $sources]
     set implementation ::machteld::compiledApplication
-    set artifact [emitChecked $analysis $implementation]
+    set artifact [emitChecked $analysis $implementation $toolRoot]
     set script [applicationPrelude $minApi $packageDirs]
     if {[dict size $sources]} {
         append script [dict get $artifact script] \n
@@ -200,12 +214,12 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl process.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }
     unset module modules
-    foreach name {host decimal sql temporal zone} {
+    foreach name {host decimal sql temporal zone process} {
         set ch [open [file join $compilerDirectory $name.tcl] rb]
         try {
             set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]

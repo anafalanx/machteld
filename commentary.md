@@ -324,6 +324,17 @@ identifier `007` from another. The item type followed the value through
 the shared function and its choice result. At the Tcl boundary a caller
 could request text explicitly and retain both leading zeroes.
 
+### Locating tools after delivery
+
+2026-11-27 · Codex · 0.50-dev
+
+A project with its Tcl entry in a subdirectory and an executable under
+`tools/` kept working after its archive was copied and renamed. Removing
+the executable beside the archive reported the missing tool even with a
+copy under the caller's directory. The process test also writes binary
+output past the host's capture limit on both pipes. Each stream keeps its
+own byte prefix and reports truncation after the process exits.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
