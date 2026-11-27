@@ -414,19 +414,25 @@ oo::class create ::appcompiler::ModuleParser {
 
     # All delimited lists return their elements in source order. Each item
     # parser consumes exactly one complete production, including nested lists.
-    method parenthesized {item {endVar {}}} {
-        my take ( {an opening parenthesis}
+    method commaItems {item closing {allowTrailing 0}} {
         set entries {}
         my skipLines
-        if {![my at )]} {
+        if {![my at $closing]} {
             while {1} {
                 lappend entries [my $item]
                 my skipLines
                 if {![my at ,]} break
                 my advance
                 my skipLines
+                if {$allowTrailing && [my at $closing]} break
             }
         }
+        return $entries
+    }
+
+    method parenthesized {item {endVar {}}} {
+        my take ( {an opening parenthesis}
+        set entries [my commaItems $item )]
         set end [my take ) {a closing parenthesis}]
         if {$endVar ne ""} {
             upvar 1 $endVar closing
@@ -852,6 +858,12 @@ oo::class create ::appcompiler::ModuleParser {
             text {
                 my advance
                 return [my node $start text value [dict get $start value]]
+            }
+            {[} {
+                my advance
+                set items [my commaItems expression {]} 1]
+                set end [my take {]} {a closing bracket after the list elements}]
+                return [my node $start list items $items endLine [dict get $end endLine] endColumn [dict get $end endColumn]]
             }
             unterminatedText {
                 ::appcompiler::fail E_PARSE_STRING $token {unterminated double-quoted text literal}

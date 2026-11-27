@@ -343,6 +343,13 @@ The first-line preview returns from inside the reader's scope. The library
 closes the file before that result reaches its caller, even when decoding
 the line fails. Its exported type page identifies the cleanup function.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, list values
+
+Two identifiers written as `['007', '7']` reach a Tcl caller as separate
+text values. An empty inner list in `[[], [7]]` takes its integer element
+type from the second row. The same `len` call counts rows in this table,
+octets in a file or Unicode code points in a decoded name.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
