@@ -136,7 +136,7 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl project.tcl project_pack.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl host.tcl decimal.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }

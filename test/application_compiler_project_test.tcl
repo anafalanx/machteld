@@ -172,6 +172,86 @@ proc ::projectTest::inspectArchive {archive originals} {
     } finally {zipfs unmount $mount}
 }
 
+proc ::projectTest::extractKit {archive directory} {
+    set mount [zipfs mount $archive project-recipient-test]
+    try {
+        ::machteld::ArchiveEntry $mount
+        file copy -- [file join $mount compiler] [file join $directory local-compiler]
+        file copy -- [file join $mount project inputs] [file join $directory working-source]
+    } finally {
+        zipfs unmount $mount
+    }
+    set readme [encoding convertfrom -profile strict utf-8 [readBytes [file join $directory local-compiler README.md]]]
+    expect [regexp {file copy [^\r\n]*compiler} $readme] 1 "bundled README explains compiler extraction"
+    expect [regexp -nocase {driver\.tcl[^\r\n]*check --json} $readme] 1 "bundled README explains offline checking"
+}
+
+proc ::projectTest::kitDiagnostics {exe cwd valid} {
+    lassign [command $exe $cwd {local-compiler/driver.tcl check --json working-source/application.dict} {} $valid] out err
+    expect $err {} "extracted driver JSON check stderr"
+    set doc [::machteld::json decode -typed [encoding convertfrom -profile strict utf-8 $out]]
+    set report [::machteld::json unwrap $doc]
+    expect [dict get $report ok] $valid "extracted driver JSON check status"
+    set found {}
+    foreach item [dict get $report diagnostics] {
+        set pos [dict get $item node]
+        lappend found [list [dict get $pos module] [dict get $item code] \
+            [dict get $pos line] [dict get $pos column] [dict get $pos endColumn]]
+    }
+    return [lsort $found]
+}
+
+proc ::projectTest::offlineRecipient {work executable archive originals} {
+    set directory [file join $work {offline author}]
+    file mkdir $directory
+    set exe [file join $directory machteld.exe]
+    set incoming [file join $directory portable.machteld]
+    file copy -- $executable $exe
+    file copy -- $archive $incoming
+    expect [lsort [glob -tails -directory $directory *]] {machteld.exe portable.machteld} "offline author receives only two files"
+
+    extractKit $incoming $directory
+    # Demonstrate that the extracted driver no longer depends on the mounted
+    # archive, its original native path, or the already-removed source tree.
+    file rename -- $incoming [file join $work detached-original.machteld]
+    expect [kitDiagnostics $exe $directory 1] {} "clean extracted project"
+    set manifest working-source/application.dict
+    set driver local-compiler/driver.tcl
+    set mainPath [file join $directory working-source code main.src]
+    set logicPath [file join $directory working-source lib a.src]
+    set original [encoding convertfrom -profile strict utf-8 [dict get $originals code/main.src]]
+    set edited [string map [list {.logic::answer($args, $data)?} {'offline revision 雪'}] $original]
+    set changed [bytes $edited]
+    writeBytes $mainPath $changed
+    set answer [bytes {offline revision 雪}]
+    appCase $exe $directory [list $driver run $manifest] {label} {} $answer "offline source runs directly"
+    set revised [file join $directory revised.machteld]
+    command $exe $directory [list $driver pack $manifest $revised] {}
+    appCase $exe $directory [list $revised] {label} {} $answer "offline edit runs from revised archive"
+    set digest [::machteld::hash file sha256 $revised]
+    inspectArchive $revised [dict replace $originals code/main.src $changed]
+
+    # Two invalid edits in different modules exercise the delivered reporter.
+    set badMain {fn .bad() -> int { return 'bad' }}
+    set badLogic {fn .bad() -> int { return $absent }}
+    set logic [encoding convertfrom -profile strict utf-8 [dict get $originals lib/a.src]]
+    writeBytes $mainPath [bytes "$edited$badMain\n"]
+    writeBytes $logicPath [bytes "$logic$badLogic\n"]
+    set mainLine [llength [split $edited \n]]
+    set logicLine [llength [split $logic \n]]
+    expect [kitDiagnostics $exe $directory 0] [list [list logic UNKNOWN_BINDING $logicLine 27 34] \
+        [list main RETURN_TYPE $mainLine 27 32]] "offline JSON check locates both broken edits"
+    command $exe $directory [list $driver pack $manifest $revised] {} 0
+    expect [::machteld::hash file sha256 $revised] $digest "bad offline build leaves revised archive byte-for-byte intact"
+    appCase $exe $directory [list $revised] {label} {} $answer "previously packed revision still runs"
+
+    set next [file join $work {next recipient}]
+    file mkdir $next
+    extractKit $revised $next
+    expect [kitDiagnostics $exe $next 1] {} "revised archive supplies working compiler and valid edited sources"
+    appCase $exe $next [list $driver run $manifest] {label} {} $answer "next recipient runs the revised sources"
+}
+
 proc ::projectTest::runSuite {work driver pack} {
     set exe [info nameofexecutable]
     set caller [file join $work {unrelated cwd}]
@@ -257,6 +337,8 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {retur
         "rebuilt using only the delivered files"
     appCase $relocatedExe $caller [list $fromPrompt] {--format portable} {} [bytes {<portable>}] \
         "the two-file rebuild includes the external Tcl package"
+
+    offlineRecipient $work $relocatedExe $shipped $originals
 
     set editor [file join $work {recipient edits}]
     file mkdir $editor

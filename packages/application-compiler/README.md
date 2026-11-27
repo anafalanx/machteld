@@ -5,6 +5,10 @@ ordinary Tcl or in a Machteld Tcl script. The caller supplies a dictionary of
 logical module names and source strings, so source files can also come from
 a mounted application archive.
 
+When this file comes from an application archive, see
+[Editing a delivered application](#editing-a-delivered-application) to
+extract the development driver and the original project.
+
 ```tcl
 package require machteld
 lappend auto_path [file join [file dirname [info script]] packages application-compiler]
@@ -419,25 +423,33 @@ try {
 } finally {zipfs unmount $root}
 ```
 
-To edit the delivered application, mount it at the Tcl prompt and copy its
-original inputs into a new working directory. This also copies the project
-manifest, assets and local Tcl packages.
+### Editing a delivered application
+
+From a directory containing `machteld.exe` and `sample.machteld`, start
+`machteld.exe` and enter the following at its Tcl prompt. Use fresh names
+for the two destination directories. `working-source` receives the project
+manifest, sources, assets and local Tcl packages. `local-compiler` receives
+the compiler, its driver and this guide.
 
 ```tcl
 set root [zipfs mount sample.machteld build]
-::machteld::ArchiveEntry $root
-source -encoding utf-8 [file join $root compiler compiler.tcl]
-file copy [file join $root project inputs] working-source
+try {
+    ::machteld::ArchiveEntry $root
+    file copy [file join $root project inputs] working-source
+    file copy [file join $root compiler] local-compiler
+} finally {zipfs unmount $root}
+exit
 ```
 
-Keep the prompt open while editing the files in `working-source`. Then build
-the revised archive from that directory. The original archive still runs
-with its original behavior.
+Edit the files in `working-source`. From a terminal, check the edits, run
+the source project and build a new archive. These commands use the extracted
+compiler and work after the original archive has been put away.
 
-```tcl
-try {
-    ::appcompiler::project::pack working-source/application.dict revised.machteld
-} finally {zipfs unmount $root}
+```text
+machteld.exe local-compiler/driver.tcl check --json working-source/application.dict
+machteld.exe local-compiler/driver.tcl run working-source/application.dict "Snow 雪"
+machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
+machteld.exe revised.machteld "Snow 雪"
 ```
 
 Run `machteld.exe test/application_compiler_project_test.tcl` to check
