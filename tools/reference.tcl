@@ -26,9 +26,7 @@ namespace eval ::ref {
 
 # ---- basic helpers ----
 
-proc ::ref::fail {message} {
-    return -code error -errorcode {REFERENCE fail} "generate-reference: $message"
-}
+source -encoding utf-8 [file join $::ref::root tools reference_authored.tcl]
 
 proc ::ref::writeUtf8Lf {path text} {
     file mkdir [file dirname $path]
@@ -158,53 +156,6 @@ proc ::ref::stripMarkdown {text} {
     # within C identifiers are part of the documented names.
     regsub -all {[`*#>|]} $text { } text
     collapse $text
-}
-
-proc ::ref::rewriteAuthoredLinks {text sourceKind} {
-    # Section offsets must address the canonical LF text that ships.
-    set text [string map [list \r\n \n \r \n] $text]
-    set out ""
-    set at 0
-    foreach {whole label target} [regexp -all -inline -indices {\[([^\]]+)\]\(([^)]+)\)} $text] {
-        lassign $whole from to
-        append out [string range $text $at [expr {$from - 1}]]
-        set at [expr {$to + 1}]
-        set labelText [string range $text {*}$label]
-        set targetText [string range $text {*}$target]
-        if {[regexp {^[A-Za-z][A-Za-z0-9+.-]*:} $targetText] || [string match #* $targetText]} {
-            append out [string range $text $from $to]
-            continue
-        }
-        set hash [string first # $targetText]
-        if {$hash >= 0} {
-            set path [string range $targetText 0 [expr {$hash - 1}]]
-            set fragment [string range $targetText $hash end]
-        } else {
-            set path $targetText
-            set fragment ""
-        }
-        if {$sourceKind eq "guide"} {
-            if {[regexp -nocase {^reference/machteld/(index|agent)\.md$} $path -> m]} {
-                set stable machteld/$m
-            } elseif {[regexp -nocase {^reference/machteld/command/([a-z0-9-]+)\.md$} $path -> m]} {
-                set stable machteld/command/$m
-            } elseif {[regexp -nocase {^([a-z0-9-]+)\.md$} $path -> m]} {
-                set stable machteld/guide/$m
-            } else {
-                fail "unsupported authored guide link target $targetText"
-            }
-        } else {
-            if {[regexp -nocase {^command/([a-z0-9-]+)\.md$} $path -> m]} {
-                set stable machteld/command/$m
-            } elseif {[regexp -nocase {^(index|agent)\.md$} $path -> m]} {
-                set stable machteld/$m
-            } else {
-                fail "unsupported authored reference link target $targetText"
-            }
-        }
-        append out "\[$labelText\]($stable$fragment)"
-    }
-    append out [string range $text $at end]
 }
 
 # ---- typed values: what the catalog is made of, for its two serializations ----
@@ -1897,15 +1848,9 @@ proc ::ref::main {argv} {
             }
         }
 
-        # Authored command, index and agent pages.
-        set authored {}
-        foreach dir [list [file join $root docs reference machteld] [file join $root docs reference machteld command]] {
-            foreach f [glob -nocomplain -type f -directory $dir *.md] {
-                lappend authored [list [string map {/ \\} [file nativename $f]] $f]
-            }
-        }
-        foreach pair [lsort -index 0 $authored] {
-            set path [lindex $pair 1]
+        set authored [authoredSources $root]
+        dict for {path kind} $authored {
+            if {$kind ne "reference"} continue
             set text [rewriteAuthoredLinks [readUtf8Strict $path] reference]
             set fm [frontMatter $text [file nativename $path]]
             set id [dict get $fm id]
@@ -1947,11 +1892,12 @@ proc ::ref::main {argv} {
                 }
             }
         }
-        foreach name [lsort [lmap f [glob -nocomplain -type f -directory [file join $root docs] *.md] {file tail $f}]] {
-            set path [file join $root docs $name]
+        dict for {path kind} $authored {
+            if {$kind ne "guide"} continue
+            set name [file tail $path]
             set text [rewriteAuthoredLinks [readUtf8Strict $path] guide]
             set guide [guideMetadata $text [file nativename $path]]
-            set base [file rootname $name]
+            set base [guideBase $path]
             set id machteld/guide/$base
             set mdRel markdown/machteld/guide/$base.md
             writeUtf8Lf [file join $candidate {*}[split $mdRel /]] $text

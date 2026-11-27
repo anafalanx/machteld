@@ -563,7 +563,7 @@ try {
         tclsh [file join $prefix bin tclsh90s.exe]]
     foreach relative {
         tools/dependencies.lock.json tools/bootstrap.tcl tools/cffi-build.tcl tools/graphviz-build.tcl tools/patches/dependency.patch tools/buildlib.tcl
-        tools/reference.tcl tools/reference_db.tcl tools/package.tcl
+        tools/reference.tcl tools/reference_authored.tcl tools/reference_db.tcl tools/package.tcl
         tools/build_identity.tcl src/machteld.h src/other.h src/media/rae_ring.h
         src/vendor/minimp3.h tcl/machteld.tcl
         tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
@@ -624,7 +624,7 @@ try {
     file delete $additionalHeader
 
     foreach relative {
-        LICENSE tools/reference.tcl tools/reference_db.tcl
+        LICENSE tools/reference.tcl tools/reference_authored.tcl tools/reference_db.tcl
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
         licenses/cffi-2.0.3.txt docs/overview.md docs/reference/machteld/command/help.md
     } {

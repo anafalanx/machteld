@@ -2,6 +2,7 @@ package require machteld
 
 if {[llength $argv]} {error "usage: documentation_examples_test.tcl"}
 set ROOT [file dirname [file dirname [file normalize [info script]]]]
+source -encoding utf-8 [file join $ROOT tools reference_authored.tcl]
 set HOST [info nameofexecutable]
 set checks 0
 set fails 0
@@ -106,9 +107,24 @@ proc clone_problem {page target} {
     if {$folder in $::IGNORED} { return "in $folder/, which git ignores" }
     return ""
 }
-set pages [concat [glob -directory $ROOT *.md] \
+proc embedded_link_problem {sources page target destination} {
+    if {![dict exists $sources $page]} {return {}}
+    if {[catch {::ref::authoredTarget [dict get $sources $page] $target} message]} {return $message}
+    if {![dict exists $sources $destination]} {return "destination is absent from the embedded reference"}
+    return {}
+}
+set authored [::ref::authoredSources $ROOT]
+set guide [file join $ROOT docs roadmap.md]
+set note [file join $ROOT docs releases 0.30-qualification.md]
+check {release notes can link back to a guide in the checkout} [expr {
+    [clone_problem $note ../roadmap.md] eq {} &&
+    [embedded_link_problem $authored $note ../roadmap.md $guide] eq {}}]
+check {an existing checkout-only release note has no embedded link from a guide} [expr {
+    [clone_problem $guide releases/0.30-qualification.md] eq {} &&
+    [embedded_link_problem $authored $guide releases/0.30-qualification.md $note] ne {}}]
+set pages [lsort -unique [concat [glob -directory $ROOT *.md] \
     [documentation_pages [file join $ROOT docs]] \
-    [documentation_pages [file join $ROOT examples] 1]]
+    [documentation_pages [file join $ROOT examples] 1] [dict keys $authored]]]
 foreach page $pages {
     foreach {whole target} [regexp -all -inline {\]\(([^)]+)\)} [read_text $page]] {
         if {[regexp {^[a-zA-Z][a-zA-Z0-9+.-]*:} $target]} { continue }
@@ -120,22 +136,20 @@ foreach page $pages {
         set problem [clone_problem $page $fileTarget]
         if {$problem ne {}} { puts "     $target: $problem" }
         check "local link in [file tail $page]: $target" [expr {$problem eq {}}]
-        if {$fragment ne {} && $problem eq {}} {
-            set destination [file join [file dirname $page] $fileTarget]
-            set hasId [regexp -line {^id: ([a-z0-9/-]+)\r?$} [read_text $destination] -> docId]
-            check "packaged section resolves: $target" [expr {$hasId &&
+        set destination [file normalize [file join [file dirname $page] $fileTarget]]
+        if {$fragment ne {} && $problem eq {} && [dict exists $authored $destination]} {
+            if {[dict get $authored $destination] eq "guide"} {
+                set docId machteld/guide/[::ref::guideBase $destination]
+            } elseif {![regexp -line {^id: ([a-z0-9/-]+)\r?$} [read_text $destination] -> docId]} {
+                error "embedded reference page has no ID: $destination"
+            }
+            check "packaged section resolves: $target" [expr {
                 ![catch {docs get $docId -section $fragment -limit 1}]}]
         }
-        # Embedded guides cannot link to checkout-only files. Match the
-        # generator's supported authored-link shapes before a slow refresh.
-        set relative [string range $page [expr {[string length $ROOT] + 1}] end]
-        if {[string match docs/* $relative] && $linkPath ne {}} {
-            if {[file dirname $page] eq [file join $ROOT docs]} {
-                set supported [regexp {^(?:[a-z0-9-]+\.md|reference/machteld/(?:index|agent)\.md|reference/machteld/command/[a-z0-9-]+\.md)$} $linkPath]
-            } else {
-                set supported [regexp {^(?:command/[a-z0-9-]+\.md|(?:index|agent)\.md)$} $linkPath]
-            }
-            check "embedded link has a stable reference mapping: $target" $supported
+        if {$linkPath ne {} && [dict exists $authored $page]} {
+            set mapping [embedded_link_problem $authored $page $target $destination]
+            if {$mapping ne {}} {puts "     $target: $mapping"}
+            check "embedded link has a stable reference mapping: $target" [expr {$mapping eq {}}]
         }
     }
 }

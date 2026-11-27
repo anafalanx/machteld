@@ -239,11 +239,15 @@ dict for {slug commands} $packageCommands {
         if {$name ni [dict get $packagePages $slug]} { fail "missing exact $name lookup on machteld/package/$slug" }
     }
 }
-foreach guide [glob -nocomplain -directory [file join $ROOT docs] *.md] {
-    dict set valid "machteld/guide/[file rootname [file tail $guide]]" 1
+source -encoding utf-8 [file join $ROOT tools reference_authored.tcl]
+set referenceFiles {}
+dict for {path kind} [::ref::authoredSources $ROOT] {
+    if {$kind eq "guide"} {
+        dict set valid "machteld/guide/[::ref::guideBase $path]" 1
+    } else {
+        lappend referenceFiles $path
+    }
 }
-set referenceFiles [concat [glob -nocomplain -directory [file join $ROOT docs reference machteld] *.md] \
-    [glob -nocomplain -directory $REFDIR *.md]]
 foreach path $referenceFiles {
     set text [read_utf8_lf $path]
     foreach ref [regexp -all -inline {machteld/(?:command/[a-z][a-z0-9-]*(?:#[a-z][a-z0-9-]*)?|(?:application|package|guide)/[a-z][a-z0-9-]*|agent|index)} $text] {
