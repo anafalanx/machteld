@@ -448,8 +448,77 @@ can inspect the status, exit code and diagnostics together. Invalid paths,
 argument NULs, out-of-range limits and out-of-range deadlines return
 `PROCESS_PATH`, `PROCESS_ARGUMENT`, `PROCESS_LIMIT` and `PROCESS_TIMEOUT`
 respectively. A failed launch returns `PROCESS_LAUNCH` with the host's
-error details. This capture operation blocks. For interactive byte streams
-or Tk event-loop callbacks, the Tcl host provides `child start -channels`.
+error details. This capture operation blocks.
+
+## Event-driven process streams
+
+Use `stream_process(exe, argv, input, chunk_bytes, timeout_ms, on_stdout,
+on_stderr, on_done)` in an application running a Tcl or Tk event loop.
+It starts the supervised process and returns `result<process_stream,problem>`
+immediately. The application can keep the opaque handle to stop the job.
+
+```text
+tool .reader = 'tools/reader.exe'
+extern fn .receive($side: text, $chunk: bytes) -> result<unit,problem> = ['::receive']
+extern fn .done($r: result<process_exit,problem>) -> unit = ['::done']
+export fn .start($args: list<text>, $input: bytes) -> result<process_stream,problem> =>
+    stream_process(.reader()?, $args, $input, 8192, 30000,
+        bind(.receive, 'stdout'), bind(.receive, 'stderr'), .done)
+```
+
+A mixed project's Tcl entry can supply the two commands and run its event
+loop. Here the terminal callback wakes a headless caller.
+
+```tcl
+package require machteld 30-
+proc ::receive {side chunk} {
+    puts stderr "$side supplied [string length $chunk] bytes"
+    return {ok {}}
+}
+proc ::done {result} {set ::finished $result; return {}}
+lassign [::application::main::start $argv [binary format a* {}]] tag job
+if {$tag eq "err"} {error [dict get $job message]}
+vwait ::finished
+```
+
+Each output callback receives between 1 and `chunk_bytes` raw bytes.
+Choose a chunk size from 1 through 65,536. The two pipes retain their
+individual byte order. A chunk can split a Unicode character or a record.
+The runtime advances stdin in bounded pieces, closes it at the end, and
+drains both output pipes. It retains the input while writing and delivers
+output directly to the callbacks. To assemble a transcript, impose an
+application limit. A slow callback applies backpressure to the child.
+Callbacks for one stream handle run serially even when a handler enters
+a nested event loop. Keep each handler short so other jobs can run.
+
+Normal completion waits for the full process tree and EOF on both output
+pipes. `on_done` then receives `ok(process_exit)`, with `status`, `exit`,
+`stdout_bytes` and `stderr_bytes`. Native statuses include `ok`, `error`,
+`timeout` and `killed`. A chunk callback can return `err(problem)` to stop
+delivery and pass that problem to `on_done`. A Tcl callback exception or
+expired captured reference produces `PROCESS_CALLBACK`. Pipe or supervision
+failure produces `PROCESS_IO`. Failure to start is returned to the caller
+before any callbacks run. A fault in `on_done` goes to Tcl's background
+error handler after the native child has been released.
+
+`cancel_process(job)` stops the child and delivers one terminal result
+with status `canceled`, exit `-1`, and the delivered byte counts. A cancel
+inside a chunk callback takes effect when that callback returns.
+`close_process(job)` stops silently and suppresses queued delivery. A
+`using $job ::= stream_process(...)? { ... }` scope calls this closer on
+every exit. Both operations accept an already finished handle from the same
+application. Keep any callback's captured references live until completion
+or close the stream before their scope ends.
+
+The executable and argument rules match bounded capture. To deliberately
+search the machine's PATH, call `find_executable('converter.exe')`, which
+returns `result<text,problem>`. Only absolute PATH entries participate.
+Supply one bare .exe name with its extension. Archive-relative tools stay
+portable when the installation moves. Invoking a shell requires selecting
+its executable and supplying its arguments explicitly.
+
+Run `machteld.exe test/application_compiler_streams_test.tcl -pack` for a
+working mixed project, concurrent pipe traffic, cancellation and relocation.
 
 ## Grouping choice variants
 

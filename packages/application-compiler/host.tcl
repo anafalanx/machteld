@@ -6,7 +6,7 @@ proc problem {message} {return [dict create message $message]}
 # arguments of a generic export. Validate every name even for an empty list,
 # an absent optional, or a parameter that occurs only in the result type.
 proc concreteType {type schemas} {
-    if {$type in {int decimal binary64 text bytes bool unit problem instant local_datetime}} {return 1}
+    if {$type in {int decimal binary64 text bytes bool unit problem instant local_datetime process_stream}} {return 1}
     if {[string length $type] > 8192 || $type eq ""} {return 0}
     set parts [typeParts $type]
     set head [lindex $parts 0]
@@ -136,6 +136,17 @@ proc ref_same {left right} {
 proc endReference {ticket} {
     variable referenceCells
     unset referenceCells([lindex $ticket 1])
+}
+
+# Completed tickets remain valid for idempotent close. Only a live entry
+# in the issuing application's stream table can release native resources.
+proc guardStream {ticket path} {
+    variable streamOwner
+    if {![info exists streamOwner] || [catch {llength $ticket} size] || $size != 2 ||
+            [lindex $ticket 0] ne $streamOwner || ![regexp {\A[0-9a-f]{32}\Z} [lindex $ticket 1]]} {
+        reject $path {a process stream from this application}
+    }
+    return $ticket
 }
 
 # Tcl packages and Tk may call an exported prefix directly. Validate all
