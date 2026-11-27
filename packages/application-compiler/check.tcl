@@ -75,7 +75,8 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         }
         return [dict get $world typeBindings $head]
     }
-    if {$head in {result list optional range map callable ref}} {
+    if {$head in {result list optional range map callable ref task}} {
+        if {$head eq "task"} {dict set reports usesWorkers 1}
         if {$head eq "callable"} {
             set arity [expr {[llength $parts] - 1}]
             if {$arity == 0} {
@@ -496,6 +497,16 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         return ""
     }
     switch -exact -- $name {
+        await - cancel {
+            if {![checkArguments $node $name $actual {*} reports]} {return ""}
+            lassign [::appcompiler::typeParts [lindex $actual 0]] head value
+            if {$head ne "task"} {
+                issue reports TASK_REQUIRED $node "'$name' requires a worker task"
+                return ""
+            }
+            dict set reports usesWorkers 1
+            return [expr {$name eq "await" ? [makeType result [list $value problem]] : "unit"}]
+        }
         ref_get - ref_set - ref_same {return [referenceOperation $node $name $actual reports]}
         bind {return [callableOperation $node bind $actual reports]}
         ok - err - encode_json - underlying - len { set params [list *] }
@@ -750,7 +761,7 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
     set target [dict get $node qualifier]
     set name [dict get $node name]
     set localChoice [format {.%s::%s} $caller $target]
-    if {$target ne ""} {
+    if {$target ne "" && ![dict exists $node workerStart]} {
         set declaredKind [dict getdef $world schemas $localChoice kind {}]
         if {$declaredKind eq "alias"} { set localChoice [dict get $reports typeNames $localChoice] }
         set isChoice [expr {[schemaKind $localChoice $world] eq "choice"}]
@@ -787,7 +798,17 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
         issue reports NOT_EXPORTED $node "function '.$name' is private to module '$target'"
         return ""
     }
-    return [checkCall $node .$name $actual $function $world reports]
+    set worker [expr {[dict get $function kind] eq "worker"}]
+    if {$worker != [dict exists $node workerStart]} {
+        issue reports WORKER_REQUIRED $node [expr {$worker ? "start the worker explicitly" : "start requires a declared worker"}]
+        return ""
+    }
+    set result [checkCall $node .$name $actual $function $world reports]
+    if {$worker && $result ne ""} {
+        set reply [lindex [::appcompiler::typeParts $result] 1]
+        return [makeType task [list $reply]]
+    }
+    return $result
 }
 
 # Bind the declaration's parameters structurally. A missing payload (the
@@ -1729,6 +1750,53 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
     }
 }
 
+# Check template bodies once, and check the arguments of every specialization.
+# This terminates even on a recursive type that grows a type argument.
+proc ::appcompiler::checker::workerData {root world} {
+    set pending [list $root]
+    set seen {}
+    while {[llength $pending]} {
+        set type [lindex $pending end]
+        set pending [lreplace $pending end end]
+        set parts [::appcompiler::typeParts $type]
+        set head [lindex $parts 0]
+        lappend pending {*}[lrange $parts 1 end]
+        if {$head in {int decimal binary64 bool text bytes unit instant local_datetime problem optional result list map range}} continue
+        if {[regexp {^@[A-Za-z_][A-Za-z_0-9]*:(record|choice):} $head]} continue
+        # Declarations use qualified dotted names. A host capability may use
+        # a schema for local checking without consenting to wire transport.
+        if {[string index $head 0] ne "." && $head ni {process_output process_exit}} {return 0}
+        if {[dict exists $world resources $head] || ![dict exists $world runtimeSchemas $head]} {return 0}
+        if {[dict exists $seen $head]} continue
+        dict set seen $head 1
+        lassign [dict get $world runtimeSchemas $head] kind members
+        switch -- $kind {
+            record {lappend pending {*}[dict values $members]}
+            choice {lappend pending {*}[concat {*}[dict values $members]]}
+            distinct {lappend pending $members}
+            default {return 0}
+        }
+    }
+    return 1
+}
+
+proc ::appcompiler::checker::checkWorker {function world reportsVar} {
+    upvar 1 $reportsVar reports
+    dict set reports usesWorkers 1
+    set params [dict get $function params]
+    lassign [::appcompiler::typeParts [dict get $function result]] head reply error
+    if {[llength $params] != 1 || [llength [dict get $function typeParams]] || $head ne "result" || $error ne "problem"} {
+        issue reports WORKER_SIGNATURE $function {a worker takes one concrete request and returns result<Reply,problem>}
+        return
+    }
+    set param [lindex $params 0]
+    foreach type [list [dict get $param type] $reply] location [list $param [dict get $function resultLocation]] {
+        if {$type ne "" && ![workerData $type $world]} {
+            issue reports WORKER_MESSAGE $location "worker messages require declared portable data throughout '$type'"
+        }
+    }
+}
+
 proc ::appcompiler::checker::checkExample {example imports world reportsVar} {
     upvar 1 $reportsVar reports
     dict set world returnType unit
@@ -1848,6 +1916,9 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             }
         }
         foreach function [dict getdef $bodies $module {}] {
+            if {[dict get $function kind] eq "worker"} {
+                checker::checkWorker $function $world reports
+            }
             checker::checkFunction $function $imports $world reports
         }
         foreach example [dict getdef $definition examples {}] {
@@ -1863,7 +1934,8 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
             callbackTargets [dict keys [dict getdef $reports callbackTargets {}]] \
             usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
-            usesZone [dict getdef $reports usesZone 0] usesProcess [dict getdef $reports usesProcess 0]]
+            usesZone [dict getdef $reports usesZone 0] usesProcess [dict getdef $reports usesProcess 0] \
+            usesWorkers [dict getdef $reports usesWorkers 0]]
     }
     return [dict get $reports diagnostics]
 }

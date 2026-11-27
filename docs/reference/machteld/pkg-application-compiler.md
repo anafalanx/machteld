@@ -229,3 +229,22 @@ with `result<process_exit,problem>`. The record contains `status`, `exit`,
 `close_process` and scope cleanup stop silently. The compiler guide has a
 headless event-loop example. For explicit PATH lookup, `find_executable`
 accepts a bare .exe name and searches absolute PATH directories.
+
+## Waiting for typed workers
+
+Declare `worker .lookup($request: .query) -> result<.answer,problem>`
+with its function body. `start .lookup($request)` returns a
+`task<.answer>`. `await($task)` returns the checked result while other
+handlers remain responsive. Each worker has a supervised process, private
+message pipes and its own live resources. A typed entry already has
+application scope. In mixed Tcl/Tk code, obtain the window owner from
+`::application::workers window .panel` and run the callback through
+`::application::workers handle $owner command ?arg ...?`.
+
+Destroying the window cancels its tasks and unwinds waiting handlers.
+`start_app` selects application ownership, allowing a different handler to
+await the result after that window closes. `cancel($task)` requests explicit
+cancellation. Worker messages have a 65,536-byte limit. The compiler guide
+describes the portable types, timeout setting and problem codes. Finite
+binary64 measurements keep their bits through a round trip. Local resources,
+callables and shared references stay in the process that owns them.

@@ -55,6 +55,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             callable {return [guardCallable $type $value $path]}
             ref {return [guardReference $first $value $path]}
             process_stream {return [guardStream $value $path]}
+            task {return [guardTask $first $value $path]}
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -74,6 +75,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             map {
                 set keyType [scalarBase $first]
                 if {$keyType ni {text int bool decimal} || [catch {dict size $value}]} {reject $path $type}
+                if {$checkExtras in {worker workerOutput} && [llength $value] != 2 * [dict size $value]} {reject $path {unique worker map keys}}
                 # Text map keys require one representation for equivalent Tcl strings.
                 set keyGuard [expr {$keyType eq "text" ? "@textKey" : $keyType}]
                 set result {}
@@ -114,6 +116,18 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 if {[dict exists $value origin]} {
                     dict set value origin [guardLocation [dict get $value origin] $path.origin]
                 }
+                if {$checkExtras in {worker workerOutput}} {
+                    set fields {}
+                    foreach key {message code origin byteOffset} {
+                        if {[dict exists $value $key]} {dict set fields $key [dict get $value $key]}
+                    }
+                    if {[dict exists $fields origin]} {
+                        set where [dict get $fields origin]
+                        dict set fields origin [dict create module [dict get $where module] \
+                            line [dict get $where line] column [dict get $where column]]
+                    }
+                    return $fields
+                }
                 return $value
             }
             int {
@@ -128,6 +142,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             }
             binary64 {
                 if {[catch {finiteBinary64 $value} number]} {reject $path {finite binary64}}
+                if {$checkExtras eq "workerOutput"} {return [format %.17g $number]}
                 return $number
             }
             instant - local_datetime {
@@ -142,13 +157,17 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             text {return $value}
         }
         lassign [specializeSchema $type [schemas]] kind members
-        if {$kind eq "distinct"} {return [guard $members $value $path]}
+        if {$kind eq "distinct"} {return [guard $members $value $path $checkExtras]}
         if {$kind eq "record"} {
             if {[catch {dict size $value}]} {reject $path $type}
+            if {$checkExtras in {worker workerOutput} && [llength $value] != 2 * [dict size $value]} {reject $path {unique worker record fields}}
             # Unknown record fields from an extern must remain usable by
             # structural equality and by the JSON writer without type guessing.
-            if {$checkExtras} {
+            if {$checkExtras ne "0"} {
                 dict for {name extra} $value {
+                    if {$checkExtras in {worker workerOutput} && ![dict exists $members $name]} {
+                        reject "$path\[[list $name]\]" {a declared worker message field}
+                    }
                     if {![dict exists $members $name] && [catch {::machteld::json type $extra}]} {
                         reject "$path\[[list $name]\]" {a retained typed JSON value}
                     }
@@ -400,6 +419,9 @@ proc ::appcompiler::emitCallPrefix {node context} {
             if {[dict exists $facts constructor]} {return [list ::list [list $name]]}
             set calleeModule [dict get $node qualifier]
             if {$calleeModule eq ""} {set calleeModule [dict get $context module]}
+            if {[dict exists $node workerStart]} {
+                return [list [list ${target}::@rt::workerStart] [dict get $node workerStart] [list $calleeModule.$name]]
+            }
             set prefix [list [list ${target}::${calleeModule}::${name}]]
             if {[llength [dict getdef $facts typeArguments {}]]} {
                 lappend prefix [emitTypeList [dict get $facts typeArguments] $context]
@@ -433,7 +455,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 }
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
-                problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
+                await - cancel - problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
                 parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process -
                 stream_process - close_process - cancel_process - find_executable {
                     return [list [list ${target}::@rt::${name}]]

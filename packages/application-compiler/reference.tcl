@@ -13,7 +13,7 @@ proc ::appcompiler::reference::signature {decl} {
             set path [string map [list \\ {\\} \" {\"}] [dict get $decl path]]
             return "$head = \"$path\""
         }
-        fn - extern {
+        fn - extern - worker {
             set params [lmap param [dict get $decl params] {
                 set signature [format {$%s: %s} [dict get $param name] [dict get $param type]]
                 if {[dict exists $param label]} {set signature "[dict get $param label] $signature"}
