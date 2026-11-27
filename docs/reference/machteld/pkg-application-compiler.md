@@ -136,3 +136,20 @@ operation succeeds. Leaving the scope before commit rolls back every write,
 including on an early success return. Failed writes and failed commits also
 end the transaction. The compiler guide includes the stable problem codes
 and a worked JSON import with replay, provenance and historical disagreements.
+
+## Running an application tool
+
+Declare a companion executable with `tool .converter = 'tools/converter.exe'`.
+Calling `.converter()?` resolves it beside the project manifest during
+development and beside the archive after delivery. Copy the executable to
+that relative location when distributing the application. Add `export` to
+share the declaration with other modules or a Tcl entry.
+
+`capture_process(exe, argv, input, limit, timeout_ms)` accepts an absolute
+native `.exe` path, a `list<text>` of individual arguments and stdin bytes.
+It waits for the process tree while draining both output pipes. The limit
+is 0 through 1,048,576 bytes per stream. Zero milliseconds disables the
+deadline. The result is `result<process_output,problem>`. Inspect `status` and
+`exit` even on success, then read `stdout` and `stderr` as bytes. Each stream
+has a retained-byte count and a truncation flag, for example `stdout_retained`
+and `stdout_truncated`. The compiler guide lists fields and problem codes.

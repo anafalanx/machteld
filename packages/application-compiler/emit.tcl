@@ -205,6 +205,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
     set module [dict get $context module]
     set kind [dict get $node kind]
     switch -exact -- $kind {
+        toolPath {
+            return [format {[%s %s]} [list [dict get $context target]::@rt::toolPath] [emitTextWord [dict get $node value]]]
+        }
         int  {return [emitIntegerWord [dict get $node value]]}
         decimal {return [list [decimal::canonical [dict get $node value]]]}
         text {return [emitTextWord [dict get $node value]]}
@@ -365,7 +368,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
-                parse_instant - parse_local_datetime - resolve_offset - resolve_zone {
+                parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}

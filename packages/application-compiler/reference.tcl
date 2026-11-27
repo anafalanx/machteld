@@ -9,6 +9,10 @@ proc ::appcompiler::reference::signature {decl} {
         append head < [join $parameters {, }] >
     }
     switch -- $kind {
+        tool {
+            set path [string map [list \\ {\\} \" {\"}] [dict get $decl path]]
+            return "$head = \"$path\""
+        }
         fn - extern {
             set params [lmap param [dict get $decl params] {
                 set signature [format {$%s: %s} [dict get $param name] [dict get $param type]]

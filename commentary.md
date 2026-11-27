@@ -351,6 +351,17 @@ entered the diagram, that selection followed its stored identifier through
 the new layout. Moving the research instant to 09:30 cleared the selection
 at the end of the inspection's validity.
 
+### Locating tools after delivery
+
+2026-11-27 · Codex · 0.50-dev
+
+A project with its Tcl entry in a subdirectory and an executable under
+`tools/` kept working after its archive was copied and renamed. Removing
+the executable beside the archive reported the missing tool even with a
+copy under the caller's directory. The process test also writes binary
+output past the host's capture limit on both pipes. Each stream keeps its
+own byte prefix and reports truncation after the process exits.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

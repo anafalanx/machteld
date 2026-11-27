@@ -179,15 +179,19 @@ proc ::appcompiler::project::load {manifest} {
 
 proc ::appcompiler::project::build {manifest {packageRoot {}}} {
     set project [load $manifest]
-    if {$packageRoot eq ""} {set packageRoot [file dirname [file normalize $manifest]]}
+    set toolRoot @startup
+    if {$packageRoot eq ""} {
+        set packageRoot [file dirname [file normalize $manifest]]
+        set toolRoot $packageRoot
+    }
     set directories [packageDirectories $project $packageRoot]
     set sources [dict get $project sources]
     set minApi [dict get $project minApi]
     if {[dict get $project tclEntry] eq {}} {
-        set artifact [::appcompiler::application $sources {*}[dict get $project entry] $minApi $directories]
+        set artifact [::appcompiler::application $sources {*}[dict get $project entry] $minApi $directories $toolRoot]
     } else {
         set path [file join $packageRoot [dict get $project tclEntry]]
-        set artifact [::appcompiler::tclApplication $sources $path $minApi $directories]
+        set artifact [::appcompiler::tclApplication $sources $path $minApi $directories $toolRoot]
     }
     return [dict create project $project artifact $artifact]
 }
@@ -198,11 +202,12 @@ proc ::appcompiler::project::packageDirectories {project root} {
 
 proc ::appcompiler::project::test {manifest} {
     set project [load $manifest]
-    set directories [packageDirectories $project [file dirname [file normalize $manifest]]]
+    set projectRoot [file dirname [file normalize $manifest]]
+    set directories [packageDirectories $project $projectRoot]
     if {[dict get $project tclEntry] eq {}} {
         set analysis [::appcompiler::analyzeApplication [dict get $project sources] {*}[dict get $project entry]]
     } else {
         set analysis [::appcompiler::analyze [dict get $project sources]]
     }
-    return [::appcompiler::runExamples $analysis [dict get $project minApi] $directories]
+    return [::appcompiler::runExamples $analysis [dict get $project minApi] $directories $projectRoot]
 }

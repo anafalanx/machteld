@@ -316,6 +316,58 @@ same binding rules as choice variants. For example, a `result<text,text>`
 can match `ok($message) | err($message) => $message`. Use postfix `?`
 when the caller should propagate the original typed failure.
 
+## Capturing a child process
+
+Declare an external Windows executable once in a module. A tool declaration
+creates a zero-argument function returning `result<text,problem>`. Its
+successful value is the executable's absolute path. Add `export` when
+another module or a Tcl entry needs it.
+
+```text
+tool .converter = 'tools/converter.exe'
+
+export fn .convert($args: list<text>, $input: bytes) -> result<process_output,problem> {
+    $exe ::= .converter()?
+    return capture_process($exe, $args, $input, 65536, 30000)
+}
+```
+
+For `project run` and `project test`, install the executable relative to the
+project manifest. For delivery, copy it to the same relative location beside
+the `.machteld` archive. A Tcl entry in a subdirectory uses the same base.
+Tool paths use the manifest's relative-path rules. Missing tools return
+`PROCESS_NOT_FOUND`. An in-memory `compile` without a project directory
+returns `PROCESS_CONTEXT` when a declaration is called.
+
+`capture_process(exe, argv, input, limit, timeout_ms)` also accepts an
+explicit absolute native `.exe` path. Executable lookup uses that path.
+Each text element in `argv` becomes one Windows argument, including empty
+strings. No shell expands punctuation, variables or wildcards. The child
+inherits its caller's working directory and environment. Machteld writes
+the input bytes and closes stdin, drains stdout and stderr concurrently,
+and waits for the supervised process tree.
+
+The per-stream return limit is 0 through 1,048,576 bytes. The native
+`run` command captures up to 1 MiB for each stream internally before this
+operation applies a smaller requested limit. A timeout of 1 through
+4,294,967,294 milliseconds sets the tree deadline. Zero disables it.
+The resulting `process_output` record has these fields.
+
+| Fields | Values |
+| --- | --- |
+| `status`, `exit` | Native status text (`ok`, `error`, `timeout`, `killed`) and the root process's 32-bit exit code. A deadline can expire after the root exits. |
+| `stdout`, `stderr` | Separate byte prefixes in stream order. Decode each explicitly when the tool defines an encoding. |
+| `stdout_retained`, `stderr_retained` | Number of bytes returned for the corresponding stream. A truncated stream produced at least one further byte. |
+| `stdout_truncated`, `stderr_truncated` | Boolean for each stream indicating whether its output exceeded the limit. |
+
+A nonzero exit and a timeout both return `ok(process_output)` so the caller
+can inspect the status, exit code and diagnostics together. Invalid paths,
+argument NULs, out-of-range limits and out-of-range deadlines return
+`PROCESS_PATH`, `PROCESS_ARGUMENT`, `PROCESS_LIMIT` and `PROCESS_TIMEOUT`
+respectively. A failed launch returns `PROCESS_LAUNCH` with the host's
+error details. This capture operation blocks. For interactive byte streams
+or Tk event-loop callbacks, the Tcl host provides `child start -channels`.
+
 ## Grouping choice variants
 
 A `match` on a closed choice must name every variant. Use `|` to give
