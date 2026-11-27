@@ -13,20 +13,23 @@ package require machteld 0.21
 #
 # The groups (the candidate's tools/test.ps1 groups, machteld 8bcc1ec):
 #
-#   fast                 no compiler and no MSYS2: reference coverage, version
+#   fast                 no C compiler or MSYS2: reference coverage, version
 #                        claims and their regressions, build identity, the
 #                        reference serializer, this gate's own test, and the
 #                        runtime lanes that need no fixture (filesystem,
 #                        runtime services, protocol, background jobs, app archives, GUI model, embedded
 #                        reference, README examples, JSONTestSuite, native
-#                        adversarial inputs and filesystem boundaries)
+#                        adversarial inputs and filesystem boundaries), and
+#                        the in-process application compiler suites
 #   integration          the C fixtures, the command-line golden vectors, the
 #                        development cache, and the process, store, native and
-#                        streaming-bounds lanes
+#                        streaming-bounds lanes, and compiled application
+#                        tests that launch child processes
 #   packaging            the runtime's build identity, entry, package and
 #                        publication, VERSIONINFO, 0.21 executable compatibility,
 #                        archive inventories, relocated examples and the Tcl
-#                        application corpus in source, archive and wrapped form
+#                        application corpus in source, archive and wrapped form,
+#                        plus compiled applications and rebuildable projects
 #   native-validation    the candidate's group: native lifetime with the
 #                        telemetry probe; bounded worker scaling (every child
 #                        live and closed, 128 ordered pool replies and the
@@ -256,6 +259,10 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast JSONTestSuite json_test.tcl
                 addLane steps $runtime fast "native adversarial inputs" native_adversarial_test.tcl
                 addLane steps $runtime fast "native filesystem boundaries" native_filesystem_test.tcl
+                addLane steps $runtime fast "application compiler" application_compiler_test.tcl
+                foreach suite {semantics decimal distinct map} {
+                    addLane steps $runtime fast "application compiler $suite" application_compiler_${suite}_test.tcl
+                }
             }
             integration {
                 if {[dict get $settings cloud]} {
@@ -322,6 +329,15 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime integration "MP3, AAC and HE-AAC PCM" audio_test.tcl
                 addLane steps $runtime integration "rolling HLS audio" hls_test.tcl
                 addLane steps $runtime integration "streaming bounds" streaming_bounds_test.tcl $processFixture
+                foreach suite {alias decode diagnostics extern group interpolation iteration text} {
+                    addLane steps $runtime integration "application compiler $suite" application_compiler_${suite}_test.tcl
+                }
+                # The packaging forms also run all direct project and I/O cases.
+                if {"packaging" ni $chosen} {
+                    foreach suite {project io} {
+                        addLane steps $runtime integration "application compiler $suite" application_compiler_${suite}_test.tcl
+                    }
+                }
             }
             packaging {
                 addStep steps packaging "build identity of the runtime" [list $tclsh [file join $test build_identity_test.tcl] $runtime]
@@ -334,6 +350,10 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "archive inventory" pack_inventory_test.tcl
                 addLane steps $runtime packaging "standalone wrapped applications" wrap_test.tcl
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
+                addLane steps $runtime packaging "application compiler archive" application_compiler_archive_test.tcl
+                foreach suite {project io} {
+                    addLane steps $runtime packaging "application compiler $suite (direct and packed)" application_compiler_${suite}_test.tcl -pack
+                }
             }
             native-validation {
                 set probe [file join $out native_probe.dll]

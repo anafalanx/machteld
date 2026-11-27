@@ -142,6 +142,33 @@ check {the reference-generator group compiles nothing} \
 
 set releasePlan [::gate::plan [settings {}]]
 set releaseLabels [labels $releasePlan]
+proc compilerSuites {steps group runtime} {
+    set suites {}
+    foreach step $steps {
+        if {[dict get $step group] ne $group} continue
+        lassign [dict get $step argv] exe path
+        if {![regexp {^application_compiler(?:_(.+))?_test\.tcl$} [file tail $path] -> suite]} continue
+        if {$exe ne $runtime} {error "compiler suite selected the wrong runtime: $exe"}
+        if {$suite eq ""} {set suite core}
+        lappend suites [list $suite {*}[lrange [dict get $step argv] 2 end]]
+    }
+    return [lsort $suites]
+}
+set candidate [dict get $default runtime]
+set direct {alias decode diagnostics extern group interpolation iteration text}
+set packed {archive {io -pack} {project -pack}}
+check {fast runs in-process application compiler suites on the candidate} \
+    [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
+check {integration alone runs the compiler's child-process and direct project and I/O tests} \
+    [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
+        [lsort [concat $direct {project io}]]}]
+check {packaging runs the compiler archive and the packed project and I/O cases} \
+    [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
+foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {
+    check {selecting both groups runs direct project and I/O just once inside the packed suites} \
+        [expr {[compilerSuites $plan integration $candidate] eq $direct &&
+            [compilerSuites $plan packaging $candidate] eq $packed}]
+}
 set corpus [lindex $releasePlan [lsearch -exact $releaseLabels {Tcl application corpus}]]
 check {the release runs the unfiltered Tcl application corpus once on the candidate} [expr {
     [llength [lsearch -all -exact [scripts $releasePlan] application_corpus_test.tcl]] == 1 &&
