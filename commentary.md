@@ -384,6 +384,13 @@ explicit reference and observed two later updates during event delivery.
 After the owning block returned, invoking the retained callback reported
 an expired reference.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, inspecting binary measurements
+
+One tenth stays exact when written as `0.1`. Converting it explicitly to
+binary64 and back exposes the extra decimal digits of the stored measurement.
+The calibration example reads a gain and offset from JSON. Its multiplication
+can report overflow before the offset is applied.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

@@ -40,6 +40,7 @@ proc sqlBinding {type value slot} {
             return [list integer $value]
         }
         bool {return [list integer [expr {$value ? 1 : 0}]]}
+        binary64 {return [list real $value]}
         text - decimal - instant - local_datetime {return [list text $value]}
         bytes {return [list blob $value]}
     }
@@ -59,6 +60,12 @@ proc sqlCell {type cell column} {
         bool {set valid [expr {$storage eq "integer" && $value in {0 1}}]}
         text {set valid [expr {$storage eq "text"}]}
         bytes {set valid [expr {$storage eq "blob"}]}
+        binary64 {
+            set valid [expr {$storage eq "real"}]
+            if {$valid && [catch {finiteBinary64 $value} value]} {
+                sqlFail SQL_TYPE "column [list $column] requires a finite REAL"
+            }
+        }
         decimal {
             set valid [expr {$storage in {text integer} && ![catch {decimal::canonical $value} value]}]
         }

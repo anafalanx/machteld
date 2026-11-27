@@ -114,7 +114,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         dict set reports usesTemporal 1
         return $type
     }
-    if {$type in {int decimal text bool bytes problem unit process_output}} { return $type }
+    if {$type in {int decimal binary64 text bool bytes problem unit process_output}} { return $type }
     if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $head -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
@@ -189,7 +189,7 @@ proc ::appcompiler::checker::resolveTypeNames {world reportsVar} {
                 set where [dict get $schema targetLocation]
                 set type [declaredType [dict get $schema target] $where $world reports]
                 if {[dict get $schema kind] eq "distinct" && $type ne ""} {
-                    if {$type ni {text int decimal bool bytes instant local_datetime}} {
+                    if {$type ni {text int decimal binary64 bool bytes instant local_datetime}} {
                         issue reports DISTINCT_BASE_TYPE $where "a distinct type requires a primitive scalar base, got $type"
                         set type ""
                     } elseif {![typeFits [string length $key] $schema reports]} {
@@ -520,6 +520,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
         quotient { set params {int int} }
         divide_rounded { set params {numeric numeric int text} }
+        to_binary64 { set params {numeric} }
+        exact_decimal { set params {binary64} }
         default {
             issue reports UNKNOWN_FUNCTION $node "unknown standard function '$name'"
             return ""
@@ -601,12 +603,14 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
         quotient { return result<int,problem> }
         divide_rounded { return result<decimal,problem> }
+        to_binary64 { return result<binary64,problem> }
+        exact_decimal { return decimal }
     }
 }
 
 proc ::appcompiler::checker::sqlScalar {type distinctBases} {
     if {[string index $type end] eq "?"} { set type [string range $type 0 end-1] }
-    return [expr {[dict getdef $distinctBases $type $type] in {int decimal text bytes bool instant local_datetime}}]
+    return [expr {[dict getdef $distinctBases $type $type] in {int decimal binary64 text bytes bool instant local_datetime}}]
 }
 
 proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
@@ -1235,7 +1239,7 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
 # invalid declaration or an intrinsically noncomparable component.
 proc ::appcompiler::checker::equalityRequirements {type summaries} {
     if {$type eq ""} { return !invalid }
-    if {$type in {int decimal text bool instant local_datetime}} { return {} }
+    if {$type in {int decimal binary64 text bool instant local_datetime}} { return {} }
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
     if {[string index $head 0] eq "@"} { return [list $head] }
@@ -1351,6 +1355,16 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         issue reports UNKNOWN_OPERATOR $node "unknown binary operator '$op'"
         return ""
     }
+    if {$left eq "binary64" || $right eq "binary64"} {
+        if {$left eq $right} {
+            fact reports $node operandType binary64
+            return result<binary64,problem>
+        }
+        if {$left ne "" && $right ne ""} {
+            issue reports OPERAND_TYPE $node "'$op' requires two binary64 operands for binary arithmetic, got $left and $right"
+        }
+        return ""
+    }
     if {$left ni {int decimal} || $right ni {int decimal}} {
         foreach side {left right} type [list $left $right] {
             if {$type ni {{} int decimal}} {
@@ -1412,8 +1426,8 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
                 set type [expressionType $value $scope $imports $world reports]
                 if {$type eq ""} {
                     set valid 0
-                } elseif {$type ni {text int decimal bool}} {
-                    issue reports INTERPOLATION_TYPE $value "interpolation needs text, int, decimal or bool, got $type"
+                } elseif {$type ni {text int decimal binary64 bool}} {
+                    issue reports INTERPOLATION_TYPE $value "interpolation needs text, int, decimal, binary64 or bool, got $type"
                     set valid 0
                 } else {
                     fact reports $part interpolationType $type
@@ -1496,8 +1510,8 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             set operand [dict get $node value]
             set type [expressionType $operand $scope $imports $world reports]
             if {$type eq ""} { return "" }
-            if {$type ni {int decimal}} {
-                issue reports OPERAND_TYPE $operand "unary '-' expects an int or decimal operand, got $type"
+            if {$type ni {int decimal binary64}} {
+                issue reports OPERAND_TYPE $operand "unary '-' expects int, decimal or binary64, got $type"
                 return ""
             }
             fact reports $node operandType $type
