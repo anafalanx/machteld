@@ -191,7 +191,7 @@ oo::class create ::appcompiler::ModuleParser {
                         set kind [expr {[string first . $word] < 0 ? "integer" : "decimal"}]
                     } elseif {[regexp {^[a-zA-Z_]} $word]} {
                         set kind [expr {$word in $keywords ? $word : "identifier"}]
-                    } elseif {$word in {+ - * / ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == !=}} {
+                    } elseif {$word in {+ - * / ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == != |}} {
                         set kind $word
                     } else {
                         ::appcompiler::fail E_PARSE_TOKEN $location "unexpected character '$word'"
@@ -332,7 +332,7 @@ oo::class create ::appcompiler::ModuleParser {
 
     # All delimited lists return their elements in source order. Each item
     # parser consumes exactly one complete production, including nested lists.
-    method parenthesized {item} {
+    method parenthesized {item {endVar {}}} {
         my take ( {an opening parenthesis}
         set entries {}
         my skipLines
@@ -345,7 +345,11 @@ oo::class create ::appcompiler::ModuleParser {
                 my skipLines
             }
         }
-        my take ) {a closing parenthesis}
+        set end [my take ) {a closing parenthesis}]
+        if {$endVar ne ""} {
+            upvar 1 $endVar closing
+            set closing $end
+        }
         return $entries
     }
 
@@ -773,6 +777,15 @@ oo::class create ::appcompiler::ModuleParser {
         return [my node $binding pattern name [dict get $binding value]]
     }
 
+    method choicePayload {} {
+        if {[my at identifier] && [dict get $token value] eq "_"} {
+            set discard $token
+            my advance
+            return [my node $discard discard]
+        }
+        return [my patternBinding]
+    }
+
     method matchArm {} {
         set start $token
         if {[my at {[}]} {
@@ -801,6 +814,30 @@ oo::class create ::appcompiler::ModuleParser {
             my advance
             return [my node $start fallback body [my armBody]]
         }
+        set first [my choicePattern]
+        set alternatives [list $first]
+        while {1} {
+            if {[my at newline]} {
+                set afterPattern [my cursor]
+                my skipLines
+                if {![my at |]} { my restore $afterPattern }
+            }
+            if {![my at |]} break
+            my advance
+            my skipLines
+            lappend alternatives [my choicePattern]
+        }
+        set body [my armBody]
+        if {[llength $alternatives] == 1} {
+            dict set first body $body
+            return $first
+        }
+        set end [lindex $alternatives end]
+        return [my node $start armGroup alternatives $alternatives body $body \
+            endLine [dict get $end endLine] endColumn [dict get $end endColumn]]
+    }
+
+    method choicePattern {} {
         # A local pattern has two components (.type::case); an imported
         # pattern has three (.module::type::case).
         set start [my take dotName {a dot-prefixed choice type in the match pattern}]
@@ -815,11 +852,12 @@ oo::class create ::appcompiler::ModuleParser {
             set variant [my take identifier {a choice variant name}]
         }
         set bindings {}
-        if {[my at (]} { set bindings [my parenthesized patternBinding] }
-        set body [my armBody]
+        set end $variant
+        if {[my at (]} { set bindings [my parenthesized choicePayload end] }
         set name [dict get $variant value]
         return [my node $start arm type $type typeLocation [my typeLocation $start $typeEnd $type] \
-                variant $name variantLocation [my node $variant variant name $name] bindings $bindings body $body]
+                variant $name variantLocation [my node $variant variant name $name] bindings $bindings \
+                endLine [dict get $end endLine] endColumn [dict get $end endColumn]]
     }
 
     method armBody {} {

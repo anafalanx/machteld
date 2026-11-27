@@ -531,6 +531,7 @@ proc ::appcompiler::checker::joinArm {body armType resultVar validVar reportsVar
 proc ::appcompiler::checker::listMatchType {node element scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set seenFallback 0
+    set coverageKnown 1
     set valid [expr {$element ne ""}]
     set result ""
     foreach arm [dict get $node arms] {
@@ -556,18 +557,131 @@ proc ::appcompiler::checker::listMatchType {node element scope imports world rep
             default {
                 issue reports PATTERN_TYPE $arm "a list match requires a list pattern or a wildcard"
                 set valid 0
+                set coverageKnown 0
+                set seen {}
+                set alternatives [dict getdef $arm alternatives [list $arm]]
+                set local [choiceArmScope $alternatives {} $world seen coverageKnown valid reports]
             }
         }
         set body [dict get $arm body]
         set armType [expressionType $body [dict merge $scope $local] $imports $world reports]
         joinArm $body $armType result valid reports
     }
-    if {!$seenFallback && $element ne ""} {
+    if {!$seenFallback && $element ne "" && $coverageKnown} {
         issue reports MATCH_NONEXHAUSTIVE $node "a list match requires a wildcard to cover other contents and lengths"
         set valid 0
     }
     if {$valid} { return $result }
     return ""
+}
+
+# Check the variant and its payload independently of any shared arm body.
+proc ::appcompiler::checker::choicePattern {arm choice world seenVar coverageVar reportsVar} {
+    upvar 1 $seenVar seen $coverageVar coverageKnown $reportsVar reports
+    set valid 1
+    set location [dict getdef $arm typeLocation $arm]
+    set variantLocation [dict getdef $arm variantLocation $arm]
+    set pattern [declaredType [dict get $arm type] $location $world reports]
+    set name [dict get $arm variant]
+    set payload {}
+    set knownVariant 0
+    if {$pattern eq ""} {
+        set valid 0
+        set coverageKnown 0
+    } elseif {[dict getdef $world schemas $pattern kind {}] ne "choice"} {
+        issue reports EXPECTED_CHOICE $location "expected a closed choice in the pattern, got $pattern"
+        set valid 0
+        set coverageKnown 0
+    } elseif {![dict exists $world schemas $pattern members $name]} {
+        issue reports UNKNOWN_VARIANT $variantLocation "unknown variant '$name' on $pattern"
+        set valid 0
+        set coverageKnown 0
+    } else {
+        set knownVariant 1
+        set payload [dict get $world schemas $pattern members $name]
+        if {$choice ne "" && $pattern ne $choice} {
+            issue reports PATTERN_TYPE $arm "expected a variant of $choice, got $pattern"
+            set valid 0
+            set coverageKnown 0
+        } elseif {$pattern eq $choice} {
+            if {[dict exists $seen $name]} {
+                issue reports DUPLICATE_ARM $variantLocation "variant '$name' is matched more than once"
+                set valid 0
+            }
+            dict set seen $name 1
+        }
+    }
+    set bindings [dict get $arm bindings]
+    if {$knownVariant && [llength $bindings] != [llength $payload]} {
+        issue reports PATTERN_ARITY $variantLocation "variant '$name' expects [llength $payload] payload bindings, got [llength $bindings]"
+        set valid 0
+    }
+    set local {}
+    set index 0
+    foreach binding $bindings {
+        if {[dict get $binding kind] ne "discard"} {
+            set capture [dict get $binding name]
+            set type [lindex $payload $index]
+            if {$type eq "" || [dict exists $local $capture]} { set valid 0 }
+            bindLocal local $binding $type 0 reports
+            dict set local $capture location $binding
+        }
+        incr index
+    }
+    return [list $valid $local]
+}
+
+proc ::appcompiler::checker::choiceArmScope {alternatives choice world seenVar coverageVar validVar reportsVar} {
+    upvar 1 $seenVar seen $coverageVar coverageKnown $validVar valid $reportsVar reports
+    set recovery {}
+    set common {}
+    foreach alternative $alternatives {
+        lassign [choicePattern $alternative $choice $world seen coverageKnown reports] ok local
+        if {[llength $alternatives] == 1} {
+            if {!$ok} { set valid 0 }
+            return $local
+        }
+        # Mentioned but disputed names have unknown types during recovery.
+        # Uses of unrelated names still receive their ordinary diagnostics.
+        foreach name [dict keys $local] {
+            dict set recovery $name [dict create type {} mutable 0]
+        }
+        if {!$ok} { set valid 0; continue }
+        if {![info exists reference]} {
+            set reference $local
+            set common $local
+            continue
+        }
+        set sameNames [expr {[dict size $local] == [dict size $reference]}]
+        set where [dict get $alternative variantLocation]
+        dict for {name binding} $local {
+            if {![dict exists $reference $name]} {
+                set sameNames 0
+                set where [dict get $binding location]
+                break
+            }
+        }
+        if {!$sameNames} {
+            issue reports PATTERN_BINDINGS $where "alternatives must bind the same names, expected [list [dict keys $reference]], got [list [dict keys $local]]"
+            set valid 0
+        }
+        dict for {name binding} $reference {
+            if {![dict exists $local $name]} {
+                dict unset common $name
+                continue
+            }
+            set expected [dict get $binding type]
+            set type [dict get $local $name type]
+            if {$expected ne $type} {
+                dict unset common $name
+                if {$type ne "" && $expected ne ""} {
+                    issue reports PATTERN_BINDING_TYPE [dict get $local $name location] "alternatives bind '$name' as both $expected and $type"
+                    set valid 0
+                }
+            }
+        }
+    }
+    return [dict merge $recovery $common]
 }
 
 proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
@@ -595,56 +709,19 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     set valid [expr {$choice ne ""}]
     set coverageKnown $valid
     foreach arm [dict get $node arms] {
-        if {[dict get $arm kind] ne "arm"} {
+        if {[dict get $arm kind] in {arm armGroup}} {
+            set alternatives [dict getdef $arm alternatives [list $arm]]
+            set local [choiceArmScope $alternatives $choice $world seen coverageKnown valid reports]
+        } else {
             if {$choice ne ""} {
                 issue reports PATTERN_TYPE $arm "a closed choice match must explicitly name its variants"
             }
             set valid 0
             set coverageKnown 0
-            continue
-        }
-        set location [dict getdef $arm typeLocation $arm]
-        set variantLocation [dict getdef $arm variantLocation $arm]
-        set pattern [declaredType [dict get $arm type] $location $world reports]
-        set name [dict get $arm variant]
-        set payload {}
-        set knownVariant 0
-        if {$pattern eq ""} {
-            set valid 0
-            set coverageKnown 0
-        } elseif {[dict getdef $world schemas $pattern kind {}] ne "choice"} {
-            issue reports EXPECTED_CHOICE $location "expected a closed choice in the pattern, got $pattern"
-            set valid 0
-            set coverageKnown 0
-        } elseif {![dict exists $world schemas $pattern members $name]} {
-            issue reports UNKNOWN_VARIANT $variantLocation "unknown variant '$name' on $pattern"
-            set valid 0
-            set coverageKnown 0
-        } else {
-            set knownVariant 1
-            set payload [dict get $world schemas $pattern members $name]
-            if {$choice ne "" && $pattern ne $choice} {
-                issue reports PATTERN_TYPE $arm "expected a variant of $choice, got $pattern"
-                set valid 0
-                set coverageKnown 0
-            } elseif {$pattern eq $choice} {
-                if {[dict exists $seen $name]} {
-                    issue reports DUPLICATE_ARM $variantLocation "variant '$name' is matched more than once"
-                    set valid 0
-                }
-                dict set seen $name 1
+            set local {}
+            foreach pattern [dict getdef $arm elements {}] {
+                if {[dict get $pattern kind] eq "pattern"} { bindLocal local $pattern {} 0 reports }
             }
-        }
-        set bindings [dict get $arm bindings]
-        if {$knownVariant && [llength $bindings] != [llength $payload]} {
-            issue reports PATTERN_ARITY $variantLocation "variant '$name' expects [llength $payload] payload bindings, got [llength $bindings]"
-            set valid 0
-        }
-        set local {}
-        set index 0
-        foreach binding $bindings {
-            bindLocal local $binding [lindex $payload $index] 0 reports
-            incr index
         }
         set body [dict get $arm body]
         set armType [expressionType $body [dict merge $scope $local] $imports $world reports]

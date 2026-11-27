@@ -41,6 +41,10 @@ proc ::projectTest::exercise {exe caller prefix} {
     appCase $exe $caller $prefix [list --flag {two words} {}] {} [bytes {two words}] \
         "flag, spaced value and trailing empty argument in order"
     appCase $exe $caller $prefix {label} {} [bytes {météo 雪}] "source literal decoded as UTF-8"
+    foreach command {--title --ranked-title} {
+        appCase $exe $caller $prefix [list $command {雪 $x [list]}] {} [bytes {title=雪 $x [list]}] \
+            "grouped choice selects the title from either payload"
+    }
     appCase $exe $caller $prefix {--literal} {} [bytes "first\n\$price\t\U0001F642\u0000"] \
         "escaped source text preserves its dollar sign, Unicode and NUL"
     appCase $exe $caller $prefix [list --format {雪; [list] $x}] {} [bytes {<雪; [list] $x>}] \
@@ -82,6 +86,8 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
     return match $args {
         [] => ok($data)
         ['label'] => ok('météo 雪')
+        ['--title', $s] => ok(.title(.label::plain($s)))
+        ['--ranked-title', $s] => ok(.title(.label::ranked(1, $s)))
         ["--literal"] => ok("first\n$price\t\u{1f642}\0")
         ['--format', $text] => ok(.format($text))
         ['--caption', $text] => ok($"$text | ${.format($text)} | ${4.00 + 0.2} | ${true}")
@@ -106,6 +112,13 @@ fn .pick($values: list<text>) -> text {
     return $selected
 }
 distinct .lookup_key = text
+choice .label {
+    plain(text)
+    ranked(int, text)
+}
+fn .title($label: .label) -> text => match $label {
+    .label::plain($s) | .label::ranked(_, $s) => $"title=$s"
+}
 fn .lookup($key: text, $value: text) -> result<text,problem> {
     $entries ::= map_put(map<.lookup_key,text>(), make<.lookup_key>('007'), $value)
     return require_key(map_put($entries, make<.lookup_key>('7'), ''), make<.lookup_key>($key))

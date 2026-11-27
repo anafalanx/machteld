@@ -202,6 +202,28 @@ location. A problem carrying its own valid source position retains it.
 Run `machteld.exe test/application_compiler_extern_test.tcl` for boundary
 examples and failure cases. The declaration spelling is provisional.
 
+## Grouping choice variants
+
+A `match` on a closed choice must name every variant. Use `|` to give
+several variants one action. Each alternative binds the same names with
+the same types. They can come from different payload positions. A bare
+`_` discards one payload field. `$_` binds a field to the ordinary name `_`.
+
+```text
+choice .label {
+    plain(text)
+    ranked(int, text)
+}
+fn .title($label: .label) -> text => match $label {
+    .label::plain($s) | .label::ranked(_, $s) => $s
+}
+```
+
+Adding another variant to `.label` gives a compile-time error at this
+match until an arm covers it. The scrutinee and the selected action each
+run once. The grouping and discard spellings are provisional. Run
+`machteld.exe test/application_compiler_group_test.tcl` for more examples.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and

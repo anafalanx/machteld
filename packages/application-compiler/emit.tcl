@@ -336,6 +336,36 @@ proc ::appcompiler::emitCallPrefix {node context} {
     }
 }
 
+# A grouped arm can bind the same name from a different payload slot in
+# each variant. Keep one copy of its body and select the slot by tag only
+# for captures whose position varies.
+proc ::appcompiler::choiceCaptures {alternatives slot bindings setupVar} {
+    upvar 1 $setupVar setup
+    set positions {}
+    foreach alternative $alternatives {
+        set tag [dict get $alternative variant]
+        set index 0
+        foreach capture [dict get $alternative bindings] {
+            incr index
+            if {[dict get $capture kind] eq "discard"} {continue}
+            dict set positions [dict get $capture name] $tag $index
+        }
+    }
+    dict for {name byTag} $positions {
+        set indexes [dict values $byTag]
+        set index [lindex $indexes 0]
+        if {[lsearch -exact -not $indexes $index] >= 0} {
+            set local ${slot}_[emitLocalName $name]
+            lappend setup [format {::set %s [::lindex $%s [::dict get %s [::lindex $%s 0]]]} \
+                    $local $slot [list $byTag] $slot]
+            dict set bindings $name [format {$%s} $local]
+        } else {
+            dict set bindings $name [format {[::lindex $%s %d]} $slot $index]
+        }
+    }
+    return $bindings
+}
+
 proc ::appcompiler::emitMatch {node context bindings depth} {
     set scrutinee [emitExpression [dict get $node value] $context $bindings $depth]
     # A nested arm must still be able to read its enclosing match's captures.
@@ -348,13 +378,16 @@ proc ::appcompiler::emitMatch {node context bindings depth} {
     set selector [format {[::lindex [::set %s %s] 0]} $slot $scrutinee]
     set words [list ::switch -exact -- $selector]
     foreach arm $arms {
-        set scope $bindings
-        set index 0
-        foreach capture [dict get $arm bindings] {
-            dict set scope [dict get $capture name] [format {[::lindex $%s %d]} $slot [incr index]]
+        set alternatives [dict getdef $arm alternatives [list $arm]]
+        set actions {}
+        set scope [choiceCaptures $alternatives $slot $bindings actions]
+        foreach alternative [lrange $alternatives 0 end-1] {
+            lappend words [list [dict get $alternative variant]] -
         }
         set result [emitExpression [dict get $arm body] $context $scope [expr {$depth + 1}]]
-        lappend words [list [dict get $arm variant]] [list [format {::set m_result %s} $result]]
+        set lastTag [dict get [lindex $alternatives end] variant]
+        lappend actions [format {::set m_result %s} $result]
+        lappend words [list $lastTag] [list [join $actions {; }]]
     }
     # An explicit final default also allows a user variant named "default".
     lappend words default [list {::return -code error -errorcode {APPCOMPILER VALUE CHOICE} {invalid choice tag}}]
