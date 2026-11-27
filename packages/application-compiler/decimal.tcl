@@ -62,6 +62,7 @@ proc ratio {a b} {
         set denominator [expr {$denominator * 10**($aScale - $bScale)}]
     }
     set x [expr {abs($numerator)}]
+    if {$x == 1 || $denominator == 1} { return [list $numerator $denominator] }
     set y $denominator
     while {$y != 0} {
         set remainder [expr {$x % $y}]
@@ -76,20 +77,48 @@ proc divisionError {code message} { return [list err [dict create code $code mes
 # A reduced fraction terminates in base ten exactly when its denominator
 # has no prime factors other than 2 and 5. Return an empty list otherwise.
 proc finiteParts {numerator denominator} {
-    set twos 0
-    while {$denominator % 2 == 0} {
-        set denominator [expr {$denominator / 2}]
-        incr twos
+    set scale 0
+    if {$denominator % 10 == 0} {
+        set shortened [string trimright $denominator 0]
+        set scale [expr {[string length $denominator] - [string length $shortened]}]
+        set denominator $shortened
     }
-    set fives 0
-    while {$denominator % 5 == 0} {
-        set denominator [expr {$denominator / 5}]
-        incr fives
+    if {$denominator == 1} { return [list $numerator $scale] }
+    if {$denominator % 2 == 0} {
+        set prime 2
+        set complement 5
+    } elseif {$denominator % 5 == 0} {
+        set prime 5
+        set complement 2
+    } else {
+        return {}
+    }
+    # After removing all tens, at most one of their prime factors remains.
+    # Divide by powers with exponents 1, 2, 4, ... and finish in descending
+    # order. Even a denominator such as 2**10000 takes logarithmically many
+    # divisions to factor.
+    set powers {}
+    set factor $prime
+    set step 1
+    set exponent 0
+    while {$denominator % $factor == 0} {
+        lappend powers [list $factor $step]
+        set denominator [expr {$denominator / $factor}]
+        incr exponent $step
+        if {$denominator == 1} break
+        set factor [expr {$factor * $factor}]
+        incr step $step
+    }
+    foreach power [lreverse $powers] {
+        if {$denominator == 1} break
+        lassign $power factor step
+        if {$denominator % $factor == 0} {
+            set denominator [expr {$denominator / $factor}]
+            incr exponent $step
+        }
     }
     if {$denominator != 1} { return {} }
-    set scale [expr {max($twos, $fives)}]
-    set coefficient [expr {$numerator * 2**($scale - $twos) * 5**($scale - $fives)}]
-    return [list $coefficient $scale]
+    return [list [expr {$numerator * $complement**$exponent}] [expr {$scale + $exponent}]]
 }
 
 proc divide {a b} {
@@ -123,22 +152,45 @@ proc rounded {a b places mode} {
     }
     lassign [ratio $a $b] numerator denominator
     if {$denominator == 0} { return [divisionError DIVIDE_BY_ZERO "division by zero"] }
-    # A terminating value already within the requested scale needs no padding,
-    # even when the caller requests many more places than the value uses.
-    set finite [finiteParts $numerator $denominator]
-    if {[llength $finite] && [lindex $finite 1] <= $places} {
-        return [list ok [fromParts {*}$finite]]
+    if {$places > 100000} {
+        # A terminating value needs no artificial padding at a huge scale.
+        set finite [finiteParts $numerator $denominator]
+        if {![llength $finite]} {
+            return [divisionError ROUND_SCALE_LIMIT "rounding a nonterminating quotient supports at most 100000 decimal places"]
+        }
+        if {[lindex $finite 1] <= $places} { return [list ok [fromParts {*}$finite]] }
     }
-    if {![llength $finite] && $places > 100000} {
-        return [divisionError ROUND_SCALE_LIMIT "rounding a nonterminating quotient supports at most 100000 decimal places"]
+
+    set magnitude [expr {abs($numerator)}]
+    set whole [expr {$magnitude / $denominator}]
+    set remainder [expr {$magnitude % $denominator}]
+    set fraction {}
+    # Long division in blocks avoids building and formatting a single huge
+    # scaled integer. Every remainder is exact; only the last one is rounded.
+    while {$remainder != 0 && $places > 0} {
+        set count [expr {min($places, 18)}]
+        set scaled [expr {$remainder * 10**$count}]
+        set digits [expr {$scaled / $denominator}]
+        set remainder [expr {$scaled % $denominator}]
+        append fraction [string repeat 0 [expr {$count - [string length $digits]}]] $digits
+        incr places -$count
     }
-    set scaled [expr {abs($numerator) * 10**$places}]
-    set whole [expr {$scaled / $denominator}]
-    set twiceRemainder [expr {2 * ($scaled % $denominator)}]
+    set last [expr {$fraction eq {} ? $whole % 10 : [string index $fraction end]}]
+    set twiceRemainder [expr {2 * $remainder}]
     if {$twiceRemainder > $denominator ||
-            ($twiceRemainder == $denominator && ($mode eq "half_away" || $whole % 2 == 1))} {
-        incr whole
+            ($twiceRemainder == $denominator && ($mode eq "half_away" || $last % 2 == 1))} {
+        # A trailing run of nines becomes zeroes, which canonical output omits.
+        set fraction [string trimright $fraction 9]
+        if {$fraction eq {}} {
+            incr whole
+        } else {
+            set digit [expr {[string index $fraction end] + 1}]
+            set fraction [string replace $fraction end end $digit]
+        }
     }
-    if {$numerator < 0} { set whole [expr {-$whole}] }
-    return [list ok [fromParts $whole $places]]
+    set fraction [string trimright $fraction 0]
+    set result $whole
+    if {$fraction ne {}} { append result . $fraction }
+    if {$numerator < 0 && $result ne "0"} { set result -$result }
+    return [list ok $result]
 }

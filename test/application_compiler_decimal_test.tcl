@@ -84,6 +84,8 @@ export fn .through($a: int, $b: int) -> result<decimal,problem> {
         1.2451 1 2 half_even 1.25   -1.2449 1 2 half_away -1.24
         1 -3 4 half_even -0.3333    1 2 5 half_even 0.5
         9.995 1 2 half_even 10      -0.005 1 2 half_even 0
+        1 7 20 half_even 0.14285714285714285714
+        0.9999999999999999995 1 18 half_even 1
     } {
         equal [::decimalApp::calc::rounded $a $b $places $mode] [list ok $expected] \
             "round $a / $b to $places places using $mode"
@@ -95,6 +97,8 @@ export fn .through($a: int, $b: int) -> result<decimal,problem> {
         "exact result at a very large requested scale"
     set tooLarge [typedProblem [::decimalApp::calc::rounded 1 3 100001 half_even] "unrepresentable rounding request"]
     equal [dict get $tooLarge code] ROUND_SCALE_LIMIT "nonterminating expansion limit"
+    set tiny "0.[string repeat 0 9999]1"
+    equal [::decimalApp::calc::rounded $tiny 1 0 half_even] {ok 0} "small value rounded to whole units"
 
     set clean [interp create]
     try {
