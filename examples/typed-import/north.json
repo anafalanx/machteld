@@ -1,0 +1,6 @@
+{
+  "source": "north",
+  "claims": [
+    {"id":"n1","entity":"007","field":"colour","starts":10,"ends":30,"value":"blue","page":4}
+  ]
+}

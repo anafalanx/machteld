@@ -599,6 +599,25 @@ oo::class create ::appcompiler::ModuleParser {
 
     method statement {} {
         set start $token
+        if {[my at identifier] && [dict get $token value] eq "using"} {
+            set beginning [my cursor]
+            my advance
+            if {[my at dataName]} {
+                set binding $token
+                my advance
+                my take ::= {'::=' after the scoped binding}
+                set resource [my take identifier {sql_begin to open a transaction}]
+                if {[dict get $resource value] ne "sql_begin"} {
+                    ::appcompiler::fail E_PARSE_EXPECTED $resource {expected sql_begin to open a transaction}
+                }
+                set begin [my node $resource sqlBegin args [my parenthesized expression]]
+                set question [my take ? {'?' to propagate failure when opening the transaction}]
+                my skipLines
+                return [my node $start using binding [my node $binding binding name [dict get $binding value]] \
+                    value [my node $question propagate value $begin] body [my braced statement {transaction body}]]
+            }
+            my restore $beginning
+        }
         if {[my at return]} {
             my advance
             return [my node $start return value [my expression]]

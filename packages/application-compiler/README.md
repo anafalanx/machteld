@@ -362,8 +362,9 @@ a nullable column can itself be `none` (SQL NULL) or `some('')` (empty
 text). Use `ORDER BY` for a defined row order. `sql_many` collects the
 selected rows in memory. Use a SQL filter or limit for a bounded read.
 
-Each call opens the file read-only and closes its connection after the
-query. A relative path resolves from the process working directory. SQLite
+Passing a path opens the file read-only and closes the connection after the
+query. Passing a transaction binding uses its existing connection. A relative
+path resolves from the process working directory. SQLite
 prepares a single read query against the actual database at execution time.
 Checking and packing validate the declared types without opening the database.
 Joins, common table expressions and FTS5 queries use ordinary SQLite syntax.
@@ -394,7 +395,7 @@ a read returns a typed problem with a stable code.
 
 | Code | Meaning |
 | --- | --- |
-| `SQL_OPEN` | The database file could not be opened for reading. |
+| `SQL_OPEN` | The existing database file could not be opened in the requested mode. |
 | `SQL_UNAVAILABLE` | The host lacks the required SQLite binding or statement inspection. |
 | `SQL_QUERY` | SQLite could not prepare or execute a permitted single read query. |
 | `SQL_BIND` | Parameter count, spelling or value is invalid. |
@@ -420,6 +421,81 @@ The result is `note=[ready]`. At 9 there is no row. At 10 the row has
 a NULL note. At 20 the note is empty, and at 34 two observations overlap
 and the lookup returns `CARDINALITY`. Copy the runtime, archive and database
 to another directory to run the same query there.
+
+## Scoped SQLite transactions
+
+Open an existing database with a fixed binding and an explicit `?` for open
+and lock failures. With an `items(id TEXT PRIMARY KEY)` table, this function
+inserts two IDs together. If either ID is already present, both inserts
+roll back.
+
+```text
+fn .insert_pair($path: text, $left: text, $right: text) -> result<unit,problem> {
+    using $tx ::= sql_begin($path)? {
+        sql_exec($tx, 'INSERT INTO items(id) VALUES (?1)', $left)?
+        sql_exec($tx, 'INSERT INTO items(id) VALUES (?1)', $right)?
+        sql_commit($tx)?
+    }
+    return ok(unit)
+}
+```
+
+`sql_begin` acquires the SQLite writer lock with `BEGIN IMMEDIATE` and
+enables foreign keys. `sql_exec` accepts one `INSERT`, `UPDATE` or
+`DELETE` with bound values (including SQLite's upsert syntax).
+Use `sql_one`, `sql_optional` or `sql_many` on the same binding to read
+pending changes. A path read uses a separate snapshot. The scope binding
+can appear only as the first argument of these SQL operations or
+`sql_commit`. Both `sql_exec` and `sql_commit` return `result<unit,problem>`.
+The typed write interface rejects schema changes, transaction commands,
+multiple statements and `RETURNING` rows.
+
+Only a successful explicit commit persists changes. Falling through the
+closing brace, returning success early, propagating a problem, leaving
+through a loop jump, or unwinding a fault closes an uncommitted transaction.
+A failed write aborts the whole transaction, even if the caller handles
+the error. A failed commit also closes it. A successful commit takes effect
+immediately. Perform all validation before committing.
+
+| Additional code | Meaning |
+| --- | --- |
+| `SQL_BEGIN` | SQLite could not start the transaction, for example because another writer holds the lock. |
+| `SQL_COMMIT` | SQLite refused the commit, for example because of a deferred foreign key. |
+| `SQL_TX_CLOSED` | A write, read or commit targeted a transaction that had already ended. |
+
+### Importing observations from two sources
+
+The project in `examples/typed-import` imports UTF-8 JSON into SQLite.
+Each claim has a stable source and source-local ID, an entity, a field,
+a text value and a validity interval measured in Unix seconds. The start
+is inclusive and the end exclusive. The database stores the claim's JSON
+alongside the searchable columns, including source-specific fields such
+as a page number. Replaying the same claim adds zero rows. Reusing the
+same source and ID with different content rejects the entire batch.
+
+Run these commands in PowerShell from the repository root with a new
+database filename and the development runtime on the command path. The
+file redirections pass each UTF-8 batch to the application byte for byte,
+including when running Windows PowerShell 5.1. The sample decodes each
+batch in memory and commits it as one unit.
+
+```powershell
+machteld.exe examples/typed-import/create_sample.tcl observations.db
+machteld.exe tools/application_project.tcl pack examples/typed-import/project.dict observations.machteld
+cmd.exe /d /c "machteld.exe observations.machteld import observations.db < examples\typed-import\north.json"
+cmd.exe /d /c "machteld.exe observations.machteld import observations.db < examples\typed-import\south.json"
+'{"entity":"007","at":25}' | machteld.exe observations.machteld at observations.db
+cmd.exe /d /c "machteld.exe observations.machteld import observations.db < examples\typed-import\invalid.json"
+```
+
+At 25, the query emits two JSON lines. North's claim `n1` says blue and
+south's `s1` says green. Both carry `disputed: true` because their values
+for the same field differ at that instant. At 30, only south's green claim
+is active and its flag is false. The final command exits with status 1. Its
+first claim was valid, but the second has an empty interval, so rerunning
+the query gives exactly the same two claims. This disagreement policy belongs
+to the example application. The compiler supplies the transaction and typed
+SQL operations.
 
 ## Executable examples
 

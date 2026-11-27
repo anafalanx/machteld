@@ -1,0 +1,106 @@
+## A source-local claim about one field during [starts, ends), in Unix seconds.
+export record .claim {
+    id: text
+    entity: text
+    field: text
+    starts: int
+    ends: int
+    value: text
+}
+
+## The stable source identifier applies to every claim in this batch.
+export record .batch {
+    source: text
+    claims: list<.claim>
+}
+
+record .saved { payload: text }
+record .request {
+    entity: text
+    at: int
+}
+
+## One active claim and its provenance. Disputed means another active source disagrees.
+export record .finding {
+    source: text
+    id: text
+    entity: text
+    field: text
+    starts: int
+    ends: int
+    value: text
+    disputed: bool
+}
+
+fn .check_replay($source: text, $claim: .claim, $saved: .saved) -> result<bool,problem> {
+    $original ::= decode_json<.claim>($saved.payload)?
+    if $original == $claim { return ok(true) }
+    return err(problem($"source '$source' reused claim id '${$claim.id}' with different content"))
+}
+
+## Adds one batch atomically. Replaying the same claim is harmless. Reusing its
+## source and id with changed content fails the batch. Returns newly inserted count.
+export fn .merge($path: text, $batch: .batch) -> result<int,problem> {
+    if $batch.source == '' { return err(problem('missing source identifier')) }
+    $added := 0
+    using $tx ::= sql_begin($path)? {
+        for $claim in $batch.claims {
+            if $claim.id == '' { return err(problem('empty claim identifier')) }
+            if $claim.entity == '' { return err(problem($"empty entity on claim '${$claim.id}'")) }
+            if $claim.field == '' { return err(problem($"empty field on claim '${$claim.id}'")) }
+            $prior ::= sql_optional<.saved>($tx,
+                'SELECT payload FROM claims WHERE source = ?1 AND id = ?2',
+                $batch.source, $claim.id)?
+            $replay ::= match $prior {
+                none => false
+                some($saved) => .check_replay($batch.source, $claim, $saved)?
+            }
+            if $replay { continue }
+            sql_exec($tx,
+                'INSERT INTO claims(source, id, entity, field, starts, ends, value, payload)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)',
+                $batch.source, $claim.id, $claim.entity, $claim.field,
+                $claim.starts, $claim.ends, $claim.value, encode_json($claim)?)?
+            $added = $added + 1
+        }
+        sql_commit($tx)?
+    }
+    return ok($added)
+}
+
+## Lists the claims covering one instant, including their source, original
+## interval and any cross-source disagreement on the same field at that instant.
+export fn .at($path: text, $entity: text, $instant: int) -> result<list<.finding>,problem> =>
+    sql_many<.finding>($path,
+        'WITH active AS (
+             SELECT source, id, entity, field, starts, ends, value FROM claims
+              WHERE entity = ?1 AND starts <= ?2 AND ?2 < ends
+         )
+         SELECT a.*, EXISTS (
+             SELECT 1 FROM active AS b WHERE b.field = a.field
+                AND b.source <> a.source AND b.value <> a.value
+         ) AS disputed FROM active AS a ORDER BY a.field, a.source, a.id',
+        $entity, $instant)
+
+fn .import_stdin($path: text) -> result<unit,problem> {
+    $batch ::= decode_json<.batch>(decode_utf8(read_stdin_bytes()?)?)?
+    $added ::= .merge($path, $batch)?
+    return write_stdout_utf8($"inserted $added\n")
+}
+
+fn .query_stdin($path: text) -> result<unit,problem> {
+    $request ::= decode_json<.request>(decode_utf8(read_stdin_bytes()?)?)?
+    $rows ::= .at($path, $request.entity, $request.at)?
+    for $row in $rows {
+        $json ::= encode_json($row)?
+        write_stdout_utf8($"$json\n")?
+    }
+    return ok(unit)
+}
+
+fn .main($args: list<text>) -> result<unit,problem> =>
+    match $args {
+        ['import', $path] => .import_stdin($path)
+        ['at', $path] => .query_stdin($path)
+        _ => err(problem('usage: observations.machteld import|at DATABASE (supply JSON on stdin)'))
+    }

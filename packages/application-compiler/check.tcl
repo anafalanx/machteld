@@ -236,11 +236,17 @@ proc ::appcompiler::checker::bindLocal {scopeVar node type mutable reportsVar} {
     dict set scope $name [dict create type $type mutable $mutable]
 }
 
-proc ::appcompiler::checker::argumentTypes {node scope imports world reportsVar} {
+proc ::appcompiler::checker::argumentTypes {node scope imports world reportsVar {sqlTarget 0}} {
     upvar 1 $reportsVar reports
     set types {}
     foreach argument [dict get $node args] {
-        lappend types [expressionType $argument $scope $imports $world reports]
+        if {$sqlTarget && [dict get $argument kind] eq "var"
+                && [dict getdef $scope [dict get $argument name] type {}] eq "@transaction"} {
+            lappend types @transaction
+        } else {
+            lappend types [expressionType $argument $scope $imports $world reports]
+        }
+        set sqlTarget 0
     }
     return $types
 }
@@ -293,7 +299,8 @@ proc ::appcompiler::checker::constructType {node spelling name ambiguous scope i
 proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set name [dict get $node name]
-    set actual [argumentTypes $node $scope $imports $world reports]
+    set sqlTarget [expr {$name in {sql_one sql_optional sql_many sql_exec sql_commit}}]
+    set actual [argumentTypes $node $scope $imports $world reports $sqlTarget]
     set generic [dict getdef $node typeArgs {}]
     set count [dict getdef {decode_json 1 make 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
     if {[llength $generic] != $count} {
@@ -317,7 +324,13 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
         map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
-        sql_one - sql_optional - sql_many { return [sqlCall $node $name $actual $world reports] }
+        sql_one - sql_optional - sql_many - sql_exec - sql_commit {
+            return [sqlCall $node $name $actual $world reports]
+        }
+        sql_begin {
+            issue reports SQL_TRANSACTION_SCOPE $node {sql_begin requires a scoped 'using' binding}
+            return ""
+        }
         quotient { set params {int int} }
         divide_rounded { set params {numeric numeric int text} }
         default {
@@ -385,7 +398,12 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     upvar 1 $reportsVar reports
     set valid 1
     set count [llength $actual]
-    if {$count < 2} {
+    if {$name eq "sql_commit"} {
+        if {$count != 1} {
+            issue reports CALL_ARITY $node "'$name' expects 1 argument, got $count"
+            set valid 0
+        }
+    } elseif {$count < 2} {
         issue reports CALL_ARITY $node "'$name' expects at least 2 arguments, got $count"
         set valid 0
     }
@@ -394,9 +412,17 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     foreach type $actual arg [dict get $node args] {
         if {$type eq ""} {
             set valid 0
-        } elseif {$index < 2} {
+        } elseif {$index == 0} {
+            if {$name in {sql_exec sql_commit} && $type ne "@transaction"} {
+                issue reports SQL_TRANSACTION_REQUIRED $arg "'$name' requires a scoped transaction binding"
+                set valid 0
+            } elseif {$type ni {text @transaction}} {
+                issue reports ARGUMENT_TYPE $arg "'$name' expects a database path or scoped transaction, got $type"
+                set valid 0
+            }
+        } elseif {$index == 1} {
             if {$type ne "text"} {
-                issue reports ARGUMENT_TYPE $arg "'$name' expects text, got $type"
+                issue reports ARGUMENT_TYPE $arg "'$name' expects SQL text, got $type"
                 set valid 0
             }
         } elseif {$type ne "*?" && ![sqlScalar $type $bases]} {
@@ -404,6 +430,11 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
             set valid 0
         }
         incr index
+    }
+    if {$name in {sql_exec sql_commit}} {
+        if {!$valid} { return "" }
+        fact reports $node sqlBindings [lrange $actual 2 end]
+        return result<unit,problem>
     }
     set location [lindex [dict get $node typeLocations] 0]
     set row [declaredType [lindex [dict get $node typeArgs] 0] $location $world reports]
@@ -423,6 +454,7 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     if {!$valid} { return "" }
     dict set reports usesSql 1
     fact reports $node schema $row
+    fact reports $node transaction [expr {[lindex $actual 0] eq "@transaction"}]
     fact reports $node sqlBindings [lrange $actual 2 end]
     switch -exact -- $name {
         sql_optional { set row [makeType optional [list $row]] }
@@ -953,7 +985,18 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
                 issue reports UNKNOWN_BINDING $node "unknown binding '$name'"
                 return ""
             }
-            return [dict get $scope $name type]
+            set type [dict get $scope $name type]
+            if {$type eq "@transaction"} {
+                issue reports SQL_TRANSACTION_SCOPE $node "scoped transaction '$name' can only be the first argument of a SQL operation"
+                return ""
+            }
+            return $type
+        }
+        sqlBegin {
+            set actual [argumentTypes $node $scope $imports $world reports]
+            if {![checkArguments $node sql_begin $actual {text} reports]} { return "" }
+            dict set reports usesSql 1
+            return result<@transaction,problem>
         }
         call { return [callType $node $scope $imports $world reports] }
         builtin { return [builtinType $node $scope $imports $world reports] }
@@ -1074,6 +1117,14 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                 set thenReturns [checkBlock [dict get $statement body] $scope $imports $world reports]
                 set elseReturns [checkBlock [dict get $statement otherwise] $scope $imports $world reports]
                 if {$thenReturns && $elseReturns} { set returns 1 }
+            }
+            using {
+                set type [expressionType [dict get $statement value] $scope $imports $world reports]
+                set innerScope $scope
+                bindLocal innerScope [dict get $statement binding] $type 0 reports
+                if {[checkBlock [dict get $statement body] $innerScope $imports $world reports]} {
+                    set returns 1
+                }
             }
             for - while {
                 set innerScope $scope

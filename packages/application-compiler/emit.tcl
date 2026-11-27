@@ -249,7 +249,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             }
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
-        call - construct - builtin {
+        call - construct - builtin - sqlBegin {
             # Checked nominal scalar conversions preserve the Tcl value.
             if {$kind eq "builtin" && [dict get $node name] in {make underlying}} {
                 return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
@@ -261,14 +261,17 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {$kind eq "builtin" && [dict get $node name] in {map_put require_key}} {
                 lset arguments 1 [emitMapKeyWord $node $context [lindex $arguments 1]]
             }
-            if {$kind eq "builtin" && [dict get $node name] in {sql_one sql_optional sql_many}} {
-                set types [dict get [emitFacts $node $context] sqlBindings]
+            set facts [emitFacts $node $context]
+            if {[dict exists $facts sqlBindings] && [dict get $node name] ne "sql_commit"} {
                 set values [format {[::list %s]} [join [lrange $arguments 2 end] { }]]
-                lappend words {*}[lrange $arguments 0 1] [list $types] $values
+                lappend words {*}[lrange $arguments 0 1] [list [dict get $facts sqlBindings]] $values
+            } else {
+                lappend words {*}$arguments
+            }
+            if {$kind eq "sqlBegin" || [dict exists $facts sqlBindings]} {
                 return [format {[%s [%s] %s]} [list ${targetNamespace}::@rt::atResult] \
                     [join $words { }] [list [emitLocation $node]]]
             }
-            lappend words {*}$arguments
             return [format {[%s]} [join $words { }]]
         }
         propagate {
@@ -312,6 +315,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
     set facts [emitFacts $node $context]
     set target [dict get $context target]
     switch -exact -- [dict get $node kind] {
+        sqlBegin {return [list [list ${target}::@rt::sqlBegin]]}
         construct {return [list ::list [list [dict get $node variant]]]}
         call {
             set name [dict get $node name]
@@ -333,8 +337,11 @@ proc ::appcompiler::emitCallPrefix {node context} {
                     return [list [list ${target}::@rt::${name}] [list [dict get $facts schema]]]
                 }
                 sql_one - sql_optional - sql_many {
-                    return [list [list ${target}::@rt::sqlRead] [string range $name 4 end] [list [dict get $facts schema]]]
+                    set reader [expr {[dict get $facts transaction] ? "sqlTxRead" : "sqlRead"}]
+                    return [list [list ${target}::@rt::${reader}] [string range $name 4 end] [list [dict get $facts schema]]]
                 }
+                sql_exec {return [list [list ${target}::@rt::sqlExec]]}
+                sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 {
                     return [list [list ${target}::@rt::${name}]]
                 }
@@ -495,6 +502,7 @@ proc ::appcompiler::findOuterJumps {statements active nearest targetsVar} {
                 findOuterJumps [dict get $node body] $active $nearest targets
                 findOuterJumps [dict get $node otherwise] $active $nearest targets
             }
+            using {findOuterJumps [dict get $node body] $active $nearest targets}
             break - continue {
                 set label [dict get $node label]
                 if {$label ne {} && $label ne $nearest} {
@@ -559,6 +567,15 @@ proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
         set location [emitLocation $statement]
         switch -exact -- [dict get $statement kind] {
             for - while {emitLoop $statement $context body locations}
+            using {
+                set local [emitLocalName [dict get $statement binding name]]
+                set open [emitExpression [dict get $statement value] $context]
+                emitLine [format {::set %s %s} $local $open] $location body locations
+                emitLine "::try \{" $location body locations
+                emitStatements [dict get $statement body] $context body locations
+                set cleanup [list [dict get $context target]::@rt::sqlEnd]
+                emitLine [format {%c finally { %s $%s }} 125 $cleanup $local] $location body locations
+            }
             if {
                 set test [emitExpression [dict get $statement condition] $context]
                 emitLine [format {::if %s %c} $test 123] $location body locations

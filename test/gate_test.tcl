@@ -142,6 +142,11 @@ check {the reference-generator group compiles nothing} \
 
 set releasePlan [::gate::plan [settings {}]]
 set releaseLabels [labels $releasePlan]
+set import [lindex $releasePlan [lsearch -exact $releaseLabels {typed colleague import}]]
+check {the worked colleague import runs once in packaging on the candidate} [expr {
+    [llength [lsearch -all -exact [scripts $releasePlan] typed_import_test.tcl]] == 1 &&
+        [dict get $import group] eq "packaging" && [dict get $import argv] eq
+        [list [dict get $default runtime] [file join $root test typed_import_test.tcl]]}]
 proc compilerSuites {steps group runtime} {
     set suites {}
     foreach step $steps {
@@ -156,12 +161,12 @@ proc compilerSuites {steps group runtime} {
 }
 set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
-set packed {archive {examples -pack} {io -pack} {project -pack} reference {sql -pack}}
+set packed {archive {examples -pack} {io -pack} {project -pack} reference {sql -pack} {transaction -pack}}
 check {fast runs in-process application compiler suites on the candidate} \
     [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
 check {integration alone runs the compiler's child-process and direct project, I/O, example and SQL tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
-        [lsort [concat $direct {project io examples sql}]]}]
+        [lsort [concat $direct {project io examples sql transaction}]]}]
 check {packaging runs the compiler archive and the packed project, I/O, example and SQL cases} \
     [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
 foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {

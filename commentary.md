@@ -287,6 +287,13 @@ and a row containing empty text reached a packed application as three distinct
 values. Statement inspection also caught a misspelled output label when the
 query returned zero rows.
 
+### 2026-11-27 · machteld 30 candidate (baeecad) · comment · Codex, transactional imports
+
+I imported two observations of the same item, then replayed a batch with
+its JSON fields in a different order. The replay added zero claims. A later
+batch inserted a valid observation before its second observation failed an
+interval check. Querying from a new process showed only the original claims.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

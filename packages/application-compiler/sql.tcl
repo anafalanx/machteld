@@ -1,5 +1,5 @@
-# Installed in the generated application's @rt namespace. A read owns its
-# connection and one database snapshot, including statement inspection.
+# Installed in the generated application's @rt namespace. A path read owns
+# one snapshot. A write scope owns one connection until commit or cleanup.
 proc sqlFail {code message} {
     return -code error -errorcode [list APPCOMPILER SQL $code] $message
 }
@@ -19,6 +19,11 @@ proc sqlAuthorizeRead {action first second database context} {
         }
     }
     return SQLITE_DENY
+}
+
+proc sqlAuthorizeWrite {action first second database context} {
+    if {$action in {SQLITE_INSERT SQLITE_UPDATE SQLITE_DELETE}} {return SQLITE_OK}
+    return [sqlAuthorizeRead $action $first $second $database $context]
 }
 
 proc sqlBinding {type value slot} {
@@ -63,15 +68,16 @@ proc sqlCell {type cell column} {
     return $value
 }
 
-proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
+proc sqlStatement {db sql} {
     set statement [$db inspect $sql]
-    if {![dict get $statement statement] || ![dict get $statement readonly]} {
-        sqlFail SQL_QUERY "expected one read-only SQLite statement"
-    }
     set tail [dict get $statement tail]
-    if {$tail ne "" && [dict get [$db inspect $tail] statement]} {
-        sqlFail SQL_QUERY "expected one read-only SQLite statement"
+    if {![dict get $statement statement] || ($tail ne "" && [dict get [$db inspect $tail] statement])} {
+        sqlFail SQL_QUERY "expected one SQLite statement"
     }
+    return $statement
+}
+
+proc sqlBindings {statement bindTypes bindValues} {
     set parameters [dict get $statement parameters]
     if {[llength $parameters] != [llength $bindValues]} {
         sqlFail SQL_BIND "statement has [llength $parameters] parameter slots, got [llength $bindValues] values"
@@ -85,6 +91,13 @@ proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
         }
         dict set bindings $slot [sqlBinding $type $value $slot]
     }
+    return $bindings
+}
+
+proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
+    set statement [sqlStatement $db $sql]
+    if {![dict get $statement readonly]} {sqlFail SQL_QUERY "expected one read-only SQLite statement"}
+    set bindings [sqlBindings $statement $bindTypes $bindValues]
     set fields [lindex [dict get [schemas] $rowType] 1]
     set columns [dict get $statement columns]
     if {![llength $columns]} {sqlFail SQL_QUERY "the read statement must return columns"}
@@ -117,41 +130,133 @@ proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
     }
 }
 
-proc sqlRead {cardinality rowType path sql bindTypes bindValues} {
+proc sqlOpen {path readonly} {
     if {[catch {package require sqlite3}]} {
-        return [list err [dict create code SQL_UNAVAILABLE message "this host does not provide SQLite"]]
+        sqlFail SQL_UNAVAILABLE "this host does not provide SQLite"
     }
     variable sqlReadSerial
     set db [namespace current]::sqlConnection[incr sqlReadSerial]
     while {[llength [info commands $db]]} {set db [namespace current]::sqlConnection[incr sqlReadSerial]}
-    set opened 0
-    set stage SQL_OPEN
+    if {$path eq "" || [string first \u0000 $path] >= 0 || ![file isfile $path]
+        || [lindex [file system $path] 0] ne "native"} {
+        sqlFail SQL_OPEN "expected an existing database file, got [list $path]"
+    }
+    if {[catch {::sqlite3 $db [file normalize $path] -readonly $readonly -create 0} message]} {
+        sqlFail SQL_OPEN $message
+    }
     try {
-        if {$path eq "" || [string first \u0000 $path] >= 0 || ![file isfile $path]
-            || [lindex [file system $path] 0] ne "native"} {
-            sqlFail SQL_OPEN "expected an existing database file, got [list $path]"
-        }
-        ::sqlite3 $db [file normalize $path] -readonly 1 -create 0
-        set opened 1
         if {[catch {$db inspect {}}] || [catch {$db config defensive 1} defensive] || !$defensive} {
-            sqlFail SQL_UNAVAILABLE "this host lacks the SQLite APIs required for typed SQL reads"
+            sqlFail SQL_UNAVAILABLE "this host lacks the SQLite APIs required for typed SQL"
         }
-        set stage SQL_QUERY
+        if {!$readonly} {
+            if {[$db readonly]} {sqlFail SQL_OPEN "database opened read-only"}
+            if {![$db config enable_fkey 1]} {sqlFail SQL_UNAVAILABLE "SQLite foreign key enforcement is required"}
+        }
+    } on error {message options} {
+        $db close
+        return -options $options $message
+    }
+    return $db
+}
+
+proc sqlErrorResult {fallback message options} {
+    set errorCode [dict get $options -errorcode]
+    if {[lrange $errorCode 0 1] eq {APPCOMPILER SQL}} {
+        set fallback [lindex $errorCode 2]
+    } elseif {[lrange $errorCode 0 2] eq {MACHTELD SQLITE parameter}} {
+        set fallback SQL_BIND
+    } elseif {[lrange $errorCode 0 2] eq {MACHTELD SQLITE text}} {
+        set fallback SQL_TYPE
+    }
+    return [list err [dict create code $fallback message $message]]
+}
+
+proc sqlRead {cardinality rowType path sql bindTypes bindValues} {
+    try {
+        set db [sqlOpen $path 1]
         # Pin the read snapshot before inspecting columns and stepping the
         # statement so concurrent schema changes cannot alter its result shape.
         $db eval {PRAGMA trusted_schema=OFF; PRAGMA query_only=ON; BEGIN; SELECT rootpage FROM main.sqlite_schema LIMIT 1}
         $db authorizer [namespace current]::sqlAuthorizeRead
         set value [sqlReadRows $db $cardinality $rowType $sql $bindTypes $bindValues]
         return [list ok $value]
-    } trap {APPCOMPILER SQL} {message options} {
-        return [list err [dict create code [lindex [dict get $options -errorcode] 2] message $message]]
-    } trap {MACHTELD SQLITE parameter} {message options} {
-        return [list err [dict create code SQL_BIND message $message]]
-    } trap {MACHTELD SQLITE text} {message options} {
-        return [list err [dict create code SQL_TYPE message $message]]
     } on error {message options} {
-        return [list err [dict create code $stage message $message]]
+        return [sqlErrorResult SQL_QUERY $message $options]
     } finally {
-        if {$opened} {$db close}
+        if {[info exists db]} {$db close}
+    }
+}
+
+proc sqlBegin {path} {
+    variable sqlTransactions
+    try {
+        set db [sqlOpen $path 0]
+        $db eval {PRAGMA trusted_schema=OFF; BEGIN IMMEDIATE}
+        # SQLite can roll back a whole transaction itself, for example on I/O
+        # errors. Never let a later operation on that handle run in autocommit.
+        $db rollback_hook [list ::set [namespace current]::sqlTransactions($db) 0]
+        set sqlTransactions($db) 1
+        return [list ok $db]
+    } on error {message options} {
+        if {[info exists db]} {$db close}
+        return [sqlErrorResult SQL_BEGIN $message $options]
+    }
+}
+
+proc sqlRequireTransaction {db authorizer} {
+    variable sqlTransactions
+    if {![info exists sqlTransactions($db)] || !$sqlTransactions($db)} {
+        sqlFail SQL_TX_CLOSED "the SQLite transaction is closed"
+    }
+    # Reinstalling the same callback expires SQLite's cached statements.
+    if {[$db authorizer] ne $authorizer} {$db authorizer $authorizer}
+}
+
+proc sqlEnd {db} {
+    variable sqlTransactions
+    if {[info exists sqlTransactions($db)]} {
+        # Closing a SQLite connection rolls back any uncommitted transaction.
+        # Cleanup also runs after a successful commit and must be idempotent.
+        catch {$db close}
+        unset sqlTransactions($db)
+    }
+}
+
+proc sqlCommit {db} {
+    try {
+        sqlRequireTransaction $db {}
+        $db eval COMMIT
+        return [list ok {}]
+    } on error {message options} {
+        return [sqlErrorResult SQL_COMMIT $message $options]
+    } finally {
+        sqlEnd $db
+    }
+}
+
+proc sqlExec {db sql bindTypes bindValues} {
+    try {
+        sqlRequireTransaction $db [namespace current]::sqlAuthorizeWrite
+        set statement [sqlStatement $db $sql]
+        if {[dict get $statement readonly] || [llength [dict get $statement columns]]} {
+            sqlFail SQL_QUERY "expected one INSERT, UPDATE or DELETE without returned columns"
+        }
+        set bindings [sqlBindings $statement $bindTypes $bindValues]
+        $db eval -parameters $bindings $sql
+        return [list ok {}]
+    } on error {message options} {
+        # OR FAIL can leave earlier rows of this statement changed. Closing
+        # here prevents an explicitly handled error from committing a prefix.
+        sqlEnd $db
+        return [sqlErrorResult SQL_QUERY $message $options]
+    }
+}
+
+proc sqlTxRead {cardinality rowType db sql bindTypes bindValues} {
+    try {
+        sqlRequireTransaction $db [namespace current]::sqlAuthorizeRead
+        return [list ok [sqlReadRows $db $cardinality $rowType $sql $bindTypes $bindValues]]
+    } on error {message options} {
+        return [sqlErrorResult SQL_QUERY $message $options]
     }
 }

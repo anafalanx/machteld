@@ -334,7 +334,7 @@ proc ::gate::plan {settings} {
                 }
                 # The packaging forms also run the direct cases for these suites.
                 if {"packaging" ni $chosen} {
-                    foreach suite {project io examples sql} {
+                    foreach suite {project io examples sql transaction} {
                         addLane steps $runtime integration "application compiler $suite" application_compiler_${suite}_test.tcl
                     }
                 }
@@ -352,7 +352,8 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "examples packaged" examples_package_test.tcl $msys [file join $cache prefix]
                 addLane steps $runtime packaging "application compiler archive" application_compiler_archive_test.tcl
                 addLane steps $runtime packaging "application compiler offline reference" application_compiler_reference_test.tcl
-                foreach suite {project io examples sql} {
+                addLane steps $runtime packaging "typed colleague import" typed_import_test.tcl
+                foreach suite {project io examples sql transaction} {
                     addLane steps $runtime packaging "application compiler $suite (direct and packed)" application_compiler_${suite}_test.tcl -pack
                 }
             }

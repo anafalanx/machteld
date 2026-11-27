@@ -54,3 +54,14 @@ a NULL column within a present row are distinct. Reads use the host's
 typed SQLite interface, documented under `machteld/package/sqlite3`.
 The compiler guide includes the type mappings, error codes and a runnable
 historical lookup.
+
+## Writing SQLite transactions
+
+Use `using $tx ::= sql_begin($path)? { ... }` inside a function returning
+`result<T,problem>`. Pass the binding to `sql_exec($tx, $sql, ...)?` for
+one bound INSERT, UPDATE or DELETE, and to the typed read functions to see
+the transaction's pending writes. Call `sql_commit($tx)?` when the entire
+operation succeeds. Leaving the scope before commit rolls back every write,
+including on an early success return. Failed writes and failed commits also
+end the transaction. The compiler guide includes the stable problem codes
+and a worked JSON import with replay, provenance and historical disagreements.

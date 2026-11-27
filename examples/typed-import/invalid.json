@@ -1,0 +1,7 @@
+{
+  "source": "west",
+  "claims": [
+    {"id":"w1","entity":"007","field":"colour","starts":20,"ends":30,"value":"red"},
+    {"id":"w2","entity":"007","field":"weight","starts":18,"ends":18,"value":"heavy"}
+  ]
+}
