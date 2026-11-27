@@ -26,6 +26,36 @@ proc sqlAuthorizeWrite {action first second database context} {
     return [sqlAuthorizeRead $action $first $second $database $context]
 }
 
+# SQLite reports operations during prepare, including calls from trigger
+# bodies, foreign keys and virtual table modules. Record what the outer
+# statement requests. Keep the restrictions in effect through sqlite3_step.
+proc sqlAuthorizeChange {db mode action first second database context} {
+    variable sqlKinds
+    if {$mode eq "schema"} {
+        switch -- $action {
+            SQLITE_CREATE_VTABLE - SQLITE_DROP_VTABLE {
+                if {![string equal -nocase $second fts5]} {return SQLITE_DENY}
+                dict set sqlKinds($db) schema 1
+                return SQLITE_OK
+            }
+            SQLITE_CREATE_TABLE - SQLITE_CREATE_INDEX - SQLITE_CREATE_VIEW - SQLITE_CREATE_TRIGGER -
+            SQLITE_CREATE_TEMP_TABLE - SQLITE_CREATE_TEMP_INDEX - SQLITE_CREATE_TEMP_VIEW - SQLITE_CREATE_TEMP_TRIGGER -
+            SQLITE_DROP_TABLE - SQLITE_DROP_INDEX - SQLITE_DROP_VIEW - SQLITE_DROP_TRIGGER -
+            SQLITE_DROP_TEMP_TABLE - SQLITE_DROP_TEMP_INDEX - SQLITE_DROP_TEMP_VIEW - SQLITE_DROP_TEMP_TRIGGER -
+            SQLITE_ALTER_TABLE - SQLITE_REINDEX - SQLITE_ANALYZE {
+                dict set sqlKinds($db) schema 1
+                return SQLITE_OK
+            }
+        }
+    }
+    if {$context eq "" && $action in {SQLITE_INSERT SQLITE_UPDATE SQLITE_DELETE}} {
+        dict set sqlKinds($db) dml 1
+    } elseif {$mode eq "schema"} {
+        dict set sqlKinds($db) other 1
+    }
+    return [sqlAuthorizeWrite $action $first $second $database $context]
+}
+
 proc sqlBinding {type value slot} {
     if {[string index $type end] eq "?"} {
         if {[lindex $value 0] eq "none"} {return [list null]}
@@ -111,10 +141,14 @@ proc sqlBindings {statement bindTypes bindValues} {
 proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
     set statement [sqlStatement $db $sql]
     if {![dict get $statement readonly]} {sqlFail SQL_QUERY "expected one read-only SQLite statement"}
+    return [sqlRows $db $cardinality $rowType $sql $statement $bindTypes $bindValues]
+}
+
+proc sqlRows {db cardinality rowType sql statement bindTypes bindValues} {
     set bindings [sqlBindings $statement $bindTypes $bindValues]
     set fields [lindex [specializeSchema $rowType [schemas]] 1]
     set columns [dict get $statement columns]
-    if {![llength $columns]} {sqlFail SQL_QUERY "the read statement must return columns"}
+    if {![llength $columns]} {sqlFail SQL_QUERY "the statement must return columns"}
     if {[lsort -ascii $columns] ne [lsort -ascii [dict keys $fields]]} {
         sqlFail SQL_COLUMNS "expected columns [list [dict keys $fields]] for $rowType, got [list $columns]"
     }
@@ -272,5 +306,48 @@ proc sqlTxRead {cardinality rowType db sql bindTypes bindValues} {
         return [list ok [sqlReadRows $db $cardinality $rowType $sql $bindTypes $bindValues]]
     } on error {message options} {
         return [sqlErrorResult SQL_QUERY $message $options]
+    }
+}
+
+proc sqlSchema {db sql bindTypes bindValues} {
+    variable sqlKinds
+    try {
+        sqlRequireTransaction $db [list [namespace current]::sqlAuthorizeChange $db schema]
+        set sqlKinds($db) {}
+        set statement [sqlStatement $db $sql]
+        # IF [NOT] EXISTS can authorize nothing, and SQLite reports a no-op
+        # DROP TRIGGER as read-only. Keep the authorizer active when stepping:
+        # VACUUM also defers work and cannot run in our transaction.
+        if {[dict get $statement explain] || [llength [dict get $statement columns]]
+            || ([dict size $sqlKinds($db)] && ![dict exists $sqlKinds($db) schema])} {
+            sqlFail SQL_QUERY "expected one transactional SQLite schema statement"
+        }
+        $db eval -parameters [sqlBindings $statement $bindTypes $bindValues] $sql
+        return [list ok {}]
+    } on error {message options} {
+        sqlEnd $db
+        return [sqlErrorResult SQL_QUERY $message $options]
+    } finally {
+        unset -nocomplain sqlKinds($db)
+    }
+}
+
+proc sqlReturning {cardinality rowType db sql bindTypes bindValues} {
+    variable sqlKinds
+    try {
+        sqlRequireTransaction $db [list [namespace current]::sqlAuthorizeChange $db returning]
+        set sqlKinds($db) {}
+        set statement [sqlStatement $db $sql]
+        if {[dict get $statement readonly] || [dict get $statement explain] || ![dict exists $sqlKinds($db) dml]} {
+            sqlFail SQL_QUERY "expected one INSERT, UPDATE or DELETE with RETURNING"
+        }
+        return [list ok [sqlRows $db $cardinality $rowType $sql $statement $bindTypes $bindValues]]
+    } on error {message options} {
+        # SQLite performs all RETURNING writes before delivering the first row.
+        # A row decode or cardinality error must roll back their trigger effects too.
+        sqlEnd $db
+        return [sqlErrorResult SQL_QUERY $message $options]
+    } finally {
+        unset -nocomplain sqlKinds($db)
     }
 }

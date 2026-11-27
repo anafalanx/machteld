@@ -219,6 +219,16 @@ including on an early success return. Failed writes and failed commits also
 end the transaction. The compiler guide includes the stable problem codes
 and a worked JSON import with replay, provenance and historical disagreements.
 
+`sql_schema($tx, $sql, ...)` executes one bound transactional schema
+statement, including ordinary tables, indexes, views, triggers and FTS5
+tables. Use `sql_returning_one<.row>`, `sql_returning_optional<.row>` or
+`sql_returning_many<.row>` with a scoped transaction and DML with
+`RETURNING` to obtain one row, an optional row or a list of rows. The
+record columns use the same SQLite storage types as typed reads. Errors
+in schema changes, returned row counts or decoding abort the transaction
+and its trigger effects. Use the native Tcl `sqlite3` binding in a separate
+phase for `VACUUM`, file creation or connection configuration.
+
 ## Running an application tool
 
 Declare a companion executable with `tool .converter = 'tools/converter.exe'`.
