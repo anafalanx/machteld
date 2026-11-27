@@ -41,6 +41,8 @@ proc ::projectTest::exercise {exe caller prefix} {
     appCase $exe $caller $prefix [list --flag {two words} {}] {} [bytes {two words}] \
         "flag, spaced value and trailing empty argument in order"
     appCase $exe $caller $prefix {label} {} [bytes {météo 雪}] "source literal decoded as UTF-8"
+    appCase $exe $caller $prefix {--literal} {} [bytes "first\n\$price\t\U0001F642\u0000"] \
+        "escaped source text preserves its dollar sign, Unicode and NUL"
     appCase $exe $caller $prefix [list --format {雪; [list] $x}] {} [bytes {<雪; [list] $x>}] \
         "extern passes one text argument to the project's own package"
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
@@ -68,6 +70,7 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
     return match $args {
         [] => ok($data)
         ['label'] => ok('météo 雪')
+        ["--literal"] => ok("first\n$price\t\u{1f642}\0")
         ['--format', $text] => ok(.format($text))
         ['--flag', $value, ''] => ok($value)
         ['--pick', $first, $second] => ok(.pick($args))

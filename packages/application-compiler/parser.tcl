@@ -14,7 +14,71 @@ oo::class create ::appcompiler::ModuleParser {
         set column 1
         set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while}
         set localChoices {}
+        # A Tcl caller can supply surrogate code points that strict UTF-8
+        # source files cannot contain, even in comments or raw literals.
+        if {[regexp -indices {[\uD800-\uDFFF]} $source invalid]} {
+            set index [lindex $invalid 0]
+            my consume [string range $source 0 $index-1]
+            set where [dict create module $module line $line column $column endLine $line endColumn [expr {$column + 1}]]
+            ::appcompiler::fail E_SOURCE_UNICODE $where {source contains a Unicode surrogate code point}
+        }
         my advance
+    }
+
+    method consume {spelling} {
+        set length [string length $spelling]
+        incr offset $length
+        set breaks [regexp -all -inline -indices {\r\n|[\r\n]} $spelling]
+        if {[llength $breaks]} {
+            incr line [llength $breaks]
+            set column [expr {$length - [lindex $breaks end 1]}]
+        } else {
+            incr column $length
+        }
+    }
+
+    method quotedText {opening} {
+        set value {}
+        set escapes [list \" \" \\ \\ n \n r \r t \t 0 \u0000 b \b f \f]
+        while {[regexp -start $offset -indices {["\\]} $source marker]} {
+            set at [lindex $marker 0]
+            if {$at > $offset} {
+                set chunk [string range $source $offset $at-1]
+                append value $chunk
+                my consume $chunk
+            }
+            set mark [string index $source $offset]
+            set where [dict create module $module line $line column $column endLine $line endColumn [expr {$column + 1}]]
+            incr offset
+            incr column
+            if {$mark eq "\""} { return $value }
+
+            set selector [string index $source $offset]
+            if {[dict exists $escapes $selector]} {
+                append value [dict get $escapes $selector]
+                incr offset
+                incr column
+            } elseif {$selector eq "u"} {
+                # A Unicode escape after its backslash occupies at most nine
+                # ASCII characters. Inspect only that bounded window.
+                set window [string range $source $offset $offset+8]
+                if {![regexp {\Au\{([0-9a-fA-F]{1,6})\}} $window spelling digits]} {
+                    ::appcompiler::fail E_PARSE_ESCAPE $where {expected one to six hex digits inside \u{...}}
+                }
+                scan $digits %x scalar
+                if {$scalar > 0x10ffff || ($scalar >= 0xd800 && $scalar <= 0xdfff)} {
+                    ::appcompiler::fail E_PARSE_ESCAPE $where {Unicode escape does not name a scalar value}
+                }
+                append value [format %c $scalar]
+                incr offset [string length $spelling]
+                incr column [string length $spelling]
+            } elseif {$selector eq ""} {
+                ::appcompiler::fail E_PARSE_ESCAPE $where {incomplete escape in double-quoted text}
+            } else {
+                ::appcompiler::fail E_PARSE_ESCAPE $where {unknown escape in double-quoted text}
+            }
+        }
+        ::appcompiler::fail E_PARSE_STRING $opening {unterminated double-quoted text literal}
     }
 
     method advance {} {
@@ -26,14 +90,7 @@ oo::class create ::appcompiler::ModuleParser {
             lassign $bounds first last
             set word [string range $source $first $last]
             set location [dict create module $module line $line column $column]
-            set offset [expr {$last + 1}]
-            set breaks [regexp -all -inline -indices {\r\n|[\r\n]} $word]
-            if {[llength $breaks]} {
-                incr line [llength $breaks]
-                set column [expr {[string length $word] - [lindex $breaks end 1]}]
-            } else {
-                incr column [string length $word]
-            }
+            my consume $word
             dict set location endLine $line
             dict set location endColumn $column
 
@@ -47,6 +104,12 @@ oo::class create ::appcompiler::ModuleParser {
                     }
                     set kind text
                     set word [string range $word 1 end-1]
+                }
+                \" {
+                    set kind text
+                    set word [my quotedText $location]
+                    dict set location endLine $line
+                    dict set location endColumn $column
                 }
                 {$} - {.} {
                     if {$word in {.. ..=}} {
@@ -101,7 +164,7 @@ oo::class create ::appcompiler::ModuleParser {
     method collectChoiceNames {} {
         # .name::member(...) can denote an imported function or a locally
         # declared choice. Collect declaration heads before parsing any uses.
-        # The lexer skips comments and keeps entire raw strings in one token.
+        # The lexer skips comments and keeps each string in one token.
         set beginning [my cursor]
         set depth 0
         set declarationStart 1
@@ -230,7 +293,7 @@ oo::class create ::appcompiler::ModuleParser {
         if {[my at {]}]} {
             ::appcompiler::fail E_EXTERN_COMMAND $token {the external command prefix must contain a command name}
         }
-        set first [my take text {a single-quoted absolute Tcl command name}]
+        set first [my take text {a quoted absolute Tcl command name}]
         set command [dict get $first value]
         if {![string match ::* $command] || [string match *:: $command] ||
                 [string first :::: $command] >= 0 || [string first \u0000 $command] >= 0} {
@@ -241,7 +304,7 @@ oo::class create ::appcompiler::ModuleParser {
         while {[my at ,]} {
             my advance
             my skipLines
-            lappend prefix [dict get [my take text {a single-quoted fixed command argument}] value]
+            lappend prefix [dict get [my take text {a quoted fixed command argument}] value]
             my skipLines
         }
         my take {]} {a closing bracket after the external command prefix}
@@ -251,7 +314,7 @@ oo::class create ::appcompiler::ModuleParser {
         if {[my at identifier] && [dict get $token value] eq "from"} {
             my advance
             my skipLines
-            set word [my take text {a single-quoted package name after 'from'}]
+            set word [my take text {a quoted package name after 'from'}]
             set package [dict get $word value]
             if {$package eq "" || [string index $package 0] eq "-" || [string first \u0000 $package] >= 0} {
                 ::appcompiler::fail E_EXTERN_PACKAGE $word {expected a nonempty package name without a NUL or leading hyphen}

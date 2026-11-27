@@ -107,6 +107,24 @@ numeric ID. The declaration and conversion spellings are provisional.
 Run `machteld.exe test/application_compiler_distinct_test.tcl` to check
 construction, equality, module visibility and boundary behavior.
 
+## Text literals
+
+Single quotes preserve the text between them. For example, `'c:\temp'`
+contains a backslash. Double quotes support escapes. In `"$price\n"`, the
+dollar sign and the five letters `price` are literal, followed by a newline.
+
+| Escape | Value |
+| --- | --- |
+| `\"`, `\\` | Quotation mark, backslash |
+| `\n`, `\r`, `\t` | Line feed, carriage return, tab |
+| `\0`, `\b`, `\f` | NUL, backspace, form feed |
+| `\u{1f642}` | Unicode scalar from one to six hexadecimal digits, here 🙂 |
+
+Both forms can span source lines. The compiler rejects unknown escapes,
+surrogates and values above U+10FFFF. It reports a malformed escape at
+its opening backslash. Run `machteld.exe test/application_compiler_text_test.tcl`
+for executable examples.
+
 ## Calling Tcl commands
 
 Declare the commands a module uses. Each declaration gives the function a
