@@ -327,6 +327,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         instant_text { set params {instant} }
         local_datetime_text { set params {local_datetime} }
         resolve_offset { set params {local_datetime int} }
+        resolve_zone { set params {local_datetime text} }
         decode_utf8 { set params [list bytes] }
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
@@ -395,6 +396,11 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         parse_instant - resolve_offset {
             dict set reports usesTemporal 1
             return result<instant,problem>
+        }
+        resolve_zone {
+            dict set reports usesTemporal 1
+            dict set reports usesZone 1
+            return result<list<instant>,problem>
         }
         parse_local_datetime {
             dict set reports usesTemporal 1
@@ -1310,7 +1316,8 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     if {$resolvedVar ne ""} {
         upvar 1 $resolvedVar resolved
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
-            usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0]]
+            usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
+            usesZone [dict getdef $reports usesZone 0]]
     }
     return [dict get $reports diagnostics]
 }

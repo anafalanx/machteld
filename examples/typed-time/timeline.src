@@ -1,6 +1,7 @@
 record .request {
     observed: text
     offset_minutes: int?
+    zone: text?
 }
 
 ## A source observation whose start and end are absolute instants.
@@ -41,9 +42,51 @@ example .describe('timeline.db', '2026-10-25T02:30:00', some(60)) => 'second log
 example .describe('timeline.db', '2026-02-29T00:00:00', none) => error 'INVALID_LOCAL_DATETIME'
 example .describe('timeline.db', '2026-10-25T02:30:00', some(841)) => error 'INVALID_OFFSET'
 
+fn .ambiguous($path: text, $times: list<instant>) -> result<text,problem> {
+    $report := 'ambiguous local time'
+    for $at in $times {
+        $found ::= .known($path, $at)?
+        $report = $"$report\n$found"
+    }
+    return ok($report)
+}
+
+fn .with_offset($path: text, $local: local_datetime, $zone: text, $times: list<instant>, $minutes: int) -> result<text,problem> {
+    $wanted ::= resolve_offset($local, $minutes)?
+    for $at in $times {
+        if $at == $wanted { return .known($path, $at) }
+    }
+    return ok($"reported offset conflicts with $zone at ${local_datetime_text($local)}")
+}
+
+## Finds every observation consistent with a named zone. If the source also
+## supplies an offset, it must identify one of the zone's candidate instants.
+export fn .describe_zone($path: text, $observed: text, $zone: text, $offset: int?) -> result<text,problem> {
+    $local ::= parse_local_datetime($observed)?
+    $times ::= resolve_zone($local, $zone)?
+    return match $offset {
+        some($minutes) => .with_offset($path, $local, $zone, $times, $minutes)
+        none => match $times {
+            [] => ok($"nonexistent local time ${local_datetime_text($local)} in $zone")
+            [$one] => .known($path, $one)
+            _ => .ambiguous($path, $times)
+        }
+    }
+}
+example .describe_zone('timeline.db', '2026-10-25T02:30:00', 'Europe/Brussels', none) => "ambiguous local time\nfirst log at 2026-10-25T00:30:00.000000000Z\nsecond log at 2026-10-25T01:30:00.000000000Z"
+example .describe_zone('timeline.db', '2026-10-25T02:30:00', 'Europe/Brussels', some(60)) => 'second log at 2026-10-25T01:30:00.000000000Z'
+example .describe_zone('timeline.db', '2026-10-25T02:30:00', 'Europe/Brussels', some(0)) => 'reported offset conflicts with Europe/Brussels at 2026-10-25T02:30:00'
+example .describe_zone('timeline.db', '2026-03-29T02:30:00', 'Europe/Brussels', none) => 'nonexistent local time 2026-03-29T02:30:00 in Europe/Brussels'
+example .describe_zone('timeline.db', '2026-10-25T01:30:00', 'Etc/UTC', none) => 'second log at 2026-10-25T01:30:00.000000000Z'
+example .describe_zone('timeline.db', '2026-10-25T02:30:00', 'Example/Unknown', none) => error 'INVALID_ZONE'
+
 fn .lookup($path: text) -> result<unit,problem> {
     $request ::= decode_json<.request>(decode_utf8(read_stdin_bytes()?)?)?
-    $description ::= .describe($path, $request.observed, $request.offset_minutes)?
+    $result ::= match $request.zone {
+        none => .describe($path, $request.observed, $request.offset_minutes)
+        some($zone) => .describe_zone($path, $request.observed, $zone, $request.offset_minutes)
+    }
+    $description ::= $result?
     return write_stdout_utf8($"$description\n")
 }
 

@@ -89,6 +89,10 @@ proc ::appcompiler::emitChecked {analysis targetNamespace} {
         variable temporalDefinitions
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $temporalDefinitions]
     }
+    if {[dict getdef $analysis resolved usesZone 0]} {
+        variable zoneDefinitions
+        dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $zoneDefinitions]
+    }
     if {[dict getdef $analysis resolved usesSql 0]} {
         variable sqlDefinitions
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $sqlDefinitions]
@@ -191,12 +195,12 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }
     unset module modules
-    foreach name {host decimal sql temporal} {
+    foreach name {host decimal sql temporal zone} {
         set ch [open [file join $compilerDirectory $name.tcl] rb]
         try {
             set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]

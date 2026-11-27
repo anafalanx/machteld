@@ -347,7 +347,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
-                parse_instant - parse_local_datetime - resolve_offset {
+                parse_instant - parse_local_datetime - resolve_offset - resolve_zone {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}

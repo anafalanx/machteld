@@ -36,20 +36,20 @@ proc parse_local_datetime {text} {
     return [list ok [temporalText {*}$parts]]
 }
 
-proc temporalAtOffset {parts eastMinutes} {
+proc temporalAtOffset {parts eastSeconds} {
     lassign $parts year month day hour minute second fraction
-    set utcMinutes [expr {60 * $hour + $minute - $eastMinutes}]
+    set utcSeconds [expr {3600 * $hour + 60 * $minute + $second - $eastSeconds}]
     # Offsets in this profile can cross at most one midnight.
-    if {$utcMinutes < 0} {
-        incr utcMinutes 1440
+    if {$utcSeconds < 0} {
+        incr utcSeconds 86400
         incr day -1
         if {$day == 0} {
             incr month -1
             if {$month == 0} {set month 12; incr year -1}
             set day [temporalMonthDays $year $month]
         }
-    } elseif {$utcMinutes >= 1440} {
-        incr utcMinutes -1440
+    } elseif {$utcSeconds >= 86400} {
+        incr utcSeconds -86400
         incr day
         if {$day > [temporalMonthDays $year $month]} {
             set day 1
@@ -62,7 +62,8 @@ proc temporalAtOffset {parts eastMinutes} {
     }
     # Every UTC instant has the same width, so BINARY text order is chronological.
     append fraction [string repeat 0 [expr {9 - [string length $fraction]}]]
-    set utc [temporalText $year $month $day [expr {$utcMinutes / 60}] [expr {$utcMinutes % 60}] $second $fraction]
+    set utc [temporalText $year $month $day [expr {$utcSeconds / 3600}] \
+            [expr {($utcSeconds / 60) % 60}] [expr {$utcSeconds % 60}] $fraction]
     return [list ok ${utc}Z]
 }
 
@@ -88,7 +89,7 @@ proc parse_instant {text} {
     if {$parts eq {}} {
         return [temporalError INVALID_INSTANT {expected a valid Gregorian date and time before the UTC offset}]
     }
-    return [temporalAtOffset $parts $eastMinutes]
+    return [temporalAtOffset $parts [expr {60 * $eastMinutes}]]
 }
 
 proc resolve_offset {local eastMinutes} {
@@ -99,7 +100,7 @@ proc resolve_offset {local eastMinutes} {
     if {$parts eq {}} {
         return [temporalError INVALID_LOCAL_DATETIME {expected a valid local date and time}]
     }
-    return [temporalAtOffset $parts $eastMinutes]
+    return [temporalAtOffset $parts [expr {60 * $eastMinutes}]]
 }
 
 proc temporalCanonical {type value} {

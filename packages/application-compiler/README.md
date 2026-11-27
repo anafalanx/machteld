@@ -346,6 +346,7 @@ explicitly when crossing a text boundary.
 | `parse_local_datetime(text)` | `result<local_datetime,problem>` |
 | `parse_instant(text)` | `result<instant,problem>` |
 | `resolve_offset(local_datetime, int)` | `result<instant,problem>`, using minutes east of UTC |
+| `resolve_zone(local_datetime, text)` | `result<list<instant>,problem>`, ordered from earliest to latest |
 | `local_datetime_text(local_datetime)`, `instant_text(instant)` | Canonical `text` |
 
 The input form is `YYYY-MM-DDTHH:MM:SS`, optionally followed by a dot and
@@ -359,9 +360,27 @@ Conversion outside the supported UTC years gives `INSTANT_RANGE`.
 
 For example, `2026-10-25T02:30:00` with offset 120 resolves to
 `2026-10-25T00:30:00.000000000Z`. With offset 60, it resolves to
-`2026-10-25T01:30:00.000000000Z`. Keep the recorded time unresolved when
-the offset is missing. Named time-zone and daylight-saving rules are outside
-this interface.
+`2026-10-25T01:30:00.000000000Z`.
+
+With a location such as `Europe/Brussels`, call `resolve_zone` to find all
+instants consistent with the clock reading. An ordinary reading returns one
+instant. When a clock turns back, the same reading can have two instants.
+A reading skipped when the clock jumps forward returns an empty list.
+These are successful lookups. Keep the complete list until other evidence
+identifies an occurrence. Match an independently recorded numeric offset
+against the candidates if the source supplies both.
+
+Zone names are case-sensitive and come from the time-zone tables bundled
+with the Machteld executable. No machine time-zone setting is needed.
+The tables cover named-zone lookups through 2099. Both the local date and
+every candidate UTC date must fall within years 0001 through 2099.
+Before a zone's first recorded transition, lookup uses its earliest listed
+offset, which can include seconds of historical local mean time. Future
+results reflect the rules in that executable. Keep its identity with
+reproducible research. Unknown or malformed names give `INVALID_ZONE`.
+`ZONE_RANGE` means the reading or a candidate exceeds the upper limit,
+`INSTANT_RANGE` means a candidate precedes year 0001, and `ZONE_DATA`
+means the host could not read its bundled rules.
 
 Canonical instants always contain nine fractional digits and a final `Z`.
 Canonical local date-times omit trailing fractional zeroes and the fraction
@@ -383,11 +402,15 @@ machteld.exe project pack examples/typed-time/project.dict timeline.machteld
 '{"observed":"2026-10-25T02:30:00","offset_minutes":120}' | machteld.exe timeline.machteld timeline.db
 '{"observed":"2026-10-25T02:30:00","offset_minutes":60}' | machteld.exe timeline.machteld timeline.db
 '{"observed":"2026-10-25T02:30:00"}' | machteld.exe timeline.machteld timeline.db
+'{"observed":"2026-10-25T02:30:00","zone":"Europe/Brussels"}' | machteld.exe timeline.machteld timeline.db
+'{"observed":"2026-03-29T02:30:00","zone":"Europe/Brussels"}' | machteld.exe timeline.machteld timeline.db
 ```
 
-The requests find `first log`, find `second log`, and report the unresolved
-local time respectively. The seven executable examples also check adjacent
-one-nanosecond intervals and the gap after their exclusive end.
+The first two requests select different logs. The third keeps the reading
+unresolved. With Brussels supplied, the autumn lookup returns both logs
+and the spring lookup reports a nonexistent clock reading. The executable
+examples also check conflicting evidence, adjacent one-nanosecond intervals
+and the uncovered instant after an interval ends.
 
 ## Typed SQLite reads
 

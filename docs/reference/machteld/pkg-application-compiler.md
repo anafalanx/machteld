@@ -83,6 +83,14 @@ of instants are UTC strings with nine fractional digits, for example
 `2026-10-25T00:30:00.000000001Z`. This preserves nanosecond precision and
 chronological ordering in a SQLite TEXT index with BINARY collation.
 
+`resolve_zone(local_datetime, text)` returns `result<list<instant>,problem>`.
+Pass an exact zone name such as `Europe/Brussels`. A successful list contains
+every possible UTC instant in chronological order. The Brussels reading
+`2026-10-25T02:30:00` yields two instants, while `2026-03-29T02:30:00` yields
+an empty list. Unknown names give `INVALID_ZONE`. The rules reside in the
+executable and cover local and UTC years 0001 through 2099. The compiler
+guide documents range errors and historical offsets.
+
 ## Writing SQLite transactions
 
 Use `using $tx ::= sql_begin($path)? { ... }` inside a function returning

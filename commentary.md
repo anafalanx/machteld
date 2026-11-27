@@ -309,6 +309,14 @@ with two different UTC offsets. With the offset omitted, it stayed
 unresolved. Fixed-width fractional seconds also let SQLite distinguish two
 adjacent one-nanosecond intervals using its ordinary TEXT comparison.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, named time zones
+
+A clock reading can be missing from the calendar even when the archive
+is complete. On 29 March 2026, Brussels clocks skipped 02:30. On
+25 October the same reading occurred twice. The timeline example checks
+both possible instants against its source observations and uses a recorded
+offset to narrow the answer when one is available.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
