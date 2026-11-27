@@ -332,6 +332,26 @@ fn .start($args: list<text>) -> result<unit,problem> {
     foreach name {a.src b.src} {writeUtf8 [file join $root $name] {}}
     report $root $driver $manifest 1 0
     plain $root $driver $manifest {}
+    set tclEntry [file join $root entry-probe.tcl]
+    try {
+        # Read-only lookup works even when neither the Tcl entry nor the
+        # other declared sources can be checked. No package index is loaded.
+        set mixed [dict replace [dict remove $base entry] tclEntry entry-probe.tcl modules {located a.src absent gone.src}]
+        writeUtf8 $manifest $mixed
+        writeUtf8 $tclEntry "set first 1\r\nset joined \\\r\n    complete\r\n\r\nif \{1\} \{\n"
+        set output [::machteld::run -dir $root -- [info nameofexecutable] $driver locate $manifest located 1]
+        expect [list [dict get $output exit] [dict get $output out]] [list 0 "a.src:1\n\n"] "empty file can be located independently of invalid project inputs"
+        set report [report $root $driver $manifest 0 1]
+        set d [dict get $report PROJECT_INVALID]
+        expect [json type [json get $d node]] null "incomplete Tcl remains a project diagnostic in schema 1"
+        expect [json unwrap [json get $d message]] {project: incomplete Tcl command in entry entry-probe.tcl (check from line 5 through end of file)} "Tcl error identifies its relative filename and unfinished lines"
+        writeUtf8 $tclEntry "set unfinished \{\n[string repeat "    x\n" 500]"
+        set d [dict get [report $root $driver $manifest 0 1] PROJECT_INVALID]
+        expect [json unwrap [json get $d message]] {project: incomplete Tcl command in entry entry-probe.tcl at end of file (line 502)} "large unterminated Tcl commands give a bounded EOF location"
+    } finally {
+        file delete -- $tclEntry
+        writeUtf8 $manifest $base
+    }
     foreach marker {entry-ran index-ran} {
         expect [file exists [file join $root $marker]] 0 "check never evaluates $marker"
     }

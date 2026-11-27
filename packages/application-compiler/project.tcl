@@ -88,11 +88,11 @@ proc ::appcompiler::project::decode {bytes path} {
     return $text
 }
 
-proc ::appcompiler::project::load {manifest} {
+proc ::appcompiler::project::readManifest {manifest cacheVar} {
+    upvar 1 $cacheVar cache
     if {[file pathtype $manifest] eq "volumerelative" || [regexp {^//[.?]/} [string map {\\ /} $manifest]]} {
         invalid "volume-relative or device manifest paths are unsupported"
     }
-    set cache {}
     set manifestBytes [readBytes $manifest cache]
     set data [dataDict [decode $manifestBytes $manifest] manifest]
     dict for {key ignored} $data {
@@ -162,19 +162,70 @@ proc ::appcompiler::project::load {manifest} {
         if {$path in $directories} {invalid "duplicate package directory [list $path]"}
         lappend directories $path
     }
+    return [dict create edition $edition minApi $minApi entry $entry tclEntry $tclEntry \
+        selected $selected manifestBytes $manifestBytes packageDirs $directories]
+}
+
+proc ::appcompiler::project::checkTclEntry {source path} {
+    set source [string map [list \r\n \n \r \n] $source]
+    if {[info complete $source]} return
+    # Locate the last complete physical line without evaluating any prefix.
+    # If a large unfinished command would require quadratic rescanning, the
+    # end-of-file location still identifies where Tcl ran out of input.
+    set lines [split $source \n]
+    set budget [expr {32 * [string length $source]}]
+    set pending {}
+    set first 1
+    set number 0
+    foreach line [lrange $lines 0 end-1] {
+        incr number
+        append pending $line \n
+        incr budget -[string length $pending]
+        if {$budget < 0} {
+            invalid "incomplete Tcl command in entry [list $path] at end of file (line [llength $lines])"
+        }
+        if {[info complete $pending]} {set pending {}; set first [expr {$number + 1}]}
+    }
+    invalid "incomplete Tcl command in entry [list $path] (check from line $first through end of file)"
+}
+
+proc ::appcompiler::project::load {manifest} {
+    set cache {}
+    set project [readManifest $manifest cache]
     set root [file dirname $manifest]
+    set tclEntry [dict get $project tclEntry]
     set files {}
     set sources {}
-    dict for {path module} $selected {
+    dict for {path module} [dict get $project selected] {
         set bytes [readBytes [file join $root $path] cache]
         dict set files $path $bytes
         if {$module ne ""} {dict set sources $module [decode $bytes $path]}
-        if {$path eq $tclEntry && ![info complete [decode $bytes $path]]} {
-            invalid "incomplete Tcl command in entry [list $path]"
-        }
+        if {$path eq $tclEntry} {checkTclEntry [decode $bytes $path] $path}
     }
-    return [dict create edition $edition minApi $minApi sources $sources entry $entry tclEntry $tclEntry \
-        files $files manifestBytes $manifestBytes packageDirs $directories]
+    return [dict merge [dict remove $project selected] [dict create sources $sources files $files]]
+}
+
+proc ::appcompiler::project::locateModule {manifest module args} {
+    set cache {}
+    set project [readManifest $manifest cache]
+    dict for {path name} [dict get $project selected] {
+        if {$name eq {} || $name ne $module} continue
+        if {![llength $args]} {return $path}
+        set line [::appcompiler::reference::number [lindex $args 0] line 1 2147483647]
+        set source [decode [readBytes [file join [file dirname $manifest] $path] cache] $path]
+        set lines [split [string map [list \r\n \n \r \n] $source] \n]
+        if {$line > max(1, [llength $lines])} {invalid "no line $line in [list $path]"}
+        return "$path:$line\n[lindex $lines [expr {$line - 1}]]"
+    }
+    invalid "unknown module [list $module]"
+}
+
+proc ::appcompiler::project::locate {input module args} {
+    if {[llength $args] > 1} {invalid "expected a module and an optional line number"}
+    if {[string equal -nocase [file extension $input] .machteld]} {
+        return [withArchiveManifest $input ::appcompiler::project::locateModule $module {*}$args]
+    }
+    return [locateModule $input $module {*}$args]
 }
 
 proc ::appcompiler::project::build {manifest {packageRoot {}}} {

@@ -36,12 +36,12 @@ proc ::referenceTest::ids {output} {
 }
 
 proc ::referenceTest::fixture {project} {
-    file mkdir $project
+    file mkdir [file join $project {nested sources}]
     write [file join $project project.dict] {schema 1
 edition 1
 minApi 0.21
 entry {guide main}
-modules {guide app.src}}
+modules {guide {nested sources/render 雪.src}}}
     set example {example .decorate(
   'horloge 雪'  # keep this comment and spacing
 ) => 'horloge 雪'}
@@ -78,17 +78,22 @@ fn .main($args: list<text>) -> result<unit,problem> {
     return ok(unit)
 }}
     set source [string map [list @EXAMPLE@ $example @DECOMPOSED@ "E\u0301cureuil" @NUL@ \u0000] $source]
-    write [file join $project app.src] $source
+    write [file join $project {nested sources/render 雪.src}] "\ufeff$source"
     return $example
 }
 
 proc ::referenceTest::run {work checkoutDriver} {
     set project [file join $work author]
     set example [fixture $project]
+    set relative {nested sources/render 雪.src}
+    set first {## sharedneedle glossary}
+    set originalManifest [file join $project project.dict]
+    equal [invoke $work $checkoutDriver 1 locate $originalManifest guide] "$relative\n" "manifest maps a logical module to its portable filename"
+    equal [invoke $work $checkoutDriver 1 locate $originalManifest guide 1] "$relative:1\n$first\n" "BOM is omitted just as it is by the compiler"
     set initial [file join $work original.machteld]
     invoke $work $checkoutDriver 1 pack [file join $project project.dict] $initial
     foreach name {entry-ran example-ran} {equal [file exists [file join $work $name]] 0 "pack leaves $name absent"}
-    file delete -- [file join $project app.src] [file join $project project.dict] $project
+    file delete -- [file join $project $relative] [file join $project {nested sources}] $originalManifest $project
 
     set recipient [file join $work {offline recipient 雪}]
     file mkdir $recipient
@@ -103,6 +108,11 @@ proc ::referenceTest::run {work checkoutDriver} {
     # All remaining CLI calls use the copied driver after closing the mount.
     set driver [file join $recipient local-compiler driver.tcl]
     set prefix [list docs [file tail $archive]]
+    equal [invoke $recipient $driver 1 locate [file tail $archive] guide] "$relative\n" "relocation preserves the filename without any checkout"
+    equal [invoke $recipient $driver 1 locate [file tail $archive] guide 3] "$relative:3\n## A\u0000B雪\n" "archived source returns ordinary UTF-8, including a NUL"
+    foreach arguments {{Guide} {} {guide 0} {guide 03} {guide 999} {guide 2 3} {{../app.src}} {{*}}} {
+        invoke $recipient $driver 0 locate [file tail $archive] {*}$arguments
+    }
     set fn fn/guide/decorate
     set page [invoke $recipient $driver 1 {*}$prefix get $fn]
     foreach fragment [list {# .guide::decorate} {export fn .decorate($value: .word) -> .word} \
@@ -166,12 +176,37 @@ proc ::referenceTest::run {work checkoutDriver} {
     write [file join $old main.tcl] "package require machteld\nclose \[open old-entry-ran w\]\n"
     ::machteld::PackArchive $old -o [file join $recipient old.machteld]
     invoke $recipient $driver 0 docs old.machteld search sharedneedle
+    invoke $recipient $driver 0 locate old.machteld guide
     file mkdir [file join $old project]
     write [file join $old project reference.db] {invalid SQLite bytes}
     ::machteld::PackArchive $old -o [file join $recipient broken-reference.machteld]
     invoke $recipient $driver 0 docs broken-reference.machteld get $fn
     write [file join $recipient corrupt.machteld] {invalid archive}
     invoke $recipient $driver 0 docs corrupt.machteld get $fn
+    invoke $recipient $driver 0 locate corrupt.machteld guide
+
+    # No pinned compiler or application database is required to locate the
+    # sources in an older, valid application archive.
+    set originals [file join $old project inputs]
+    file mkdir $originals
+    write [file join $originals application.dict] {schema 1 edition 1 minApi 0.21 tclEntry startup.tcl modules {Old odd.src}}
+    write [file join $originals startup.tcl] {close [open old-entry-ran w]}
+    write [file join $originals odd.src] "# first\r# 二\r\n# third\n"
+    ::machteld::PackArchive $old -o [file join $recipient legacy.machteld]
+    equal [invoke $recipient $driver 1 locate legacy.machteld Old 2] "odd.src:2\n# 二\n" "old archive with CR and CRLF source"
+    equal [invoke $recipient $driver 1 locate legacy.machteld Old 4] "odd.src:4\n\n" "blank source line at EOF"
+
+    # An archive whose files have never been inventoried must be refused
+    # even if its manifest and desired source would otherwise be readable.
+    zipfs mkzip [file join $recipient unverified.machteld] $old
+    invoke $recipient $driver 0 locate unverified.machteld Old 1
+    set mount [zipfs mount [file join $recipient legacy.machteld] old-inventory]
+    try {
+        file copy -- [file join $mount machteld-inventory.dict] $old
+    } finally {zipfs unmount $mount}
+    write [file join $old project reference.db] {unrelated changed bytes}
+    zipfs mkzip [file join $recipient altered.machteld] $old
+    invoke $recipient $driver 0 locate altered.machteld Old 1
     foreach name {entry-ran example-ran old-entry-ran} {
         equal [file exists [file join $recipient $name]] 0 "query leaves $name absent"
     }

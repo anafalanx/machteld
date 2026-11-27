@@ -88,18 +88,25 @@ proc ::appcompiler::project::pack {manifest output} {
     return $out
 }
 
-proc ::appcompiler::project::rebuild {archive output} {
-    requirePacker
+proc ::appcompiler::project::withArchiveManifest {archive command args} {
     if {![llength [info commands ::machteld::ArchiveEntry]]} {
         return -code error -errorcode {APPCOMPILER PROJECT PACK} \
-            "rebuilding requires a Machteld executable that verifies archive inventories"
+            "reading an application archive requires a Machteld executable that verifies its inventory"
     }
     set archive [file normalize $archive]
-    set output [outputPath $output [list $archive]]
     set name "appcompiler-[binary encode hex [::machteld::hash random 16]]"
     set mount [zipfs mount $archive $name]
     try {
         ::machteld::ArchiveEntry $mount
-        return [pack [file join $mount project inputs application.dict] $output]
+        set manifest [file join $mount project inputs application.dict]
+        if {![file isfile $manifest]} {invalid "archive has no editable project manifest"}
+        return [$command $manifest {*}$args]
     } finally { zipfs unmount $mount }
+}
+
+proc ::appcompiler::project::rebuild {archive output} {
+    requirePacker
+    set archive [file normalize $archive]
+    set output [outputPath $output [list $archive]]
+    return [withArchiveManifest $archive ::appcompiler::project::pack $output]
 }

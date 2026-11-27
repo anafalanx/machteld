@@ -3,7 +3,7 @@ package require machteld
 namespace eval ::projectDriver {}
 
 proc ::projectDriver::synopsis {} {
-    return [format {usage: %s check ?--json? MANIFEST | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
+    return [format {usage: %s check ?--json? MANIFEST | locate MANIFEST|ARCHIVE MODULE ?LINE? | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
 }
 
 proc ::projectDriver::usage {} {
@@ -87,6 +87,12 @@ proc ::projectDriver::main {argv driverDirectory} {
                 puts [format {%d examples: %d passed, %d failed} [dict get $report total] \
                     [dict get $report passed] [dict get $report failed]]
                 if {[dict get $report failed]} {exit 1}
+            }
+            locate {
+                if {$argc ni {3 4}} {usage}
+                set answer [::appcompiler::project::locate $input {*}[lrange $argv 2 end]]
+                chan configure stdout -translation binary
+                puts -nonewline stdout [encoding convertto -profile strict utf-8 "$answer\n"]
             }
             run {
                 if {$argc < 2} {usage}

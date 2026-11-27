@@ -71,6 +71,7 @@ source -encoding utf-8 [file join $::appcompiler::compilerDirectory driver.tcl]
     expect [dict get $bad err] {} "structured diagnostics stay on stdout"
     expect [dict get [::machteld::json decode [dict get $bad out]] ok] 0 "failed check returns structured diagnostics"
     expect [call $exe $delivery project test $manifest] {1 examples: 1 passed, 0 failed} "embedded example runner"
+    expect [call $exe $delivery project locate $manifest labels] labels.src "embedded source locator"
     expect [call $exe $author project run project.dict --manifest] $manifest "source application launch prefix"
     set label {two words 雪}
     expect [call $exe $delivery project run $manifest $label] $label "source application argv and Unicode"
@@ -109,6 +110,7 @@ source -encoding utf-8 [file join $root compiler driver.tcl]
     expect [string match {*different application compiler is already loaded*} [dict get $mismatch err]] 1 "actionable mismatch diagnostic"
     file rename -- $author [file join $work put-away]
     expect [call $exe $delivery labels.machteld $label] $label "relocated application"
+    expect [call $exe $delivery project locate labels.machteld labels 2] "labels.src:2\nexport fn .label(\$name: text) -> text => \$name" "embedded archive locator reads retained source after relocation"
     expect [call $exe $delivery project docs labels.machteld search label] fn/labels/label "archive reference via host"
     set rebuilt [file join $delivery rebuilt.machteld]
     expect [call $exe $delivery project rebuild labels.machteld $rebuilt] $rebuilt "rebuild without the source directory"
