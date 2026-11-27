@@ -96,6 +96,36 @@ An exact quotient already within the requested scale returns without padding.
 Run `machteld.exe test/application_compiler_decimal_test.tcl` for the
 source-level and generated-Tcl arithmetic checks.
 
+## Iteration
+
+`for $value in $items` visits a list in order and binds one complete
+element per iteration. An integer range contains its start and excludes its
+end. Use `..=` to include both endpoints. For example, `2..5` visits
+`2, 3, 4` and `2..=5` also visits `5`. Both forms are empty when the
+start is greater than the end. Iteration computes the bounds once and
+steps through exact integers without allocating a list of all values.
+
+```text
+fn .sum($start: int, $end: int) -> int {
+    $values ::= $start..$end
+    $total := 0
+    for $i in $values {
+        $total = $total + $i
+    }
+    return $total
+}
+```
+
+The type of `$values` is `range<int>`. The iteration binding is fixed
+and visible only inside the body. `break` and `continue` select the
+innermost loop. Give a loop a label, as in `for .outer $item in $items`,
+to target it from an inner loop with `break .outer` or `continue .outer`.
+`return` and a propagated failure still exit the function.
+Range and label spellings are provisional.
+
+Run `machteld.exe test/application_compiler_iteration_test.tcl` for the
+iteration, scope and control-flow regressions.
+
 ## File-backed applications
 
 The development driver accepts a UTF-8 project dictionary. The following

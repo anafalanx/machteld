@@ -76,6 +76,12 @@ proc ::appcompiler::emitRuntime {targetNamespace modules} {
             return [list some [guard $first [lindex $value 1] $path]]
         }
         switch -exact -- $head {
+            range {
+                if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
+                lassign $value start end closed
+                if {$closed ni {0 1}} {reject $path.closed {0 or 1}}
+                return [list [guard int $start $path.start] [guard int $end $path.end] $closed]
+            }
             list {
                 if {[catch {llength $value}]} {reject $path $type}
                 set index 0
@@ -207,6 +213,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set op [dict get $node op]
             set left [emitExpression [dict get $node left] $context $bindings $depth]
             set right [emitExpression [dict get $node right] $context $bindings $depth]
+            if {$op in {.. ..=}} {
+                return [format {[::list %s %s %d]} $left $right [expr {$op eq "..="}]]
+            }
             if {$op eq "/"} {
                 return [format {[%s %s %s]} [list ${targetNamespace}::@rt::decimal::divide] $left $right]
             }
@@ -349,8 +358,15 @@ proc ::appcompiler::emitListMatch {scrutinee slot arms context bindings depth} {
 }
 
 proc ::appcompiler::emitStatement {node context} {
+    set kind [dict get $node kind]
+    if {$kind in {break continue}} {
+        set label [dict get $node label]
+        if {$label eq {} || $label eq [dict get $context nearestLoop]} {return ::$kind}
+        set code [loopCode [dict get $context loopIndices $label] $kind]
+        return [list ::return -level 0 -code $code]
+    }
     set word [emitExpression [dict get $node value] $context]
-    switch -exact -- [dict get $node kind] {
+    switch -exact -- $kind {
         bind - assign {
             return [format {::set %s %s} [emitLocalName [dict get $node name]] $word]
         }
@@ -366,25 +382,96 @@ proc ::appcompiler::emitStatement {node context} {
     }
 }
 
+proc ::appcompiler::emitLine {line location bodyVar locationsVar} {
+    upvar 1 $bodyVar body $locationsVar locations
+    lappend body $line
+    dict set locations [llength $body] $location
+}
+
+# Only a jump across another loop needs a handler. Resolve the lexical target
+# once during compilation so ordinary foreach/for bodies have no try overhead.
+proc ::appcompiler::findOuterJumps {statements active nearest targetsVar} {
+    upvar 1 $targetsVar targets
+    foreach node $statements {
+        switch -exact -- [dict get $node kind] {
+            for {
+                set label [dict get $node label]
+                set scope $active
+                if {$label ne {}} {dict set scope $label [emitLocation $node]}
+                findOuterJumps [dict get $node body] $scope $label targets
+            }
+            if {
+                findOuterJumps [dict get $node body] $active $nearest targets
+                findOuterJumps [dict get $node otherwise] $active $nearest targets
+            }
+            break - continue {
+                set label [dict get $node label]
+                if {$label ne {} && $label ne $nearest} {
+                    dict set targets [dict get $active $label] [dict get $node kind] 1
+                }
+            }
+        }
+    }
+}
+
+# Tcl loops propagate custom completion codes unchanged. Reserve two per
+# nesting level, separate from Tcl's native return, break and continue.
+proc ::appcompiler::loopCode {depth kind} {
+    expr {256 + 2 * $depth + ($kind eq "continue")}
+}
+
+proc ::appcompiler::emitLoop {node context bodyVar locationsVar} {
+    upvar 1 $bodyVar body $locationsVar locations
+    set location [emitLocation $node]
+    set iterable [emitExpression [dict get $node iterable] $context]
+    set type [dict get [emitFacts $node $context] iterableType]
+    set local [emitLocalName [dict get $node name]]
+    set depth [dict getdef $context loopDepth 0]
+    if {$type eq "range<int>"} {
+        set limit m_limit_$depth
+        set closed m_closed_$depth
+        emitLine [format {::lassign %s %s %s %s} $iterable $local $limit $closed] $location body locations
+        emitLine [format {::incr %s $%s} $limit $closed] $location body locations
+        set header [format {::for {} {$%s < $%s} {::incr %s} %c} $local $limit $local 123]
+    } else {
+        set header [format {::foreach %s %s %c} $local $iterable 123]
+    }
+    emitLine $header $location body locations
+    set label [dict get $node label]
+    dict set context loopDepth [expr {$depth + 1}]
+    dict set context nearestLoop $label
+    if {$label ne {}} {dict set context loopIndices $label $depth}
+    set jumps [dict getdef $context outerJumps $location {}]
+    if {[dict size $jumps]} {emitLine "::try \{" $location body locations}
+    emitStatements [dict get $node body] $context body locations
+    if {[dict size $jumps]} {
+        set handlers \}
+        foreach kind [dict keys $jumps] {
+            append handlers [format { on %d {} {::%s}} [loopCode $depth $kind] $kind]
+        }
+        emitLine $handlers $location body locations
+    }
+    emitLine \} $location body locations
+}
+
 proc ::appcompiler::emitStatements {statements context bodyVar locationsVar} {
     upvar 1 $bodyVar body $locationsVar locations
     foreach statement $statements {
         set location [emitLocation $statement]
-        dict set locations [expr {[llength $body] + 1}] $location
-        if {[dict get $statement kind] ne "if"} {
-            lappend body [emitStatement $statement $context]
-            continue
+        switch -exact -- [dict get $statement kind] {
+            for {emitLoop $statement $context body locations}
+            if {
+                set test [emitExpression [dict get $statement condition] $context]
+                emitLine [format {::if %s %c} $test 123] $location body locations
+                emitStatements [dict get $statement body] $context body locations
+                if {[llength [dict get $statement otherwise]]} {
+                    emitLine [format {%c else %c} 125 123] $location body locations
+                    emitStatements [dict get $statement otherwise] $context body locations
+                }
+                emitLine \} $location body locations
+            }
+            default {emitLine [emitStatement $statement $context] $location body locations}
         }
-        set test [emitExpression [dict get $statement condition] $context]
-        lappend body [format {::if %s %c} $test 123]
-        emitStatements [dict get $statement body] $context body locations
-        if {[llength [dict get $statement otherwise]]} {
-            lappend body [format {%c else %c} 125 123]
-            dict set locations [llength $body] $location
-            emitStatements [dict get $statement otherwise] $context body locations
-        }
-        lappend body \}
-        dict set locations [llength $body] $location
     }
 }
 
@@ -403,6 +490,9 @@ proc ::appcompiler::emitModules {modules targetNamespace {facts {}}} {
             set formals {}
             set body {}
             set locations [dict create]
+            set targets {}
+            findOuterJumps [dict get $function body] {} {} targets
+            dict set context outerJumps $targets
             foreach param [dict get $function params] {
                 set local [emitLocalName [dict get $param name]]
                 lappend formals $local

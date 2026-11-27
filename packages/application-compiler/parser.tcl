@@ -12,7 +12,7 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice match with some none if else unit}
+        set keywords {fn export import return true false record choice match with some none if else unit for in break continue}
         set localChoices {}
         my advance
     }
@@ -20,7 +20,7 @@ oo::class create ::appcompiler::ModuleParser {
     method advance {} {
         # The final alternative consumes every remaining character. A search
         # beginning at offset therefore always matches at that exact offset.
-        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|::=|:=|::|->|=>|==|!=|.}
+        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|\.\.=?|::=|:=|::|->|=>|==|!=|.}
         while {$offset < [string length $source]} {
             regexp -start $offset -indices -- $pattern $source bounds
             lassign $bounds first last
@@ -49,11 +49,14 @@ oo::class create ::appcompiler::ModuleParser {
                     set word [string range $word 1 end-1]
                 }
                 {$} - {.} {
-                    if {[string length $word] == 1} {
+                    if {$word in {.. ..=}} {
+                        set kind $word
+                    } elseif {[string length $word] == 1} {
                         ::appcompiler::fail E_PARSE_NAME $location "expected an identifier after '$word'"
+                    } else {
+                        set kind [expr {$initial eq "." ? "dotName" : "dataName"}]
+                        set word [string range $word 1 end]
                     }
-                    set kind [expr {$initial eq "." ? "dotName" : "dataName"}]
-                    set word [string range $word 1 end]
                 }
                 default {
                     if {[string match {[0-9]} $initial]} {
@@ -298,6 +301,27 @@ oo::class create ::appcompiler::ModuleParser {
             my advance
             return [my node $start return value [my expression]]
         }
+        set kind [dict get $start kind]
+        if {$kind in {for break continue}} {
+            my advance
+            set node [my node $start $kind label {}]
+            if {[my at dotName]} {
+                dict set node label [dict get $token value]
+                dict set node labelLocation [my node $token label]
+                my advance
+            }
+            if {$kind eq "for"} {
+                set binding [my take dataName {a loop binding beginning with '$'}]
+                set name [dict get $binding value]
+                dict set node name $name
+                dict set node binding [my node $binding binding name $name]
+                my take in {'in' before the iterable}
+                dict set node iterable [my expression]
+                my skipLines
+                dict set node body [my braced statement {loop body}]
+            }
+            return $node
+        }
         if {[my at if]} {
             my advance
             set condition [my expression]
@@ -349,7 +373,7 @@ oo::class create ::appcompiler::ModuleParser {
                 set left [my node $where update base $left fields $fields]
             }
         }
-        set precedences {== 1 != 1 + 2 - 2 * 3 / 3}
+        set precedences {== 1 != 1 .. 2 ..= 2 + 3 - 3 * 4 / 4}
         while {[dict exists $precedences [dict get $token kind]]} {
             set op [dict get $token kind]
             set precedence [dict get $precedences $op]
@@ -368,7 +392,7 @@ oo::class create ::appcompiler::ModuleParser {
         switch -exact -- [dict get $token kind] {
             - {
                 my advance
-                return [my node $start unary op - value [my expression 4]]
+                return [my node $start unary op - value [my expression 5]]
             }
             decimal {
                 my advance

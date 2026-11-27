@@ -42,6 +42,8 @@ proc ::projectTest::exercise {exe caller prefix} {
         "flag, spaced value and trailing empty argument in order"
     appCase $exe $caller $prefix {label} {} [bytes {météo 雪}] "source literal decoded as UTF-8"
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
+    appCase $exe $caller $prefix [list --pick {} {two words}] {} [bytes {two words}] \
+        "labeled list iteration selects a complete argument"
 
     lassign [command $exe $caller $prefix [binary decode hex 61ff] 0] out err
     expect $out {} "no output on invalid input"
@@ -59,9 +61,22 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
         [] => ok($data)
         ['label'] => ok('météo 雪')
         ['--flag', $value, ''] => ok($value)
+        ['--pick', $first, $second] => ok(.pick($args))
         [$one] => ok($one)
         _ => err(problem('expected zero or one argument'))
     }
+}
+fn .pick($values: list<text>) -> text {
+    $selected := ''
+    for .candidates $value in $values {
+        for $i in 1..=1 {
+            if $value == '--pick' {continue .candidates}
+            if $value == '' {continue .candidates}
+            $selected = $value
+            break .candidates
+        }
+    }
+    return $selected
 }}
     set main {import logic
 fn .start($args: list<text>) -> result<unit,problem> {

@@ -22,7 +22,7 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
     upvar 1 $reportsVar reports
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
-    if {$head in {result list optional}} {
+    if {$head in {result list optional range}} {
         set arity [expr {$head eq "result" ? 2 : 1}]
         if {[llength $parts] != $arity + 1} {
             issue reports TYPE_ARITY $node "type '$head' requires $arity type arguments"
@@ -33,6 +33,10 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
             lappend args [declaredType $child $node $world reports]
         }
         if {"" in $args} { return "" }
+        if {$head eq "range" && [lindex $args 0] ne "int"} {
+            issue reports RANGE_ELEMENT_TYPE $node "only ranges of int are supported"
+            return ""
+        }
         return [makeType $head $args]
     }
     if {$type in {int decimal text bool bytes problem unit}} { return $type }
@@ -511,6 +515,7 @@ proc ::appcompiler::checker::comparable {type world} {
         if {$member eq ""} { set known -1; continue }
         if {$member in {int decimal text bool}} { continue }
         set parts [::appcompiler::typeParts $member]
+        if {[lindex $parts 0] eq "range"} { return 0 }
         if {[lindex $parts 0] in {optional list}} {
             lappend pending [lindex $parts 1]
             continue
@@ -531,6 +536,15 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
     set op [dict get $node op]
     set left [expressionType [dict get $node left] $scope $imports $world reports]
     set right [expressionType [dict get $node right] $scope $imports $world reports]
+    if {$op in {.. ..=}} {
+        foreach side {left right} type [list $left $right] {
+            if {$type ni {{} int}} {
+                issue reports OPERAND_TYPE [dict get $node $side] "range endpoint must be int, got $type"
+            }
+        }
+        if {$left eq "int" && $right eq "int"} { return range<int> }
+        return ""
+    }
     set numeric [expr {$left in {int decimal} && $right in {int decimal}}]
     set common [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
     if {$op in {== !=}} {
@@ -686,6 +700,36 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                 set thenReturns [checkBlock [dict get $statement body] $scope $imports $world reports]
                 set elseReturns [checkBlock [dict get $statement otherwise] $scope $imports $world reports]
                 if {$thenReturns && $elseReturns} { set returns 1 }
+            }
+            for {
+                set iterable [dict get $statement iterable]
+                set type [expressionType $iterable $scope $imports $world reports]
+                set parts [::appcompiler::typeParts $type]
+                set element ""
+                if {[lindex $parts 0] eq "list" || $type eq "range<int>"} {
+                    set element [lindex $parts 1]
+                    fact reports $statement iterableType $type
+                } elseif {$type ne ""} {
+                    issue reports ITERABLE_TYPE $iterable "for requires a list or an integer range, got $type"
+                }
+                set label [dict get $statement label]
+                if {$label ne "" && $label in [dict getdef $world loops {}]} {
+                    issue reports DUPLICATE_LOOP_LABEL [dict get $statement labelLocation] "loop label '.$label' is already active"
+                }
+                set nested $world
+                dict lappend nested loops $label
+                set innerScope $scope
+                bindLocal innerScope [dict get $statement binding] $element 0 reports
+                checkBlock [dict get $statement body] $innerScope $imports $nested reports
+            }
+            break - continue {
+                set loops [dict getdef $world loops {}]
+                set label [dict get $statement label]
+                if {$label ne "" && $label ni $loops} {
+                    issue reports UNKNOWN_LOOP_LABEL [dict get $statement labelLocation] "unknown loop label '.$label'"
+                } elseif {$label eq "" && ![llength $loops]} {
+                    issue reports LOOP_CONTROL $statement "'$kind' requires an enclosing loop"
+                }
             }
             expr {
                 set value [dict get $statement value]
