@@ -45,6 +45,19 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
 
+## Binary64 measurements
+
+`to_binary64($value)` converts an integer or decimal and returns
+`result<binary64,problem>`. `exact_decimal($binary)` recovers the exact
+stored value as a decimal.
+Binary64 addition, subtraction, multiplication and division accept two binary64
+values and return checked results. In `($raw * $gain)? + $offset`, a
+multiplication failure propagates before the addition. Overflow reports
+`BINARY64_OVERFLOW` and a zero divisor reports `DIVIDE_BY_ZERO`. The domain
+includes subnormal values and a single zero. NaN and infinities fail the Tcl,
+SQL and JSON boundary checks. A typed SQL parameter or column uses REAL.
+The runnable `examples/typed-calibration` project reads a measurement from JSON.
+
 ## Recovering from a typed failure
 
 Use `match` on a `result<T,E>` to handle each outcome locally.

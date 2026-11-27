@@ -1,0 +1,20 @@
+## A device reading, multiplicative gain, and additive offset in binary64.
+export record .measurement {
+    raw: binary64
+    gain: binary64
+    offset: binary64
+}
+
+## Applies gain and offset, rounding each operation to binary64.
+export fn .apply($m: .measurement) -> result<binary64,problem> =>
+    ($m.raw * $m.gain)? + $m.offset
+
+## Returns the exact decimal expansion of the calibrated bits for inspection.
+export fn .inspect($json: text) -> result<decimal,problem> =>
+    ok(exact_decimal(.apply(decode_json<.measurement>($json)?)?))
+example .inspect('{"raw":8,"gain":1.25,"offset":-0.5}') => 9.5
+
+fn .main($args: list<text>) -> result<unit,problem> {
+    $value ::= .inspect(decode_utf8(read_stdin_bytes()?)?)?
+    return write_stdout_utf8($"$value")
+}

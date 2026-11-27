@@ -123,6 +123,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
                 if {[catch {decimal::canonical $value} normalized]} {reject $path decimal}
                 return $normalized
             }
+            binary64 {
+                if {[catch {finiteBinary64 $value} number]} {reject $path {finite binary64}}
+                return $number
+            }
             instant - local_datetime {
                 if {[catch {temporalCanonical $type $value}]} {reject $path "canonical $type"}
                 return $value
@@ -221,8 +225,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
                     continue
                 }
                 set word [emitExpression [dict get $part value] $context $bindings $depth]
-                if {[dict get [emitFacts $part $context] interpolationType] eq "bool"} {
-                    set word [format {[::expr {%s ? "true" : "false"}]} $word]
+                switch -- [dict get [emitFacts $part $context] interpolationType] {
+                    bool {set word [format {[::expr {%s ? "true" : "false"}]} $word]}
+                    binary64 {set word [format {[::format %%.17g %s]} $word]}
                 }
                 lappend words $word
             }
@@ -246,6 +251,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {[dict get [emitFacts $node $context] operandType] eq "decimal"} {
                 return [format {[%s - 0 %s]} [list ${targetNamespace}::@rt::decimal::calc] $value]
             }
+            if {[dict get [emitFacts $node $context] operandType] eq "binary64"} {
+                return [format {[::tcl::mathop::- 0.0 %s]} $value]
+            }
             return [format {[::tcl::mathop::- %s]} $value]
         }
         binary {
@@ -254,6 +262,9 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set right [emitExpression [dict get $node right] $context $bindings $depth]
             if {$op in {.. ..=}} {
                 return [format {[::list %s %s %d]} $left $right [expr {$op eq "..="}]]
+            }
+            if {$op in {+ - * /} && [dict getdef [emitFacts $node $context] operandType {}] eq "binary64"} {
+                return [format {[%s %s %s %s]} [list ${targetNamespace}::@rt::binaryArithmetic] $op $left $right]
             }
             if {$op eq "/"} {
                 return [format {[%s %s %s]} [list ${targetNamespace}::@rt::decimal::divide] $left $right]
@@ -372,6 +383,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}
+                to_binary64 - exact_decimal {return [list [list ${target}::@rt::${name}]]}
                 divide_rounded {return [list [list ${target}::@rt::decimal::rounded]]}
                 default {error "unsupported application builtin: [list $name]"}
             }

@@ -362,6 +362,13 @@ copy under the caller's directory. The process test also writes binary
 output past the host's capture limit on both pipes. Each stream keeps its
 own byte prefix and reports truncation after the process exits.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, inspecting binary measurements
+
+One tenth stays exact when written as `0.1`. Converting it explicitly to
+binary64 and back exposes the extra decimal digits of the stored measurement.
+The calibration example reads a gain and offset from JSON. Its multiplication
+can report overflow before the offset is applied.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

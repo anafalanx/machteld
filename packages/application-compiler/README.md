@@ -52,7 +52,7 @@ on every successful path. The `=>` spelling is provisional.
   first. Module names that differ only in case cannot coexist. Text values
   can contain Unicode.
 
-The current language subset includes typed functions, integers, exact decimals, text,
+The current language subset includes typed functions, integers, exact decimals, binary64, text,
 booleans, lists, records, closed choices, optionals and results. The entry
 can read bytes, decode UTF-8 strictly, decode a JSON record, update it,
 and write UTF-8. Record decoding retains unknown JSON members with their
@@ -186,7 +186,7 @@ distinct .product_id = text
 fn .print_id($id: .product_id) -> text { return underlying($id) }
 ```
 
-The declaration may use `text`, `int`, `decimal`, `bool`, `bytes`,
+The declaration may use `text`, `int`, `decimal`, `binary64`, `bool`, `bytes`,
 `instant` or `local_datetime`, including an alias for one of these types.
 `make` and `underlying`
 convert explicitly in either direction. An alias for a distinct type
@@ -231,7 +231,8 @@ fn .caption($name: text, $count: int) -> text {
 ```
 
 The current formatting rules preserve text, write integers and decimals
-in canonical decimal notation and spell Booleans `true` or `false`. Use
+in canonical decimal notation, print binary64 with up to 17 significant
+digits, and spell Booleans `true` or `false`. Use
 `underlying($id)` to display a distinct scalar. Convert a structured value
 explicitly by selecting the fields to display. Holes evaluate once, from
 left to right. A propagated failure stops the string at that hole. Use
@@ -421,6 +422,47 @@ An exact quotient already within the requested scale returns without padding.
 
 Run `machteld.exe test/application_compiler_decimal_test.tcl` for the
 source-level and generated-Tcl arithmetic checks.
+
+## Explicit binary floating point
+
+`binary64` represents finite IEEE 754 double-precision values. Choose it
+for an approximate measurement or a numerical model. `to_binary64(x)`
+accepts an `int` or `decimal` and returns `result<binary64,problem>`.
+Conversion rounds to the nearest representable value, with ties to even.
+For example, 9007199254740993 rounds to 9007199254740992.
+`exact_decimal(x)` returns the exact decimal expansion of the stored
+bits. Converting the binary approximation of 0.1 back to decimal yields
+`0.1000000000000000055511151231257827021181583404541015625`.
+
+```text
+fn .calibrate($raw: binary64, $gain: binary64, $offset: binary64) -> result<binary64,problem> =>
+    ($raw * $gain)? + $offset
+```
+
+The binary operators `+`, `-`, `*` and `/` require two `binary64` operands
+and return `result<binary64,problem>`. Each operation rounds separately.
+Overflow produces `BINARY64_OVERFLOW`. Division by zero produces
+`DIVIDE_BY_ZERO`. Subnormals are retained down to 2⁻¹⁰⁷⁴. Underflow
+rounds to the nearest representable value and all zero results use +0.
+Unary minus returns a `binary64` directly. Equality compares the stored
+values. A mixed operation needs an explicit conversion. A distinct
+binary64 type keeps its own identity across calls and generic functions.
+
+A Tcl parameter accepts finite decimal and scientific notation. NaN,
+infinities and hexadecimal input produce a typed argument error. A
+declared JSON field accepts a finite numeric value, including an exponent.
+JSON output and text interpolation use up to 17 significant digits to
+round-trip the value. SQLite parameters and result columns use REAL.
+
+Run the calibration example from the checkout. It converts a device reading
+to calibrated units and writes the exact decimal value of the resulting bits.
+
+```powershell
+'{"raw":8,"gain":1.25,"offset":-0.5}' | .\machteld.exe project run examples/typed-calibration/project.dict
+```
+
+The output is `9.5`. Run `machteld.exe test/application_compiler_binary64_test.tcl -pack`
+to check conversions, arithmetic, SQLite storage, JSON and archive rebuilding.
 
 ## Iteration
 
@@ -664,6 +706,7 @@ from field order.
 | `bytes` | BLOB |
 | `bool` | INTEGER 0 or 1 |
 | `decimal` | Binds as exact decimal TEXT. Reads accept decimal TEXT or INTEGER. |
+| `binary64` | Binds and reads a finite REAL. INTEGER or TEXT results require an explicit SQL conversion. |
 | `instant`, `local_datetime` | Canonical TEXT in the temporal type's format |
 | `T?` | SQL NULL or the storage class for `T` |
 

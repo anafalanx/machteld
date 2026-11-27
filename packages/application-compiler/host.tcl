@@ -6,7 +6,7 @@ proc problem {message} {return [dict create message $message]}
 # arguments of a generic export. Validate every name even for an empty list,
 # an absent optional, or a parameter that occurs only in the result type.
 proc concreteType {type schemas} {
-    if {$type in {int decimal text bytes bool unit problem instant local_datetime}} {return 1}
+    if {$type in {int decimal binary64 text bytes bool unit problem instant local_datetime}} {return 1}
     if {[string length $type] > 8192 || $type eq ""} {return 0}
     set parts [typeParts $type]
     set head [lindex $parts 0]
@@ -371,6 +371,12 @@ proc fromWire {type node path} {
     set actual [::machteld::json type $node]
     switch -exact -- $head {
         optional {return [list some [fromWire [lindex $parts 1] $node $path]]}
+        binary64 {
+            if {$actual ne "number" || [catch {finiteBinary64 [::machteld::json unwrap $node]} value]} {
+                invalidWire "$path expects a finite binary64 JSON number"
+            }
+            return $value
+        }
         instant - local_datetime {
             set value [fromWire text $node $path]
             if {[catch {temporalCanonical $head $value}]} {invalidWire "$path expects canonical $head text"}
@@ -454,6 +460,7 @@ proc toWire {type value path} {
         }
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
+        binary64 {return [::machteld::json value number [format %.17g [guard binary64 $value $path]]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
         bytes {invalidWire "$path has no JSON representation for bytes"}
         list {
@@ -563,10 +570,54 @@ proc equalWire {left right} {
     }
 }
 
+# Accept decimal/scientific spelling at the Tcl and JSON boundaries. Constrain
+# the input before conversion so Tcl's base prefixes never change its value.
+proc finiteBinary64 {value} {
+    if {![regexp {\A[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z} $value]} {
+        error "expected a finite binary64 number"
+    }
+    if {[regexp {\A[+-]?0[0-9]+\Z} $value]} {append value .0}
+    set number [expr {double($value)}]
+    if {abs($number) == Inf} {error "binary64 overflow"}
+    return [expr {$number == 0.0 ? 0.0 : $number}]
+}
+
+proc to_binary64 {exact} {
+    if {[catch {finiteBinary64 $exact} number]} {
+        return [list err [dict create code BINARY64_OVERFLOW message "conversion exceeds the finite binary64 range"]]
+    }
+    return [list ok $number]
+}
+
+proc binaryArithmetic {op a b} {
+    if {$op eq "/" && $b == 0.0} {
+        return [list err [dict create code DIVIDE_BY_ZERO message "division by zero"]]
+    }
+    set number [::tcl::mathop::$op $a $b]
+    if {abs($number) == Inf} {
+        return [list err [dict create code BINARY64_OVERFLOW message "operation exceeds the finite binary64 range"]]
+    }
+    return [list ok [expr {$number == 0.0 ? 0.0 : $number}]]
+}
+
+# A binary64 value is an integer significand times a power of two. For a
+# negative exponent -n, multiply by 5**n and place n decimal fraction digits.
+proc exact_decimal {number} {
+    binary scan [binary format Q $number] Wu bits
+    set exponent [expr {($bits >> 52) & 0x7ff}]
+    set fraction [expr {$bits & ((1 << 52) - 1)}]
+    set significand [expr {$exponent == 0 ? $fraction : (1 << 52) | $fraction}]
+    if {$bits >> 63} {set significand [expr {-$significand}]}
+    if {$significand == 0} {return 0}
+    set shift [expr {max(1, $exponent) - 1075}]
+    if {$shift >= 0} {return [expr {$significand << $shift}]}
+    return [decimal::fromParts [expr {$significand * 5**(-$shift)}] [expr {-$shift}]]
+}
+
 proc equal {type left right} {
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
-        int - bool {return [expr {$left == $right}]}
+        int - bool - binary64 {return [expr {$left == $right}]}
         decimal - instant - local_datetime {return [string equal $left $right]}
         text {
             if {[string equal $left $right]} {return 1}
