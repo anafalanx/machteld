@@ -13,6 +13,8 @@ Use `machteld.exe project check project.dict`, then `project test`,
 `project run` or `project pack project.dict app.machteld`. Run the result
 with `machteld.exe app.machteld`. Use `--project` to select the built-in
 driver explicitly when the current directory contains a file named `project`.
+The check stops after validating the manifest, modules and entry. The run and
+pack commands also generate executable Tcl.
 Editable archives also carry a copy of their compiler under `compiler/`
 and their manifest and original files under `project/inputs/`.
 

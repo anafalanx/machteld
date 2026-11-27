@@ -76,7 +76,7 @@ proc ::projectDriver::main {argv driverDirectory} {
                     if {$argc != 3} {usage}
                     set input $output
                 } elseif {$argc != 2} {usage}
-                ::appcompiler::project::build $input
+                ::appcompiler::project::check $input
             }
             test {
                 if {$argc != 2} {usage}
