@@ -384,6 +384,14 @@ explicit reference and observed two later updates during event delivery.
 After the owning block returned, invoking the retained callback reported
 an expired reference.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, child output as it arrives
+
+A child can finish while Windows still has bytes ready on its output pipes.
+The streaming test enters a nested event loop inside a two-byte callback and
+checks the last byte of each pipe before reporting the child's exit. A second
+child fills both pipes with over a megabyte of binary data before reading its
+input. Every byte reaches the correct stream in order.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

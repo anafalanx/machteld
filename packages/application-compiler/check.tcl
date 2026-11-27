@@ -115,6 +115,10 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         return $type
     }
     if {$type in {int decimal text bool bytes problem unit process_output}} { return $type }
+    if {$type in {process_stream process_exit}} {
+        dict set reports usesProcess 1
+        return $type
+    }
     if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $head -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
@@ -317,6 +321,10 @@ proc ::appcompiler::checker::resourceProtocols {world reportsVar} {
 proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
     upvar 1 $reportsVar reports
     if {$type in {{} @transaction}} {return}
+    if {$type eq "process_stream"} {
+        fact reports $node builtinCloser close_process
+        return
+    }
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
     if {$head eq "ref"} {
@@ -507,6 +515,11 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         resolve_offset { set params {local_datetime int} }
         resolve_zone { set params {local_datetime text} }
         capture_process { set params {text list<text> bytes int int} }
+        stream_process {
+            set params {text list<text> bytes int int callable<bytes,result<unit,problem>> callable<bytes,result<unit,problem>> callable<result<process_exit,problem>,unit>}
+        }
+        close_process - cancel_process {set params {process_stream}}
+        find_executable {set params {text}}
         decode_utf8 { set params [list bytes] }
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
@@ -569,6 +582,10 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         capture_process {
             dict set reports usesProcess 1
             return result<process_output,problem>
+        }
+        stream_process - close_process - cancel_process - find_executable {
+            dict set reports usesProcess 1
+            return [dict get {stream_process result<process_stream,problem> close_process unit cancel_process unit find_executable result<text,problem>} $name]
         }
         decode_utf8 - decode_text - preview_text { return result<text,problem> }
         decode_json {
@@ -1756,6 +1773,9 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
         stdout_truncated bool stderr_truncated bool}
     dict set world schemas process_output [dict create kind record members $outputFields]
     dict set runtimeSchemas process_output [list record $outputFields]
+    set exitFields {status text exit int stdout_bytes int stderr_bytes int}
+    dict set world schemas process_exit [dict create kind record members $exitFields]
+    dict set runtimeSchemas process_exit [list record $exitFields]
     dict set world runtimeSchemas $runtimeSchemas
     dict set world equalitySummaries [checker::equalitySummaries $runtimeSchemas]
     # Index normalized signatures before bodies to support forward and recursive calls.

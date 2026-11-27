@@ -189,3 +189,14 @@ deadline. The result is `result<process_output,problem>`. Inspect `status` and
 `exit` even on success, then read `stdout` and `stderr` as bytes. Each stream
 has a retained-byte count and a truncation flag, for example `stdout_retained`
 and `stdout_truncated`. The compiler guide lists fields and problem codes.
+
+Use `stream_process(exe, argv, input, chunk_bytes, timeout_ms, stdout_cb,
+stderr_cb, done_cb)` for an event-driven consumer. The two chunk callbacks
+accept raw `bytes` and return `result<unit,problem>`. Choose 1 through
+65,536 bytes per chunk. Normal completion calls `done_cb` after both EOFs
+with `result<process_exit,problem>`. The record contains `status`, `exit`,
+`stdout_bytes` and `stderr_bytes`. A successful start immediately returns a
+`process_stream` handle. `cancel_process` delivers a terminal cancellation.
+`close_process` and scope cleanup stop silently. The compiler guide has a
+headless event-loop example. For explicit PATH lookup, `find_executable`
+accepts a bare .exe name and searches absolute PATH directories.

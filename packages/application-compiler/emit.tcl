@@ -54,6 +54,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
         switch -exact -- $head {
             callable {return [guardCallable $type $value $path]}
             ref {return [guardReference $first $value $path]}
+            process_stream {return [guardStream $value $path]}
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -405,7 +406,8 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
-                parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process {
+                parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process -
+                stream_process - close_process - cancel_process - find_executable {
                     return [list [list ${target}::@rt::${name}]]
                 }
                 quotient {return [list [list ${target}::@rt::decimal::quotient]]}
@@ -638,7 +640,7 @@ proc ::appcompiler::emitUsing {node context bodyVar locationsVar} {
     if {![dict exists $facts resourceCloser]} {
         emitLine "::try \{" $location body locations
         emitStatements [dict get $node body] $context body locations
-        set closer [expr {[dict get $node value kind] eq "refCreate" ? "endReference" : "sqlEnd"}]
+        set closer [dict getdef $facts builtinCloser [expr {[dict get $node value kind] eq "refCreate" ? "endReference" : "sqlEnd"}]]
         emitLine [format {%c finally { %s $%s }} 125 [list ${target}::@rt::${closer}] $local] $location body locations
         return
     }
