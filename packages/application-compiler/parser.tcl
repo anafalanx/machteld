@@ -840,7 +840,11 @@ oo::class create ::appcompiler::ModuleParser {
             interpolateStart { return [my interpolated] }
             dataName {
                 my advance
-                return [my node $start var name [dict get $start value]]
+                set binding [my node $start var name [dict get $start value]]
+                if {[my at (]} {
+                    return [my node $start invoke value $binding args [my parenthesized callArgument]]
+                }
+                return $binding
             }
             ( {
                 my advance
@@ -1041,9 +1045,7 @@ oo::class create ::appcompiler::ModuleParser {
                     my advance
                     set member [my take identifier {a choice variant name}]
                     set name [dict get $member value]
-                } elseif {![dict exists $applied typeLocations] &&
-                        ([dict exists $localChoices $qualifier $name] ||
-                        (![my at (] && [dict exists $localChoices $qualifier]))} {
+                } elseif {![dict exists $applied typeLocations] && [dict exists $localChoices $qualifier $name]} {
                     set ambiguous [my at (]
                 } else {
                     if {[dict exists $localChoices $qualifier]} {
@@ -1061,8 +1063,13 @@ oo::class create ::appcompiler::ModuleParser {
         }
         set typeLocations [dict getdef $applied typeLocations {}]
         set typeArgs [lmap location $typeLocations {dict get $location name}]
-        set args [my parenthesized callArgument]
-        return [my node $start call name $name qualifier $qualifier args $args \
+        set kind functionValue
+        set args {}
+        if {[my at (]} {
+            set kind call
+            set args [my parenthesized callArgument]
+        }
+        return [my node $start $kind name $name qualifier $qualifier args $args \
             typeArgs $typeArgs typeLocations $typeLocations {*}$locations]
     }
 }

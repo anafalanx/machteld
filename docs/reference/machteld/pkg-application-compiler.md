@@ -60,6 +60,20 @@ parameter takes its value positionally. Supply arguments in declaration
 order. The exported signature in the application's offline reference
 shows the exact labels. Tcl callers still pass the values positionally.
 
+## Passing callbacks
+
+A `callable<int,text>` accepts one integer and returns text. A
+`callable<text>` accepts zero arguments. Take a named function as a value
+with `.name`, `.module::name` or `.identity<int>`. Invoke a local callable
+as `$f(42)`. Callable parameters are positional. A labelled function can
+provide a positional adapter that supplies the required labels.
+
+`bind(.caption, $station)` captures the current station as the first
+argument of `.caption`. The remaining parameters are supplied on each
+invocation. Tcl can invoke the returned prefix with `{*}$prefix 42`.
+Declare an existing Tcl procedure as an `extern fn` to use it as a
+typed callback. The compiler guide includes a complete capture example.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type

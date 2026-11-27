@@ -95,6 +95,46 @@ At the Tcl boundary the values occupy their declared positions, so a Tcl
 caller uses `::application::routes::route North East` for this export in
 module `routes`.
 
+## Callable values and captures
+
+`callable<int,text>` takes one integer and returns text. The final type is
+always the result, so `callable<text>` takes zero arguments. Write `.name`
+to take a named function as a value. After importing another module you can
+write `.routes::name`. A generic function needs explicit type arguments when
+taken as a value, for example `.identity<int>`.
+
+```text
+fn .caption($station: text, $number: int) -> text => $"$station $number"
+
+fn .researcher($station: text) -> callable<int,text> =>
+    bind(.caption, $station)
+
+fn .label() -> text {
+    $format ::= .researcher('Leiden')
+    return $format(42)
+}
+```
+
+`bind` evaluates the callable and each supplied argument once, from left to
+right. It captures the current values of one or more leading parameters.
+Later reassignment or collection updates leave the captured values intact.
+Binding all remaining parameters produces a zero-argument callable. A local
+call uses `$format(42)`. A named call uses `.format(42)`.
+
+Callable parameters are positional. To offer the labelled `.route` function
+above as a callable, write a positional adapter that supplies both labels.
+
+```text
+fn .trip($a: text, $b: text) -> text => .route(from: $a, to: $b)
+```
+
+A Tcl caller receives a command prefix and invokes it with `{*}$prefix 42`.
+A typed X parameter or extern result accepting a callable checks the prefix's
+application target, concrete signature and captures. To use an existing Tcl
+procedure as a callable, give it an X `extern fn` declaration and take that
+declaration as a value. A callable has no value equality, SQL column type
+or JSON representation.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.

@@ -75,8 +75,16 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         }
         return [dict get $world typeBindings $head]
     }
-    if {$head in {result list optional range map}} {
-        set arity [expr {$head in {result map} ? 2 : 1}]
+    if {$head in {result list optional range map callable}} {
+        if {$head eq "callable"} {
+            set arity [expr {[llength $parts] - 1}]
+            if {$arity == 0} {
+                issue reports TYPE_ARITY $node {callable requires a result type after its parameter types}
+                return ""
+            }
+        } else {
+            set arity [expr {$head in {result map} ? 2 : 1}]
+        }
         if {[llength $parts] != $arity + 1} {
             issue reports TYPE_ARITY $node "type '$head' requires $arity type arguments"
             return ""
@@ -402,6 +410,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         return ""
     }
     switch -exact -- $name {
+        bind {return [callableOperation $node bind $actual reports]}
         ok - err - encode_json - underlying { set params [list *] }
         make {
             set location [lindex [dict getdef $node typeLocations {}] 0]
@@ -731,6 +740,10 @@ proc ::appcompiler::checker::checkCall {node name actual function world reportsV
         if {"" in $resolved} {return ""}
         set arguments $resolved
     } elseif {[llength $variables]} {
+        if {[dict get $node kind] eq "functionValue"} {
+            issue reports TYPE_INFERENCE $node "supply explicit type arguments when taking '$name' as a callable"
+            return ""
+        }
         set arguments [inferTypeArguments $node $variables $expected $actual reports]
         if {![llength $arguments]} {return ""}
     }
@@ -745,8 +758,52 @@ proc ::appcompiler::checker::checkCall {node name actual function world reportsV
         }
         fact reports $node typeArguments $arguments
     }
+    if {[dict get $node kind] eq "functionValue"} {
+        foreach param [dict get $function params] {
+            if {[dict getdef $param label {}] ne ""} {
+                issue reports CALLABLE_LABEL $node "'$name' requires argument labels; declare a positional adapter that supplies them"
+                return ""
+            }
+        }
+        if {"" in $expected || $result eq ""} {return ""}
+        set key [list [dict get $function module] [dict get $function name]]
+        dict set reports callbackTargets $key 1
+        return [checkedType callable [list {*}$expected $result] $node reports]
+    }
     if {![checkArguments $node $name $actual $expected reports [dict get $function params]]} { return "" }
     return $result
+}
+
+# Both operations consume the same positional signature. Binding consumes a
+# nonempty leading slice and leaves the suffix as the new callable's type.
+proc ::appcompiler::checker::callableOperation {node operation actual reportsVar} {
+    upvar 1 $reportsVar reports
+    if {$operation eq "bind" && [llength $actual] < 2} {
+        issue reports CALL_ARITY $node {bind expects a callable followed by at least one captured argument}
+        return ""
+    }
+    set type [lindex $actual 0]
+    if {$type eq ""} {return ""}
+    set parts [::appcompiler::typeParts $type]
+    if {[lindex $parts 0] ne "callable"} {
+        set operand [expr {$operation eq "bind" ? [lindex [dict get $node args] 0] : [dict get $node value]}]
+        issue reports EXPECTED_CALLABLE $operand "expected a callable, got $type"
+        return ""
+    }
+    set expected [lrange $parts 1 end-1]
+    set supplied [lrange $actual 1 end]
+    if {$operation eq "bind"} {
+        dict set node args [lrange [dict get $node args] 1 end]
+        set count [llength $supplied]
+        if {$count > [llength $expected]} {
+            issue reports CALL_ARITY $node "cannot capture $count arguments of a callable with [llength $expected] parameters"
+            return ""
+        }
+        if {![checkArguments $node bind $supplied [lrange $expected 0 $count-1] reports]} {return ""}
+        return [makeType callable [lrange $parts $count+1 end]]
+    }
+    if {![checkArguments $node $operation $supplied $expected reports]} {return ""}
+    return [lindex $parts end]
 }
 
 proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
@@ -1265,7 +1322,13 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             dict set reports usesSql 1
             return result<@transaction,problem>
         }
-        call { return [callType $node $scope $imports $world reports] }
+        call - functionValue { return [callType $node $scope $imports $world reports] }
+        invoke {
+            set callee [dict get $node value]
+            set type [expressionType $callee $scope $imports $world reports]
+            set actual [argumentTypes $node $scope $imports $world reports]
+            return [callableOperation $node "\$[dict get $callee name]" [list $type {*}$actual] reports]
+        }
         builtin { return [builtinType $node $scope $imports $world reports] }
         construct {
             return [constructType $node [dict get $node type] [dict get $node variant] \
@@ -1572,6 +1635,7 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     if {$resolvedVar ne ""} {
         upvar 1 $resolvedVar resolved
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
+            callbackTargets [dict keys [dict getdef $reports callbackTargets {}]] \
             usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
             usesZone [dict getdef $reports usesZone 0]]
     }

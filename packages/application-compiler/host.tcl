@@ -17,6 +17,10 @@ proc concreteType {type schemas} {
             set arity 1
         }
         list {set arity 1}
+        callable {
+            set arity [llength $children]
+            if {$arity == 0} {return 0}
+        }
         map - result {set arity 2}
         range {return [expr {$type eq "range<int>"}]}
         default {
@@ -43,6 +47,52 @@ proc bindTypes {variables arguments} {
         dict set bindings $variable $argument
     }
     return $bindings
+}
+
+# Prefixes carry ordinary Tcl values, including all captures. The generated
+# table is the only source of executable target commands and their signatures.
+proc callbackSignature {key types path} {
+    set targets [callbackTargets]
+    if {![dict exists $targets $key]} {reject $path {a callable from this application}}
+    lassign [dict get $targets $key] command variables parameters result
+    set bindings [bindTypes $variables $types]
+    set parameters [lmap type $parameters {substituteType $type $bindings}]
+    return [list $command $parameters [substituteType $result $bindings]]
+}
+
+proc guardCallable {type value path} {
+    if {[catch {llength $value} size] || $size != 4 ||
+            [lindex $value 0] ne "[namespace current]::invokeCallback"} {reject $path $type}
+    lassign $value dispatch key types captures
+    lassign [callbackSignature $key $types $path] command parameters result
+    if {[catch {llength $captures} count] || $count > [llength $parameters]} {reject $path $type}
+    set remaining [list {*}[lrange $parameters $count end] $result]
+    if {$type ne "callable<[join $remaining ,]>"} {reject $path $type}
+    set checked {}
+    foreach item $captures expected [lrange $parameters 0 $count-1] {
+        lappend checked [guard $expected $item "$path capture [llength $checked]" 1]
+    }
+    return [list $dispatch $key $types $checked]
+}
+
+proc bindCallback {callback args} {
+    lassign $callback dispatch key types captures
+    return [list $dispatch $key $types [list {*}$captures {*}$args]]
+}
+
+# Tcl packages and Tk may call an exported prefix directly. Validate all
+# supplied arguments even when its original X function was private.
+proc invokeCallback {key types captures args} {
+    lassign [callbackSignature $key $types callback] command parameters result
+    if {[catch {llength $captures} count] || $count + [llength $args] != [llength $parameters]} {
+        reject callback "[llength $parameters] total captured and supplied arguments"
+    }
+    set checked {}
+    foreach item [list {*}$captures {*}$args] expected $parameters {
+        lappend checked [guard $expected $item "callback argument [llength $checked]" 1]
+    }
+    if {[llength $types]} {tailcall $command $types {*}$checked}
+    tailcall $command {*}$checked
 }
 
 proc atResult {result location} {
@@ -363,7 +413,7 @@ proc fromWire {type node path} {
             if {$actual ne "boolean"} {invalidWire "$path expects a boolean, got $actual"}
             return [::machteld::json unwrap $node]
         }
-        bytes {invalidWire "$path has no JSON representation for bytes"}
+        bytes - callable {invalidWire "$path has no JSON representation for $head"}
         list {
             if {$actual ne "array"} {invalidWire "$path expects an array, got $actual"}
             set out {}
@@ -404,7 +454,8 @@ proc fromWire {type node path} {
 
 proc toWire {type value path} {
     set parts [typeParts $type]
-    switch -exact -- [lindex $parts 0] {
+    set head [lindex $parts 0]
+    switch -exact -- $head {
         text {return [::machteld::json value string [nativeJsonText $value]]}
         instant - local_datetime {
             if {[catch {temporalCanonical $type $value}]} {invalidWire "$path expects canonical $type text"}
@@ -413,7 +464,7 @@ proc toWire {type value path} {
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
-        bytes {invalidWire "$path has no JSON representation for bytes"}
+        bytes - callable {invalidWire "$path has no JSON representation for $head"}
         list {
             set nodes {}
             foreach element $value {lappend nodes [toWire [lindex $parts 1] $element $path]}

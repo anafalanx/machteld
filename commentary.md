@@ -337,6 +337,13 @@ Two station names have the same type. A route declaration with required
 reference displayed both labels and its Tcl command still accepted the
 two names in order.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, callable values
+
+A callback captured a map containing the identifier `007`. Its owner then
+overwrote that entry. Invoking the callback from Tcl still returned `007`.
+The packed program also retained its capture after relocation and an
+offline rebuild from the archived sources.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
