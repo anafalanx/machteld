@@ -1,0 +1,6 @@
+schema 1
+edition 1
+minApi 30
+tclEntry research-main.tcl
+modules {timeline research.src}
+assets {research.tcl view.tcl}

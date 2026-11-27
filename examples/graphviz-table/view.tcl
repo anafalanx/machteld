@@ -82,21 +82,25 @@ proc ::diagram::draw {canvas script origin tags} {
         }
     }
 }
-proc ::diagram::select {canvas} {
-    variable selected
-    $canvas delete selection
-    set selected ""
+proc ::diagram::hitNode {canvas} {
     foreach tag [$canvas gettags current] {
-        if {[string match node:* $tag]} {
-            set selected [string range $tag 5 end]
-            $canvas create rectangle [$canvas bbox $tag] -outline #365e91 -width 2 -tags selection
-            break
-        }
+        if {[string match node:* $tag]} {return [string range $tag 5 end]}
+    }
+    return {}
+}
+proc ::diagram::highlight {canvas node} {
+    $canvas delete selection
+    if {$node eq {}} {return}
+    set box [$canvas bbox node:$node]
+    if {[llength $box]} {
+        $canvas create rectangle $box -outline #365e91 -width 2 -state disabled -tags selection
     }
 }
-proc ::diagram::show {canvas} {
-    variable dot
-    set graph [::machteld::graphviz layout $dot]
+proc ::diagram::select {canvas} {
+    variable selected [hitNode $canvas]
+    highlight $canvas $selected
+}
+proc ::diagram::paint {canvas graph} {
     set origin [dict get $graph origin]
     foreach edge [dict get $graph edges] {
         foreach key {draw tailDraw headDraw labelDraw} {
@@ -108,6 +112,11 @@ proc ::diagram::show {canvas} {
             draw $canvas [dict get $card $key] $origin [list node node:$node]
         }
     }
+}
+proc ::diagram::show {canvas} {
+    variable dot
+    set graph [::machteld::graphviz layout $dot]
+    paint $canvas $graph
     lassign [dict get $graph size] width height
     $canvas configure -width [expr {ceil($width) + 4}] -height [expr {ceil($height) + 4}]
     bind $canvas <Button-1> [list ::diagram::select $canvas]
