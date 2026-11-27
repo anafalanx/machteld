@@ -9,7 +9,7 @@ commands: docs, help
 # Agent documentation bootstrap
 
 The Machteld distribution contains the complete, exact-version offline
-references for Machteld 0.50-dev, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
+references for Machteld 0.50, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
 `docs get cffi/manual/intro` for foreign calls and the Foreign calls section
 of the runtime contract for the bundled build's restrictions. The corpus includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not

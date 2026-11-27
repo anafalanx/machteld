@@ -1,17 +1,17 @@
 ---
 type: roadmap
 title: Roadmap
-description: The integrated compiler and runtime planned for release 0.50, the unsigned development baselines, and release acceptance.
+description: The integrated compiler and runtime in release 0.50, the unsigned development baselines, and release acceptance.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 0.50-dev
+## 0.50
 
 On 2026-11-27 the owner chose **one release integrating the application
-compiler with the Tcl/Tk runtime**. Development builds display `0.50-dev`.
-The next public release is `0.50` and subsequent releases continue with
+compiler with the Tcl/Tk runtime**. The release displays `0.50` and
+subsequent releases continue with
 `0.51`, `0.52` and so on. Existing Tcl applications use package API `30`.
 The upgrade is from signed 0.21 to 0.50.
 The work prepared under 0.30 continues as an unsigned development baseline.

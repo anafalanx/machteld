@@ -7,7 +7,7 @@ tags: [machteld, windows, tcl, runtime]
 
 # Overview
 
-Machteld 0.50-dev is a compact Windows runtime for Tcl/Tk 9
+Machteld 0.50 is a compact Windows runtime for Tcl/Tk 9
 programs. It is strongest at what tools do: supervised processes and
 terminals, files, HTTP, JSON, hashing and SQLite, in one executable that
 installs nothing. It combines Tcl/Tk 9.0.4 with native supervision, ConPTY,
@@ -17,8 +17,8 @@ trap-able codes.
 
 It is Vincent Vercauteren's own runtime, and it serves tools first. Use by
 others is welcome, but adoption, a plugin marketplace, and integration with
-another agent platform are not current product goals. The next public
-release is 0.50. It integrates the Tcl-written application compiler with the
+another agent platform are not current product goals. Machteld 0.50
+integrates the Tcl-written application compiler with the
 shared runtime so a project can introduce typed modules one file at a time.
 The API-30 artifacts and signed 0.21 release have separate identities.
 Build identities, artifact hashes, and verification receipts distinguish

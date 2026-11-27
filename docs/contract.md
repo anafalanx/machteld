@@ -10,8 +10,8 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-This contract describes Machteld 0.50-dev and its Tcl package API `30`.
-Signed 0.21 is the public release and 0.50 is the next delivery target.
+This contract describes Machteld 0.50 and its Tcl package API `30`.
+The supported upgrade is from signed 0.21.
 Consult the selected executable's embedded reference
 and artifact identity for the commands it actually provides. [Roadmap](roadmap.md)
 

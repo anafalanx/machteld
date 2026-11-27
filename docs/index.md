@@ -1,15 +1,14 @@
 ---
 type: index
 title: machteld documentation
-description: Documentation for the API-30 development runtime and the integrated 0.50 release plan.
+description: Documentation for the integrated compiler and runtime in Machteld 0.50, with Tcl package API 30.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# Machteld 0.50-dev
+# Machteld 0.50
 
-These pages describe the unsigned development runtime, whose API number is
-`30`. The next public release, 0.50, integrates the typed application
-compiler with the Tcl/Tk runtime.
+These pages describe the typed application compiler and Tcl/Tk runtime
+in Machteld 0.50. Its Tcl package API is `30`.
 The older signed release's own embedded reference and release notes
 describe its behavior. Use the selected executable's
 `manifest`, `docs status`, and (for incremental development builds)

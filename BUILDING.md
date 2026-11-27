@@ -6,9 +6,8 @@ and its packaged application examples. Keep those executables inside the job. CI
 publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
-0.50 is the next public release after signed 0.21. It combines the
-application compiler with the Tcl/Tk runtime. The integrated development
-build reports `0.50-dev` from `machteld.exe --version`. Its Tcl package
+Machteld 0.50 combines the application compiler with the Tcl/Tk runtime.
+`machteld.exe --version` reports `0.50`. Its Tcl package
 API is `30`, also available from `machteld.exe --version --api`. The
 earlier Beta 1 run produced an unsigned test
 ZIP before the current CI policy was adopted.
@@ -146,8 +145,8 @@ Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
 
-For release, set `MACHTELD_PRODUCT_VERSION` to `0.50` in `src/machteld.h`.
-Verify the CLI and Windows version strings report that value and the Windows
+The release label in `src/machteld.h` is `0.50`. Verify that the CLI and
+Windows version strings both report this value and that the Windows
 prerelease flag is clear. Keep the Tcl package API at `30` and the fixed
 Windows version fields at `30.0.0.0`. Test exact and bounded Tcl package
 requirements before freezing the candidate.
