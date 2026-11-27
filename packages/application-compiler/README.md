@@ -591,8 +591,13 @@ to the application's event fault sink after the native child has been released.
 with status `canceled`, exit `-1`, and the delivered byte counts. A cancel
 inside a chunk callback takes effect when that callback returns.
 `close_process(job)` stops silently and suppresses queued delivery. A
-`using $job ::= stream_process(...)? { ... }` scope calls this closer on
-every exit. Both operations accept an already finished handle from the same
+callback can still throw after requesting cancel or close, including when
+its window closes during nested event processing. The application fault
+sink receives that exception once as `process-stdout` or `process-stderr`,
+with its original options. Cancellation keeps its canceled terminal result,
+and explicit closure suppresses the terminal callback. A scoped
+`using $job ::= stream_process(...)? { ... }` calls this closer on every
+exit. Both operations accept an already finished handle from the same
 application. Keep any callback's captured references live until completion
 or close the stream before their scope ends.
 

@@ -452,6 +452,14 @@ window's scope. One test makes the operation fail immediately and another
 lets it reach a worker reply first. In both cases a second window can
 refresh its display, and the fault reaches the application's reporter once.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, errors while ending a stream
+
+A chunk handler can decide that it has enough data, cancel the child,
+and then hit an error while updating its display. The stream now keeps
+its canceled completion and the application receives the display error
+with its original Tcl options. Closing a stream also preserves a later
+handler error. A second child continued sending data after both cases.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

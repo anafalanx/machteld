@@ -45,9 +45,28 @@ switch -- [lindex $argv 0] {
         puts -nonewline stdout [read stdin]
     }
     early {close stdin; puts -nonewline stdout early; exit 9}
+    stderr {puts -nonewline stderr E}
+    gated {
+        set deadline [expr {[clock milliseconds] + 5000}]
+        while {![file exists [lindex $argv 1]]} {
+            if {[clock milliseconds] >= $deadline} {exit 2}
+            after 10
+        }
+        puts -nonewline stdout ready
+    }
     wait {after 5000}
 }}
+    variable namedSource {extern fn .part($name: text, $bytes: bytes) -> result<unit,problem> = ['::receivePart']
+extern fn .done($name: text, $result: result<process_exit,problem>) -> unit = ['::complete']
+export fn .named($name: text, $args: list<text>, $input: bytes) -> result<process_stream,problem> =>
+    stream_process(.helper()?, $args, $input, 16, 8000,
+        bind(.part,$name), bind(.part,$name), bind(.done,$name))
+}
     variable entry {package require machteld
+if {[lindex $argv 0] eq "--retirement"} {
+    source -encoding utf-8 [file join [file dirname [info script]] retirement.tcl]
+    return
+}
 array set ::bytes {stdout {} stderr {}}
 proc ::received {side data} {append ::bytes($side) $data; return {ok {}}}
 proc ::terminal {r} {set ::outcome $r; return {}}
@@ -189,6 +208,7 @@ proc ::streamTest::exercise {exe script} {
     waitFor ::streamTest::closed
     update
     equal [list $terminals [::machteld::child list]] {0 {}} "close inside callback suppresses all later callbacks"
+    equal [::typedStream::@events::last_fault] {} "ordinary cancellation and closure do not report a fault"
     reset
     start $exe [list $script wait] {} 100 100
     lassign [finish] tag r
@@ -249,19 +269,84 @@ proc ::streamTest::invalid {exe work} {
         }
     } finally {set ::env(PATH) $saved; cd $previous}
 }
+# The healthy stream is already running when its siblings fault. Its child
+# writes only after the fault reporter has seen both callbacks.
+set ::streamTest::retirement {package require machteld
+set reports {}
+set completions {}
+set chunks {}
+set finished 0
+set background {}
+interp bgerror {} [list lappend ::background]
+proc ::receivePart {name bytes} {
+    dict append ::chunks $name $bytes
+    if {$name eq "healthy"} {return {ok {}}}
+    ::application::flow::$name [dict get $::jobs $name]
+    return -code error -errorcode [list TEST RETIRED $name] -retiremode $name "$name callback fault"
+}
+proc ::complete {name result} {
+    dict lappend ::completions $name $result
+    if {$name eq "healthy"} {set ::finished 1}
+    return {}
+}
+proc ::saveFault {report} {
+    lappend ::reports $report
+    if {[llength $::reports] == 2} {close [open $::gateFile {WRONLY CREAT EXCL}]}
+}
+proc ::require {condition message} {
+    if {![uplevel 1 [list expr $condition]]} {error "$message, reports=$::reports completions=$::completions"}
+}
+::application::@events::on_fault ::saveFault
+set dir [file tempdir]
+try {
+    set gateFile [file join $dir ready]
+    set helper [lindex $argv 1]
+    foreach {name cmd} [list healthy [list gated $gateFile] cancel {argv C} close stderr] {
+        lassign [::application::flow::named $name [list $helper {*}$cmd] [binary format a0 {}]] tag ticket
+        require {$tag eq "ok"} "failed to start $name"
+        dict set jobs $name $ticket
+    }
+    set timer [after 10000 {set ::finished timeout}]
+    try {if {!$finished} {vwait ::finished}} finally {after cancel $timer}
+    update
+    require {$finished eq "1" && [llength $reports] == 2} "expected one report from each faulting callback"
+    set found {}
+    foreach report $reports {
+        set opts [dict get $report options]
+        set name [dict get $opts -retiremode]
+        require {$name in {close cancel} && ![dict exists $found $name]} "duplicate or unrelated report"
+        dict set found $name 1
+        set operation [expr {$name eq "close" ? "process-stderr" : "process-stdout"}]
+        require {[dict get $report operation] eq $operation && [dict get $report message] eq "$name callback fault"} "original fault identity"
+        require {[dict get $opts -errorcode] eq [list TEST RETIRED $name] && [dict get $opts -appcompilerlocation module] eq "flow"} "original error options and source"
+        require {[string first "$name callback fault" [dict get $opts -errorinfo]] >= 0} "missing Tcl error trace"
+    }
+    require {![dict exists $completions close] && [llength [dict get $completions cancel]] == 1} "close suppressed completion and cancel delivered exactly once"
+    lassign [lindex [dict get $completions cancel] 0] tag result
+    require {$tag eq "ok" && [dict get $result status] eq "canceled"} "canceled status retained"
+    lassign [lindex [dict get $completions healthy] 0] tag result
+    require {$tag eq "ok" && [dict get $result status] eq "ok" && [dict get $chunks healthy] eq "ready"} "other stream completes after both faults"
+    require {$background eq {} && [::machteld::child list] eq {}} "background fault or retained child"
+    puts ok
+} finally {file delete -force -- $dir}
+}
+
 proc ::streamTest::portable {work script packed} {
     variable source
     variable entry
+    variable namedSource
+    variable retirement
     set author [file join $work author]
     set delivery [file join $work {recipient 雪}]
     foreach dir [list $author $delivery] {
         file mkdir [file join $dir bin]
         file copy [info nameofexecutable] [file join $dir bin {byte helper.exe}]
     }
-    write [file join $author flow.src] $source
+    write [file join $author flow.src] "$source\n$namedSource"
     write [file join $author main.tcl] $entry
+    write [file join $author retirement.tcl] $retirement
     set manifest [file join $author project.dict]
-    write $manifest {schema 1 edition 1 minApi 30 tclEntry main.tcl modules {flow flow.src}}
+    write $manifest {schema 1 edition 1 minApi 30 tclEntry main.tcl modules {flow flow.src} assets retirement.tcl}
     set entries [list [list [file join $::appcompiler::compilerDirectory driver.tcl] run $manifest]]
     if {$packed} {
         file copy [info nameofexecutable] [file join $delivery machteld.exe]
@@ -281,6 +366,8 @@ proc ::streamTest::portable {work script packed} {
         set launched [::machteld::run -dir $work -stdin [binary decode hex 4aff004b] -timeout 15s -- $host {*}$args $script echo]
         equal [list [dict get $launched exit] [dict get $launched err]] {0 {}} "source or relocated archive runs"
         equal [string trim [dict get $launched out]] {error 17 4aff004b 00ffc328} "terminal status and separate raw bytes"
+        set retired [::machteld::run -dir $work -timeout 15s -- $host {*}$args --retirement $script]
+        equal [list [dict get $retired exit] [dict get $retired err] [string trim [dict get $retired out]]] {0 {} ok} "self-cancel and self-close faults and an independent stream"
     }
 }
 if {$argv ni {{} -pack}} {error "usage: [file tail [info script]] ?-pack?"}

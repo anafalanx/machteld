@@ -282,12 +282,22 @@ proc streamPump {key} {
             if {[string length $bytes] == 0} continue
             set delivered 1
             dict incr streamJobs($key) ${name}_bytes [string length $bytes]
+            # The callback can retire its own job before it returns or throws.
+            set location [dict get $streamJobs($key) location]
             set callbackCode [catch {[namespace current]::streamCallback [dict get $streamJobs($key) scope] \
                     [dict get $streamJobs($key) $name] $bytes} outcome options]
-            if {![info exists streamJobs($key)]} {return}
-            if {[dict exists $streamJobs($key) canceled]} break
+            if {![info exists streamJobs($key)] || [dict exists $streamJobs($key) canceled]} {
+                # Close suppresses completion; cancel owns the terminal result.
+                # Finish it before a fault sink can reenter the event loop.
+                try {
+                    streamFinish $key canceled
+                } finally {
+                    if {$callbackCode} {reportFault process-$name $outcome $options $location}
+                }
+                return
+            }
             if {$callbackCode} {
-                set origin [mappedLocation $options [sourceMap] [dict get $streamJobs($key) location]]
+                set origin [mappedLocation $options [sourceMap] $location]
                 dict set options -appcompilerlocation $origin
                 set outcome [list err [dict create code PROCESS_CALLBACK message $outcome origin $origin options $options]]
             }

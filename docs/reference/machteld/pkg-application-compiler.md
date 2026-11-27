@@ -249,8 +249,10 @@ accept raw `bytes` and return `result<unit,problem>`. Choose 1 through
 with `result<process_exit,problem>`. The record contains `status`, `exit`,
 `stdout_bytes` and `stderr_bytes`. A successful start immediately returns a
 `process_stream` handle. `cancel_process` delivers a terminal cancellation.
-`close_process` and scope cleanup stop silently. Streams started in a
-typed Tk handler stop silently when its window closes. Streams started
+`close_process` and scope cleanup stop silently. If a chunk handler throws
+after canceling or closing its stream, the application fault sink receives
+the original exception as `process-stdout` or `process-stderr`. Streams
+started in a typed Tk handler stop silently when its window closes. Streams started
 from their chunk or completion callbacks inherit the same owner. The
 compiler guide has a headless event-loop example. For explicit PATH lookup, `find_executable`
 accepts a bare .exe name and searches absolute PATH directories.
