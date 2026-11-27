@@ -313,6 +313,7 @@ oo::class create ::appcompiler::ModuleParser {
     # On a failed check, replay lexical tokens to find an independent
     # declaration. Multiline strings and comments are single tokens. An
     # unclosed block or interpolation does not establish a new top level.
+    # Return 1 at a safe restart, 0 at a balanced end, -1 for an uncertain tail.
     method nextDeclaration {beginning failedAt} {
         my restore $beginning
         set expected {}
@@ -323,8 +324,8 @@ oo::class create ::appcompiler::ModuleParser {
             set currentLine [dict get $token line]
             if {$atLineStart && ![llength $expected] && ($currentLine > $failedLine ||
                     ($currentLine == $failedLine && [dict get $token column] >= [dict get $failedAt column]))} {
-                if {$kind in {export fn extern import record choice alias distinct} ||
-                    ($kind eq "identifier" && [dict get $token value] in {resource tool worker example})} {
+                if {$kind in {export fn extern worker import record choice alias distinct} ||
+                    ($kind eq "identifier" && [dict get $token value] in {resource tool example})} {
                     return 1
                 }
             }
@@ -334,7 +335,7 @@ oo::class create ::appcompiler::ModuleParser {
                 ( {lappend expected )}
                 interpolateStart {lappend expected interpolateEnd}
                 \} - {]} - ) - interpolateEnd {
-                    if {![llength $expected] || [lpop expected] ne $kind} {return 0}
+                    if {![llength $expected] || [lpop expected] ne $kind} {return -1}
                 }
             }
             set atLineStart [expr {$kind eq "newline"}]
@@ -348,84 +349,142 @@ oo::class create ::appcompiler::ModuleParser {
                 }
             }
         }
-        return 0
+        return [expr {[llength $expected] ? -1 : 0}]
     }
 
-    method parse {{prescan 1}} {
+    # A damaged body can hide its declaration, but cannot introduce an
+    # unrelated name. Only use tokens from the declaration's actual head.
+    method missingDeclaration {beginning} {
+        my restore $beginning
         if {[my at start]} {my advance}
-        set imports {}
-        set importLocations {}
-        set functions {}
-        set types {}
-        set resources {}
-        set examples {}
+        my skipLines
+        if {[my at export]} {my advance}
+        set kind [dict get $token kind]
+        if {$kind eq "identifier"} {set kind [dict get $token value]}
+        switch -- $kind {
+            fn - worker - tool - extern {set section functions}
+            record - choice - alias - distinct {set section types}
+            import {set section imports}
+            resource {set section resources}
+            example {return {examples *}}
+            default {return {* *}}
+        }
+        try {
+            my advance
+            if {$kind eq "extern"} {my take fn "'fn' after 'extern'"}
+        } trap {APPCOMPILER DIAGNOSTIC} {} {return [list $section *]}
+        if {$section eq "imports" ? [my at identifier] || [dict get $token kind] in $keywords : [my at dotName]} {
+            return [list $section [dict get $token value]]
+        }
+        return [list $section *]
+    }
+
+    # Return one fully parsed declaration. The caller commits it only after
+    # verifying its boundary, so a truncated definition never enters a scope.
+    method declaration {owner} {
+        set start $token
+        if {[my at identifier] && [dict get $token value] eq "example"} {
+            return [list examples [my example $owner]]
+        }
+        if {[my at identifier] && [dict get $token value] eq "resource"} {
+            my advance
+            set type [my take dotName {the local nominal type of the resource}]
+            set using [my take identifier {'using' before the cleanup function}]
+            if {[dict get $using value] ne "using"} {
+                ::appcompiler::fail E_PARSE_EXPECTED $using {expected 'using' before the cleanup function}
+            }
+            set closer [my take dotName {the local cleanup function}]
+            return [list resources [my node $start resource name [dict get $type value] closer [dict get $closer value] \
+                typeLocation [my node $type type] closerLocation [my node $closer fn]]]
+        }
+        if {[my at import]} {
+            my advance
+            set imported [my take identifier {an imported module name}]
+            return [list imports [my node $imported import name [dict get $imported value]]]
+        }
+        set exported [my at export]
+        if {$exported} {my advance}
+        set kind [dict get $token kind]
+        if {$kind eq "identifier" && [dict get $token value] eq "tool"} {set kind tool}
+        switch -exact -- $kind {
+            tool {
+                my advance
+                return [list functions [my documented $start [my tool $exported]]]
+            }
+            fn - extern - worker {
+                my advance
+                if {$kind eq "extern"} {my take fn "'fn' after 'extern'"}
+                return [list functions [my documented $start [my function $exported $kind]]]
+            }
+            record - choice - alias - distinct {
+                return [list types [my documented $start [my typeDeclaration $exported]]]
+            }
+            default {
+                ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, worker, external function, tool, record, choice, alias, distinct, resource or import declaration}
+            }
+        }
+    }
+
+    method parse {{reportsVar {}}} {
+        if {$reportsVar ne {}} {upvar 1 $reportsVar reports}
+        set definition [dict create imports {} importLocations {} types {} functions {} resources {} examples {}]
         set owner {}
-        if {$prescan && [string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
+        if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
                 [string first alias $source] >= 0 || [string first distinct $source] >= 0)} {
             set beginning [my cursor]
-            try {my collectChoiceNames} trap {APPCOMPILER DIAGNOSTIC} {} {
-                # Report a malformed declaration in source order in the
-                # real parse, after any preceding independent diagnostics.
-                my restore $beginning
-            }
+            try {
+                my advance
+                my collectChoiceNames
+            } trap {APPCOMPILER DIAGNOSTIC} {} {
+                # The real parse reports this error in source order.
+            } finally {my restore $beginning}
         }
-        my skipLines
-        while {![my at eof]} {
-            if {[my at identifier] && [dict get $token value] eq "example"} {
-                lappend examples [my example $owner]
-            } elseif {[my at identifier] && [dict get $token value] eq "resource"} {
-                set owner {}
-                set start $token
-                my advance
-                set type [my take dotName {the local nominal type of the resource}]
-                set using [my take identifier {'using' before the cleanup function}]
-                if {[dict get $using value] ne "using"} {
-                    ::appcompiler::fail E_PARSE_EXPECTED $using {expected 'using' before the cleanup function}
+        while {1} {
+            set beginning [my cursor]
+            try {
+                if {[my at start]} {my advance}
+                my skipLines
+                if {[my at eof]} break
+                set beginning [my cursor]
+                lassign [my declaration $owner] section record
+                if {![my at newline] && ![my at eof]} {
+                    ::appcompiler::fail E_PARSE_EXPECTED $token {expected a line break between declarations}
                 }
-                set closer [my take dotName {the local cleanup function}]
-                lappend resources [my node $start resource name [dict get $type value] closer [dict get $closer value] \
-                    typeLocation [my node $type type] closerLocation [my node $closer fn]]
-            } elseif {[my at import]} {
-                set owner {}
-                my advance
-                set imported [my take identifier {an imported module name}]
-                set name [dict get $imported value]
-                lappend imports $name
-                dict set importLocations $name [my node $imported import name $name]
+            } trap {APPCOMPILER DIAGNOSTIC} {message options} {
+                if {$reportsVar eq {}} {return -options $options $message}
+                set error [dict get $options -diagnostic]
+                lappend reports $error
+                try {
+                    lassign [my missingDeclaration $beginning] missing name
+                } trap {APPCOMPILER DIAGNOSTIC} {} {set missing *; set name *}
+                dict set definition partial $missing $name 1
+                if {$missing eq "functions" && $name ne "*"} {
+                    set owner $name
+                } elseif {$missing ne "examples"} {set owner @unavailable}
+                try {
+                    set resume [my nextDeclaration $beginning [dict get $error node]]
+                } trap {APPCOMPILER DIAGNOSTIC} {message options} {
+                    set next [dict get $options -diagnostic]
+                    if {[dict get $next node line] > [dict get $error node line]} {lappend reports $next}
+                    dict set definition partial * * 1
+                    break
+                }
+                if {$resume < 0} {dict set definition partial * * 1}
+                if {$resume <= 0} break
+                continue
+            }
+            if {$section eq "imports"} {
+                set name [dict get $record name]
+                dict lappend definition imports $name
+                dict set definition importLocations $name $record
             } else {
-                set start $token
-                set exported [my at export]
-                if {$exported} { my advance }
-                set declaration [dict get $token kind]
-                if {[my at identifier] && [dict get $token value] eq "tool"} {set declaration tool}
-                switch -exact -- $declaration {
-                    tool {
-                        my advance
-                        set function [my documented $start [my tool $exported]]
-                        lappend functions $function
-                        set owner [dict get $function name]
-                    }
-                    fn - extern - worker {
-                        set kind [dict get $token kind]
-                        my advance
-                        if {$kind eq "extern"} { my take fn "'fn' after 'extern'" }
-                        set function [my documented $start [my function $exported $kind]]
-                        lappend functions $function
-                        set owner [dict get $function name]
-                    }
-                    record - choice - alias - distinct {
-                        set owner {}
-                        lappend types [my documented $start [my typeDeclaration $exported]]
-                    }
-                    default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, worker, external function, tool, record, choice, alias, distinct, resource or import declaration}
-                    }
-                }
+                dict lappend definition $section $record
             }
-            if {![my at eof]} { my take newline {a line break between declarations} }
-            my skipLines
+            if {$section eq "functions"} {
+                set owner [dict get $record name]
+            } elseif {$section ne "examples"} {set owner {}}
         }
-        return [dict create imports $imports importLocations $importLocations types $types functions $functions resources $resources examples $examples]
+        return $definition
     }
 
     method documented {start declaration} {
@@ -1209,29 +1268,6 @@ proc ::appcompiler::parseModule {module source {reportsVar {}}} {
     try {
         if {$reportsVar eq {}} {return [$parser parse]}
         upvar 1 $reportsVar reports
-        set first 1
-        while {1} {
-            set beginning [$parser cursor]
-            try {
-                set parsed [$parser parse $first]
-            } trap {APPCOMPILER DIAGNOSTIC} {message options} {
-                set error [dict get $options -diagnostic]
-                lappend reports $error
-                try {
-                    set resume [$parser nextDeclaration $beginning [dict get $error node]]
-                } trap {APPCOMPILER DIAGNOSTIC} {message options} {
-                    # The lexer can encounter the original error again. A
-                    # later lexical failure also ends safe resynchronization.
-                    set next [dict get $options -diagnostic]
-                    if {[dict get $next node line] > [dict get $error node line]} {lappend reports $next}
-                    return {}
-                }
-                if {!$resume} {return {}}
-                set first 0
-                continue
-            }
-            if {!$first} {return {}}
-            return $parsed
-        }
+        return [$parser parse reports]
     } finally { $parser destroy }
 }

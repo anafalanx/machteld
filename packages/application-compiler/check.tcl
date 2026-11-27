@@ -62,6 +62,13 @@ proc ::appcompiler::checker::checkedType {head argsList node reportsVar} {
     return [makeType $head $argsList]
 }
 
+# Recovery keeps the names of discarded declarations whenever their heads
+# were readable. An ambiguous tail can hide any declaration in that module.
+proc ::appcompiler::checker::possiblyMissing {world module section name} {
+    set missing [dict getdef $world modules $module partial {}]
+    return [expr {[dict exists $missing * *] || [dict exists $missing $section *] || [dict exists $missing $section $name]}]
+}
+
 # Nominal types include the defining module. A '*' is an internal inference
 # variable for an absent payload. An empty type marks a prior diagnostic.
 proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemplate 0}} {
@@ -131,13 +138,17 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
     set caller [dict get $node module]
     if {$target eq ""} { set target $caller }
     if {$target ne $caller && $target ni [dict get $world modules $caller imports]} {
-        issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
+        if {![possiblyMissing $world $caller imports $target]} {
+            issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
+        }
         return ""
     }
     if {![dict exists $world modules $target]} { return "" }
     set key [format {.%s::%s} $target $name]
-    if {![dict exists $world schemas $key]} {
-        issue reports UNKNOWN_TYPE $node "unknown type '$type' in module '$target'"
+    if {![dict exists $world schemas $key] || [dict exists $world modules $target partial types $name]} {
+        if {![possiblyMissing $world $target types $name]} {
+            issue reports UNKNOWN_TYPE $node "unknown type '$type' in module '$target'"
+        }
         return ""
     }
     set schema [dict get $world schemas $key]
@@ -294,14 +305,18 @@ proc ::appcompiler::checker::resourceProtocols {world reportsVar} {
             }
             dict set protocols $type {}
             if {[dict getdef $world schemas $type kind {}] ni {record choice distinct}} {
-                issue reports RESOURCE_TYPE $where "a resource must name a record, choice or distinct type declared in this module"
+                if {![possiblyMissing $world $module types [dict get $node name]]} {
+                    issue reports RESOURCE_TYPE $where "a resource must name a record, choice or distinct type declared in this module"
+                }
                 continue
             }
             set name [dict get $node closer]
             set where [dict get $node closerLocation]
             set function [dict getdef $world functions $module $name {}]
             if {$function eq ""} {
-                issue reports RESOURCE_CLOSER $where "cleanup function '.$name' must be declared in module '$module'"
+                if {![possiblyMissing $world $module functions $name]} {
+                    issue reports RESOURCE_CLOSER $where "cleanup function '.$name' must be declared in module '$module'"
+                }
                 continue
             }
             set params [dict get $function params]
@@ -310,6 +325,7 @@ proc ::appcompiler::checker::resourceProtocols {world reportsVar} {
             set parts [::appcompiler::typeParts [dict getdef $formal type {}]]
             set arguments [lrange $parts 1 end]
             set result [dict get $function result]
+            if {[llength $params] == 1 && ([dict get $formal type] eq "" || $result eq "")} {continue}
             if {[llength $params] != 1 || [lindex $parts 0] ne $type ||
                     [lsort -ascii $arguments] ne [lsort -ascii $variables] ||
                     $result ni {unit result<unit,problem>}} {
@@ -346,6 +362,7 @@ proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
         return
     }
     if {![dict exists $world resources $head]} {
+        if {[regexp {^\.([^:]+)::(.+)$} $head -> owner name] && [possiblyMissing $world $owner resources $name]} {return}
         issue reports RESOURCE_REQUIRED [dict get $node value] "no scoped cleanup function is declared for $type"
         return
     }
@@ -353,7 +370,7 @@ proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
     if {$protocol eq ""} {return}
     set fallible [dict get $protocol fallible]
     set result [::appcompiler::typeParts [dict get $world returnType]]
-    if {$fallible && ([lindex $result 0] ne "result" || [lindex $result 2] ne "problem")} {
+    if {$fallible && [dict get $world returnType] ne "" && ([lindex $result 0] ne "result" || [lindex $result 2] ne "problem")} {
         issue reports RESOURCE_PROPAGATION $node "fallible cleanup requires an enclosing function returning result<T,problem>"
         return
     }
@@ -823,12 +840,16 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
     if {$target eq ""} {
         set target $caller
     } elseif {$target ne $caller && $target ni $imports} {
-        issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
+        if {![possiblyMissing $world $caller imports $target] && ![possiblyMissing $world $caller types $target]} {
+            issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
+        }
         return ""
     }
     if {![dict exists $world functions $target]} { return "" }
-    if {![dict exists $world functions $target $name]} {
-        issue reports UNKNOWN_FUNCTION $node "unknown function '.$name' in module '$target'"
+    if {![dict exists $world functions $target $name] || [dict exists $world modules $target partial functions $name]} {
+        if {![possiblyMissing $world $target functions $name]} {
+            issue reports UNKNOWN_FUNCTION $node "unknown function '.$name' in module '$target'"
+        }
         return ""
     }
     set function [dict get $world functions $target $name]
@@ -1908,12 +1929,15 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
 
 # Check template bodies once, and check the arguments of every specialization.
 # This terminates even on a recursive type that grows a type argument.
-proc ::appcompiler::checker::workerData {root world} {
+proc ::appcompiler::checker::workerData {root world {skipUnresolved 0}} {
     set pending [list $root]
     set seen {}
     while {[llength $pending]} {
         set type [lindex $pending end]
         set pending [lreplace $pending end end]
+        # During diagnostic collection the field declaration already reported
+        # its missing type. Other, resolved capability fields still get checked.
+        if {$type eq "" && $skipUnresolved} continue
         set parts [::appcompiler::typeParts $type]
         set head [lindex $parts 0]
         lappend pending {*}[lrange $parts 1 end]
@@ -1940,14 +1964,16 @@ proc ::appcompiler::checker::checkWorker {function world reportsVar} {
     upvar 1 $reportsVar reports
     dict set reports usesWorkers 1
     set params [dict get $function params]
-    lassign [::appcompiler::typeParts [dict get $function result]] head reply error
-    if {[llength $params] != 1 || [llength [dict get $function typeParams]] || $head ne "result" || $error ne "problem"} {
+    set result [dict get $function result]
+    lassign [::appcompiler::typeParts $result] head reply error
+    if {[llength $params] != 1 || [llength [dict get $function typeParams]] ||
+            ($result ne "" && ($head ne "result" || $error ne "problem"))} {
         issue reports WORKER_SIGNATURE $function {a worker takes one concrete request and returns result<Reply,problem>}
         return
     }
     set param [lindex $params 0]
     foreach type [list [dict get $param type] $reply] location [list $param [dict get $function resultLocation]] {
-        if {$type ne "" && ![workerData $type $world]} {
+        if {$type ne "" && ![workerData $type $world 1]} {
             issue reports WORKER_MESSAGE $location "worker messages require declared portable data throughout '$type'"
         }
     }
@@ -1959,7 +1985,7 @@ proc ::appcompiler::checker::checkExample {example imports world reportsVar} {
     set actual [dict get $example actual]
     set owner [dict get $example owner]
     set type ""
-    if {$owner eq "" || $owner ne [dict get $actual name]} {
+    if {$owner ne "@unavailable" && $owner ne [dict get $actual name]} {
         issue reports EXAMPLE_OWNER $actual "an example must call the function declared immediately before it"
         argumentTypes $actual {} $imports $world reports
     } else {

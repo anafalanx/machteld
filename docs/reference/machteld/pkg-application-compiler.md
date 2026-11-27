@@ -106,6 +106,14 @@ Negative or out-of-range indices return `none`. Use
 `require_index($names, $i)?` to propagate an `INDEX_OUT_OF_RANGE` problem
 when an element is required.
 
+## Source checking
+
+`project check --json` reports source spans for independent parse and
+type errors. When a declaration is malformed, intact declarations in the
+same file and calls to intact exports in other modules still receive type
+checks. Fix the original declaration before relying on calls or types
+that depend on it. A failed check prevents execution and packing.
+
 ## Argument labels
 
 Authors can require names at X call sites. A parameter declared as
