@@ -212,6 +212,13 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         int  {return [emitIntegerWord [dict get $node value]]}
         decimal {return [list [decimal::canonical [dict get $node value]]]}
         text {return [emitTextWord [dict get $node value]]}
+        list {
+            set words [list ::list]
+            foreach item [dict get $node items] {
+                lappend words [emitExpression $item $context $bindings $depth]
+            }
+            return [format {[%s]} [join $words { }]]
+        }
         interpolate {
             # Each segment is one Tcl word. Command substitutions run from
             # left to right and a propagated error skips the remaining words.
@@ -374,6 +381,13 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 unit {return [list ::list]}
                 map {return [list ::dict create]}
                 bind {return [list [list ${target}::@rt::bindCallback]]}
+                len {
+                    switch -- [dict get $facts lengthKind] {
+                        list {return [list ::llength]}
+                        map {return [list ::dict size]}
+                        text - bytes {return [list ::string length]}
+                    }
+                }
                 map_put {return [list ::dict replace]}
                 require_key {return [list [list ${target}::@rt::require_key]]}
                 sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}

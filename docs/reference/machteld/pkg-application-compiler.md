@@ -52,6 +52,14 @@ Use `match` on a `result<T,E>` to handle each outcome locally.
 are required. A nested match can inspect an application's declared error
 variants. Use `?` to propagate the typed failure to the caller.
 
+## List literals and length
+
+`[1, 2, 3]` builds a `list<int>`. Elements evaluate once from left to
+right. The declared return type in `fn .names() -> list<text> => []`
+supplies the type of the empty list. In `[[], ['007']]`, the second
+element supplies the missing type. Use `len(value)` to count list
+elements, map entries, bytes or Unicode code points in text.
+
 ## Argument labels
 
 Authors can require names at X call sites. A parameter declared as

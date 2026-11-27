@@ -462,6 +462,30 @@ An exact quotient already within the requested scale returns without padding.
 Run `machteld.exe test/application_compiler_decimal_test.tcl` for the
 source-level and generated-Tcl arithmetic checks.
 
+## List values and lengths
+
+Write `['007', '7']` for a `list<text>`. A list can span lines and have a
+trailing comma. Its elements are evaluated once in source order. If an
+element propagates a failure with `?`, later elements are skipped.
+Each element must have the same type. A nested list can take its element
+type from a sibling, as in `[[], [7]]`.
+
+```text
+fn .empty_names() -> list<text> => []
+fn .lengths($word: text, $notes: list<text>) -> list<int> =>
+    [len($word), len($notes)]
+```
+
+A parameter, return type or existing binding can supply the element type
+of `[]`. A new local list binding needs a concrete element type. For
+example, `$names := .empty_names()` declares an initially empty, mutable
+`list<text>`. A Tcl caller receives an ordinary Tcl list with one word per
+element, including empty strings and strings that contain spaces.
+
+`len(value)` returns an `int`. It counts list elements, map entries, raw
+bytes or Unicode code points, according to the type of its argument.
+`len([])` is zero. Combining marks each count as a code point.
+
 ## Iteration
 
 `for $value in $items` visits a list in order and binds one complete

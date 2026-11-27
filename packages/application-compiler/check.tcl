@@ -479,7 +479,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     }
     switch -exact -- $name {
         bind {return [callableOperation $node bind $actual reports]}
-        ok - err - encode_json - underlying { set params [list *] }
+        ok - err - encode_json - underlying - len { set params [list *] }
         make {
             set location [lindex [dict getdef $node typeLocations {}] 0]
             if {$location eq ""} { set location $node }
@@ -532,6 +532,16 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     }
     if {!$valid} { return "" }
     switch -exact -- $name {
+        len {
+            set type [lindex $actual 0]
+            set head [lindex [::appcompiler::typeParts $type] 0]
+            if {$head ni {list map bytes text}} {
+                issue reports ARGUMENT_TYPE [lindex [dict get $node args] 0] "'len' requires list, map, bytes or text, got $type"
+                return ""
+            }
+            fact reports $node lengthKind $head
+            return int
+        }
         make { return $nominal }
         underlying {
             set type [lindex $actual 0]
@@ -1344,6 +1354,26 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             dict set reports usesProcess 1
             return result<text,problem>
         }
+        list {
+            set element *
+            set valid 1
+            foreach item [dict get $node items] {
+                set type [expressionType $item $scope $imports $world reports]
+                if {$type eq ""} {
+                    set valid 0
+                    continue
+                }
+                set joined [joinTypes $element $type]
+                if {$joined eq ""} {
+                    issue reports LIST_ELEMENT_TYPE $item "list element expects $element, got $type"
+                    set valid 0
+                } else {
+                    set element $joined
+                }
+            }
+            if {!$valid} {return ""}
+            return [checkedType list [list $element] $node reports]
+        }
         interpolate {
             set valid 1
             foreach part [dict get $node parts] {
@@ -1486,6 +1516,9 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                     set head [lindex [::appcompiler::typeParts $type] 0]
                     if {$head eq "optional"} {
                         issue reports OPTIONAL_TYPE_REQUIRED $value "cannot infer an optional payload type from this expression"
+                        set type ""
+                    } elseif {$head eq "list"} {
+                        issue reports INCOMPLETE_TYPE $value "a list binding needs a concrete element type"
                         set type ""
                     } elseif {$mutable} {
                         issue reports INCOMPLETE_TYPE $value "a changeable binding needs a concrete type"
