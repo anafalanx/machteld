@@ -89,7 +89,7 @@ proc ::appcompiler::compile {sources {targetNamespace ::application}} {
 
 # Produce a complete Machteld Tcl entry without running the application.
 # The selected entry may be private to its module.
-proc ::appcompiler::application {sources entryModule {entryFunction main}} {
+proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}}} {
     set analysis [analyze $sources]
     set modules [dict get $analysis modules]
     if {![llength [dict get $analysis diagnostics]]} {
@@ -115,22 +115,33 @@ proc ::appcompiler::application {sources entryModule {entryFunction main}} {
     set artifact [emitChecked $analysis ::application]
     set entry ::application::${entryModule}::${entryFunction}
     set dispatch [list ::application::@rt::launch $entry [dict get $artifact sourceMap]]
-    set script "package require machteld\n[dict get $artifact script]\n"
+    set requirement [list package require machteld]
+    if {$minApi ne {}} {
+        if {[catch {package vcompare $minApi $minApi}]} {
+            return -code error -errorcode {APPCOMPILER CONFIG VERSION} "invalid minimum Machteld API [list $minApi]"
+        }
+        lappend requirement "$minApi-"
+    }
+    set script "$requirement\n[dict get $artifact script]\n"
     append script "::exit \[$dispatch \$::argv\]\n"
     dict set artifact script $script
     return $artifact
 }
 
-source -encoding utf-8 [file join [file dirname [info script]] types.tcl]
-source -encoding utf-8 [file join [file dirname [info script]] parser.tcl]
-source -encoding utf-8 [file join [file dirname [info script]] check.tcl]
-source -encoding utf-8 [file join [file dirname [info script]] emit.tcl]
-apply {{dir} {
-    set ch [open [file join $dir host.tcl] rb]
+namespace eval ::appcompiler {
+    variable compilerDirectory [file dirname [file normalize [info script]]]
+    set modules {types.tcl parser.tcl check.tcl emit.tcl project.tcl project_pack.tcl}
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl host.tcl {*}$modules]
+    foreach module $modules {
+        source -encoding utf-8 [file join $compilerDirectory $module]
+    }
+    unset module modules
+    set ch [open [file join $compilerDirectory host.tcl] rb]
     try {
-        set ::appcompiler::hostDefinitions [encoding convertfrom -profile strict utf-8 [read $ch]]
+        variable hostDefinitions [encoding convertfrom -profile strict utf-8 [read $ch]]
     } finally {
         close $ch
+        unset ch
     }
-}} [file dirname [info script]]
+}
 package provide application-compiler 0.1

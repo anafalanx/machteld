@@ -63,3 +63,64 @@ same byte and error checks against a relocated archive. Run
 `machteld.exe test/application_compiler_archive_test.tcl` to check
 recompilation from bundled sources with only the executable and archive
 in the delivery directory.
+
+## File-backed applications
+
+The development driver accepts a UTF-8 project dictionary. The following
+manifest selects a module at `src/main.src` and an optional binary asset.
+Paths are relative to the manifest. Module identifiers are case-sensitive.
+
+```tcl
+schema 1
+edition 1
+minApi 0.21
+entry {app main}
+modules {app src/main.src}
+assets {assets/logo.png}
+```
+
+`schema` versions the manifest format. `edition` selects the source language
+rules, and `minApi` sets the minimum Machteld version for building on a
+Machteld host and for running the generated program. Remove the `assets`
+line if the application has none. The manifest and its module table are Tcl
+dictionaries read as data. Use list quoting for paths containing spaces.
+
+From the repository root, run the development driver with the local executable.
+
+```text
+machteld.exe tools/application_project.tcl check project.dict
+machteld.exe tools/application_project.tcl run project.dict argument
+machteld.exe tools/application_project.tcl pack project.dict sample.machteld
+machteld.exe sample.machteld argument
+machteld.exe tools/application_project.tcl rebuild sample.machteld rebuilt.machteld
+```
+
+`check` validates every declared input and the entry signature without
+starting the app. `run` forwards each argument after the manifest, including
+empty arguments, and the application inherits standard input and output.
+`pack` and `rebuild` require an archive-capable host. A working archive
+is replaced only after the replacement has been built and checked.
+
+The archive contains the generated `main.tcl` with its source map, the
+compiler under `compiler/`, and the original manifest at
+`project/inputs/application.dict`. The declared source and asset files keep
+their relative paths and exact bytes under `project/inputs/`. The path
+`application.dict` in that directory is reserved for the manifest.
+
+A recipient with only the archive and an archive-capable `machteld.exe`
+can also rebuild it. From their directory, start `machteld.exe` in a
+terminal and enter this Tcl at the prompt. The new archive uses the
+compiler bundled with the application.
+
+```tcl
+set root [zipfs mount sample.machteld build]
+try {
+    ::machteld::ArchiveEntry $root
+    source -encoding utf-8 [file join $root compiler compiler.tcl]
+    ::appcompiler::project::pack [file join $root project inputs application.dict] rebuilt.machteld
+} finally {zipfs unmount $root}
+```
+
+Run `machteld.exe test/application_compiler_project_test.tcl` to check
+the file-backed driver. Add `-pack` on an archive-capable host to include
+relocation, source-free rebuild and the two-file terminal workflow.
