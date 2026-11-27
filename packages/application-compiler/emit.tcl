@@ -261,6 +261,13 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {$kind eq "builtin" && [dict get $node name] in {map_put require_key}} {
                 lset arguments 1 [emitMapKeyWord $node $context [lindex $arguments 1]]
             }
+            if {$kind eq "builtin" && [dict get $node name] in {sql_one sql_optional sql_many}} {
+                set types [dict get [emitFacts $node $context] sqlBindings]
+                set values [format {[::list %s]} [join [lrange $arguments 2 end] { }]]
+                lappend words {*}[lrange $arguments 0 1] [list $types] $values
+                return [format {[%s [%s] %s]} [list ${targetNamespace}::@rt::atResult] \
+                    [join $words { }] [list [emitLocation $node]]]
+            }
             lappend words {*}$arguments
             return [format {[%s]} [join $words { }]]
         }
@@ -324,6 +331,9 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 ok - err {return [list ::list $name]}
                 decode_json - encode_json {
                     return [list [list ${target}::@rt::${name}] [list [dict get $facts schema]]]
+                }
+                sql_one - sql_optional - sql_many {
+                    return [list [list ${target}::@rt::sqlRead] [string range $name 4 end] [list [dict get $facts schema]]]
                 }
                 problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 {
                     return [list [list ${target}::@rt::${name}]]

@@ -295,7 +295,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     set name [dict get $node name]
     set actual [argumentTypes $node $scope $imports $world reports]
     set generic [dict getdef $node typeArgs {}]
-    set count [dict getdef {decode_json 1 make 1 map 2} $name 0]
+    set count [dict getdef {decode_json 1 make 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
     if {[llength $generic] != $count} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
@@ -317,6 +317,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         decode_text - preview_text { set params {bytes text} }
         read_stdin_bytes - map { set params {} }
         map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
+        sql_one - sql_optional - sql_many { return [sqlCall $node $name $actual $world reports] }
         quotient { set params {int int} }
         divide_rounded { set params {numeric numeric int text} }
         default {
@@ -373,6 +374,61 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         quotient { return result<int,problem> }
         divide_rounded { return result<decimal,problem> }
     }
+}
+
+proc ::appcompiler::checker::sqlScalar {type distinctBases} {
+    if {[string index $type end] eq "?"} { set type [string range $type 0 end-1] }
+    return [expr {[dict getdef $distinctBases $type $type] in {int decimal text bytes bool}}]
+}
+
+proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
+    upvar 1 $reportsVar reports
+    set valid 1
+    set count [llength $actual]
+    if {$count < 2} {
+        issue reports CALL_ARITY $node "'$name' expects at least 2 arguments, got $count"
+        set valid 0
+    }
+    set bases [dict get $reports distinctBases]
+    set index 0
+    foreach type $actual arg [dict get $node args] {
+        if {$type eq ""} {
+            set valid 0
+        } elseif {$index < 2} {
+            if {$type ne "text"} {
+                issue reports ARGUMENT_TYPE $arg "'$name' expects text, got $type"
+                set valid 0
+            }
+        } elseif {$type ne "*?" && ![sqlScalar $type $bases]} {
+            issue reports SQL_BIND_TYPE $arg "'$name' cannot bind $type as a SQLite value"
+            set valid 0
+        }
+        incr index
+    }
+    set location [lindex [dict get $node typeLocations] 0]
+    set row [declaredType [lindex [dict get $node typeArgs] 0] $location $world reports]
+    if {$row eq ""} { return "" }
+    if {[dict getdef $world schemas $row kind {}] ne "record"} {
+        issue reports EXPECTED_RECORD $location "'$name' requires a record row type, got $row"
+        return ""
+    }
+    dict for {field type} [dict get $world schemas $row members] {
+        if {$type eq ""} {
+            set valid 0
+        } elseif {![sqlScalar $type $bases]} {
+            issue reports SQL_FIELD_TYPE $location "row field '$field' has type $type, which cannot hold a SQLite cell"
+            set valid 0
+        }
+    }
+    if {!$valid} { return "" }
+    dict set reports usesSql 1
+    fact reports $node schema $row
+    fact reports $node sqlBindings [lrange $actual 2 end]
+    switch -exact -- $name {
+        sql_optional { set row [makeType optional [list $row]] }
+        sql_many { set row [makeType list [list $row]] }
+    }
+    return [makeType result [list $row problem]]
 }
 
 proc ::appcompiler::checker::mapParts {type base reportsVar} {
@@ -575,30 +631,46 @@ proc ::appcompiler::checker::listMatchType {node element scope imports world rep
     return ""
 }
 
+proc ::appcompiler::checker::matchVariants {type world} {
+    if {[string index $type end] eq "?"} {
+        return [dict create none {} some [list [string range $type 0 end-1]]]
+    }
+    return [dict get $world schemas $type members]
+}
+
 # Check the variant and its payload independently of any shared arm body.
 proc ::appcompiler::checker::choicePattern {arm choice world seenVar coverageVar reportsVar} {
     upvar 1 $seenVar seen $coverageVar coverageKnown $reportsVar reports
     set valid 1
     set location [dict getdef $arm typeLocation $arm]
     set variantLocation [dict getdef $arm variantLocation $arm]
-    set pattern [declaredType [dict get $arm type] $location $world reports]
+    if {[dict get $arm kind] eq "optionalArm"} {
+        set pattern $choice
+        if {$choice ne "" && [string index $choice end] ne "?"} {
+            issue reports PATTERN_TYPE $arm "an optional pattern cannot match $choice"
+            set pattern ""
+        }
+    } else {
+        set pattern [declaredType [dict get $arm type] $location $world reports]
+        if {$pattern ne "" && [dict getdef $world schemas $pattern kind {}] ne "choice"} {
+            issue reports EXPECTED_CHOICE $location "expected a closed choice in the pattern, got $pattern"
+            set pattern ""
+        }
+    }
     set name [dict get $arm variant]
     set payload {}
     set knownVariant 0
+    set members [expr {$pattern eq "" ? {} : [matchVariants $pattern $world]}]
     if {$pattern eq ""} {
         set valid 0
         set coverageKnown 0
-    } elseif {[dict getdef $world schemas $pattern kind {}] ne "choice"} {
-        issue reports EXPECTED_CHOICE $location "expected a closed choice in the pattern, got $pattern"
-        set valid 0
-        set coverageKnown 0
-    } elseif {![dict exists $world schemas $pattern members $name]} {
+    } elseif {![dict exists $members $name]} {
         issue reports UNKNOWN_VARIANT $variantLocation "unknown variant '$name' on $pattern"
         set valid 0
         set coverageKnown 0
     } else {
         set knownVariant 1
-        set payload [dict get $world schemas $pattern members $name]
+        set payload [dict get $members $name]
         if {$choice ne "" && $pattern ne $choice} {
             issue reports PATTERN_TYPE $arm "expected a variant of $choice, got $pattern"
             set valid 0
@@ -689,19 +761,20 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     set value [dict get $node value]
     set choice [expressionType $value $scope $imports $world reports]
     set parts [::appcompiler::typeParts $choice]
-    if {[lindex $parts 0] eq "list"} {
+    set head [lindex $parts 0]
+    if {$head eq "list"} {
         return [listMatchType $node [lindex $parts 1] $scope $imports $world reports]
     }
     set arms [dict get $node arms]
-    if {[llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
+    if {$head ne "optional" && [llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
             && [dict getdef $world schemas $choice kind {}] ne "choice"} {
         if {$choice ne ""} {
             issue reports EXPECTED_LIST $value "expected a list for these patterns, got $choice"
         }
         return [listMatchType $node "" $scope $imports $world reports]
     }
-    if {$choice ne "" && [dict getdef $world schemas $choice kind {}] ne "choice"} {
-        issue reports EXPECTED_CHOICE $value "expected a closed choice, got $choice"
+    if {$choice ne "" && $head ne "optional" && [dict getdef $world schemas $choice kind {}] ne "choice"} {
+        issue reports EXPECTED_CHOICE $value "expected a closed choice or optional, got $choice"
         set choice ""
     }
     set seen {}
@@ -709,7 +782,7 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     set valid [expr {$choice ne ""}]
     set coverageKnown $valid
     foreach arm [dict get $node arms] {
-        if {[dict get $arm kind] in {arm armGroup}} {
+        if {[dict get $arm kind] in {arm optionalArm armGroup}} {
             set alternatives [dict getdef $arm alternatives [list $arm]]
             set local [choiceArmScope $alternatives $choice $world seen coverageKnown valid reports]
         } else {
@@ -731,7 +804,7 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     # diagnostic is sufficient until the intended variant is known.
     if {$coverageKnown} {
         set absent {}
-        foreach name [dict keys [dict get $world schemas $choice members]] {
+        foreach name [dict keys [matchVariants $choice $world]] {
             if {![dict exists $seen $name]} { lappend absent $name }
         }
         if {[llength $absent]} {
@@ -1169,7 +1242,8 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     }
     if {$resolvedVar ne ""} {
         upvar 1 $resolvedVar resolved
-        set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions]]
+        set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
+            usesSql [dict getdef $reports usesSql 0]]
     }
     return [dict get $reports diagnostics]
 }

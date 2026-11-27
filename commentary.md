@@ -279,6 +279,14 @@ accent. Splitting the query into words in Tcl made the spelling miss its own
 page. The bundled SQLite FTS5 tokenizer recognized both spellings.
 Using it for the query and the index lets a recipient find the page offline.
 
+### 2026-11-27 · machteld 30 candidate (baeecad) · comment · Codex, typed SQL reads
+
+Reading a nullable note showed why the SQLite binding exposes each cell's
+storage class. With `db eval -typed`, an empty result, a row containing NULL,
+and a row containing empty text reached a packed application as three distinct
+values. Statement inspection also caught a misspelled output label when the
+query returned zero rows.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

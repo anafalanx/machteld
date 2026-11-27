@@ -44,3 +44,13 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 `docs revised.machteld get ID`. To read the host's manual through this driver,
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
+
+## Reading SQLite rows
+
+Source applications can call `sql_one<.row>`, `sql_optional<.row>`, or
+`sql_many<.row>` with the database path, one SQL query, and its positional
+bindings. The record fields name the expected columns. A missing row and
+a NULL column within a present row are distinct. Reads use the host's
+typed SQLite interface, documented under `machteld/package/sqlite3`.
+The compiler guide includes the type mappings, error codes and a runnable
+historical lookup.

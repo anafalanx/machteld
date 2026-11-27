@@ -1,0 +1,5 @@
+schema 1
+edition 1
+minApi 30
+entry {history main}
+modules {history history.src}

@@ -1,0 +1,52 @@
+record .request {
+    id: text
+    at: int
+}
+
+## One observation valid from its start through the instant before its end.
+export record .observation {
+    id: text
+    starts: int
+    note: text?
+}
+
+## Returns the single observation covering an instant, or none for a gap.
+## Overlapping observations fail with CARDINALITY.
+export fn .active_at($path: text, $id: text, $at: int) -> result<.observation?,problem> =>
+    sql_optional<.observation>($path,
+        'SELECT entity AS id, starts, note
+           FROM observations
+          WHERE entity = ?1 AND starts <= ?2 AND ?2 < ends',
+        $id, $at)
+
+fn .describe($observation: .observation?) -> text =>
+    match $observation {
+        none => 'no row'
+        some($row) => match $row.note {
+            none => 'row with NULL note'
+            some($note) => $"note=[$note]"
+        }
+    }
+
+## Describes a gap, a nullable note or the note text at an instant.
+export fn .describe_at($path: text, $id: text, $at: int) -> result<text,problem> =>
+    ok(.describe(.active_at($path, $id, $at)?))
+example .describe_at('history.db', '007', 9) => 'no row'
+example .describe_at('history.db', '007', 10) => 'row with NULL note'
+example .describe_at('history.db', '007', 20) => 'note=[]'
+example .describe_at('history.db', '007', 31) => 'note=[ready]'
+example .describe_at('history.db', '007', 34) => error 'CARDINALITY'
+example .describe_at('history.db', '7', 31) => 'no row'
+example .describe_at('history.db', '007', 40) => 'no row'
+
+fn .lookup($path: text) -> result<unit,problem> {
+    $request ::= decode_json<.request>(decode_utf8(read_stdin_bytes()?)?)?
+    $description ::= .describe_at($path, $request.id, $request.at)?
+    return write_stdout_utf8($"$description\n")
+}
+
+fn .main($args: list<text>) -> result<unit,problem> =>
+    match $args {
+        [$path] => .lookup($path)
+        _ => err(problem('usage: history.machteld DATABASE (supply a JSON request on stdin)'))
+    }

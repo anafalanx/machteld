@@ -906,24 +906,34 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method choicePattern {} {
-        # A local pattern has two components (.type::case); an imported
-        # pattern has three (.module::type::case).
-        set start [my take dotName {a dot-prefixed choice type in the match pattern}]
-        set type ".[dict get $start value]"
-        set typeEnd $start
-        my take :: {'::' before the choice variant}
-        set variant [my take identifier {a choice variant name}]
-        if {[my at ::]} {
-            append type :: [dict get $variant value]
-            set typeEnd $variant
+        set start $token
+        if {[my at none] || [my at some]} {
+            set kind optionalArm
+            set annotation {}
+            set variant $start
             my advance
+        } else {
+            # A local pattern has two components (.type::case); an imported
+            # pattern has three (.module::type::case).
+            my take dotName {a dot-prefixed choice type, none or some in a match pattern}
+            set kind arm
+            set type ".[dict get $start value]"
+            set typeEnd $start
+            my take :: {'::' before the choice variant}
             set variant [my take identifier {a choice variant name}]
+            if {[my at ::]} {
+                append type :: [dict get $variant value]
+                set typeEnd $variant
+                my advance
+                set variant [my take identifier {a choice variant name}]
+            }
+            set annotation [dict create type $type typeLocation [my typeLocation $start $typeEnd $type]]
         }
         set bindings {}
         set end $variant
         if {[my at (]} { set bindings [my parenthesized choicePayload end] }
         set name [dict get $variant value]
-        return [my node $start arm type $type typeLocation [my typeLocation $start $typeEnd $type] \
+        return [my node $start $kind {*}$annotation \
                 variant $name variantLocation [my node $variant variant name $name] bindings $bindings \
                 endLine [dict get $end endLine] endColumn [dict get $end endColumn]]
     }

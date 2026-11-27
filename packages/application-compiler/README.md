@@ -333,6 +333,94 @@ map built-in names are provisional.
 Run `machteld.exe test/application_compiler_map_test.tcl` for the map
 regressions.
 
+## Typed SQLite reads
+
+Declare a record for one result row and supply a path to an existing
+SQLite database. The arguments after the SQL text are bound values.
+
+```text
+record .observation {
+    id: text
+    note: text?
+}
+
+fn .active_at($db: text, $id: text, $at: int) -> result<.observation?,problem> =>
+    sql_optional<.observation>($db,
+        'SELECT entity AS id, note FROM observations
+          WHERE entity = ?1 AND starts <= ?2 AND ?2 < ends',
+        $id, $at)
+```
+
+| Read | Successful payload | Row count |
+| --- | --- | --- |
+| `sql_one<.row>(path, sql, ...)` | `.row` | Exactly one |
+| `sql_optional<.row>(path, sql, ...)` | `.row?` | Zero or one |
+| `sql_many<.row>(path, sql, ...)` | `list<.row>` | Any count, including zero |
+
+Match an optional row with `none` and `some($row)`. Within a present row,
+a nullable column can itself be `none` (SQL NULL) or `some('')` (empty
+text). Use `ORDER BY` for a defined row order. `sql_many` collects the
+selected rows in memory. Use a SQL filter or limit for a bounded read.
+
+Each call opens the file read-only and closes its connection after the
+query. A relative path resolves from the process working directory. SQLite
+prepares a single read query against the actual database at execution time.
+Checking and packing validate the declared types without opening the database.
+Joins, common table expressions and FTS5 queries use ordinary SQLite syntax.
+Use a single query when several tables must be read from the same snapshot.
+
+Use positional placeholders `?` or `?N`. The first bound value occupies
+slot 1. A repeated slot reuses the same value. Supply all slots through the
+highest number, including gaps. For example, a query with only `?2` can
+take the bindings `none, $id`. Output column labels must match the record
+fields exactly, once each, even when the result is empty. Use `AS` to give
+an expression or a joined column its field name. Column order may differ
+from field order.
+
+| Field or bound value | SQLite representation |
+| --- | --- |
+| `int` | Signed 64-bit INTEGER |
+| `text` | TEXT, preserving such identifiers as `'007'` |
+| `bytes` | BLOB |
+| `bool` | INTEGER 0 or 1 |
+| `decimal` | Binds as exact decimal TEXT. Reads accept decimal TEXT or INTEGER. |
+| `T?` | SQL NULL or the storage class for `T` |
+
+Type aliases and distinct scalars use their underlying representation.
+For exact decimal storage, use a TEXT column. SQLite numeric affinity may
+convert decimal text to a REAL, which the exact decoder rejects.
+Unsupported field and argument types are compiler diagnostics. At runtime,
+a read returns a typed problem with a stable code.
+
+| Code | Meaning |
+| --- | --- |
+| `SQL_OPEN` | The database file could not be opened for reading. |
+| `SQL_UNAVAILABLE` | The host lacks the required SQLite binding or statement inspection. |
+| `SQL_QUERY` | SQLite could not prepare or execute a permitted single read query. |
+| `SQL_BIND` | Parameter count, spelling or value is invalid. |
+| `SQL_COLUMNS` | Result labels differ from the declared row. |
+| `SQL_TYPE` | A result value cannot be decoded as the field type. |
+| `CARDINALITY` | The result has too many or too few rows for this read. |
+
+### Run the history example
+
+The following PowerShell commands use a host providing typed SQLite
+evaluation, statement inspection and application archives. Run them from
+the repository root with a fresh `history.db` filename. The setup script
+creates sample data. The application itself only reads the database.
+
+```powershell
+machteld.exe examples/typed-history/create_sample.tcl history.db
+machteld.exe tools/application_project.tcl test examples/typed-history/project.dict
+machteld.exe tools/application_project.tcl pack examples/typed-history/project.dict history.machteld
+'{"id":"007","at":31}' | machteld.exe history.machteld history.db
+```
+
+The result is `note=[ready]`. At 9 there is no row. At 10 the row has
+a NULL note. At 20 the note is empty, and at 34 two observations overlap
+and the lookup returns `CARDINALITY`. Copy the runtime, archive and database
+to another directory to run the same query there.
+
 ## Executable examples
 
 Place an `example` immediately after the function it calls. A function may
