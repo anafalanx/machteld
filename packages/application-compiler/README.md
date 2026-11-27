@@ -570,6 +570,42 @@ division, addition and subtraction, ranges, ordering, equality, `&&`,
 then `||`. Unary `!` and unary minus bind before binary operators.
 Parentheses can specify a different grouping.
 
+## Constructing records
+
+`make<.type>(field: value, ...)` creates a fresh application record from
+typed values. Supply every required field exactly once. Field order is up
+to the caller. Expressions evaluate once from left to right, and `?`
+skips later values if an earlier expression fails.
+
+```text
+record .lookup {
+    asset_id: text
+    sample_limit: int
+    note: text?
+}
+fn .request($id: text) -> .lookup =>
+    make<.lookup>(sample_limit: 3, asset_id: $id)
+```
+
+An optional field may be omitted, set to `none`, or set to `some(value)`.
+Omission and `none` compare equal and both omit the member from JSON.
+`some('')` encodes a present empty string. Tcl callers receive an ordinary
+dictionary. An omitted field has no key, while an explicitly supplied
+optional uses its ordinary tagged Tcl representation.
+
+Use an exported record or alias from another module after importing it,
+for example `make<.data::row<text>>(id: '007', value: 'open')`.
+The field types follow the chosen generic arguments. A distinct scalar
+keeps its one-argument form, such as `make<.asset_id>('007')`. Obtain
+native handles and host-provided records from their corresponding host
+operations.
+
+Use `$old with { sample_limit = 4 }` to edit a received record. This
+preserves compatible unknown incoming fields, including their wire types.
+A fresh `make` has only the fields its author supplies. Run
+`machteld.exe project run examples/typed-request/project.dict 007` to build
+a lookup request in X and write it as JSON at the application boundary.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and

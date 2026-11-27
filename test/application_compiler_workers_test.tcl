@@ -34,6 +34,8 @@ record .station { label: text }
 worker .station_by_id($q: .query) -> result<.station,problem> =>
     sql_one<.station>($q.database, 'SELECT label FROM stations WHERE id=?1', $q.id)
 export fn .read_station($q: .query) -> result<.station,problem> => await(start .station_by_id($q))
+export fn .by_id($database: text, $id: text) -> result<.station,problem> =>
+    .read_station(make<.query>(id: $id, database: $database))
 distinct .code = text
 distinct .gain = binary64
 worker .exit_report($v: process_exit) -> result<process_exit,problem> => ok($v)
@@ -212,10 +214,13 @@ if {$mode eq "sibling"} {
 }
 if {$mode eq "sql"} {
     ::application::workers handle $owner apply [list {} {
-        set ::answer [::application::jobs::read_station [dict create database [file join [pwd] observations.db] id 007]]
+        set file [file join [pwd] observations.db]
+        set supplied [::application::jobs::read_station [dict create database $file id 007]]
+        set built [::application::jobs::by_id $file 007]
+        set ::answer [list $supplied $built]
     }]
     waitFor ::answer
-    assert [expr {$answer eq {ok {label West}}}] "typed SQL worker returned $answer"
+    assert [expr {$answer eq {{ok {label West}} {ok {label West}}}}] "typed SQL worker returned $answer"
     puts ok
     return
 }

@@ -1013,7 +1013,8 @@ oo::class create ::appcompiler::ModuleParser {
                     set types [dict get $args types]
                     set locations [dict get $args locations]
                 }
-                set args [my parenthesized expression]
+                set item [expr {[dict get $start value] eq "make" ? "callArgument" : "expression"}]
+                set args [my parenthesized $item]
                 return [my node $start builtin name [dict get $start value] typeArgs $types typeLocations $locations args $args]
             }
             default { ::appcompiler::fail E_PARSE_EXPECTED $token {expected a value expression} }

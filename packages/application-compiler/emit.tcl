@@ -346,6 +346,14 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
         call - construct - builtin - sqlBegin - refCreate {
+            set facts [emitFacts $node $context]
+            if {[dict exists $facts recordConstructor]} {
+                set words [list ::dict create]
+                foreach argument [dict get $node args] {
+                    lappend words [list [dict get $argument argumentLabel name]] [emitExpression $argument $context $bindings $depth]
+                }
+                return [format {[%s]} [join $words { }]]
+            }
             # These explicit conversions preserve the checked Tcl representation.
             if {$kind eq "builtin" && [dict get $node name] in {make underlying instant_text local_datetime_text}} {
                 return [emitExpression [lindex [dict get $node args] 0] $context $bindings $depth]
@@ -357,7 +365,6 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             if {$kind eq "builtin" && [dict get $node name] in {map_put require_key}} {
                 lset arguments 1 [emitMapKeyWord $node $context [lindex $arguments 1]]
             }
-            set facts [emitFacts $node $context]
             if {[dict exists $facts sqlBindings] && [dict get $node name] ne "sql_commit"} {
                 set values [format {[::list %s]} [join [lrange $arguments 2 end] { }]]
                 lappend words {*}[lrange $arguments 0 1] [emitTypeList [dict get $facts sqlBindings] $context] $values

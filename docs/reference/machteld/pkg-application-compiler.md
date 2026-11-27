@@ -74,6 +74,15 @@ Boolean operators are `!`, `&&` and `||`. The left operand determines
 whether `&&` or `||` evaluates the right operand, including any function
 calls or error propagation it contains.
 
+## Constructing and editing records
+
+Use `make<.record>(field: value, ...)` to create a fresh application
+record. An imported generic record can be constructed as
+`make<.model::row<text>>(id: '007', value: 'ready')`. Supply each required
+field once. Optional fields accept `none` or `some(value)` and may be
+omitted. Expressions evaluate in source order. To edit a received record,
+`$old with { value = 'ready' }` keeps its unknown incoming fields.
+
 ## Recovering from a typed failure
 
 Use `match` on a `result<T,E>` to handle each outcome locally.
