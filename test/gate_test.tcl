@@ -184,6 +184,12 @@ check {the relocated archive shortcut runs exclusively through the private deskt
     [lmap arg [dict get $shortcutStep argv] {file tail $arg}] eq
     {desktop_runner.exe machteld.exe archive_shortcut_test.tcl window_fixture.exe}}]
 set windowStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated child window startup and callbacks}]]
+set migrationStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated mixed migration Tk callbacks}]]
+check {mixed migration Tk runs once in the private integration desktop} [expr {
+    [dict get $migrationStep group] eq "integration" && [dict get $migrationStep timeout] eq "200s" &&
+    [lmap arg [dict get $migrationStep argv] {file tail $arg}] eq
+    {desktop_runner.exe --timeout-seconds 180 machteld.exe migration_tk_test.tcl} &&
+    [llength [lsearch -all -exact $releaseLabels {isolated mixed migration Tk callbacks}]] == 1}]
 set wrapWindowStep [lindex $releasePlan [lsearch -exact $releaseLabels {isolated standalone application windows and icons}]]
 check {wrapped application window and icon checks use the release's private desktop} [expr {
     [lmap arg [dict get $wrapWindowStep argv] {file tail $arg}] eq

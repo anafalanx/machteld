@@ -308,6 +308,8 @@ proc ::gate::plan {settings} {
                     [file join $test desktop_test.tcl] $windowFixture $catalogFixture] timeout 120s
                 addStep steps integration "isolated child window startup and callbacks" [list $privateRunner $runtime \
                     [file join $test child_window_test.tcl] $windowFixture] timeout 90s
+                addStep steps integration "isolated mixed migration Tk callbacks" [list $privateRunner --timeout-seconds 180 $runtime \
+                    [file join $test migration_tk_test.tcl]] timeout 200s
                 addStep steps integration "isolated browser lifecycle" [list $privateRunner $runtime \
                     [file join $test browser_test.tcl]] timeout 120s
                 addStep steps integration "isolated shortcut to a relocated archive" [list $privateRunner $runtime \
