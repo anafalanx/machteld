@@ -321,14 +321,29 @@ proc ::appcompiler::checker::argumentTypes {node scope imports world reportsVar 
     return $types
 }
 
-proc ::appcompiler::checker::checkArguments {node name actual expected reportsVar} {
+proc ::appcompiler::checker::checkArguments {node name actual expected reportsVar {parameters {}}} {
     upvar 1 $reportsVar reports
     set count [llength $expected]
     set valid [expr {$count == [llength $actual]}]
     if {!$valid} {
         issue reports CALL_ARITY $node "'$name' expects $count arguments, got [llength $actual]"
     }
-    foreach have $actual want $expected arg [dict get $node args] {
+    foreach have $actual want $expected arg [dict get $node args] parameter $parameters {
+        if {$arg ne {} && ($parameter ne {} || $want ne {})} {
+            set label [dict getdef $arg argumentLabel {}]
+            set supplied [dict getdef $label name {}]
+            set required [dict getdef $parameter label {}]
+            if {$supplied ne $required} {
+                if {$required eq {}} {
+                    issue reports ARGUMENT_LABEL $label "'$name' expects an unlabeled argument here, got '$supplied:'"
+                } elseif {$label eq {}} {
+                    issue reports ARGUMENT_LABEL $arg "'$name' requires the label '$required:' here"
+                } else {
+                    issue reports ARGUMENT_LABEL $label "'$name' expects the label '$required:' here, got '$supplied:'"
+                }
+                set valid 0
+            }
+        }
         if {$have eq "" || $want eq ""} {
             set valid 0
         } elseif {$want eq "numeric" ? $have ni {int decimal} : ![compatible $have $want]} {
@@ -730,7 +745,7 @@ proc ::appcompiler::checker::checkCall {node name actual function world reportsV
         }
         fact reports $node typeArguments $arguments
     }
-    if {![checkArguments $node $name $actual $expected reports]} { return "" }
+    if {![checkArguments $node $name $actual $expected reports [dict get $function params]]} { return "" }
     return $result
 }
 

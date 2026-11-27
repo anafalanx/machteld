@@ -74,6 +74,27 @@ same byte and error checks against a relocated archive. Run
 recompilation from bundled sources with only the executable and archive
 in the delivery directory.
 
+## Argument labels
+
+Write a label before a parameter's local name when callers should identify
+its role. The following function requires both labels, even though both
+values have the same type.
+
+```text
+export fn .route(from $origin: text, to $destination: text) -> text =>
+    $"$origin to $destination"
+example .route(from: 'North', to: 'East') => 'North to East'
+```
+
+Calls supply each label in declaration order and with its exact spelling.
+A parameter declared as `$value: text` takes an ordinary positional
+argument. A signature can mix the two forms. Expressions evaluate once
+from left to right. Generic and external function declarations use the
+same syntax. The generated archive reference displays the required labels.
+At the Tcl boundary the values occupy their declared positions, so a Tcl
+caller uses `::application::routes::route North East` for this export in
+module `routes`.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.

@@ -330,6 +330,13 @@ A packed lookup returned the identifier `007` unchanged. When the source
 reported a held item, its caller matched the typed reason and printed
 `pending: review`. The same caller handled a missing item separately.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, argument labels
+
+Two station names have the same type. A route declaration with required
+`from` and `to` labels rejected a call that swapped them. Its packed
+reference displayed both labels and its Tcl command still accepted the
+two names in order.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

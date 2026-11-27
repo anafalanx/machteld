@@ -11,7 +11,9 @@ proc ::appcompiler::reference::signature {decl} {
     switch -- $kind {
         fn - extern {
             set params [lmap param [dict get $decl params] {
-                format {$%s: %s} [dict get $param name] [dict get $param type]
+                set signature [format {$%s: %s} [dict get $param name] [dict get $param type]]
+                if {[dict exists $param label]} {set signature "[dict get $param label] $signature"}
+                set signature
             }]
             return "${head}([join $params {, }]) -> [dict get $decl result]"
         }

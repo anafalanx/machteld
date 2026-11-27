@@ -368,7 +368,7 @@ oo::class create ::appcompiler::ModuleParser {
         my advance
         set name [my take dotName {the dot-prefixed function called by the example}]
         set types [my callTypeArguments]
-        set actual [my node $name call name [dict get $name value] qualifier {} {*}$types args [my parenthesized expression]]
+        set actual [my node $name call name [dict get $name value] qualifier {} {*}$types args [my parenthesized callArgument]]
         set actualLocation [my consumedSpan $name]
         my take => {'=>' before the example expectation}
         my skipLines
@@ -586,7 +586,13 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method parameter {} {
-        return [my typedName [my take dataName {a parameter name beginning with '$'}] param]
+        set label {}
+        if {![my at dataName]} {
+            set label [my take identifier {an argument label or a parameter name beginning with '$'}]
+        }
+        set parameter [my typedName [my take dataName {a parameter name beginning with '$'}] param]
+        if {$label ne {}} {dict set parameter label [dict get $label value]}
+        return $parameter
     }
 
     method fieldDeclaration {} {
@@ -997,6 +1003,23 @@ oo::class create ::appcompiler::ModuleParser {
         return [my expression]
     }
 
+    method callArgument {} {
+        if {[my at identifier] || [dict get $token kind] in $keywords} {
+            set beginning [my cursor]
+            set label $token
+            my advance
+            if {[my at :]} {
+                my advance
+                my skipLines
+                set value [my expression]
+                dict set value argumentLabel [my node $label label name [dict get $label value]]
+                return $value
+            }
+            my restore $beginning
+        }
+        return [my expression]
+    }
+
     method call {} {
         set start $token
         set name [dict get $token value]
@@ -1031,14 +1054,14 @@ oo::class create ::appcompiler::ModuleParser {
             }
             if {$choice ne {}} {
                 set args {}
-                if {[my at (]} { set args [my parenthesized expression] }
+                if {[my at (]} { set args [my parenthesized callArgument] }
                 return [my node $start construct type [dict get $choice name] typeLocation $choice \
                         variant $name variantLocation [my node $member variant name $name] ambiguous $ambiguous args $args]
             }
         }
         set typeLocations [dict getdef $applied typeLocations {}]
         set typeArgs [lmap location $typeLocations {dict get $location name}]
-        set args [my parenthesized expression]
+        set args [my parenthesized callArgument]
         return [my node $start call name $name qualifier $qualifier args $args \
             typeArgs $typeArgs typeLocations $typeLocations {*}$locations]
     }

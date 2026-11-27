@@ -52,6 +52,14 @@ Use `match` on a `result<T,E>` to handle each outcome locally.
 are required. A nested match can inspect an application's declared error
 variants. Use `?` to propagate the typed failure to the caller.
 
+## Argument labels
+
+Authors can require names at X call sites. A parameter declared as
+`from $origin: text` takes `from: 'North'`. An ordinary `$value: text`
+parameter takes its value positionally. Supply arguments in declaration
+order. The exported signature in the application's offline reference
+shows the exact labels. Tcl callers still pass the values positionally.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type
