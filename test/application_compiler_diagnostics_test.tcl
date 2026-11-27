@@ -162,6 +162,84 @@ fn .inside() -> int => [3,,4]"} {{E_PARSE_ESCAPE 1 25 1 26} {E_PARSE_EXPECTED 3 
     }
 }
 
+proc ::diagnosticTest::declarationBoundaries {root driver manifest} {
+    set intact {export fn .take($s: int) -> int => $s
+fn .one() -> int => $missing
+fn .two() -> int => 'bad'}
+    writeUtf8 [file join $root b.src] {import first
+fn .wrong() -> int => .first::take('bad')
+fn .typo() -> int => .first::unknown()}
+    foreach {bad col} [list "fn .broken() -> int => 1 )\]\}" 26 ")\} \]" 1] {
+        writeUtf8 [file join $root a.src] "$bad\n$intact"
+        set items [report $root $driver $manifest 0 5]
+        located $items E_PARSE_EXPECTED [list first 1 $col 1 [expr {$col + 1}]]
+        located $items UNKNOWN_BINDING {first 3 21 3 29}
+        located $items RETURN_TYPE {first 4 21 4 26}
+        located $items ARGUMENT_TYPE {second 2 36 2 41}
+        located $items UNKNOWN_FUNCTION {second 3 22 3 28}
+    }
+
+    # A mismatch inside a nested list still leaves the following text uncertain.
+    writeUtf8 [file join $root a.src] {fn .broken() -> int { return [1,,2) }
+fn .uncertain() -> int => $hidden}
+    writeUtf8 [file join $root b.src] {import first
+fn .maybe() -> int => .first::uncertain()
+fn .known_bad() -> int => 'bad'}
+    set items [report $root $driver $manifest 0 2]
+    located $items E_PARSE_EXPECTED {first 1 33 1 34}
+    located $items RETURN_TYPE {second 3 27 3 32}
+
+    writeUtf8 [file join $root a.src] {export alias .lost =
+record .private { x: int }
+export alias .normal =
+    list<int>
+export fn .take($v: .normal) -> int => 7}
+    writeUtf8 [file join $root b.src] {import first
+fn .priv($v: .first::private) -> int => $v.x
+fn .arg() -> int => .first::take('bad')
+fn .absent($v: .first::typo) -> int => 0}
+    set items [report $root $driver $manifest 0 4]
+    located $items E_PARSE_EXPECTED {first 2 1 2 7}
+    located $items NOT_EXPORTED {second 2 14 2 29}
+    located $items ARGUMENT_TYPE {second 3 34 3 39}
+    located $items UNKNOWN_TYPE {second 4 16 4 28}
+
+    writeUtf8 [file join $root a.src] {export fn .take($s: int) -> int => $s}
+    writeUtf8 [file join $root b.src] {distinct .lost =
+import first
+fn .bad() -> int => .first::take('bad')
+fn .good() -> int => .first::take(2)}
+    set items [report $root $driver $manifest 0 2]
+    located $items E_PARSE_EXPECTED {second 2 1 2 7}
+    located $items ARGUMENT_TYPE {second 3 34 3 39}
+
+    # "tool" and "example" are ordinary words in expression positions.
+    # Their dotted declaration names distinguish these from a continuation.
+    writeUtf8 [file join $root a.src] {fn .missing() -> int =>
+tool .helper = 'helper.exe'
+fn .use() -> result<text,problem> => .helper()}
+    writeUtf8 [file join $root b.src] {}
+    set items [report $root $driver $manifest 0 1]
+    located $items E_PARSE_EXPECTED {first 2 1 2 5}
+    writeUtf8 [file join $root a.src] {fn .missing() -> int =>
+example .missing() => $typo}
+    set items [report $root $driver $manifest 0 2]
+    located $items E_PARSE_EXPECTED {first 2 1 2 8}
+    located $items UNKNOWN_BINDING {first 2 23 2 28}
+
+    writeUtf8 [file join $root a.src] {}
+    writeUtf8 [file join $root b.src] {alias .sample =
+    list<text>
+distinct .length =
+    int
+fn .checked($v: .sample, $l: .length) -> int =>
+    underlying($l)
+fn .two() -> int => 2
+example .two() =>
+    2}
+    report $root $driver $manifest 1 0
+}
+
 proc ::diagnosticTest::partialModules {root driver manifest} {
     set first {export fn .before() -> int => $missing_before
 export fn .broken() -> int => [1,,2]
@@ -282,6 +360,7 @@ fn .bad() -> int { return .take("雪🚀", $lost) }}
     plain $root $driver $manifest [list $firstLine $secondLine]
     syntaxRecovery $root $driver $manifest
     partialModules $root $driver $manifest
+    declarationBoundaries $root $driver $manifest
 
     # Project errors have no application source range. Use a dictionary key so
     # even characters that Windows forbids in filenames can reach the reporter.
