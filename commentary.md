@@ -455,6 +455,14 @@ one row and gets two, both inserts and their audit-trigger entries roll
 back. A second connection in the regression test checks the database after
 the application handles that error.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking existing rows during migration
+
+Adding a constrained column checks the values that existing rows would
+receive. If one fails, SQLite reports the constraint and the typed
+transaction rolls back the migration. A repeated FTS5 table declaration
+also preserves the existing index. The regression opens both an authored
+archive and its rebuild against a populated index and searches the original row.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
