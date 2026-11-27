@@ -1091,10 +1091,8 @@ enables foreign keys. `sql_exec` accepts one `INSERT`, `UPDATE` or
 `DELETE` with bound values (including SQLite's upsert syntax).
 Use `sql_one`, `sql_optional` or `sql_many` on the same binding to read
 pending changes. A path read uses a separate snapshot. The scope binding
-can appear only as the first argument of these SQL operations or
-`sql_commit`. Both `sql_exec` and `sql_commit` return `result<unit,problem>`.
-The typed write interface rejects schema changes, transaction commands,
-multiple statements and `RETURNING` rows.
+can appear only as the first argument of the database operations in this
+section. Both `sql_exec` and `sql_commit` return `result<unit,problem>`.
 
 Only a successful explicit commit persists changes. Falling through the
 closing brace, returning success early, propagating a problem, leaving
@@ -1108,6 +1106,53 @@ immediately. Perform all validation before committing.
 | `SQL_BEGIN` | SQLite could not start the transaction, for example because another writer holds the lock. |
 | `SQL_COMMIT` | SQLite refused the commit, for example because of a deferred foreign key. |
 | `SQL_TX_CLOSED` | A write, read or commit targeted a transaction that had already ended. |
+
+### Applying a schema change and receiving generated values
+
+`sql_schema($tx, $sql, ...)` executes one schema statement and returns
+`result<unit,problem>`. A migration can alter a table and create or drop
+tables, indexes, views and triggers, including temporary objects. It can
+also create and drop bundled FTS5 tables, run `ANALYZE` and `REINDEX`, and bind values in
+`CREATE TABLE … AS SELECT`. Pass identifiers as part of the schema SQL.
+SQLite permits bound parameters only in value positions supported by the
+statement. Each statement and all its effects belong to the enclosing
+transaction.
+
+```text
+record .inserted { id: int }
+fn .add($path: text, $label: text) -> result<int,problem> {
+    using $tx ::= sql_begin($path)? {
+        sql_schema($tx, 'CREATE TABLE IF NOT EXISTS item(id INTEGER PRIMARY KEY, label TEXT)')?
+        $row ::= sql_returning_one<.inserted>($tx,
+            'INSERT INTO item(label) VALUES (?1) RETURNING id', $label)?
+        sql_commit($tx)?
+        return ok($row.id)
+    }
+}
+```
+
+For an `INSERT`, `UPDATE` or `DELETE` with `RETURNING`, choose
+`sql_returning_one<.row>`, `sql_returning_optional<.row>` or
+`sql_returning_many<.row>`. Their success payloads are `.row`, `.row?` and
+`list<.row>`. The field names, types, NULL handling and positional binding
+rules match the corresponding reads. SQLite chooses the order of returned
+rows. Large writes can buffer their returned data in SQLite, and the many
+form also collects the decoded rows. Bound the batch size when this matters.
+
+SQLite prepares the statement on the actual connection. A `WITH` prefix can
+introduce either a read or a write. Triggers and foreign keys run within
+the same transaction. A failed schema or returning operation closes the
+transaction, including on a wrong field type, a missing column or the wrong
+row count. Earlier changes and trigger effects roll back, even when the
+caller handles the returned problem.
+
+SQLite requires `VACUUM` and `VACUUM INTO` to run outside a transaction.
+Changing into or out of WAL journal mode also requires an appropriate
+connection outside a transaction. For these operations, database creation,
+connection-level PRAGMAs, attachments or other SQLite facilities, use a Tcl
+module through the project's checked extern boundary. The command
+`package require sqlite3` exposes the full bundled SQLite binding. Own and close its
+connection there and use a separate phase from an active typed transaction.
 
 ### Importing observations from two sources
 

@@ -475,6 +475,15 @@ Checking an edit used to generate the Tcl program and discard it. The project
 driver now stops after checking the selected entry and its modules. A fixture
 disables the emitter and checks projects with both typed and Tcl entries.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, migrating a database in X
+
+A migration can now create a table and its trigger, insert a bound value,
+and return the generated key in one typed transaction. SQLite applies a
+write before it yields the first `RETURNING` row. If the application asks for
+one row and gets two, both inserts and their audit-trigger entries roll
+back. A second connection in the regression test checks the database after
+the application handles that error.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

@@ -478,6 +478,10 @@ proc ::appcompiler::emitCallPrefix {node context} {
                     return [list [list ${target}::@rt::${reader}] [string range $name 4 end] [emitTypeWord [dict get $facts schema] $context]]
                 }
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
+                sql_schema {return [list [list ${target}::@rt::sqlSchema]]}
+                sql_returning_one - sql_returning_optional - sql_returning_many {
+                    return [list [list ${target}::@rt::sqlReturning] [lindex [split $name _] end] [emitTypeWord [dict get $facts schema] $context]]
+                }
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
                 await - cancel - problem - read_stdin_bytes - decode_utf8 - decode_text - preview_text - write_stdout_utf8 -
                 parse_instant - parse_local_datetime - resolve_offset - resolve_zone - capture_process -

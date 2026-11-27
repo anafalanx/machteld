@@ -161,12 +161,12 @@ proc compilerSuites {steps group runtime} {
 }
 set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
-set packed {archive {binary64 -pack} {callable -pack} {examples -pack} {generics -pack} host {io -pack} {labels -pack} {lists -pack} {migration -pack} {operators -pack} {process -pack} {project -pack} {records -pack} reference {resources -pack} {result_match -pack} {shared -pack} {sql -pack} {streams -pack} {temporal -pack} {transaction -pack} {widgets -pack} {workers -pack} {zone -pack}}
+set packed {archive {binary64 -pack} {callable -pack} {examples -pack} {generics -pack} host {io -pack} {labels -pack} {lists -pack} {migration -pack} {operators -pack} {process -pack} {project -pack} {records -pack} reference {resources -pack} {result_match -pack} {schema -pack} {shared -pack} {sql -pack} {streams -pack} {temporal -pack} {transaction -pack} {widgets -pack} {workers -pack} {zone -pack}}
 check {fast runs in-process application compiler suites on the candidate} \
     [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
 check {integration alone runs the compiler's child-process and direct project, I/O, example and SQL tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
-        [lsort [concat $direct {project io examples sql transaction migration temporal zone generics result_match labels resources process callable lists shared binary64 operators streams workers records widgets}]]}]
+        [lsort [concat $direct {project io examples sql schema transaction migration temporal zone generics result_match labels resources process callable lists shared binary64 operators streams workers records widgets}]]}]
 check {packaging runs the compiler archive and the packed project, I/O, example and SQL cases} \
     [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
 foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {

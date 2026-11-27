@@ -512,14 +512,16 @@ proc ::appcompiler::checker::constructType {node spelling name ambiguous scope i
 proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set name [dict get $node name]
-    set sqlTarget [expr {$name in {sql_one sql_optional sql_many sql_exec sql_commit}}]
+    set sqlTarget [expr {$name in {sql_one sql_optional sql_many sql_exec sql_schema sql_commit
+        sql_returning_one sql_returning_optional sql_returning_many}}]
     set actual [argumentTypes $node $scope $imports $world reports $sqlTarget]
     if {$name eq "ref"} {
         issue reports REF_SCOPE $node {create a reference with 'using $cell ::= ref(initial)'}
         return ""
     }
     set generic [dict getdef $node typeArgs {}]
-    set count [dict getdef {decode_json 1 make 1 list 1 map 2 sql_one 1 sql_optional 1 sql_many 1} $name 0]
+    set count [dict getdef {decode_json 1 make 1 list 1 map 2 sql_one 1 sql_optional 1 sql_many 1
+        sql_returning_one 1 sql_returning_optional 1 sql_returning_many 1} $name 0]
     if {[llength $generic] != $count} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
@@ -572,7 +574,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         read_stdin_bytes - list - map { set params {} }
         list_append - require_index {return [listCall $node $name $actual reports]}
         map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
-        sql_one - sql_optional - sql_many - sql_exec - sql_commit {
+        sql_one - sql_optional - sql_many - sql_exec - sql_schema - sql_commit -
+        sql_returning_one - sql_returning_optional - sql_returning_many {
             return [sqlCall $node $name $actual $world reports]
         }
         sql_begin {
@@ -697,7 +700,7 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
         if {$type eq ""} {
             set valid 0
         } elseif {$index == 0} {
-            if {$name in {sql_exec sql_commit} && $type ne "@transaction"} {
+            if {$name ni {sql_one sql_optional sql_many} && $type ne "@transaction"} {
                 issue reports SQL_TRANSACTION_REQUIRED $arg "'$name' requires a scoped transaction binding"
                 set valid 0
             } elseif {$type ni {text @transaction}} {
@@ -715,7 +718,7 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
         }
         incr index
     }
-    if {$name in {sql_exec sql_commit}} {
+    if {$name in {sql_exec sql_schema sql_commit}} {
         if {!$valid} { return "" }
         fact reports $node sqlBindings [lrange $actual 2 end]
         return result<unit,problem>
@@ -741,8 +744,8 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     fact reports $node transaction [expr {[lindex $actual 0] eq "@transaction"}]
     fact reports $node sqlBindings [lrange $actual 2 end]
     switch -exact -- $name {
-        sql_optional { set row [makeType optional [list $row]] }
-        sql_many { set row [makeType list [list $row]] }
+        sql_optional - sql_returning_optional { set row [makeType optional [list $row]] }
+        sql_many - sql_returning_many { set row [makeType list [list $row]] }
     }
     return [makeType result [list $row problem]]
 }
