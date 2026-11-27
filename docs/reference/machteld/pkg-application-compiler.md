@@ -45,6 +45,18 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
 
+## Ordering and boolean conditions
+
+Use `$start <= $at && $at < $stop` to check a half-open interval. Integers
+and exact decimals compare numerically. Text compares in ordinal,
+case-sensitive order, so `'007' < '7'` is true. Compare instants with
+instants and local date-times with local date-times. Two values of the same
+distinct type inherit the order of its scalar base when that order exists.
+
+Boolean operators are `!`, `&&` and `||`. The left operand determines
+whether `&&` or `||` evaluates the right operand, including any function
+calls or error propagation it contains.
+
 ## Recovering from a typed failure
 
 Use `match` on a `result<T,E>` to handle each outcome locally.

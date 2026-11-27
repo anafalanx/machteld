@@ -401,6 +401,10 @@ proc sorted_keys {keyType map} {
     }
 }
 
+proc compareText {left right} {
+    return [string compare [mapTextKey $left] [mapTextKey $right]]
+}
+
 proc typedMembers {node} {
     set children {}
     foreach key [dict keys [::machteld::json unwrap $node]] {

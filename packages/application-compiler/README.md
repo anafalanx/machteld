@@ -430,6 +430,32 @@ match until an arm covers it. The scrutinee and the selected action each
 run once. The grouping and discard spellings are provisional. Run
 `machteld.exe test/application_compiler_group_test.tcl` for more examples.
 
+## Ordering and boolean conditions
+
+Use `<`, `<=`, `>` and `>=` to compare ordered values. Integer and
+fixed-point decimal operands compare exactly, including a comparison between
+the two types. Text uses case-sensitive ordinal order. For example, the
+identifier `'007'` precedes `'7'`, and `'19'` precedes `'2'`.
+Two instants compare on the UTC timeline. Two local date-times compare
+by the recorded clock reading. Compare distinct values of the same
+declared type when its underlying scalar has an order.
+
+`!` negates a boolean. `&&` evaluates its right operand only when its left
+operand is true. `||` evaluates its right operand only when its left operand
+is false. Both operands are checked as `bool` during compilation. At run
+time each reached operand runs once, from left to right. A skipped operand
+can therefore contain a function call or a propagating `?`.
+
+```text
+fn .in_period($at: instant, $start: instant, $stop: instant) -> bool =>
+    $start <= $at && $at < $stop
+```
+
+From tightest to loosest, binary operators group as multiplication and
+division, addition and subtraction, ranges, ordering, equality, `&&`,
+then `||`. Unary `!` and unary minus bind before binary operators.
+Parentheses can specify a different grouping.
+
 ## Exact arithmetic
 
 A literal such as `0.10` is an exact decimal. Addition, subtraction and
@@ -563,7 +589,7 @@ regressions.
 
 Use `local_datetime` for the date and time recorded on a clock. Use
 `instant` for a known point on the UTC timeline. They are distinct scalar
-types. Both support equality, optional values and record fields. Convert
+types. Both support equality, ordering, optional values and record fields. Convert
 explicitly when crossing a text boundary.
 
 | Operation | Result |

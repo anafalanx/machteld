@@ -376,6 +376,13 @@ text values. An empty inner list in `[[], [7]]` takes its integer element
 type from the second row. The same `len` call counts rows in this table,
 octets in a file or Unicode code points in a decoded name.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, ordered conditions
+
+The two UTC instants for a repeated Brussels clock reading sort in
+chronological order. A text identifier keeps its leading zeroes when
+compared with another identifier. A condition can test a prerequisite
+before calling a fallible function on its right-hand side.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
