@@ -105,7 +105,7 @@ proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
     set statement [sqlStatement $db $sql]
     if {![dict get $statement readonly]} {sqlFail SQL_QUERY "expected one read-only SQLite statement"}
     set bindings [sqlBindings $statement $bindTypes $bindValues]
-    set fields [lindex [dict get [schemas] $rowType] 1]
+    set fields [lindex [specializeSchema $rowType [schemas]] 1]
     set columns [dict get $statement columns]
     if {![llength $columns]} {sqlFail SQL_QUERY "the read statement must return columns"}
     if {[lsort -ascii $columns] ne [lsort -ascii [dict keys $fields]]} {

@@ -91,6 +91,68 @@ module that declared the alias determine what its target name denotes.
 Run `machteld.exe test/application_compiler_alias_test.tcl` for these
 checks and their generated-Tcl behavior.
 
+## Generic functions, records and choices
+
+Declare type parameters after the name. Each parameter has a leading dot,
+like other user-defined type names. The following function works for a
+list of stations, a list of vehicles, or any other element type.
+
+```text
+export fn .first_or<.item>($items: list<.item>, $fallback: .item) -> .item {
+    for $item in $items { return $item }
+    return $fallback
+}
+```
+
+The compiler checks the body once against its declared types, including
+when the function has no callers. A body that adds one to an unconstrained
+`.item` fails this check. Type arguments are normally inferred from the
+value arguments. Use an explicit application such as `.first_or<text>(...)`
+when writing out the type is clearer. Supply explicit arguments if the
+ordinary arguments leave a parameter unknown, for example when it occurs
+only in the result.
+
+```text
+export record .page<.item> { items: list<.item> }
+export choice .selection<.item> {
+    empty
+    found(.item)
+}
+```
+
+A `.page<.station>` retains its station fields all the way through a call.
+Passing it as a `.page<.vehicle>` is a compile-time error. The constructor
+`.selection::found($station)` infers `.station` from its payload. Write
+`.selection<.station>::empty()` for the case with no payload. In a match
+on a `.selection<.station>`, the `.selection::found($item)` arm receives
+a station. Records, choices and functions can be exported across modules.
+Their type parameters also appear in the archive's searchable application
+reference.
+
+A Tcl caller supplies the concrete types as its first argument to a
+generic export. This call returns `found 007`.
+
+```tcl
+::application::pages::first {text} [dict create items {007 008}]
+```
+
+Supply one list element per parameter in declaration order. Use canonical names, such
+as `text`, `list<int>` or `.pages::page<text>`. The generated command
+checks both the descriptors and the values. Ordinary exported functions
+keep their existing argument lists. A project's entry function has a
+concrete signature.
+
+To try both uses of the same page type, run the following from the
+repository root.
+
+```powershell
+machteld.exe project test examples/typed-pages/project.dict
+machteld.exe project pack examples/typed-pages/project.dict pages.machteld
+'{"items":[{"name":"North"}]}' | machteld.exe pages.machteld stations
+'{"items":[{"fleet_id":"007"}]}' | machteld.exe pages.machteld vehicles
+machteld.exe project docs pages.machteld get fn/pages/first
+```
+
 ## Distinct scalar types
 
 Use a distinct type when two identifiers have the same representation but

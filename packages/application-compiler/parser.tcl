@@ -367,7 +367,8 @@ oo::class create ::appcompiler::ModuleParser {
         set first [expr {$offset - [string length [dict get $start value]]}]
         my advance
         set name [my take dotName {the dot-prefixed function called by the example}]
-        set actual [my node $name call name [dict get $name value] qualifier {} args [my parenthesized expression]]
+        set types [my callTypeArguments]
+        set actual [my node $name call name [dict get $name value] qualifier {} {*}$types args [my parenthesized expression]]
         set actualLocation [my consumedSpan $name]
         my take => {'=>' before the example expectation}
         my skipLines
@@ -441,11 +442,12 @@ oo::class create ::appcompiler::ModuleParser {
 
     method function {exported kind} {
         set name [my take dotName {a dot-prefixed function name}]
+        set generics [my typeParameters]
         set params [my parenthesized parameter]
         my take -> {'->' before the result type}
         set result [my typeAnnotation]
         my skipLines
-        set node [my node $name $kind name [dict get $name value] exported $exported params $params \
+        set node [my node $name $kind name [dict get $name value] exported $exported {*}$generics params $params \
                 result [dict get $result name] resultLocation $result body {}]
         if {$kind eq "extern"} { return [dict merge $node [my externalBinding]] }
         if {[my at =>]} {
@@ -515,15 +517,8 @@ oo::class create ::appcompiler::ModuleParser {
         } else {
             set name [dict get [my take identifier {a type name}] value]
         }
-        if {[my at <]} {
-            set args [my typeArguments]
-            append name < [join [dict get $args types] ,] >
-            set end [dict get $args end]
-            set type [my typeLocation $start $end $name]
-            dict set type typeLocations [dict get $args locations]
-        } else {
-            set type [my typeLocation $start $end $name]
-        }
+        set type [my appliedType $start $end $name]
+        set name [dict get $type name]
         while {[my at ?]} {
             append name ?
             set optional [my typeLocation $start $token $name]
@@ -532,6 +527,41 @@ oo::class create ::appcompiler::ModuleParser {
             my advance
         }
         return $type
+    }
+
+    method appliedType {start end name} {
+        if {![my at <]} {return [my typeLocation $start $end $name]}
+        set args [my typeArguments]
+        append name < [join [dict get $args types] ,] >
+        return [dict merge [my typeLocation $start [dict get $args end] $name] \
+                [dict create typeLocations [dict get $args locations]]]
+    }
+
+    method typeParameters {} {
+        set names {}
+        set locations {}
+        if {[my at <]} {
+            my advance
+            my skipLines
+            while {1} {
+                set param [my take dotName {a dot-prefixed type parameter}]
+                set name [dict get $param value]
+                lappend names $name
+                lappend locations [my node $param typeParameter name $name]
+                my skipLines
+                if {![my at ,]} break
+                my advance
+                my skipLines
+            }
+            my take > {a closing angle bracket after the type parameters}
+        }
+        return [dict create typeParams $names typeParamLocations $locations]
+    }
+
+    method callTypeArguments {} {
+        if {![my at <]} {return [dict create typeArgs {} typeLocations {}]}
+        set args [my typeArguments]
+        return [dict create typeArgs [dict get $args types] typeLocations [dict get $args locations]]
     }
 
     method typeArguments {} {
@@ -575,6 +605,8 @@ oo::class create ::appcompiler::ModuleParser {
         set kind [dict get $token kind]
         my advance
         set name [my take dotName "a dot-prefixed $kind name"]
+        set generics {}
+        if {$kind in {record choice}} {set generics [my typeParameters]}
         my skipLines
         if {$kind in {alias distinct}} {
             my take = "'=' before the $kind target"
@@ -586,7 +618,7 @@ oo::class create ::appcompiler::ModuleParser {
         } else {
             set members [dict create variants [my braced variantDeclaration {choice variants}]]
         }
-        return [my node $name $kind name [dict get $name value] exported $exported {*}$members]
+        return [my node $name $kind name [dict get $name value] exported $exported {*}$generics {*}$members]
     }
 
     method node {where kind args} {
@@ -936,17 +968,18 @@ oo::class create ::appcompiler::ModuleParser {
             # pattern has three (.module::type::case).
             my take dotName {a dot-prefixed choice type, none or some in a match pattern}
             set kind arm
-            set type ".[dict get $start value]"
-            set typeEnd $start
+            set location [my appliedType $start $start ".[dict get $start value]"]
             my take :: {'::' before the choice variant}
             set variant [my take identifier {a choice variant name}]
-            if {[my at ::]} {
-                append type :: [dict get $variant value]
-                set typeEnd $variant
-                my advance
+            if {[my at ::] || [my at <]} {
+                if {[dict exists $location typeLocations]} {
+                    ::appcompiler::fail E_PARSE_EXPECTED $token {expected the choice pattern after the specialized type name}
+                }
+                set location [my appliedType $start $variant "[dict get $location name]::[dict get $variant value]"]
+                my take :: {'::' before the choice variant}
                 set variant [my take identifier {a choice variant name}]
             }
-            set annotation [dict create type $type typeLocation [my typeLocation $start $typeEnd $type]]
+            set annotation [dict create type [dict get $location name] typeLocation $location]
         }
         set bindings {}
         set end $variant
@@ -969,39 +1002,44 @@ oo::class create ::appcompiler::ModuleParser {
         set qualifier {}
         set locations {}
         my advance
+        set applied [my appliedType $start $start ".$name"]
         if {[my at ::]} {
             set qualifier $name
             my advance
             set member [my take identifier {a qualified member name}]
             set name [dict get $member value]
-            set type ".$qualifier"
-            set typeEnd $start
             set ambiguous 0
-            if {[my at ::]} {
-                append type :: $name
-                set typeEnd $member
-                my advance
-                set member [my take identifier {a choice variant name}]
-                set name [dict get $member value]
-            } elseif {[dict exists $localChoices $qualifier $name] ||
-                    (![my at (] && [dict exists $localChoices $qualifier])} {
-                set ambiguous [my at (]
-            } else {
-                if {[dict exists $localChoices $qualifier]} {
-                    set locations [dict create typeLocation [my typeLocation $start $typeEnd $type] \
-                        variantLocation [my node $member variant name $name]]
+            set choice $applied
+            if {![dict exists $applied typeLocations]} {
+                set applied [my appliedType $start $member ".${qualifier}::$name"]
+                if {[my at ::]} {
+                    set choice $applied
+                    my advance
+                    set member [my take identifier {a choice variant name}]
+                    set name [dict get $member value]
+                } elseif {![dict exists $applied typeLocations] &&
+                        ([dict exists $localChoices $qualifier $name] ||
+                        (![my at (] && [dict exists $localChoices $qualifier]))} {
+                    set ambiguous [my at (]
+                } else {
+                    if {[dict exists $localChoices $qualifier]} {
+                        set locations [dict create typeLocation $choice variantLocation [my node $member variant name $name]]
+                    }
+                    set choice {}
                 }
-                set type {}
             }
-            if {$type ne {}} {
+            if {$choice ne {}} {
                 set args {}
                 if {[my at (]} { set args [my parenthesized expression] }
-                return [my node $start construct type $type typeLocation [my typeLocation $start $typeEnd $type] \
+                return [my node $start construct type [dict get $choice name] typeLocation $choice \
                         variant $name variantLocation [my node $member variant name $name] ambiguous $ambiguous args $args]
             }
         }
+        set typeLocations [dict getdef $applied typeLocations {}]
+        set typeArgs [lmap location $typeLocations {dict get $location name}]
         set args [my parenthesized expression]
-        return [my node $start call name $name qualifier $qualifier args $args {*}$locations]
+        return [my node $start call name $name qualifier $qualifier args $args \
+            typeArgs $typeArgs typeLocations $typeLocations {*}$locations]
     }
 }
 

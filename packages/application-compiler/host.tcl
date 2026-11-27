@@ -2,6 +2,49 @@
 # namespace. Input, output and JSON are touched only when the program asks.
 proc problem {message} {return [dict create message $message]}
 
+# A Tcl caller supplies concrete, canonical type names before the ordinary
+# arguments of a generic export. Validate every name even for an empty list,
+# an absent optional, or a parameter that occurs only in the result type.
+proc concreteType {type schemas} {
+    if {$type in {int decimal text bytes bool unit problem instant local_datetime}} {return 1}
+    if {[string length $type] > 8192 || $type eq ""} {return 0}
+    set parts [typeParts $type]
+    set head [lindex $parts 0]
+    set children [lrange $parts 1 end]
+    switch -exact -- $head {
+        optional {
+            if {[string index $type end] ne "?"} {return 0}
+            set arity 1
+        }
+        list {set arity 1}
+        map - result {set arity 2}
+        range {return [expr {$type eq "range<int>"}]}
+        default {
+            if {![dict exists $schemas $head]} {return 0}
+            set arity [llength [lindex [dict get $schemas $head] 2]]
+        }
+    }
+    if {[llength $children] != $arity} {return 0}
+    foreach child $children {if {![concreteType $child $schemas]} {return 0}}
+    if {$head eq "map" && [scalarBase [lindex $children 0]] ni {int decimal text bool}} {return 0}
+    return 1
+}
+
+proc bindTypes {variables arguments} {
+    if {[catch {llength $arguments} count] || $count != [llength $variables]} {
+        reject {type arguments} "[llength $variables] concrete type argument(s)"
+    }
+    set schemas [schemas]
+    set bindings {}
+    foreach variable $variables argument $arguments {
+        if {[catch {concreteType $argument $schemas} valid] || !$valid} {
+            reject {type arguments} "a concrete type, got [list $argument]"
+        }
+        dict set bindings $variable $argument
+    }
+    return $bindings
+}
+
 proc atResult {result location} {
     lassign $result tag value
     if {$tag eq "err" && ![dict exists $value origin]} {
@@ -235,7 +278,7 @@ proc require_key {map key} {
 # Distinct scalar keys share the Tcl representation of their declared base.
 proc scalarBase {type} {
     if {[string index $type 0] eq "."} {
-        lassign [dict get [schemas] $type] kind base
+        lassign [specializeSchema $type [schemas]] kind base
         if {$kind eq "distinct"} {return $base}
     }
     return $type
@@ -342,7 +385,7 @@ proc fromWire {type node path} {
             return $out
         }
     }
-    lassign [dict getdef [schemas] $type {}] kind members
+    lassign [specializeSchema $type [schemas]] kind members
     if {$kind eq "distinct"} {return [fromWire $members $node $path]}
     if {$kind ne "record"} {
         invalidWire "$path has no declared record wire format for $type"
@@ -389,7 +432,7 @@ proc toWire {type value path} {
             return [toWire [lindex $parts 1] [lindex $value 1] $path]
         }
     }
-    lassign [dict getdef [schemas] $type {}] kind members
+    lassign [specializeSchema $type [schemas]] kind members
     if {$kind eq "distinct"} {return [toWire $members $value $path]}
     if {$kind ne "record"} {
         invalidWire "$path has no declared record wire format for $type"
@@ -508,7 +551,7 @@ proc equal {type left right} {
             return 1
         }
     }
-    lassign [dict get [schemas] $type] kind members
+    lassign [specializeSchema $type [schemas]] kind members
     if {$kind eq "distinct"} {return [equal $members $left $right]}
     if {$kind eq "choice"} {
         set tag [lindex $left 0]

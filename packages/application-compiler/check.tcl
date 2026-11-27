@@ -2,6 +2,10 @@ namespace eval ::appcompiler::checker {}
 
 proc ::appcompiler::checker::issue {reportsVar code node message} {
     upvar 1 $reportsVar reports
+    # Parameter identities carry their scope internally. Diagnostics use
+    # the spelling an author can find in the declaration at this location.
+    regsub -all {@[A-Za-z_][A-Za-z_0-9]*:(?:fn|extern|record|choice):[A-Za-z_][A-Za-z_0-9]*:([A-Za-z_][A-Za-z_0-9]*)} \
+        $message {.\1} message
     dict lappend reports diagnostics [::appcompiler::diagnostic $code $node $message]
 }
 
@@ -16,6 +20,31 @@ proc ::appcompiler::checker::makeType {head arguments} {
     return [format {%s<%s>} $head [join $arguments ,]]
 }
 
+proc ::appcompiler::checker::withTypeParams {world node reportsVar} {
+    upvar 1 $reportsVar reports
+    set bindings {}
+    set prefix @[dict get $node module]:[dict getdef $node kind fn]:[dict get $node name]:
+    foreach param [dict getdef $node typeParams {}] location [dict getdef $node typeParamLocations {}] {
+        if {[dict exists $bindings .$param]} {
+            if {$location eq ""} { set location $node }
+            issue reports DUPLICATE_TYPE_PARAMETER $location "type parameter '.$param' is already declared"
+        } else {
+            dict set bindings .$param $prefix$param
+        }
+    }
+    dict set world typeBindings $bindings
+    return $world
+}
+
+proc ::appcompiler::checker::schemaKind {type world} {
+    set head [lindex [::appcompiler::typeParts $type] 0]
+    return [dict getdef $world schemas $head kind {}]
+}
+
+proc ::appcompiler::checker::schemaMembers {type world} {
+    return [lindex [::appcompiler::specializeSchema $type [dict get $world runtimeSchemas]] 1]
+}
+
 proc ::appcompiler::checker::typeFits {length node reportsVar} {
     upvar 1 $reportsVar reports
     set limit 8192
@@ -24,12 +53,28 @@ proc ::appcompiler::checker::typeFits {length node reportsVar} {
     return 0
 }
 
+# Check the size before joining; several arguments can reuse a long alias.
+proc ::appcompiler::checker::checkedType {head argsList node reportsVar} {
+    upvar 1 $reportsVar reports
+    set length [expr {$head eq "optional" ? 1 : [string length $head] + [llength $argsList] + 1}]
+    foreach argument $argsList { incr length [string length $argument] }
+    if {![typeFits $length $node reports]} { return "" }
+    return [makeType $head $argsList]
+}
+
 # Nominal types include the defining module. A '*' is an internal inference
 # variable for an absent payload. An empty type marks a prior diagnostic.
-proc ::appcompiler::checker::declaredType {type node world reportsVar} {
+proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemplate 0}} {
     upvar 1 $reportsVar reports
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
+    if {[dict exists $world typeBindings $head]} {
+        if {[llength $parts] != 1} {
+            issue reports TYPE_ARITY $node "type parameter '$head' takes no arguments"
+            return ""
+        }
+        return [dict get $world typeBindings $head]
+    }
     if {$head in {result list optional range map}} {
         set arity [expr {$head in {result map} ? 2 : 1}]
         if {[llength $parts] != $arity + 1} {
@@ -55,19 +100,14 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
             issue reports RANGE_ELEMENT_TYPE $node "only ranges of int are supported"
             return ""
         }
-        # Count punctuation and canonical children before joining. Repeated
-        # aliases in a generic can otherwise double its spelling at each step.
-        set length [expr {$head eq "optional" ? 1 : [string length $head] + $arity + 1}]
-        foreach argument $args { incr length [string length $argument] }
-        if {![typeFits $length $node reports]} { return "" }
-        return [makeType $head $args]
+        return [checkedType $head $args $node reports]
     }
     if {$type in {instant local_datetime}} {
         dict set reports usesTemporal 1
         return $type
     }
     if {$type in {int decimal text bool bytes problem unit}} { return $type }
-    if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $type -> target name]} {
+    if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $head -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
     }
@@ -89,12 +129,30 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         issue reports NOT_EXPORTED $node "type '.$name' is private to module '$target'"
         return ""
     }
+    set arity [llength [dict getdef $schema typeParams {}]]
+    if {$allowTemplate && $arity && [llength $parts] == 1} { return $key }
+    if {[llength $parts] != $arity + 1} {
+        issue reports TYPE_ARITY $node "type '$head' requires $arity type arguments"
+        return ""
+    }
     if {[dict get $schema kind] in {alias distinct}} {
         if {[dict exists $reports typeReferences]} {
             dict set reports typeReferences $key $node
             return ""
         }
         return [dict getdef $reports typeNames $key {}]
+    }
+    if {$arity} {
+        set args {}
+        set index 0
+        foreach arg [lrange $parts 1 end] {
+            set where [lindex [dict getdef $node typeLocations {}] $index]
+            if {$where eq ""} { set where $node }
+            lappend args [declaredType $arg $where $world reports]
+            incr index
+        }
+        if {"" in $args} { return "" }
+        return [checkedType $key $args $node reports]
     }
     if {![typeFits [string length $key] $node reports]} { return "" }
     return $key
@@ -183,6 +241,14 @@ proc ::appcompiler::checker::compatible {actual expected} {
 
 proc ::appcompiler::checker::signature {function world reportsVar} {
     upvar 1 $reportsVar reports
+    set world [withTypeParams $world $function reports]
+    dict set function typeBindings [dict get $world typeBindings]
+    dict set function typeVariables [dict values [dict get $world typeBindings]]
+    if {[dict get $function exported] && [llength [dict get $function typeVariables]]} {
+        # A Tcl caller can select instant at this boundary even when no X
+        # declaration in the program spells a concrete temporal type.
+        dict set reports usesTemporal 1
+    }
     set params {}
     foreach param [dict get $function params] {
         set location [dict getdef $param typeLocation $param]
@@ -277,24 +343,33 @@ proc ::appcompiler::checker::constructType {node spelling name ambiguous scope i
     upvar 1 $reportsVar reports
     set actual [argumentTypes $node $scope $imports $world reports]
     set where [dict getdef $node typeLocation $node]
-    set choice [declaredType $spelling $where $world reports]
+    set choice [declaredType $spelling $where $world reports 1]
     if {$choice eq ""} { return "" }
-    if {[dict getdef $world schemas $choice kind {}] ne "choice"} {
+    if {[schemaKind $choice $world] ne "choice"} {
         issue reports EXPECTED_CHOICE $where "expected a choice type, got $choice"
         return ""
     }
+    set head [lindex [::appcompiler::typeParts $choice] 0]
+    set variants [dict get $world schemas $head members]
     set alternate [string range $spelling 1 end]
     set function [dict getdef $world functions $alternate $name {}]
     if {$ambiguous && $alternate in $imports && $function ne "" && [dict get $function exported]
-            && [dict exists $world schemas $choice members $name]} {
+            && [dict exists $variants $name]} {
         issue reports AMBIGUOUS_CALL $node "'[format {%s::%s} $spelling $name]' names both an imported function and a local choice variant"
         return ""
     }
-    if {![dict exists $world schemas $choice members $name]} {
+    if {![dict exists $variants $name]} {
         issue reports UNKNOWN_VARIANT [dict getdef $node variantLocation $node] "unknown variant '$name' on $choice"
         return ""
     }
-    set payload [dict get $world schemas $choice members $name]
+    set variables [dict getdef $world schemas $head typeVariables {}]
+    if {$choice eq $head && [llength $variables]} {
+        set args [inferTypeArguments $node $variables [dict get $variants $name] $actual reports]
+        if {![llength $args]} { return "" }
+        set choice [checkedType $head $args $where reports]
+        if {$choice eq ""} { return "" }
+    }
+    set payload [dict get [schemaMembers $choice $world] $name]
     if {![checkArguments $node $name $actual $payload reports]} { return "" }
     fact reports $node constructor $choice
     return $choice
@@ -357,7 +432,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         if {$location eq ""} { set location $node }
         set schema [declaredType [lindex $generic 0] $location $world reports]
         if {$schema eq ""} { return "" }
-        if {[dict getdef $world schemas $schema kind {}] ne "record"} {
+        if {[schemaKind $schema $world] ne "record"} {
             issue reports EXPECTED_RECORD $location "decode_json requires a record schema, got $schema"
             return ""
         }
@@ -384,7 +459,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
         encode_json {
             set schema [lindex $actual 0]
-            if {[dict getdef $world schemas $schema kind {}] ne "record"} {
+            if {[schemaKind $schema $world] ne "record"} {
                 issue reports EXPECTED_RECORD [lindex [dict get $node args] 0] "encode_json requires a record, got $schema"
                 return ""
             }
@@ -461,11 +536,11 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     set location [lindex [dict get $node typeLocations] 0]
     set row [declaredType [lindex [dict get $node typeArgs] 0] $location $world reports]
     if {$row eq ""} { return "" }
-    if {[dict getdef $world schemas $row kind {}] ne "record"} {
+    if {[schemaKind $row $world] ne "record"} {
         issue reports EXPECTED_RECORD $location "'$name' requires a record row type, got $row"
         return ""
     }
-    dict for {field type} [dict get $world schemas $row members] {
+    dict for {field type} [schemaMembers $row $world] {
         if {$type eq ""} {
             set valid 0
         } elseif {![sqlScalar $type $bases]} {
@@ -539,10 +614,20 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
     if {$target ne ""} {
         set declaredKind [dict getdef $world schemas $localChoice kind {}]
         if {$declaredKind eq "alias"} { set localChoice [dict get $reports typeNames $localChoice] }
-        set isChoice [expr {[dict getdef $world schemas $localChoice kind {}] eq "choice"}]
-        if {($isChoice && [dict exists $world schemas $localChoice members $name])
+        set isChoice [expr {[schemaKind $localChoice $world] eq "choice"}]
+        set choiceHead [lindex [::appcompiler::typeParts $localChoice] 0]
+        if {($isChoice && [dict exists $world schemas $choiceHead members $name])
                 || (($declaredKind in {alias distinct} || $isChoice) && $target ni $imports)} {
-            return [constructType $node .$target $name 1 $scope $imports $world reports]
+            if {![llength [dict getdef $node typeArgs {}]]} {
+                return [constructType $node .$target $name 1 $scope $imports $world reports]
+            }
+            # Type arguments after a qualified member belong to the
+            # function. A choice applies its arguments before the "::".
+            if {$target ne $caller && $target ni $imports} {
+                issue reports TYPE_ARITY [lindex [dict get $node typeLocations] 0] \
+                    "place choice type arguments before '::$name' in a variant constructor"
+                return ""
+            }
         }
     }
     set actual [argumentTypes $node $scope $imports $world reports]
@@ -563,14 +648,90 @@ proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
         issue reports NOT_EXPORTED $node "function '.$name' is private to module '$target'"
         return ""
     }
-    return [checkCall $node .$name $actual $function reports]
+    return [checkCall $node .$name $actual $function $world reports]
 }
 
-proc ::appcompiler::checker::checkCall {node name actual function reportsVar} {
+# Bind the declaration's parameters structurally. A missing payload (the
+# internal "*") contributes no evidence; a later argument can fill it in.
+proc ::appcompiler::checker::inferFromArgument {formal actual variables bindingsVar} {
+    upvar 1 $bindingsVar bindings
+    if {$actual eq "*"} {return 1}
+    if {$formal in $variables} {
+        set known [dict getdef $bindings $formal *]
+        set combined [joinTypes $known $actual]
+        if {$combined eq ""} {return 0}
+        dict set bindings $formal $combined
+        return 1
+    }
+    set pattern [::appcompiler::typeParts $formal]
+    set supplied [::appcompiler::typeParts $actual]
+    if {[lindex $pattern 0] ne [lindex $supplied 0] || [llength $pattern] != [llength $supplied]} {return 0}
+    foreach child [lrange $pattern 1 end] value [lrange $supplied 1 end] {
+        if {![inferFromArgument $child $value $variables bindings]} {return 0}
+    }
+    return 1
+}
+
+proc ::appcompiler::checker::inferTypeArguments {node variables expected actual reportsVar} {
+    upvar 1 $reportsVar reports
+    if {[llength $actual] != [llength $expected]} {
+        issue reports CALL_ARITY $node "expected [llength $expected] arguments, got [llength $actual]"
+        return {}
+    }
+    set bindings {}
+    foreach formal $expected value $actual arg [dict get $node args] {
+        if {$formal eq "" || $value eq ""} {return {}}
+        if {![inferFromArgument $formal $value $variables bindings]} {
+            issue reports ARGUMENT_TYPE $arg "argument of type $value is inconsistent with the generic signature or earlier arguments"
+            return {}
+        }
+    }
+    set arguments {}
+    foreach variable $variables {
+        set type [dict getdef $bindings $variable *]
+        if {[string first * $type] >= 0} {
+            set name [lindex [split $variable :] end]
+            issue reports TYPE_INFERENCE $node "cannot infer type parameter '.$name'; supply explicit type arguments"
+            return {}
+        }
+        lappend arguments $type
+    }
+    return $arguments
+}
+
+proc ::appcompiler::checker::checkCall {node name actual function world reportsVar} {
     upvar 1 $reportsVar reports
     set expected [lmap param [dict get $function params] {dict get $param type}]
+    set variables [dict get $function typeVariables]
+    set arguments [dict getdef $node typeArgs {}]
+    if {[llength $arguments]} {
+        if {[llength $arguments] != [llength $variables]} {
+            issue reports TYPE_ARITY $node "'$name' expects [llength $variables] type arguments, got [llength $arguments]"
+            return ""
+        }
+        set resolved {}
+        foreach type $arguments location [dict get $node typeLocations] {
+            lappend resolved [declaredType $type $location $world reports]
+        }
+        if {"" in $resolved} {return ""}
+        set arguments $resolved
+    } elseif {[llength $variables]} {
+        set arguments [inferTypeArguments $node $variables $expected $actual reports]
+        if {![llength $arguments]} {return ""}
+    }
+    set result [dict get $function result]
+    if {[llength $variables]} {
+        set bindings {}
+        foreach variable $variables argument $arguments {dict set bindings $variable $argument}
+        set expected [lmap formal $expected {::appcompiler::substituteType $formal $bindings}]
+        set result [::appcompiler::substituteType $result $bindings]
+        foreach type [list {*}$expected $result] {
+            if {![typeFits [string length $type] $node reports]} {return ""}
+        }
+        fact reports $node typeArguments $arguments
+    }
     if {![checkArguments $node $name $actual $expected reports]} { return "" }
-    return [dict get $function result]
+    return $result
 }
 
 proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
@@ -588,12 +749,12 @@ proc ::appcompiler::checker::recordExpression {node scope imports world reportsV
     set base [dict get $node base]
     set record [expressionType $base $scope $imports $world reports]
     set valid [expr {$record ne ""}]
-    if {$valid && [dict getdef $world schemas $record kind {}] ne "record"} {
+    if {$valid && [schemaKind $record $world] ne "record"} {
         issue reports EXPECTED_RECORD $base "expected a record, got $record"
         set valid 0
     }
     set hasRecord $valid
-    if {$hasRecord} { set fields [dict get $world schemas $record members] }
+    if {$hasRecord} { set fields [schemaMembers $record $world] }
     if {[dict get $node kind] eq "field"} {
         if {!$hasRecord} { return "" }
         return [lookupField $fields $node $record reports]
@@ -689,7 +850,7 @@ proc ::appcompiler::checker::matchVariants {type world} {
     if {[string index $type end] eq "?"} {
         return [dict create none {} some [list [string range $type 0 end-1]]]
     }
-    return [dict get $world schemas $type members]
+    return [schemaMembers $type $world]
 }
 
 # Check the variant and its payload independently of any shared arm body.
@@ -705,8 +866,15 @@ proc ::appcompiler::checker::choicePattern {arm choice world seenVar coverageVar
             set pattern ""
         }
     } else {
-        set pattern [declaredType [dict get $arm type] $location $world reports]
-        if {$pattern ne "" && [dict getdef $world schemas $pattern kind {}] ne "choice"} {
+        set pattern [declaredType [dict get $arm type] $location $world reports 1]
+        if {$pattern ne "" && $pattern eq [lindex [::appcompiler::typeParts $choice] 0]} {
+            # The matched value determines an omitted argument list in a pattern.
+            set pattern $choice
+        } elseif {[dict getdef $world schemas $pattern typeVariables {}] ne ""} {
+            issue reports TYPE_INFERENCE $location "cannot infer the type arguments for pattern '$pattern' from '$choice'"
+            set pattern ""
+        }
+        if {$pattern ne "" && [schemaKind $pattern $world] ne "choice"} {
             issue reports EXPECTED_CHOICE $location "expected a closed choice in the pattern, got $pattern"
             set pattern ""
         }
@@ -821,13 +989,13 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     }
     set arms [dict get $node arms]
     if {$head ne "optional" && [llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
-            && [dict getdef $world schemas $choice kind {}] ne "choice"} {
+            && [schemaKind $choice $world] ne "choice"} {
         if {$choice ne ""} {
             issue reports EXPECTED_LIST $value "expected a list for these patterns, got $choice"
         }
         return [listMatchType $node "" $scope $imports $world reports]
     }
-    if {$choice ne "" && $head ne "optional" && [dict getdef $world schemas $choice kind {}] ne "choice"} {
+    if {$choice ne "" && $head ne "optional" && [schemaKind $choice $world] ne "choice"} {
         issue reports EXPECTED_CHOICE $value "expected a closed choice or optional, got $choice"
         set choice ""
     }
@@ -873,33 +1041,81 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
 # Equality visits each reachable type once, even for cyclic declarations.
 # A failed member declaration already has a diagnostic. Its unknown type
 # cannot establish either comparability or a second, independent error.
-proc ::appcompiler::checker::comparable {type world} {
-    set pending [list $type]
-    set seen {}
-    set known 1
-    for {set i 0} {$i < [llength $pending]} {incr i} {
-        set member [lindex $pending $i]
-        if {[dict exists $seen $member]} { continue }
-        dict set seen $member 1
-        if {$member eq ""} { set known -1; continue }
-        if {$member in {int decimal text bool instant local_datetime}} { continue }
-        set parts [::appcompiler::typeParts $member]
-        if {[lindex $parts 0] eq "range"} { return 0 }
-        if {[lindex $parts 0] in {optional list map}} {
-            lappend pending {*}[lrange $parts 1 end]
-            continue
-        }
-        if {![dict exists $world schemas $member]} { return 0 }
-        set schema [dict get $world schemas $member]
-        if {[dict get $schema kind] eq "distinct"} {
-            lappend pending [dict get $schema members]
-        } elseif {[dict get $schema kind] eq "choice"} {
-            foreach payload [dict values [dict get $schema members]] { lappend pending {*}$payload }
+# Equality requires every stored component to support equality. Represent that
+# condition as the set of parameters that must support it, plus a marker for an
+# invalid declaration or an intrinsically noncomparable component.
+proc ::appcompiler::checker::equalityRequirements {type summaries} {
+    if {$type eq ""} { return !invalid }
+    if {$type in {int decimal text bool instant local_datetime}} { return {} }
+    set parts [::appcompiler::typeParts $type]
+    set head [lindex $parts 0]
+    if {[string index $head 0] eq "@"} { return [list $head] }
+    set args [lrange $parts 1 end]
+    if {$head in {optional list map}} {
+        set required {}
+        foreach arg $args { lappend required {*}[equalityRequirements $arg $summaries] }
+        return [lsort -unique $required]
+    }
+    if {![dict exists $summaries $head]} { return !unsupported }
+    lassign [dict get $summaries $head] variables conditions
+    set required {}
+    foreach condition $conditions {
+        set index [lsearch -exact $variables $condition]
+        if {$index < 0} {
+            lappend required $condition
         } else {
-            lappend pending {*}[dict values [dict get $schema members]]
+            lappend required {*}[equalityRequirements [lindex $args $index] $summaries]
         }
     }
-    return $known
+    return [lsort -unique $required]
+}
+
+# Solve the finite requirements of recursive declarations once, on their
+# templates. Expanding .tree<list<T>> recursively from .tree<T> would produce
+# infinitely many concrete type spellings even when all its fields compare.
+proc ::appcompiler::checker::equalitySummaries {schemas} {
+    set summaries {}
+    set fields {}
+    set dependents {}
+    set pending {}
+    dict for {name entry} $schemas {
+        lassign $entry kind members variables
+        dict set summaries $name [list $variables {}]
+        dict set pending $name 1
+        switch -- $kind {
+            distinct { set types [list $members] }
+            record { set types [dict values $members] }
+            choice { set types [concat {*}[dict values $members]] }
+        }
+        dict set fields $name $types
+        foreach referenced [regexp -all -inline {\.[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*} $types] {
+            dict set dependents $referenced $name 1
+        }
+    }
+    while {[dict size $pending]} {
+        set batch $pending
+        set pending {}
+        dict for {name unused} $batch {
+            set requirements {}
+            foreach type [dict get $fields $name] {
+                lappend requirements {*}[equalityRequirements $type $summaries]
+            }
+            set requirements [lsort -unique $requirements]
+            lassign [dict get $summaries $name] variables previous
+            if {$requirements ne $previous} {
+                dict set summaries $name [list $variables $requirements]
+                set pending [dict merge $pending [dict getdef $dependents $name {}]]
+            }
+        }
+    }
+    return $summaries
+}
+
+proc ::appcompiler::checker::comparable {type world} {
+    set required [equalityRequirements $type [dict get $world equalitySummaries]]
+    if {$required eq ""} { return 1 }
+    if {$required eq "!invalid"} { return -1 }
+    return 0
 }
 
 proc ::appcompiler::checker::comparisonType {left right op where world reportsVar} {
@@ -961,6 +1177,16 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
 }
 
 proc ::appcompiler::checker::expressionType {node scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    try {
+        return [inferExpression $node $scope $imports $world reports]
+    } trap {APPCOMPILER TYPE_EXPANSION_LIMIT} message {
+        issue reports TYPE_EXPANSION_LIMIT $node $message
+        return ""
+    }
+}
+
+proc ::appcompiler::checker::inferExpression {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set kind [dict get $node kind]
     switch -exact -- $kind {
@@ -1178,6 +1404,8 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
                 set actual [expressionType $value $scope $imports $world reports]
                 if {[lindex [::appcompiler::typeParts $actual] 0] eq "result"} {
                     issue reports DISCARDED_RESULT $value "handle, propagate or return the result of this expression"
+                } elseif {$actual in [dict values [dict getdef $world typeBindings {}]]} {
+                    issue reports DISCARDED_RESULT $value "the value of this expression may be a result; bind it or return it"
                 }
             }
             default { issue reports UNKNOWN_STATEMENT $statement "unknown statement kind '$kind'" }
@@ -1188,6 +1416,7 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
 
 proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
     upvar 1 $reportsVar reports
+    dict set world typeBindings [dict get $function typeBindings]
     set scope {}
     foreach param [dict get $function params] {
         bindLocal scope $param [dict get $param type] 0 reports
@@ -1268,12 +1497,20 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             if {[dict get $schema kind] eq "distinct"} {
                 set members [dict getdef $reports distinctBases $key {}]
             } else {
-                set members [checker::readMembers $schema $world reports]
+                set memberWorld [checker::withTypeParams $world $schema reports]
+                set variables [dict values [dict get $memberWorld typeBindings]]
+                dict set world schemas $key typeVariables $variables
+                set members [checker::readMembers $schema $memberWorld reports]
             }
             dict set world schemas $key members $members
             dict set runtimeSchemas $key [list [dict get $schema kind] $members]
+            if {[dict getdef $world schemas $key typeVariables {}] ne ""} {
+                dict lappend runtimeSchemas $key $variables
+            }
         }
     }
+    dict set world runtimeSchemas $runtimeSchemas
+    dict set world equalitySummaries [checker::equalitySummaries $runtimeSchemas]
     # Index normalized signatures before bodies to support forward and recursive calls.
     set bodies {}
     dict for {module definition} $modules {

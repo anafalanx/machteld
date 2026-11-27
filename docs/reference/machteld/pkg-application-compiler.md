@@ -45,6 +45,17 @@ function or type gets a Markdown page. After a search, pass a returned ID to
 use `docs --runtime get ID`. The compiler's bundled `README.md` describes
 extracting the driver and sources, the project manifest, and typed examples.
 
+## Generic application code
+
+Generic functions, records and closed choices declare dotted type
+parameters, for example `record .page<.item> { items: list<.item> }`.
+X normally infers the type arguments to a function from its arguments.
+A Tcl caller supplies an explicit list of concrete types before the
+ordinary arguments of a generic export. Use `project docs ARCHIVE get
+fn/MODULE/NAME` for its signature. The compiler guide and the
+`examples/typed-pages` project show how to share one function across
+several record types.
+
 ## Keeping an existing Tcl/Tk entry
 
 Set `tclEntry main.tcl` in place of `entry {module function}`. Start with

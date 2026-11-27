@@ -1,0 +1,16 @@
+## A page retains the type of each item it contains.
+export record .page<.item> {
+    items: list<.item>
+}
+
+## A nonempty selection carries one item of the page's element type.
+export choice .selection<.item> {
+    empty
+    found(.item)
+}
+
+## Retrieves the first item in its original type. An empty page stays empty.
+export fn .first<.item>($page: .page<.item>) -> .selection<.item> {
+    for $item in $page.items { return .selection::found($item) }
+    return .selection<.item>::empty()
+}

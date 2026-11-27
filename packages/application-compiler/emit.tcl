@@ -35,8 +35,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
     }
     set definitions [list [list ::namespace eval $rt {}]]
     lappend definitions [list ::proc ${rt}::schemas {} [list ::return $schemas]]
-    lappend definitions [list ::proc ${rt}::typeParts [info args ::appcompiler::typeParts] \
-        [info body ::appcompiler::typeParts]]
+    foreach helper {typeParts substituteType specializeSchema} {
+        lappend definitions [list ::proc ${rt}::$helper [info args ::appcompiler::$helper] \
+            [info body ::appcompiler::$helper]]
+    }
     lappend definitions [list ::proc ${rt}::reject {path expected} {
         return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} "expected $expected at $path"
     }]
@@ -132,7 +134,7 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             @textKey {return [mapTextKey $value]}
             text {return $value}
         }
-        lassign [dict get [schemas] $type] kind members
+        lassign [specializeSchema $type [schemas]] kind members
         if {$kind eq "distinct"} {return [guard $members $value $path]}
         if {$kind eq "record"} {
             if {[catch {dict size $value}]} {reject $path $type}
@@ -178,6 +180,18 @@ proc ::appcompiler::emitLocation {node} {
 proc ::appcompiler::emitFacts {node context} {
     set key [list [dict get $node module] [dict get $node line] [dict get $node column] [dict get $node kind]]
     return [dict getdef $context facts $key {}]
+}
+
+# Closed types stay literal Tcl words. Types mentioning a parameter acquire
+# the concrete caller's descriptor before a runtime boundary sees them.
+proc ::appcompiler::emitTypeWord {type context} {
+    if {[string first @ $type] < 0} {return [list $type]}
+    return [format {[%s %s $m_types]} [list [dict get $context target]::@rt::substituteType] [list $type]]
+}
+
+proc ::appcompiler::emitTypeList {types context} {
+    if {[string first @ $types] < 0} {return [list $types]}
+    return [format {[::list %s]} [join [lmap type $types {emitTypeWord $type $context}] { }]]
 }
 
 proc ::appcompiler::emitMapKeyWord {node context word} {
@@ -243,7 +257,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             }
             if {$op in {== !=}} {
                 set type [dict get [emitFacts $node $context] operandType]
-                set comparison [format {[%s %s %s %s]} [list ${targetNamespace}::@rt::equal] [list $type] $left $right]
+                set comparison [format {[%s %s %s %s]} [list ${targetNamespace}::@rt::equal] [emitTypeWord $type $context] $left $right]
                 if {$op eq "!="} {return [format {[::tcl::mathop::! %s]} $comparison]}
                 return $comparison
             }
@@ -268,7 +282,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set facts [emitFacts $node $context]
             if {[dict exists $facts sqlBindings] && [dict get $node name] ne "sql_commit"} {
                 set values [format {[::list %s]} [join [lrange $arguments 2 end] { }]]
-                lappend words {*}[lrange $arguments 0 1] [list [dict get $facts sqlBindings]] $values
+                lappend words {*}[lrange $arguments 0 1] [emitTypeList [dict get $facts sqlBindings] $context] $values
             } else {
                 lappend words {*}$arguments
             }
@@ -326,7 +340,11 @@ proc ::appcompiler::emitCallPrefix {node context} {
             if {[dict exists $facts constructor]} {return [list ::list [list $name]]}
             set calleeModule [dict get $node qualifier]
             if {$calleeModule eq ""} {set calleeModule [dict get $context module]}
-            return [list [list ${target}::${calleeModule}::${name}]]
+            set prefix [list [list ${target}::${calleeModule}::${name}]]
+            if {[llength [dict getdef $facts typeArguments {}]]} {
+                lappend prefix [emitTypeList [dict get $facts typeArguments] $context]
+            }
+            return $prefix
         }
         builtin {
             set name [dict get $node name]
@@ -338,11 +356,11 @@ proc ::appcompiler::emitCallPrefix {node context} {
                 sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}
                 ok - err {return [list ::list $name]}
                 decode_json - encode_json {
-                    return [list [list ${target}::@rt::${name}] [list [dict get $facts schema]]]
+                    return [list [list ${target}::@rt::${name}] [emitTypeWord [dict get $facts schema] $context]]
                 }
                 sql_one - sql_optional - sql_many {
                     set reader [expr {[dict get $facts transaction] ? "sqlTxRead" : "sqlRead"}]
-                    return [list [list ${target}::@rt::${reader}] [string range $name 4 end] [list [dict get $facts schema]]]
+                    return [list [list ${target}::@rt::${reader}] [string range $name 4 end] [emitTypeWord [dict get $facts schema] $context]]
                 }
                 sql_exec {return [list [list ${target}::@rt::sqlExec]]}
                 sql_commit {return [list [list ${target}::@rt::sqlCommit]]}
@@ -611,7 +629,7 @@ proc ::appcompiler::emitExtern {function context formals bodyVar locationsVar} {
     set call [list $invoke [list $where] [emitTextWord [dict get $function prefix]]]
     foreach formal $formals {lappend call [format {$%s} $formal]}
     set value [format {[%s %s %s [%s]]} [list ${rt}::externResult] [list $where] \
-        [list [dict get $function result]] [join $call { }]]
+        [emitTypeWord [dict get $function result] $context] [join $call { }]]
     if {[dict get $context problemResult]} {
         set value [format {[%s %s %s]} [list ${rt}::atResult] $value [list $where]]
     }
@@ -633,13 +651,18 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
             set formals {}
             set body {}
             set locations [dict create]
+            set variables [dict getdef $function typeVariables {}]
+            if {[llength $variables]} {
+                emitLine [format {::set m_types [%s %s $m_arguments]} \
+                    [list ${targetNamespace}::@rt::bindTypes] [list $variables]] [emitLocation $function] body locations
+            }
             foreach param [dict get $function params] {
                 set local [emitLocalName [dict get $param name]]
                 lappend formals $local
                 set type [dict get $param type]
                 if {[dict get $function exported] && $type ne "text"} {
                     lappend body [format {::set %s [%s %s $%s %s]} $local \
-                        [list ${targetNamespace}::@rt::guard] [list $type] $local \
+                        [list ${targetNamespace}::@rt::guard] [emitTypeWord $type $context] $local \
                         [list [format {$%s} [dict get $param name]]]]
                     dict set locations [llength $body] [emitLocation $param]
                 }
@@ -652,6 +675,7 @@ proc ::appcompiler::emitModules {modules targetNamespace facts resolved} {
                 dict set context outerJumps $targets
                 emitStatements [dict get $function body] $context body locations
             }
+            if {[llength $variables]} {set formals [linsert $formals 0 m_arguments]}
             lappend definitions [list ::proc $name $formals [join $body \n]]
             if {[dict get $function exported]} {
                 lappend definitions [list ::namespace eval $moduleNamespace [list ::namespace export $functionName]]

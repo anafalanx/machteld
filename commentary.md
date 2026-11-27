@@ -317,6 +317,13 @@ is complete. On 29 March 2026, Brussels clocks skipped 02:30. On
 both possible instants against its source observations and uses a recorded
 offset to narrow the answer when one is available.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, generic pages
+
+The same lookup returned a station name from one page and the vehicle
+identifier `007` from another. The item type followed the value through
+the shared function and its choice result. At the Tcl boundary a caller
+could request text explicitly and retain both leading zeroes.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

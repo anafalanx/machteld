@@ -1,0 +1,42 @@
+import pages
+
+record .station {
+    name: text
+}
+
+record .vehicle {
+    fleet_id: text
+}
+
+## Reads a page of stations and returns the first station's name.
+export fn .station_name($json: text) -> result<text,problem> {
+    $page ::= decode_json<.pages::page<.station>>($json)?
+    return ok(match .pages::first($page) {
+        .pages::selection::empty => 'no station'
+        .pages::selection::found($station) => $station.name
+    })
+}
+example .station_name('{"items":[{"name":"North"},{"name":"South"}]}') => 'North'
+example .station_name('{"items":[]}') => 'no station'
+
+## Reads a page of vehicles. Fleet identifiers preserve their leading zeroes.
+export fn .vehicle_id($json: text) -> result<text,problem> {
+    $page ::= decode_json<.pages::page<.vehicle>>($json)?
+    return ok(match .pages::first($page) {
+        .pages::selection::empty => 'no vehicle'
+        .pages::selection::found($vehicle) => $vehicle.fleet_id
+    })
+}
+example .vehicle_id('{"items":[{"fleet_id":"007"}]}') => '007'
+example .vehicle_id('{"items":[]}') => 'no vehicle'
+
+fn .main($args: list<text>) -> result<unit,problem> {
+    $json ::= decode_utf8(read_stdin_bytes()?)?
+    $value ::= match $args {
+        ['stations'] => .station_name($json)
+        ['vehicles'] => .vehicle_id($json)
+        _ => err(problem('usage: pages.machteld stations|vehicles (supply a JSON page on stdin)'))
+    }
+    $line ::= $value?
+    return write_stdout_utf8($"$line\n")
+}

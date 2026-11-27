@@ -3,9 +3,13 @@ namespace eval ::appcompiler::reference {variable serial 0}
 proc ::appcompiler::reference::signature {decl} {
     set kind [dict get $decl kind]
     set head "export $kind .[dict get $decl name]"
+    if {$kind eq "extern"} {set head "export extern fn .[dict get $decl name]"}
+    if {[llength [dict getdef $decl typeParams {}]]} {
+        set parameters [lmap name [dict get $decl typeParams] {format ".%s" $name}]
+        append head < [join $parameters {, }] >
+    }
     switch -- $kind {
         fn - extern {
-            if {$kind eq "extern"} {set head "export extern fn .[dict get $decl name]"}
             set params [lmap param [dict get $decl params] {
                 format {$%s: %s} [dict get $param name] [dict get $param type]
             }]

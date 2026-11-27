@@ -111,10 +111,11 @@ proc ::appcompiler::analyzeApplication {sources entryModule entryFunction} {
         set fn [dict getdef $analysis resolved functions $entryModule $entryFunction {}]
         if {$fn ne {}} {
             set parameters [dict get $fn params]
-            if {[llength $parameters] != 1 || [dict get [lindex $parameters 0] type] ne "list<text>" \
+            if {[llength [dict getdef $fn typeParams {}]] ||
+                    [llength $parameters] != 1 || [dict get [lindex $parameters 0] type] ne "list<text>" \
                     || [dict get $fn result] ne "result<unit,problem>"} {
                 dict lappend analysis diagnostics [diagnostic ENTRY_TYPE $fn \
-                    "entry requires one list<text> parameter and a result<unit,problem> return"]
+                    "entry requires a concrete function with one list<text> parameter and a result<unit,problem> return"]
             }
         } else {
             dict lappend analysis diagnostics [diagnostic ENTRY_NAME $location \
@@ -174,6 +175,10 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs} {
                 if {![dict get $function exported]} continue
                 set command [list ::tailcall ${rt}::callExport ${implementation}::${module}::${name} [emitLocation $function]]
                 set formals {}
+                if {[llength [dict getdef $function typeParams {}]]} {
+                    lappend formals typeArguments
+                    append command { $typeArguments}
+                }
                 foreach param [dict get $function params] {
                     set local [emitLocalName [dict get $param name]]
                     lappend formals $local
