@@ -156,16 +156,16 @@ proc compilerSuites {steps group runtime} {
 }
 set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
-set packed {archive {io -pack} {project -pack}}
+set packed {archive {examples -pack} {io -pack} {project -pack} reference}
 check {fast runs in-process application compiler suites on the candidate} \
     [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
-check {integration alone runs the compiler's child-process and direct project and I/O tests} \
+check {integration alone runs the compiler's child-process and direct project, I/O and example tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
-        [lsort [concat $direct {project io}]]}]
-check {packaging runs the compiler archive and the packed project and I/O cases} \
+        [lsort [concat $direct {project io examples}]]}]
+check {packaging runs the compiler archive and the packed project, I/O and example cases} \
     [expr {[compilerSuites [::gate::plan [settings {--group packaging}]] packaging $candidate] eq $packed}]
 foreach plan [list $releasePlan [::gate::plan [settings {--group packaging --group integration}]]] {
-    check {selecting both groups runs direct project and I/O just once inside the packed suites} \
+    check {selecting both groups runs the direct cases just once inside each packed suite} \
         [expr {[compilerSuites $plan integration $candidate] eq $direct &&
             [compilerSuites $plan packaging $candidate] eq $packed}]
 }

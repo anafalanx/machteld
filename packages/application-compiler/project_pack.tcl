@@ -72,6 +72,7 @@ proc ::appcompiler::project::pack {manifest output} {
         set originals [file join $app project inputs]
         stageBytes [file join $originals application.dict] [dict get $project manifestBytes]
         dict for {name bytes} $inputs { stageBytes [file join $originals $name] $bytes }
+        stageBytes [file join $app project reference.db] [::appcompiler::reference::build [dict get $built artifact modules]]
         file mkdir [file join $app compiler]
         foreach member $::appcompiler::compilerFiles {
             file copy -- [file join $::appcompiler::compilerDirectory $member] [file join $app compiler $member]

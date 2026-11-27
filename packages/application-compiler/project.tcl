@@ -167,8 +167,19 @@ proc ::appcompiler::project::load {manifest} {
 proc ::appcompiler::project::build {manifest {packageRoot {}}} {
     set project [load $manifest]
     if {$packageRoot eq ""} {set packageRoot [file dirname [file normalize $manifest]]}
-    set directories [lmap path [dict get $project packageDirs] {file join $packageRoot $path}]
+    set directories [packageDirectories $project $packageRoot]
     set artifact [::appcompiler::application [dict get $project sources] {*}[dict get $project entry] \
         [dict get $project minApi] $directories]
     return [dict create project $project artifact $artifact]
+}
+
+proc ::appcompiler::project::packageDirectories {project root} {
+    return [lmap path [dict get $project packageDirs] {file join $root $path}]
+}
+
+proc ::appcompiler::project::test {manifest} {
+    set project [load $manifest]
+    set directories [packageDirectories $project [file dirname [file normalize $manifest]]]
+    set analysis [::appcompiler::analyzeApplication [dict get $project sources] {*}[dict get $project entry]]
+    return [::appcompiler::runExamples $analysis [dict get $project minApi] $directories]
 }

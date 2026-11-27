@@ -2,7 +2,7 @@ package require machteld
 
 proc usage {} {
     return -code error -errorcode {APPCOMPILER PROJECT USAGE} \
-        [format {usage: %s check ?--json? MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT} [file tail $::argv0]]
+        [format {usage: %s check ?--json? MANIFEST | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
 }
 
 namespace eval ::projectDriver {}
@@ -63,6 +63,16 @@ try {
             } elseif {$argc != 2} {usage}
             ::appcompiler::project::build $input
         }
+        test {
+            if {$argc != 2} {usage}
+            set report [::appcompiler::project::test $input]
+            foreach diagnostic [dict get $report failures] {
+                puts stderr [::appcompiler::formatDiagnostic $diagnostic]
+            }
+            puts [format {%d examples: %d passed, %d failed} [dict get $report total] \
+                [dict get $report passed] [dict get $report failed]]
+            if {[dict get $report failed]} {exit 1}
+        }
         run {
             if {$argc < 2} {usage}
             set projectBuild [::appcompiler::project::build $input]
@@ -74,6 +84,13 @@ try {
         pack - rebuild {
             if {$argc != 3} {usage}
             puts [::appcompiler::project::$action $input $output]
+        }
+        docs {
+            if {$argc < 4} {usage}
+            set answer [::appcompiler::reference::query $input {*}[lrange $argv 2 end]]
+            if {$output eq "search" && $answer ne {}} {append answer \n}
+            chan configure stdout -translation binary
+            puts -nonewline stdout [encoding convertto -profile strict utf-8 $answer]
         }
         default {usage}
     }

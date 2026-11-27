@@ -1,3 +1,6 @@
 extern fn .length($value: text) -> int = ['::string', 'length']
 
+## Formats the Unicode character count as a line of text.
 export fn .describe($value: text) -> text => $"characters=${.length($value)}\n"
+example .describe('Snow 雪') => "characters=6\n"
+example .describe('') => "characters=0\n"

@@ -92,9 +92,7 @@ proc ::appcompiler::compile {sources {targetNamespace ::application}} {
     return [emitChecked [analyze $sources] $targetNamespace]
 }
 
-# Produce a complete Machteld Tcl entry without running the application.
-# The selected entry may be private to its module.
-proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}}} {
+proc ::appcompiler::analyzeApplication {sources entryModule entryFunction} {
     set analysis [analyze $sources]
     if {![llength [dict get $analysis diagnostics]]} {
         set location [dict create module $entryModule line 1 column 1]
@@ -111,9 +109,10 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
                 "unknown application entry [list $entryModule $entryFunction]"]
         }
     }
-    set artifact [emitChecked $analysis ::application]
-    set entry ::application::${entryModule}::${entryFunction}
-    set dispatch [list ::application::@rt::launch $entry [dict get $artifact sourceMap]]
+    return $analysis
+}
+
+proc ::appcompiler::applicationPrelude {minApi packageDirs} {
     set requirement [list package require machteld]
     if {$minApi ne {}} {
         if {[catch {package vcompare $minApi $minApi}]} {
@@ -127,15 +126,27 @@ proc ::appcompiler::application {sources entryModule {entryFunction main} {minAp
     foreach path [lreverse $packageDirs] {
         append script [format {set ::auto_path [linsert $::auto_path 0 [file join [file dirname [info script]] %s]]} [list $path]] \n
     }
+    return $script
+}
+
+# Produce a complete Machteld Tcl entry without running the application.
+# The selected entry may be private to its module.
+proc ::appcompiler::application {sources entryModule {entryFunction main} {minApi {}} {packageDirs {}}} {
+    set analysis [analyzeApplication $sources $entryModule $entryFunction]
+    set artifact [emitChecked $analysis ::application]
+    set entry ::application::${entryModule}::${entryFunction}
+    set dispatch [list ::application::@rt::launch $entry [dict get $artifact sourceMap]]
+    set script [applicationPrelude $minApi $packageDirs]
     append script "[dict get $artifact script]\n"
     append script "::exit \[$dispatch \$::argv\]\n"
     dict set artifact script $script
+    dict set artifact modules [dict get $analysis modules]
     return $artifact
 }
 
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
-    set modules {types.tcl parser.tcl check.tcl emit.tcl project.tcl project_pack.tcl}
+    set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}
     variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]

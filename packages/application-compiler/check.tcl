@@ -775,6 +775,26 @@ proc ::appcompiler::checker::comparable {type world} {
     return $known
 }
 
+proc ::appcompiler::checker::comparisonType {left right op where world reportsVar} {
+    upvar 1 $reportsVar reports
+    if {$left eq "" || $right eq ""} { return "" }
+    if {$left in {int decimal} && $right in {int decimal}} {
+        return [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
+    }
+    set type [joinTypes $left $right]
+    if {$type eq ""} {
+        issue reports OPERAND_TYPE $where "'$op' needs operands of the same type, got $left and $right"
+        return ""
+    }
+    set comparison [comparable $type $world]
+    if {$comparison < 0} { return "" }
+    if {!$comparison} {
+        issue reports NOT_COMPARABLE $where "value equality is not defined for $type"
+        return ""
+    }
+    return $type
+}
+
 proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set op [dict get $node op]
@@ -789,21 +809,9 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         if {$left eq "int" && $right eq "int"} { return range<int> }
         return ""
     }
-    set numeric [expr {$left in {int decimal} && $right in {int decimal}}]
-    set common [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
     if {$op in {== !=}} {
-        if {$left eq "" || $right eq ""} { return "" }
-        set type [expr {$numeric ? $common : [joinTypes $left $right]}]
-        if {$type eq ""} {
-            issue reports OPERAND_TYPE $node "'$op' needs operands of the same type, got $left and $right"
-            return ""
-        }
-        set comparison [comparable $type $world]
-        if {$comparison < 0} { return "" }
-        if {!$comparison} {
-            issue reports NOT_COMPARABLE $node "value equality is not defined for $type"
-            return ""
-        }
+        set type [comparisonType $left $right $op $node $world reports]
+        if {$type eq ""} { return "" }
         fact reports $node operandType $type
         return bool
     }
@@ -811,7 +819,7 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         issue reports UNKNOWN_OPERATOR $node "unknown binary operator '$op'"
         return ""
     }
-    if {!$numeric} {
+    if {$left ni {int decimal} || $right ni {int decimal}} {
         foreach side {left right} type [list $left $right] {
             if {$type ni {{} int decimal}} {
                 issue reports OPERAND_TYPE [dict get $node $side] "'$op' expects an int or decimal operand, got $type"
@@ -820,6 +828,7 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         return ""
     }
     if {$op eq "/"} { return result<decimal,problem> }
+    set common [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
     if {$common eq "decimal"} { fact reports $node operandType decimal }
     return $common
 }
@@ -1045,6 +1054,52 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
     }
 }
 
+proc ::appcompiler::checker::checkExample {example imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    dict set world returnType unit
+    set actual [dict get $example actual]
+    set owner [dict get $example owner]
+    set type ""
+    if {$owner eq "" || $owner ne [dict get $actual name]} {
+        issue reports EXAMPLE_OWNER $actual "an example must call the function declared immediately before it"
+        argumentTypes $actual {} $imports $world reports
+    } else {
+        set type [expressionType $actual {} $imports $world reports]
+        if {$type ne ""} { fact reports $example actualType $type }
+    }
+    lassign [::appcompiler::typeParts $type] head success failure
+    if {[dict get $example expectation] eq "value"} {
+        set expected [dict get $example expected]
+        set want [expressionType $expected {} $imports $world reports]
+        if {$head ne "result"} { set success $type }
+        set comparison [comparisonType $success $want => $expected $world reports]
+        if {$comparison ne ""} { fact reports $example operandType $comparison }
+        return
+    }
+    if {$type ne "" && ($head ne "result" || $failure ne "problem")} {
+        issue reports EXAMPLE_ERROR_TYPE [dict get $example code] "an error-code expectation requires result<T,problem>, got $type"
+    }
+    set seen [dict create code 1]
+    foreach field [dict get $example fields] {
+        set name [dict get $field name]
+        set value [dict get $field value]
+        set want [expressionType $value {} $imports $world reports]
+        if {[dict exists $seen $name]} {
+            issue reports EXAMPLE_DUPLICATE_FIELD $field "problem field '$name' is already selected"
+            continue
+        }
+        dict set seen $name 1
+        if {$want eq ""} { continue }
+        set defined [dict getdef {message text byteOffset int} $name {}]
+        if {$defined ne "" && $want ne $defined} {
+            issue reports EXAMPLE_FIELD_TYPE $value "problem field '$name' expects $defined, got $want"
+            continue
+        }
+        set comparison [comparisonType $want $want => $value $world reports]
+        if {$comparison ne ""} { fact reports $field operandType $comparison }
+    }
+}
+
 proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {resolvedVar {}}} {
     set reports [dict create diagnostics {} facts {} typeNames {} distinctBases {}]
     set world [dict create modules $modules schemas {} functions {}]
@@ -1103,6 +1158,9 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
         }
         foreach function [dict getdef $bodies $module {}] {
             checker::checkFunction $function $imports $world reports
+        }
+        foreach example [dict getdef $definition examples {}] {
+            checker::checkExample $example $imports $world reports
         }
     }
     if {$factsVar ne ""} {

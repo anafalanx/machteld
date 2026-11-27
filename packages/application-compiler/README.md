@@ -333,6 +333,31 @@ map built-in names are provisional.
 Run `machteld.exe test/application_compiler_map_test.tcl` for the map
 regressions.
 
+## Executable examples
+
+Place an `example` immediately after the function it calls. A function may
+have several examples. The checker verifies the call and its expectation.
+The project driver's `test` command evaluates them and reports each failure
+at its source location, followed by the total passed and failed.
+
+```text
+export fn .seconds($minutes: int) -> int => $minutes * 60
+example .seconds(2) => 120
+
+extern fn .hex($value: text) -> bytes = ['::binary', 'decode', 'hex']
+export fn .decode_hex($value: text) -> result<text,problem> => decode_utf8(.hex($value))
+example .decode_hex('4142') => 'AB'
+example .decode_hex('4142ff') => error 'UTF8' { byteOffset = 2 }
+```
+
+A value expectation uses the language's equality rules. For a function
+returning `result`, the value is the successful payload. An error expectation
+requires a `result<T,problem>`. The example above checks the code and the byte
+offset. To check only the code, write `=> error 'UTF8'`. Add `message = '…'`
+to the field selection when exact wording is part of the contract. A missing
+selected field fails. Other fields may vary. Examples can call private helpers
+and imported functions. They execute with the project's declared Tcl packages.
+
 ## File-backed applications
 
 The development driver accepts a UTF-8 project dictionary. The following
@@ -376,6 +401,7 @@ print `characters=6` followed by a newline.
 
 ```text
 machteld.exe tools/application_project.tcl check examples/typed-text-length/project.dict
+machteld.exe tools/application_project.tcl test examples/typed-text-length/project.dict
 machteld.exe tools/application_project.tcl run examples/typed-text-length/project.dict "Snow 雪"
 machteld.exe tools/application_project.tcl pack examples/typed-text-length/project.dict sample.machteld
 machteld.exe sample.machteld "Snow 雪"
@@ -385,7 +411,10 @@ machteld.exe tools/application_project.tcl rebuild sample.machteld rebuilt.macht
 `check` validates every declared input and the entry signature without
 starting the app. `run` forwards each argument after the manifest, including
 empty arguments, and the application inherits standard input and output.
-`pack` and `rebuild` require an archive-capable host. A working archive
+`test` checks the whole project before running its examples. It leaves the
+application entry idle, except for any explicit example calling that function.
+`check`, `pack` and ordinary application startup leave examples unexecuted.
+`pack` and `rebuild` require an archive-capable host with SQLite FTS5. A working archive
 is replaced only after the replacement has been built and checked.
 
 `check --json` writes one UTF-8 JSON document to standard output. A clean
@@ -408,6 +437,31 @@ compiler under `compiler/`, and the original manifest at
 `project/inputs/application.dict`. The declared source and asset files keep
 their relative paths and exact bytes under `project/inputs/`. The path
 `application.dict` in that directory is reserved for the manifest.
+
+### Reading the offline application reference
+
+Each new archive includes `project/reference.db`. It contains one Markdown
+page per exported function or type, with its source-level signature.
+Consecutive `##` lines directly above the declaration supply the page's
+Markdown description. Function pages also display their exact source
+examples. Private functions' examples still run in project tests.
+
+```text
+machteld.exe tools/application_project.tcl docs sample.machteld search "character count"
+machteld.exe tools/application_project.tcl docs sample.machteld get fn/textutil/describe
+machteld.exe tools/application_project.tcl docs --runtime get machteld/command/docs 0 1000
+```
+
+`search QUERY [LIMIT]` uses SQLite FTS5 and returns one page ID per line.
+The default limit is 50 and the maximum is 200. Application IDs are
+case-sensitive and use `fn/MODULE/NAME` or `type/MODULE/NAME`.
+`get ID [OFFSET [LIMIT]]` returns a Markdown slice measured in characters.
+The default offset is zero and the default limit is 32,768. The maximum
+limit is 1,048,576. Use `--runtime` on a host carrying the Machteld
+reference to query its manual with the same commands. Reading an application
+reference verifies the archive and reads its database without loading any of
+the application's Tcl or starting its examples. Rebuild an older archive
+with the current compiler to generate its reference.
 
 A recipient with only the archive and an archive-capable `machteld.exe`
 can also rebuild it. From their directory, start `machteld.exe` in a
@@ -447,8 +501,10 @@ compiler and work after the original archive has been put away.
 
 ```text
 machteld.exe local-compiler/driver.tcl check --json working-source/application.dict
+machteld.exe local-compiler/driver.tcl test working-source/application.dict
 machteld.exe local-compiler/driver.tcl run working-source/application.dict "Snow 雪"
 machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
+machteld.exe local-compiler/driver.tcl docs revised.machteld get fn/textutil/describe
 machteld.exe revised.machteld "Snow 雪"
 ```
 

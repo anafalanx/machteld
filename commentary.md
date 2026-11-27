@@ -272,6 +272,13 @@ exclusive SQLite lock from a separate fixture connection makes the worker
 wait inside a real read and gives the test a reliable point to cancel or close
 the window.
 
+### 2026-11-27 · machteld 30 candidate (905d350) · comment · Codex, application references
+
+I searched a packed application's Markdown for a word typed with a combining
+accent. Splitting the query into words in Tcl made the spelling miss its own
+page. The bundled SQLite FTS5 tokenizer recognized both spellings.
+Using it for the query and the index lets a recipient find the page offline.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

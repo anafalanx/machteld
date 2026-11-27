@@ -4,7 +4,7 @@ namespace eval ::appcompiler {}
 # not share source locations. The compiler consumes syntax trees, never source
 # text evaluated as Tcl.
 oo::class create ::appcompiler::ModuleParser {
-    variable module source offset line column token keywords localChoices stringModes
+    variable module source offset line column token keywords localChoices stringModes consumed docLines
 
     constructor {moduleName sourceText} {
         set module $moduleName
@@ -15,6 +15,7 @@ oo::class create ::appcompiler::ModuleParser {
         set keywords {fn extern export import return true false record choice alias distinct match with some none if else unit for in break continue while}
         set localChoices {}
         set stringModes {}
+        set docLines {}
         # A Tcl caller can supply surrogate code points that strict UTF-8
         # source files cannot contain, even in comments or raw literals.
         if {[regexp -indices {[\uD800-\uDFFF]} $source invalid]} {
@@ -129,6 +130,9 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method advance {} {
+        # The cursor normally sits beyond the lookahead token. Save the end
+        # of the consumed token before skipping trivia or reading ahead.
+        set consumed [list $offset $line $column]
         if {[lindex $stringModes end 0] eq "text"} {
             set token [my interpolationToken]
             return
@@ -147,7 +151,18 @@ oo::class create ::appcompiler::ModuleParser {
 
             set initial [string index $word 0]
             switch -exact -- $initial {
-                " " - "\t" - "#" { continue }
+                " " - "\t" { continue }
+                "#" {
+                    if {[string range $word 0 1] eq "##"} {
+                        set startOfLine [expr {$first - [dict get $location column] + 1}]
+                        if {[string trim [string range $source $startOfLine $first-1] " \t"] eq ""} {
+                            set content [string range $word 2 end]
+                            if {[string index $content 0] eq " "} { set content [string range $content 1 end] }
+                            dict set docLines [dict get $location line] $content
+                        }
+                    }
+                    continue
+                }
                 "\r" - "\n" { set kind newline }
                 "'" {
                     if {[string length $word] == 1} {
@@ -238,9 +253,9 @@ oo::class create ::appcompiler::ModuleParser {
         while {[my at newline]} { my advance }
     }
 
-    method cursor {} { list $offset $line $column $token $stringModes }
+    method cursor {} { list $offset $line $column $token $stringModes $consumed }
 
-    method restore {cursor} { lassign $cursor offset line column token stringModes }
+    method restore {cursor} { lassign $cursor offset line column token stringModes consumed }
 
     method collectChoiceNames {} {
         # .name::member(...) can denote an imported function or a locally
@@ -294,19 +309,25 @@ oo::class create ::appcompiler::ModuleParser {
         set importLocations {}
         set functions {}
         set types {}
+        set examples {}
+        set owner {}
         if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
                 [string first alias $source] >= 0 || [string first distinct $source] >= 0)} {
             my collectChoiceNames
         }
         my skipLines
         while {![my at eof]} {
-            if {[my at import]} {
+            if {[my at identifier] && [dict get $token value] eq "example"} {
+                lappend examples [my example $owner]
+            } elseif {[my at import]} {
+                set owner {}
                 my advance
                 set imported [my take identifier {an imported module name}]
                 set name [dict get $imported value]
                 lappend imports $name
                 dict set importLocations $name [my node $imported import name $name]
             } else {
+                set start $token
                 set exported [my at export]
                 if {$exported} { my advance }
                 switch -exact -- [dict get $token kind] {
@@ -314,10 +335,13 @@ oo::class create ::appcompiler::ModuleParser {
                         set kind [dict get $token kind]
                         my advance
                         if {$kind eq "extern"} { my take fn "'fn' after 'extern'" }
-                        lappend functions [my function $exported $kind]
+                        set function [my documented $start [my function $exported $kind]]
+                        lappend functions $function
+                        set owner [dict get $function name]
                     }
                     record - choice - alias - distinct {
-                        lappend types [my typeDeclaration $exported]
+                        set owner {}
+                        lappend types [my documented $start [my typeDeclaration $exported]]
                     }
                     default {
                         ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct or import declaration}
@@ -327,7 +351,51 @@ oo::class create ::appcompiler::ModuleParser {
             if {![my at eof]} { my take newline {a line break between declarations} }
             my skipLines
         }
-        return [dict create imports $imports importLocations $importLocations types $types functions $functions]
+        return [dict create imports $imports importLocations $importLocations types $types functions $functions examples $examples]
+    }
+
+    method documented {start declaration} {
+        set lines {}
+        set n [dict get $start line]
+        while {[dict exists $docLines [incr n -1]]} { lappend lines [dict get $docLines $n] }
+        if {[llength $lines]} { dict set declaration doc [join [lreverse $lines] \n] }
+        return $declaration
+    }
+
+    method example {owner} {
+        set start $token
+        set first [expr {$offset - [string length [dict get $start value]]}]
+        my advance
+        set name [my take dotName {the dot-prefixed function called by the example}]
+        set actual [my node $name call name [dict get $name value] qualifier {} args [my parenthesized expression]]
+        set actualLocation [my consumedSpan $name]
+        my take => {'=>' before the example expectation}
+        my skipLines
+        set expectedStart $token
+        if {[my at identifier] && [dict get $token value] eq "error"} {
+            my advance
+            set literal [my take text {a literal text error code}]
+            set fields {}
+            if {[my at \{]} { set fields [my braced exampleField {expected problem fields} 1] }
+            set expectation [dict create expectation error code [my node $literal text value [dict get $literal value]] fields $fields]
+        } else {
+            set expectation [dict create expectation value expected [my expression]]
+        }
+        lassign $consumed last endLine endColumn
+        return [my node $start example owner $owner source [string range $source $first $last-1] \
+            endLine $endLine endColumn $endColumn actual $actual actualLocation $actualLocation \
+            expectedLocation [my consumedSpan $expectedStart] {*}$expectation]
+    }
+
+    method consumedSpan {start} {
+        return [dict replace [dict remove $start kind value] \
+            endLine [lindex $consumed 1] endColumn [lindex $consumed 2]]
+    }
+
+    method exampleField {} {
+        set field [my fieldAssignment]
+        dict set field kind exampleField
+        return $field
     }
 
     # All delimited lists return their elements in source order. Each item
