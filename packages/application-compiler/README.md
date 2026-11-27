@@ -1093,8 +1093,8 @@ creates sample data. The application itself only reads the database.
 
 ```powershell
 machteld.exe examples/typed-history/create_sample.tcl history.db
-machteld.exe tools/application_project.tcl test examples/typed-history/project.dict
-machteld.exe tools/application_project.tcl pack examples/typed-history/project.dict history.machteld
+machteld.exe project test examples/typed-history/project.dict
+machteld.exe project pack examples/typed-history/project.dict history.machteld
 '{"id":"007","at":31}' | machteld.exe history.machteld history.db
 ```
 
@@ -1212,7 +1212,7 @@ batch in memory and commits it as one unit.
 
 ```powershell
 machteld.exe examples/typed-import/create_sample.tcl observations.db
-machteld.exe tools/application_project.tcl pack examples/typed-import/project.dict observations.machteld
+machteld.exe project pack examples/typed-import/project.dict observations.machteld
 cmd.exe /d /c "machteld.exe observations.machteld import observations.db < examples\typed-import\north.json"
 cmd.exe /d /c "machteld.exe observations.machteld import observations.db < examples\typed-import\south.json"
 '{"entity":"007","at":25}' | machteld.exe observations.machteld at observations.db
@@ -1353,24 +1353,43 @@ Use `--project` to select it explicitly in a directory that also contains
 a script named `project`. The checkout and editable archives retain their
 standalone driver for use on earlier hosts.
 
-The driver accepts a UTF-8 project dictionary. The following
-manifest selects a module at `src/main.src` and an optional binary asset.
-Paths are relative to the manifest. Module identifiers are case-sensitive.
+To create a project using only the integrated host, save the following
+two files as UTF-8 in one directory. In `project.dict`, the module name
+`app` refers to the file `main.src`. Paths are relative to the manifest.
+Module identifiers are case-sensitive.
 
 ```tcl
 schema 1
 edition 1
-minApi 0.21
+minApi 30
 entry {app main}
-modules {app src/main.src}
-assets {assets/logo.png}
+modules {app main.src}
+```
+
+`main.src` contains the entry function and a test for its greeting.
+
+```text
+fn .greeting() -> text => "hello\n"
+example .greeting() => "hello\n"
+fn .main($args: list<text>) -> result<unit,problem> => write_stdout_utf8(.greeting())
+```
+
+From a terminal in that directory, run the commands below with the path to
+your copy of `machteld.exe`. The last command prints `hello` on its own line.
+
+```text
+machteld.exe project check --json project.dict
+machteld.exe project test project.dict
+machteld.exe project pack project.dict hello.machteld
+machteld.exe hello.machteld
 ```
 
 `schema` versions the manifest format. `edition` selects the source language
-rules, and `minApi` sets the minimum Machteld version for building on a
-Machteld host and for running the generated program. Remove the `assets`
-line if the application has none. The manifest and its module table are Tcl
-dictionaries read as data. Use list quoting for paths containing spaces.
+rules, and `minApi` sets the minimum Machteld package API for building on a
+Machteld host and for running the generated program. To include an image,
+add `assets {assets/logo.png}` to the manifest. The manifest and its module
+table are Tcl dictionaries read as data. Use list quoting for paths
+containing spaces.
 
 ### Migrating a Tcl/Tk project one file at a time
 
@@ -1443,17 +1462,17 @@ resolve them inside the archive. Include any other scripts or data the
 package reads in `assets`. Checking and packing preserve their bytes
 without loading the package.
 
-From the repository root, run the two-module text-length example with the
-development driver. `Snow 雪` contains six characters. Both run commands
+From the example checkout's root, run the two-module text-length project
+with the integrated host. `Snow 雪` contains six characters. Both run commands
 print `characters=6` followed by a newline.
 
 ```text
-machteld.exe tools/application_project.tcl check examples/typed-text-length/project.dict
-machteld.exe tools/application_project.tcl test examples/typed-text-length/project.dict
-machteld.exe tools/application_project.tcl run examples/typed-text-length/project.dict "Snow 雪"
-machteld.exe tools/application_project.tcl pack examples/typed-text-length/project.dict sample.machteld
+machteld.exe project check examples/typed-text-length/project.dict
+machteld.exe project test examples/typed-text-length/project.dict
+machteld.exe project run examples/typed-text-length/project.dict "Snow 雪"
+machteld.exe project pack examples/typed-text-length/project.dict sample.machteld
 machteld.exe sample.machteld "Snow 雪"
-machteld.exe tools/application_project.tcl rebuild sample.machteld rebuilt.machteld
+machteld.exe project rebuild sample.machteld rebuilt.machteld
 ```
 
 `check` validates every declared input and the entry signature without
@@ -1464,6 +1483,9 @@ application entry idle, except for any explicit example calling that function.
 `check`, `pack` and ordinary application startup leave examples unexecuted.
 `pack` and `rebuild` require an archive-capable host with SQLite FTS5. A working archive
 is replaced only after the replacement has been built and checked.
+`project rebuild` reads the archived inputs and compiles them with the
+compiler in the running host. This also updates the compiler saved in the
+rebuilt archive.
 
 `check --json` writes one UTF-8 JSON document to standard output. After a
 syntax error the checker resumes at the next recognizable top-level
@@ -1484,11 +1506,22 @@ check exits with status 1. Each compiler diagnostic contains `code`,
 exclusive. A project error without a source position has a null `node`.
 
 ```text
-machteld.exe tools/application_project.tcl check --json examples/typed-text-length/project.dict
+machteld.exe project check --json examples/typed-text-length/project.dict
 ```
 
 ```json
 {"schema":1,"ok":true,"diagnostics":[]}
+```
+
+To find the file for a diagnostic's logical module, use `project locate`.
+Supply its one-based line number to see the project-relative path and the
+original line of source. For example, both commands below identify line 1
+of `textutil.src`. The second command reads the verified archive and works
+after the source directory has been moved.
+
+```text
+machteld.exe project locate examples/typed-text-length/project.dict textutil 1
+machteld.exe project locate sample.machteld textutil 1
 ```
 
 The archive contains the generated `main.tcl` with its source map, the
@@ -1506,9 +1539,9 @@ Markdown description. Function pages also display their exact source
 examples. Private functions' examples still run in project tests.
 
 ```text
-machteld.exe tools/application_project.tcl docs sample.machteld search "character count"
-machteld.exe tools/application_project.tcl docs sample.machteld get fn/textutil/describe
-machteld.exe tools/application_project.tcl docs --runtime get machteld/command/docs 0 1000
+machteld.exe project docs sample.machteld search "character count"
+machteld.exe project docs sample.machteld get fn/textutil/describe
+machteld.exe project docs --runtime get machteld/command/docs 0 1000
 ```
 
 `search QUERY [LIMIT]` uses SQLite FTS5 and returns one page ID per line.
@@ -1522,10 +1555,10 @@ reference verifies the archive and reads its database without loading any of
 the application's Tcl or starting its examples. Rebuild an older archive
 with the current compiler to generate its reference.
 
-A recipient with only the archive and an archive-capable `machteld.exe`
-can also rebuild it. From their directory, start `machteld.exe` in a
-terminal and enter this Tcl at the prompt. The new archive uses the
-compiler bundled with the application.
+To rebuild with the exact compiler shipped by the application author,
+start `machteld.exe` in the directory containing the executable and archive.
+Enter this Tcl at its prompt. It verifies the archive before loading the
+bundled compiler.
 
 ```tcl
 set root [zipfs mount sample.machteld build]
