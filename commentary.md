@@ -510,6 +510,14 @@ transaction rolls back the migration. A repeated FTS5 table declaration
 also preserves the existing index. The regression opens both an authored
 archive and its rebuild against a populated index and searches the original row.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, errors while ending a stream
+
+A chunk handler can decide that it has enough data, cancel the child,
+and then hit an error while updating its display. The stream now keeps
+its canceled completion and the application receives the display error
+with its original Tcl options. Closing a stream also preserves a later
+handler error. A second child continued sending data after both cases.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
