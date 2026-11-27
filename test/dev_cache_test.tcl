@@ -569,7 +569,7 @@ try {
         tcl/pool.tcl packages/machteld-job/pkgIndex.tcl packages/machteld-job/job.tcl packages/cffi/pkgIndex.tcl
         LICENSE licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt licenses/cffi-2.0.3.txt
         licenses/yyjson-0.12.0.txt docs/overview.md
-        docs/reference/machteld/command/help.md staged/prelude.tcl
+        docs/reference/machteld/command/help.md packages/application-compiler/README.md staged/prelude.tcl
         staged/console.exe staged/wrapped.exe staged/reference/reference.db
     } {
         write_bytes [file join $::fixtureRoot {*}[split $relative /]] "fixture:$relative"
@@ -626,7 +626,7 @@ try {
     foreach relative {
         LICENSE tools/reference.tcl tools/reference_authored.tcl tools/reference_db.tcl
         tools/dependencies.lock.json licenses/Tcl-9.0.4.txt licenses/Tk-9.0.4.txt
-        licenses/cffi-2.0.3.txt docs/overview.md docs/reference/machteld/command/help.md
+        licenses/cffi-2.0.3.txt docs/overview.md docs/reference/machteld/command/help.md packages/application-compiler/README.md
     } {
         spec_tracks reference [file join $::fixtureRoot {*}[split $relative /]]
     }

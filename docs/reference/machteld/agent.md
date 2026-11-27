@@ -89,6 +89,12 @@ For runtime packages, use `docs list -scope machteld -type package`.
 For example, `docs get machteld/package/sqlite3` describes typed parameters
 and `docs get machteld/package/network` describes UDP and authenticated time.
 
+For the typed language and project driver, start with the
+[application compiler manual](../../../packages/application-compiler/README.md).
+Use `docs outline machteld/guide/application-compiler` for its section IDs,
+`docs get {project check}` for project checks, or `docs get require_index`
+for list lookup and its error result.
+
 An archive uses the shared runtime’s documentation. The arguments following
 its filename belong to the application. Invoke `machteld.exe --docs` directly
 to query the runtime before opening an application.

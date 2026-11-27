@@ -124,10 +124,13 @@ puts SERIALIZER-SMOKE-OK
     file delete -force $work
 }
 
-set markdown [::ref::rewriteAuthoredLinks "## First\r\ncontent\n## Last\rline\r\n" reference]
+set markdown [::ref::rewriteAuthoredLinks "## First\r\ncontent \U0001F642\n## Last\rline\r\n" reference]
 set lastSection [lindex [::ref::markdownSections $markdown headings] end]
-check {section character offsets refer to the published LF bytes even after a mixed checkout} [expr {
+check {section positions count Unicode scalars after converting mixed line endings to LF} [expr {
     [string range $markdown [dict get $lastSection start] [expr {[dict get $lastSection end]-1}]] eq "## Last\nline\n"}]
+check {a lone surrogate remains invalid in reference Markdown} [catch {
+    ::ref::markdownSections "## Bad\n\ud800" headings
+}]
 
 if {$failures} {
     puts stderr "$failures of $checks reference serializer checks failed"

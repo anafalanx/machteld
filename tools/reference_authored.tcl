@@ -1,14 +1,18 @@
 # Authored reference sources and their stable links. Loaded by the generator
 # on the build host and by coverage checks on Tcl and on the candidate.
-namespace eval ::ref {}
+namespace eval ::ref {
+    variable compilerGuide packages/application-compiler/README.md
+}
 
 proc ::ref::fail {message} {
     return -code error -errorcode {REFERENCE fail} "generate-reference: $message"
 }
 
 proc ::ref::authoredSources {root} {
+    variable compilerGuide
+    set root [file normalize $root]
     set sources {}
-    set docs [file join [file normalize $root] docs]
+    set docs [file join $root docs]
     set reference [file join $docs reference machteld]
     set pages {}
     foreach directory [list $reference [file join $reference command]] {
@@ -21,14 +25,18 @@ proc ::ref::authoredSources {root} {
     foreach path [lsort [glob -nocomplain -type f -directory $docs *.md]] {
         dict set sources $path guide
     }
+    dict set sources [file join $root $compilerGuide] guide
     return $sources
 }
 
 proc ::ref::guideBase {path} {
+    variable compilerGuide
+    if {[string match "*/$compilerGuide" $path]} {return application-compiler}
     return [file rootname [file tail $path]]
 }
 
 proc ::ref::authoredTarget {sourceKind target} {
+    variable compilerGuide
     if {[regexp {^[A-Za-z][A-Za-z0-9+.-]*:} $target] || [string match #* $target]} {return $target}
     set hash [string first # $target]
     if {$hash >= 0} {
@@ -53,6 +61,8 @@ proc ::ref::authoredTarget {sourceKind target} {
             set stable machteld/command/$m
         } elseif {[regexp -nocase {^(index|agent)\.md$} $path -> m]} {
             set stable machteld/$m
+        } elseif {$path eq "../../../$compilerGuide"} {
+            set stable machteld/guide/[guideBase $path]
         } else {
             fail "unsupported authored reference link target $target"
         }

@@ -70,6 +70,33 @@ foreach lookup {{cffi::callback} {cffi::callback new} {cffi::callback free} cffi
 }
 
 set schema [docs schema]
+set manualId machteld/guide/application-compiler
+check {the compiler manual has its own outline and the short package lookup still works} [expr {
+    [dict get [docs get application-compiler -limit 1] id] eq "machteld/package/application-compiler" &&
+    [dict get [docs outline {compiler manual}] sections grouping-choice-variants] eq "Grouping choice variants"}]
+foreach {lookup section snippet} {
+    { Project   Check } migrating-a-tcl-tk-project-one-file-at-a-time {project check project.dict}
+    {project check --json} migrating-a-tcl-tk-project-one-file-at-a-time {diagnostics}
+    {project run} migrating-a-tcl-tk-project-one-file-at-a-time {forwards each argument}
+    {project test} executable-examples {verifies the call and its expectation}
+    {project pack} migrating-a-tcl-tk-project-one-file-at-a-time {application.dict}
+    {project rebuild} migrating-a-tcl-tk-project-one-file-at-a-time {rebuild sample.machteld rebuilt.machteld}
+    {project docs} reading-the-offline-application-reference {docs sample.machteld search}
+    require_index list-values-and-lengths {INDEX_OUT_OF_RANGE}
+    list_append list-values-and-lengths {list_append($items, $value)}
+} {
+    set selection [docs get $lookup]
+    set hit [lindex [dict get [docs search $lookup -limit 1] items] 0]
+    check "compiler lookup $lookup selects and ranks its manual section" [expr {
+        [dict get $selection id] eq $manualId && [dict get $selection section] eq $section &&
+        ![dict get $selection truncated] && [string first $snippet [dict get $selection text]] >= 0 &&
+        [dict get $hit doc_ref] eq "$manualId#$section"}]
+}
+set groupText [dict get [docs get $manualId#grouping-choice-variants] text]
+check {language sections after a supplementary Unicode literal retain exact start and end} [expr {
+    [string first "## Grouping choice variants\n" $groupText] == 0 &&
+    [string first {.label::plain($s) | .label::ranked(_, $s) => $s} $groupText] >= 0 &&
+    [string match "*for more examples.\n\n" $groupText]}]
 check {schema describes all operations and bounded retrieval} [expr {
     [dict get $schema schema] == 2 && [dict get $schema catalog_schema] == 2 &&
     [lsort [dict keys [dict get $schema subcommands]]] eq

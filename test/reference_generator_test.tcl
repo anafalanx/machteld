@@ -209,6 +209,20 @@ proc ::rgt::main {argv} {
                 ![fixture exists {SELECT 1 FROM alias WHERE name='agents.md' AND id='machteld/agent'}]} {
                 fail "start and agent instructions are not discoverable as Markdown pages"
             }
+            set manualId machteld/guide/application-compiler
+            set relative packages/application-compiler/README.md
+            set original [string map [list \r\n \n \r \n] [readUtf8 [file join $root $relative]]]
+            if {[fixture onecolumn {SELECT body FROM page WHERE id=$manualId AND kind='guide'}] ne $original ||
+                    [fixture onecolumn {SELECT count(*) FROM page WHERE body=$original}] != 1 ||
+                    [fixture onecolumn {SELECT source_sha256 FROM provenance WHERE id=$manualId AND source_file=$relative}]
+                        ne [hash file sha256 [file join $root $relative]]} {
+                fail "the compiler manual must be a single page from the original packaged README"
+            }
+            if {![fixture exists {SELECT 1 FROM search WHERE search MATCH '"scrutinee"' AND id=$manualId}] ||
+                    [fixture eval {SELECT id,slug FROM fragment WHERE name='project check'}] ne
+                        [list $manualId migrating-a-tcl-tk-project-one-file-at-a-time]} {
+                fail "the compiler's language text or exact project command is missing from the reference"
+            }
             if {[fixture onecolumn {SELECT count(*) FROM provenance}] != [fixture onecolumn {SELECT count(*) FROM page}] ||
                 ![fixture exists {SELECT 1 FROM provenance WHERE id='tcl/command/dict' AND length(source_sha256)=64}]} {
                 fail "the database lost original source provenance"

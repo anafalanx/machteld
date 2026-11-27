@@ -30,6 +30,8 @@ namespace eval ::machteld::devcache {
     variable steeringPatterns {TCL*_TM_PATH BASH_FUNC_*}
 }
 
+source -encoding utf-8 [file join $::machteld::devcache::directory reference_authored.tcl]
+
 # The steering variables this process has with a value, as the environment
 # spells them. Windows compares environment names without regard to case, and
 # so does this.
@@ -557,6 +559,7 @@ proc ::machteld::devcache::reference_version {root} {
 proc ::machteld::devcache::reference_spec {root cache tclsh} {
     set version [reference_version $root]
     set files [list $tclsh [file join $cache prefix bin refsqlite.dll] [file join $root LICENSE] [info nameofexecutable]]
+    lappend files [file join $root $::ref::compilerGuide]
     foreach name {reference.tcl reference_authored.tcl reference_db.tcl dependencies.lock.json} { lappend files [file join $root tools $name] }
     foreach name {Tcl-9.0.4.txt Tk-9.0.4.txt cffi-2.0.3.txt} { lappend files [file join $root licenses $name] }
     foreach name {cffi.3tcl cffi-cffi.3tcl cffi-Concepts.3tcl cffi-Cookbook.3tcl} {

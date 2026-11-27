@@ -66,12 +66,11 @@ proc ::ref::assertArchive {path expected name} {
     }
 }
 
-# Tcl counts characters where .NET counts UTF-16 units; the corpus has no
-# text beyond the BMP, and a future occurrence fails instead of publishing
-# divergent offsets.
+# Section offsets use Unicode scalar values. Tcl 9 string indices and SQLite
+# substr() both count a supplementary character once.
 proc ::ref::assertNoSurrogates {text label} {
-    if {[regexp {[\U00010000-\U0010FFFF\uD800-\uDFFF]} $text]} {
-        fail "$label contains non-BMP text; section offset encoding must be upgraded"
+    if {[regexp {[\uD800-\uDFFF]} $text]} {
+        fail "$label contains an unpaired surrogate"
     }
 }
 
@@ -1894,23 +1893,58 @@ proc ::ref::main {argv} {
         }
         dict for {path kind} $authored {
             if {$kind ne "guide"} continue
+            set base [guideBase $path]
             set name [file tail $path]
             set text [rewriteAuthoredLinks [readUtf8Strict $path] guide]
-            set guide [guideMetadata $text [file nativename $path]]
-            set base [guideBase $path]
+            set isCompilerGuide [expr {$path eq [file join $root $::ref::compilerGuide]}]
+            if {$isCompilerGuide} {
+                # This README travels with each editable application. Keep its
+                # original text and leave the package's short lookup intact.
+                set name $::ref::compilerGuide
+                set title "Application compiler manual"
+                set summary "Language syntax, Tcl APIs, project commands and the editable application archive format."
+                set shortName "compiler manual"
+            } else {
+                set guide [guideMetadata $text [file nativename $path]]
+                set title [dict get $guide metadata title]
+                set summary [dict get $guide metadata description]
+                set shortName $base
+            }
             set id machteld/guide/$base
+            if {[dict exists $documents $id]} {fail "duplicate guide ID $id"}
             set mdRel markdown/machteld/guide/$base.md
             writeUtf8Lf [file join $candidate {*}[split $mdRel /]] $text
-            set title [dict get $guide metadata title]
-            set summary [dict get $guide metadata description]
             set sections [markdownSections $text $id]
             set formats [D markdown [formatRecord $candidate $mdRel $sections]]
             dict set documents $id [D id [S $id] product [S machteld] version [S $version] type [S guide] \
                 title [S $title] summary [S $summary] names [Ls [list $title]] sections [sectionsDict $sections 0] \
                 formats $formats path [S $mdRel] raw_path [S ""] source_file [S $name] \
                 content_sha256 [S [get $formats markdown sha256]] source_sha256 [S [sha256 $path]] bytes [N [get $formats markdown bytes]]]
-            foreach alias [list $id $base $title] {
+            foreach alias [list $id $shortName $title] {
                 addUnique aliases [normalizeSearch $alias] $id
+            }
+            if {$isCompilerGuide} {
+                set lookups {
+                    {project check} migrating-a-tcl-tk-project-one-file-at-a-time
+                    {project check --json} migrating-a-tcl-tk-project-one-file-at-a-time
+                    {project run} migrating-a-tcl-tk-project-one-file-at-a-time
+                    {project pack} migrating-a-tcl-tk-project-one-file-at-a-time
+                    {project test} executable-examples
+                    {project docs} reading-the-offline-application-reference
+                    {project rebuild} migrating-a-tcl-tk-project-one-file-at-a-time
+                    require_index list-values-and-lengths
+                    list_append list-values-and-lengths
+                }
+                foreach section $sections {
+                    set slug [dict get $section slug]
+                    dict set lookups "$id#$slug" $slug
+                }
+                dict for {lookup slug} $lookups {
+                    if {[dict exists $aliases $lookup] || [dict exists $fragments $lookup]} {
+                        fail "duplicate compiler manual lookup $lookup"
+                    }
+                    dict set fragments $lookup [D id [S $id] section [S $slug]]
+                }
             }
         }
 
@@ -1953,6 +1987,7 @@ proc ::ref::main {argv} {
             "machteld.exe --docs search canvas" \
             "machteld.exe --docs get tk/command/canvas --section synopsis" \
             "machteld.exe --docs get machteld/package/application-compiler" \
+            {machteld.exe --docs outline machteld/guide/application-compiler} \
             "machteld.exe --docs get machteld/agent" "```" "" \
             "In a Tcl application, use `docs search canvas`, `docs get tk/command/canvas` and `docs schema` for the query contract." \
             "Read `machteld/command/docs` for query options and `tcl/application/tclsh` or `tk/application/wish` for the upstream shell manuals." \
