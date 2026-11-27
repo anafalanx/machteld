@@ -398,6 +398,17 @@ chronological order. A text identifier keeps its leading zeroes when
 compared with another identifier. A condition can test a prerequisite
 before calling a fallible function on its right-hand side.
 
+### Waiting for a lookup after its window closes
+
+2026-11-27 · Codex · 0.50-dev
+
+A suspended lookup handler can outlive the interval between its child's
+reply and Tcl's next callback. Closing the owner in that interval ran the
+handler's cleanup and prevented a late update. A separate handler could
+still collect the same reply when the application owned the work. The
+regression forces this ordering with a real worker and repeats it after
+copying and renaming the application archive.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
