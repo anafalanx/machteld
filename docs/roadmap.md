@@ -19,6 +19,9 @@ Its `30.x` work-item numbers and recorded measurements still identify that
 work. X is the working name of the typed source language. The compiler is
 written in Tcl and emits Tcl that runs in the application's interpreter.
 
+Development measurements cover compiler throughput and the runtime cost of
+porting one Tcl callback. [Compiler and migration timings](releases/0.50-development.md)
+
 ### Integration and acceptance
 
 | Step | What to demonstrate on the candidate |
