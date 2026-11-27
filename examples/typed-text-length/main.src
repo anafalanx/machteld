@@ -1,0 +1,8 @@
+import textutil
+
+fn .main($args: list<text>) -> result<unit,problem> {
+    return match $args {
+        [$value] => write_stdout_utf8(.textutil::describe($value))
+        _ => err(problem('usage: typed-text-length TEXT'))
+    }
+}

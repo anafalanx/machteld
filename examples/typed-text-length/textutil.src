@@ -1,0 +1,3 @@
+extern fn .length($value: text) -> int = ['::string', 'length']
+
+export fn .describe($value: text) -> text => $"characters=${.length($value)}\n"

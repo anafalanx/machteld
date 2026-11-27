@@ -15,6 +15,73 @@ proc ::semanticsTest::check {source expected label} {
     equal [lsort [lmap d $diagnostics {dict get $d code}]] [lsort $expected] $label
 }
 
+proc ::semanticsTest::expressionBodies {} {
+    set model {export distinct .id = int
+export fn .next($n: int) -> .id => make<.id>(.add($n, 1))
+fn .add($a: int, $b: int) -> int => $a + $b
+export fn .only($items: list<text>) -> text? =>
+    match $items {
+        [$name] => some($name)
+        _ => none
+    }
+export fn .ratio($a: int, $b: int) -> result<int,problem> =>
+    ok(
+        quotient($a, $b)?
+    )
+export fn .exact($a: int, $b: int) -> result<decimal,problem> =>
+    (
+        $a / $b
+    )
+export fn .reject() -> result<int,problem> =>
+    err(problem('no value'))}
+    set client {import model
+export fn .label($n: int) -> int => underlying(.model::next($n))
+export fn .ratio($a: int, $b: int) -> result<int,problem> { return .model::ratio($a, $b) }
+fn .finished() -> unit => unit
+export fn .main($args: list<text>) -> result<unit,problem> => ok(.finished())}
+    set sources [dict create client $client model $model]
+    equal [::appcompiler::check $sources] {} "cross-module expression bodies check"
+    set compiled [::appcompiler::compile $sources ::shortBodyApp]
+    namespace eval :: [dict get $compiled script]
+    equal [::shortBodyApp::client::label 009] 10 "forward call and imported distinct result"
+    equal [::shortBodyApp::model::only [list {}]] [list some {}] "expression match retains a present empty value"
+    equal [::shortBodyApp::model::only {a b}] none "expression match returns an absent value"
+    equal [::shortBodyApp::client::main {}] [list ok {}] "expression body returns unit through an entry"
+    set app [::appcompiler::application $sources client]
+    equal [dict exists $app sourceMap ::application::client::main] 1 "application accepts the expression-bodied entry"
+    equal [::shortBodyApp::client::ratio -8 3] {ok -2} "multiline call inside an expression body"
+
+    foreach {fn args token text} [list ratio {1 0} ? {        quotient($a, $b)?} exact {1 3} ( {    (} \
+            reject {} err {    err(problem('no value'))}] {
+        lassign [::shortBodyApp::model::$fn {*}$args] tag problem
+        equal $tag err "$fn returned a typed failure"
+        set origin [dict get $problem origin]
+        set line [expr {1 + [lsearch -exact [split $model \n] $text]}]
+        set column [expr {1 + [string first $token $text]}]
+        equal [list [dict get $origin module] [dict get $origin line] [dict get $origin column]] \
+            [list model $line $column] "$fn preserves the expression's original position"
+    }
+    set returnSites [dict values [dict get $compiled sourceMap ::shortBodyApp::model::exact]]
+    set firstLine [expr {1 + [lsearch -exact [split $model \n] {    (}]}]
+    equal [lindex $returnSites end] [dict create module model line $firstLine column 5] \
+        "generated return maps to the opening expression even when the operator starts on a different line"
+
+    set wrong {fn .bad() -> int =>
+    'wrong'}
+    set diagnostics [::appcompiler::check [dict create sample $wrong]]
+    equal [lmap item $diagnostics {dict get $item code}] RETURN_TYPE "single expression must match the declared return"
+    set where [dict get [lindex $diagnostics 0] node]
+    equal [list [dict get $where line] [dict get $where column] [dict get $where endColumn]] {2 5 12} \
+        "return mismatch covers the offending expression on its own source line"
+    check {distinct .id = int
+fn .id($value: int) -> .id => $value} RETURN_TYPE "expression bodies keep nominal return checks"
+    check {fn .bad() -> int => 1 return 2} E_PARSE_EXPECTED "a second statement cannot follow the expression"
+    check {fn .bad() -> int =>} E_PARSE_EXPECTED "the arrow requires an expression"
+    check {fn .bad() -> int => return 1} E_PARSE_EXPECTED "return is a statement"
+    check {fn .bad() -> int { 1 }} MISSING_RETURN "a block still requires an explicit return"
+    check {fn .bad() -> unit { unit }} MISSING_RETURN "unit blocks also require an explicit return"
+}
+
 namespace eval ::semanticsTest {
     set convert {export fn .read($args: list<text>) -> result<text,text> {
     return match $args {
@@ -96,5 +163,6 @@ fn .other() -> text { return $missing + 1 }} \
     set last [expr {[dict get $location endColumn] - 2}]
     equal [list [dict get $location module] [dict get $location line] [string range $source $first $last]] \
         {model 1 .missing} "diagnostic marks the exact JSON type argument"
+    expressionBodies
     puts "application compiler semantics: $count assertions passed"
 }

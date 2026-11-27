@@ -1,0 +1,8 @@
+schema 1
+edition 1
+minApi 0.21
+entry {main main}
+modules {
+    main main.src
+    textutil textutil.src
+}

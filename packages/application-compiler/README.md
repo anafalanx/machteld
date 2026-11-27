@@ -22,6 +22,12 @@ The example prints `120`. Checking and emission take place before the
 explicit `namespace eval` loads the generated procedures. Choose a fresh
 application namespace when loading generated code in a shared interpreter.
 
+A function with a single expression can return it with `=>`. For example,
+`fn .seconds($minutes: int) -> int => $minutes * 60` has the same signature
+and result as the block above. The expression can span lines and use `match`
+or `?`. A value-returning function with a block requires an explicit return
+on every successful path. The `=>` spelling is provisional.
+
 * `::appcompiler::check $modules` returns a list of diagnostics. An empty
   list means checking succeeded. Each diagnostic has a stable `code`, a
   readable `message`, and a `node` with the module and one-based source
@@ -317,13 +323,15 @@ resolve them inside the archive. Include any other scripts or data the
 package reads in `assets`. Checking and packing preserve their bytes
 without loading the package.
 
-From the repository root, run the development driver with the local executable.
+From the repository root, run the two-module text-length example with the
+development driver. `Snow 雪` contains six characters. Both run commands
+print `characters=6` followed by a newline.
 
 ```text
-machteld.exe tools/application_project.tcl check project.dict
-machteld.exe tools/application_project.tcl run project.dict argument
-machteld.exe tools/application_project.tcl pack project.dict sample.machteld
-machteld.exe sample.machteld argument
+machteld.exe tools/application_project.tcl check examples/typed-text-length/project.dict
+machteld.exe tools/application_project.tcl run examples/typed-text-length/project.dict "Snow 雪"
+machteld.exe tools/application_project.tcl pack examples/typed-text-length/project.dict sample.machteld
+machteld.exe sample.machteld "Snow 雪"
 machteld.exe tools/application_project.tcl rebuild sample.machteld rebuilt.machteld
 ```
 

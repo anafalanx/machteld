@@ -376,7 +376,14 @@ oo::class create ::appcompiler::ModuleParser {
         set node [my node $name $kind name [dict get $name value] exported $exported params $params \
                 result [dict get $result name] resultLocation $result body {}]
         if {$kind eq "extern"} { return [dict merge $node [my externalBinding]] }
-        dict set node body [my braced statement {function body}]
+        if {[my at =>]} {
+            my advance
+            my skipLines
+            set start $token
+            dict set node body [list [my node $start return value [my expression]]]
+        } else {
+            dict set node body [my braced statement {function body}]
+        }
         return $node
     }
 
