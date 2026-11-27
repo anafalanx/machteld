@@ -200,14 +200,21 @@ proc ::appcompiler::project::packageDirectories {project root} {
     return [lmap path [dict get $project packageDirs] {file join $root $path}]
 }
 
+proc ::appcompiler::project::analyze {project} {
+    set sources [dict get $project sources]
+    if {[dict get $project tclEntry] eq {}} {
+        return [::appcompiler::analyzeApplication $sources {*}[dict get $project entry]]
+    }
+    return [::appcompiler::analyze $sources]
+}
+
+proc ::appcompiler::project::check {manifest} {
+    ::appcompiler::requireValid [analyze [load $manifest]]
+}
+
 proc ::appcompiler::project::test {manifest} {
     set project [load $manifest]
     set projectRoot [file dirname [file normalize $manifest]]
     set directories [packageDirectories $project $projectRoot]
-    if {[dict get $project tclEntry] eq {}} {
-        set analysis [::appcompiler::analyzeApplication [dict get $project sources] {*}[dict get $project entry]]
-    } else {
-        set analysis [::appcompiler::analyze [dict get $project sources]]
-    }
-    return [::appcompiler::runExamples $analysis [dict get $project minApi] $directories $projectRoot]
+    return [::appcompiler::runExamples [analyze $project] [dict get $project minApi] $directories $projectRoot]
 }

@@ -73,17 +73,21 @@ proc ::appcompiler::check {sources} {
     return [dict get [analyze $sources] diagnostics]
 }
 
-proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
-    if {![regexp {^::[A-Za-z_][A-Za-z_0-9]*(::[A-Za-z_][A-Za-z_0-9]*)*$} $targetNamespace]} {
-        return -code error -errorcode {APPCOMPILER CONFIG NAMESPACE} \
-            "expected an absolute application namespace, got [list $targetNamespace]"
-    }
+proc ::appcompiler::requireValid {analysis} {
     set diagnostics [dict get $analysis diagnostics]
     if {[llength $diagnostics]} {
         set lines [lmap item $diagnostics {formatDiagnostic $item}]
         return -code error -errorcode {APPCOMPILER CHECK} \
             -diagnostics $diagnostics [join $lines \n]
     }
+}
+
+proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
+    if {![regexp {^::[A-Za-z_][A-Za-z_0-9]*(::[A-Za-z_][A-Za-z_0-9]*)*$} $targetNamespace]} {
+        return -code error -errorcode {APPCOMPILER CONFIG NAMESPACE} \
+            "expected an absolute application namespace, got [list $targetNamespace]"
+    }
+    requireValid $analysis
     set artifact [emitModules [dict get $analysis modules] $targetNamespace [dict get $analysis facts] \
         [dict get $analysis resolved]]
     # The runtime uses one source map for entry faults, Tcl exports and

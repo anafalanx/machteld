@@ -461,6 +461,12 @@ An application-owned worker kept running, and another handler collected
 its reply. The tests exercise the source project, packed archive and
 offline rebuild.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, checking an edit
+
+Checking an edit used to generate the Tcl program and discard it. The project
+driver now stops after checking the selected entry and its modules. A fixture
+disables the emitter and checks projects with both typed and Tcl entries.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

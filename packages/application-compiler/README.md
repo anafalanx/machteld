@@ -1326,9 +1326,10 @@ dynamic scripts generally need a Tcl adapter with explicit arguments. Either
 language can supply an ordinary procedure used as a callback. Keep a GUI
 callback short, as both languages share Tcl's event loop.
 
-Run `machteld.exe project check project.dict` before packing. This checks
-all typed modules and checks the Tcl entry's UTF-8 encoding and command
-completeness. Tcl commands and lazy package indexes are exercised by running
+Run `machteld.exe project check project.dict` before packing. It validates the
+manifest, the typed modules and the selected entry, then stops before code
+generation. For a Tcl entry it checks UTF-8 and command completeness.
+Tcl commands and lazy package indexes are exercised by running
 the application. `project test` runs the typed examples and leaves the Tcl
 entry idle. `project pack` and `project rebuild` preserve the originals.
 The example in `examples/mixed-migration` compares an all-Tcl baseline,

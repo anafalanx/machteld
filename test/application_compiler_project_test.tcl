@@ -262,7 +262,26 @@ proc ::projectTest::runSuite {work driver pack} {
     set path [file join $project lib a.src]
     set direct [list $driver run $manifest]
     set marker [file join $caller package-index-visited]
-    command $exe $caller [list $driver check $manifest] {}
+    # Exercise the shipped driver with generation disabled. Checking a project
+    # should finish once its manifest, entry and typed sources have been checked.
+    set probe [file join $caller check-only.tcl]
+    writeBytes $probe [bytes {package require machteld
+lassign $argv compiler driver manifest
+source -encoding utf-8 $compiler
+proc ::appcompiler::emitModules args {error {project check entered code generation}}
+set argv [list check $manifest]
+source -encoding utf-8 $driver
+}]
+    set compiler [file join [file dirname $driver] .. packages application-compiler compiler.tcl]
+    expect [command $exe $caller [list $probe $compiler $driver $manifest] {}] {{} {}} \
+        "checking a typed project skips code generation"
+    set mixed [dict remove [dict get $originals application.dict] entry]
+    dict set mixed tclEntry ui.tcl
+    set mixedManifest [file join $project mixed.dict]
+    writeBytes $mixedManifest [bytes $mixed]
+    writeBytes [file join $project ui.tcl] [bytes {error {checking ran the Tcl entry}}]
+    expect [command $exe $caller [list $probe $compiler $driver $mixedManifest] {}] {{} {}} \
+        "checking a mixed project skips code generation and its Tcl entry"
     expect [file exists $marker] 0 "checking leaves the external package index unevaluated"
     exercise $exe $caller $direct
     expect [file exists $marker] 1 "runtime can read the explicitly declared local package index"
