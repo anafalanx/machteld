@@ -233,6 +233,35 @@ Event scripts keep arbitrary application keys and text as data.
 See `examples/graphviz-table/typed-window.dict` for the X-owned window
 that reuses the original graph drawing code.
 
+### Reporting an event fault
+
+An uncaught fault ends the current callback. Its scopes finish cleanup,
+including rollback of open transactions, before the application receives
+the diagnostic. Other windows continue to handle events. By default the
+runtime writes the source location, operation and message to stderr.
+
+A Tcl entry can direct diagnostics to a log or a nonmodal error pane.
+The command prefix receives a dictionary containing `operation`, `message`
+and `options`. The options preserve Tcl’s `-errorcode`, `-errorinfo`,
+custom options and the mapped `-appcompilerlocation` when available.
+The operation identifies the event boundary, such as `tk-action`,
+`tk-click`, `worker-resume` or `process-done`.
+
+```tcl
+proc displayFault {label report} {
+    $label configure -text [dict get $report message]
+}
+::application::@events::on_fault [list ::displayFault .status]
+```
+
+Call `on_fault` without arguments to read the current prefix, or pass
+`{}` to restore stderr. `::application::@events::last_fault` returns the
+most recent report, including when a windowed launch has no stderr. It
+returns an empty dictionary before the first fault. A failing or reentered
+sink falls back to stderr. Each compiled application owns these settings.
+Tcl’s interpreter-wide background error handler remains under the caller’s
+control.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.
@@ -552,10 +581,11 @@ pipes. `on_done` then receives `ok(process_exit)`, with `status`, `exit`,
 `stdout_bytes` and `stderr_bytes`. Native statuses include `ok`, `error`,
 `timeout` and `killed`. A chunk callback can return `err(problem)` to stop
 delivery and pass that problem to `on_done`. A Tcl callback exception or
-expired captured reference produces `PROCESS_CALLBACK`. Pipe or supervision
-failure produces `PROCESS_IO`. Failure to start is returned to the caller
-before any callbacks run. A fault in `on_done` goes to Tcl's background
-error handler after the native child has been released.
+expired captured reference produces `PROCESS_CALLBACK`, with the mapped
+`origin` and Tcl return `options` available to the completion consumer.
+Pipe or supervision failure produces `PROCESS_IO`. Failure to start is
+returned to the caller before any callbacks run. A fault in `on_done` goes
+to the application's event fault sink after the native child has been released.
 
 `cancel_process(job)` stops the child and delivers one terminal result
 with status `canceled`, exit `-1`, and the delivered byte counts. A cancel

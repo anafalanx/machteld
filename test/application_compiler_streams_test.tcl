@@ -92,7 +92,7 @@ proc ::received {side data} {
         set largest [expr {max($largest, [string length $data])}]
         switch -- $action {
             reject {return {err {code TEST_REJECT message {consumer declined}}}}
-            throw {error "consumer fault"}
+            throw {return -code error -errorcode {TEST CHUNK} -chunkdetail original "consumer fault"}
             cancel {::streamTest::api cancel $ticket}
             close {::streamTest::api close $ticket; set ::streamTest::closed 1}
             nest {update}
@@ -104,7 +104,7 @@ proc ::terminal {result} {
     if {$::streamTest::depth} {error "terminal delivered inside chunk callback"}
     incr ::streamTest::terminals
     set ::streamTest::outcome $result
-    if {$::streamTest::action eq "terminal_fault"} {error "terminal consumer fault"}
+    if {$::streamTest::action eq "terminal_fault"} {return -code error -errorcode {TEST TERMINAL} "terminal consumer fault"}
     return {}
 }
 proc ::streamTest::background {message options} {set ::streamTest::backgroundMessage $message}
@@ -174,6 +174,11 @@ proc ::streamTest::exercise {exe script} {
         start $exe [list $script flood] {} 7 5000
         lassign [finish] tag r
         equal [list $tag [dict get $r code] $chunks] [list err $code 1] "chunk failure $mode closes stream once"
+        if {$mode eq "throw"} {
+            equal [list [dict get $r options -errorcode] [dict get $r options -chunkdetail] [dict get $r origin module]] \
+                {{TEST CHUNK} original flow} "chunk fault preserves options and mapped source for the completion consumer"
+            equal [::typedStream::@events::last_fault] {} "handled chunk fault is not reported again"
+        }
     }
     reset cancel
     start $exe [list $script flood] {} 7 5000
@@ -196,16 +201,23 @@ proc ::streamTest::exercise {exe script} {
     lassign [api escaped $exe [list $script echo] $small] tag ticket
     lassign [finish] tag r
     equal [list $tag [dict get $r code] $chunks] {err PROCESS_CALLBACK 0} "expired reference prevents late chunk delivery"
+    equal [dict get $r origin module] flow "capture validation falls back to stream source"
 
     reset terminal_fault
     set oldHandler [interp bgerror {}]
     try {
         interp bgerror {} ::streamTest::background
+        ::typedStream::@events::on_fault [list set ::streamTest::terminalReport]
         start $exe [list $script echo] {} 65536 5000
         finish
-        equal [string match {*terminal consumer fault*} [waitFor ::streamTest::backgroundMessage]] 1 "terminal callback fault reaches the background handler"
+        set report [waitFor ::streamTest::terminalReport]
+        equal [list [dict get $report operation] [dict get $report message] [dict get $report options -errorcode]] \
+            {process-done {terminal consumer fault} {TEST TERMINAL}} "completion fault goes to application sink"
+        equal [dict get $report options -appcompilerlocation module] flow "completion fault preserves source"
+        update
+        equal [info exists ::streamTest::backgroundMessage] 0 "completion fault bypasses interpreter background errors"
         equal [list $terminals [::machteld::child list]] {1 {}} "terminal callback fault does not leak or retry"
-    } finally {interp bgerror {} $oldHandler}
+    } finally {::typedStream::@events::on_fault {}; interp bgerror {} $oldHandler}
 }
 
 proc ::streamTest::invalid {exe work} {

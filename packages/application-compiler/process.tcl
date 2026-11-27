@@ -105,7 +105,7 @@ proc streamScopeLive {scope} {
 
 # Every channel handler carries the stream key. A retired or queued handler
 # can never operate on a newly assigned channel with the same native name.
-proc stream_process {exe arguments input chunk timeout stdout stderr done} {
+proc stream_process {location exe arguments input chunk timeout stdout stderr done} {
     variable streamOwner
     variable streamJobs
     if {$chunk < 1 || $chunk > 65536} {
@@ -131,7 +131,7 @@ proc stream_process {exe arguments input chunk timeout stdout stderr done} {
         }
         set scope [streamScope]
         set streamJobs($key) [dict create child $child channels $channels input $input offset 0 chunk $chunk \
-            stdout $stdout stderr $stderr done $done stdout_bytes 0 stderr_bytes 0 native {} busy 0 timer {} scope $scope]
+            stdout $stdout stderr $stderr done $done stdout_bytes 0 stderr_bytes 0 native {} busy 0 timer {} scope $scope location $location]
         if {$scope ne {}} {
             lassign $scope register forget
             set token [{*}$register [list [namespace current]::streamFinish $key ownerClosed]]
@@ -216,10 +216,9 @@ proc streamFinish {key reason {result {}}} {
         if {$reason eq "canceled"} {set status canceled; set exit -1}
         set result [list ok [dict create status $status exit $exit stdout_bytes [dict get $job stdout_bytes] stderr_bytes [dict get $job stderr_bytes]]]
     }
-    # Release resources before notifying, including when the terminal
-    # callback throws. Let Tcl's event error handler report its error once.
-    if {[catch {[namespace current]::streamCallback [dict get $job scope] [dict get $job done] $result} msg options]} {
-        after 0 [list ::return -options $options $msg]
+    # Notify after releasing the child, including when the consumer fails.
+    if {[catch {[namespace current]::streamCallback [dict get $job scope] [dict get $job done] $result} message options]} {
+        reportFault process-done $message $options [dict get $job location]
     }
 }
 
@@ -283,12 +282,15 @@ proc streamPump {key} {
             if {[string length $bytes] == 0} continue
             set delivered 1
             dict incr streamJobs($key) ${name}_bytes [string length $bytes]
-            if {[catch {[namespace current]::streamCallback [dict get $streamJobs($key) scope] \
-                    [dict get $streamJobs($key) $name] $bytes} outcome]} {
-                set outcome [processProblem PROCESS_CALLBACK $outcome]
-            }
+            set callbackCode [catch {[namespace current]::streamCallback [dict get $streamJobs($key) scope] \
+                    [dict get $streamJobs($key) $name] $bytes} outcome options]
             if {![info exists streamJobs($key)]} {return}
             if {[dict exists $streamJobs($key) canceled]} break
+            if {$callbackCode} {
+                set origin [mappedLocation $options [sourceMap] [dict get $streamJobs($key) location]]
+                dict set options -appcompilerlocation $origin
+                set outcome [list err [dict create code PROCESS_CALLBACK message $outcome origin $origin options $options]]
+            }
             if {[lindex $outcome 0] eq "err"} {
                 streamFinish $key failed $outcome
                 return

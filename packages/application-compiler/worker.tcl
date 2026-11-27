@@ -135,7 +135,7 @@ proc workerDeliver {task} {
     dict set workerTasks $task notice {}
     set co [dict get $workerTasks $task waiter]
     if {![dict exists $workerHandlers $co] || ![dict exists $workerOwners [dict get $workerHandlers $co]]} return
-    $co ready
+    eventBoundary worker-resume $co ready
 }
 
 proc await {task} {
@@ -289,7 +289,8 @@ proc workerControl {subcommand args} {
             set owner owner#[incr workerSequence]
             # A private tag avoids overwriting the application's own Destroy binding.
             set tag [namespace current]::$owner
-            bind $tag <Destroy> [format {%s %s %%W} [list [namespace current]::workerWindowDestroyed] $owner]
+            bind $tag <Destroy> [list [namespace current]::eventBoundary worker-window-close \
+                [list [namespace current]::workerWindowDestroyed $owner] %W]
             bindtags $window [linsert [bindtags $window] 0 $tag]
             dict set workerWindows $window $owner
             dict set workerOwners $owner $window

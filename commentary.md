@@ -439,6 +439,12 @@ An application-owned worker kept running, and another handler collected
 its reply. The tests exercise the source project, packed archive and
 offline rebuild.
 
+A second recording window refreshed while a writer waited for a worker,
+and again after its reply handler failed. The diagnostic sink observed the
+original error code, source and a rolled-back SQLite write. An application
+can present that report in its own status pane without Tk opening a modal
+background-error dialog.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

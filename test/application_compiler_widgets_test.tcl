@@ -93,9 +93,33 @@ proc ::widgetTest::recorded {window} {
         [list -2 15 [list some $::sampleKey]] "typed integer coordinates and arbitrary exact key"
     equal [dict get $::observed canvas] $canvas "event identifies its live canvas"
     set ::failEvent 1
-    equal [catch {::recordTk::click $c $new 2 3} message options] 1 "callback fault escapes this delivery"
+    set literal {panel [literal]; $name}
+    equal [::application::@events::last_fault] {} "empty diagnostic history on first use"
+    ::application::@events::on_fault [list ::saveEvent $literal]
+    equal [::application::@events::on_fault] [list ::saveEvent $literal] "registered prefix is literal Tcl data"
+    equal [catch {::recordTk::click $c $new 2 3}] 0 "a failing event returns to the dispatcher"
+    equal $::sinkLabel $literal "sink receives its arguments exactly"
+    set fault [::application::@events::last_fault]
+    equal [list [dict get $fault operation] [dict get $fault message]] {tk-click {handler failed}} "failed click is identified"
+    set options [dict get $fault options]
     equal [dict get $options -errorcode] {TEST CLICK} "typed dispatch preserves the callback's error code"
     equal [dict get $options -appcompilerlocation module] probe "callback fault retains typed source"
+    equal [dict get $options -fixturemetadata] preserved "arbitrary Tcl error options survive"
+    equal [::foreign::@events::last_fault] {} "faults belong to the failing application"
+    equal [::foreign::@events::on_fault] {} "independent apps keep independent sink preferences"
+    ::application::@events::on_fault {}
+    ::recordTk::click $c $new 2 3
+    equal [string match {probe:*:*: tk-click error: handler failed} [lindex $::stderrLines end]] 1 "default stderr identifies the source"
+    ::application::@events::on_fault [list ::failSink $c $new]
+    ::recordTk::click $c $new 2 3
+    equal $::badSinkCalls 1 "a fault during reporting cannot recursively invoke the same sink"
+    equal [lindex $::stderrLines end] {fault sink error: broken diagnostic pane} "sink failure falls back to stderr"
+    equal [dict get [::application::@events::last_fault] options -errorcode] {TEST CLICK} "sink failure preserves the application fault"
+    ::application::@events::on_fault {}
+    set ::stderrUnavailable 1
+    equal [catch {::recordTk::click $c $new 2 3}] 0 "a launch without stderr still returns to the event loop"
+    equal [dict get [::application::@events::last_fault] message] {handler failed} "diagnostic remains accessible without stderr"
+    unset ::stderrUnavailable
     unset ::failEvent
     set ::retainedWindow [dict get $::observed window]
     ::application::probe::title $::retainedWindow {Bay %x [7]}
@@ -117,11 +141,15 @@ proc ::widgetTest::recorded {window} {
     rename ::application::@rt::workerHandle {}
     set ::afterClose [dict get $::recordTk::bindings [list [lindex [bindtags $c] 0] <Button-1>]]
     set ::hookRuns {}
+    ::application::@events::on_fault [list ::saveEvent closing]
+    ::application::@rt::tkOnClose $::retainedWindow [list ::error {close observer failed} {} {TEST CLOSE}]
     ::application::@rt::tkOnClose $::retainedWindow [list lappend ::hookRuns kept]
     set forgotten [::application::@rt::tkOnClose $::retainedWindow [list lappend ::hookRuns forgotten]]
     ::application::@rt::tkForgetClose $::retainedWindow $forgotten
     destroy $window
-    equal $::hookRuns kept "close observers fire once"
+    equal $::hookRuns kept "later close observers fire once after an observer faults"
+    equal [list [dict get $::savedEvent operation] [dict get $::savedEvent options -errorcode]] \
+        {tk-destroy {TEST CLOSE}} "destroy callback faults go to the application sink"
     equal [catch {::application::probe::close $::retainedWindow}] 1 "closed window rejects updates"
     set ::observed none
     uplevel #0 [string map {%x 1 %y 1} $::afterClose]
@@ -146,8 +174,25 @@ proc ::widgetTest::headless {} {
         $app eval $generated
         $app eval [dict get [::appcompiler::compile [dict create probe $probes] ::foreign] script]
         $app eval {
+            set ::stderrLines {}
+            set ::badSinkCalls 0
+            rename ::puts ::realPuts
+            proc ::puts {args} {
+                if {[llength $args] == 2 && [lindex $args 0] eq "stderr"} {
+                    if {[info exists ::stderrUnavailable]} {error {stderr is closed}}
+                    lappend ::stderrLines [lindex $args 1]
+                    return
+                }
+                tailcall ::realPuts {*}$args
+            }
+            proc ::saveEvent {label fault} {set ::sinkLabel $label; set ::savedEvent $fault}
+            proc ::failSink {canvas item fault} {
+                incr ::badSinkCalls
+                ::recordTk::click $canvas $item 2 3
+                error {broken diagnostic pane}
+            }
             proc received {event} {
-                if {[info exists ::failEvent]} {return -code error -errorcode {TEST CLICK} "handler failed"}
+                if {[info exists ::failEvent]} {return -code error -errorcode {TEST CLICK} -fixturemetadata preserved "handler failed"}
                 set ::observed $event
                 return {}
             }
@@ -240,7 +285,7 @@ proc ::widgetTest::owners {packed} {
         set fixture [file join $root test fixtures window-owner]
         set author [file join $tmp author]
         file mkdir $author
-        foreach member {requests.src synchronous.src streams.src controller.tcl lib} {
+        foreach member {requests.src faults.src synchronous.src streams.src controller.tcl lib} {
             file copy -- [file join $fixture $member] [file join $author $member]
         }
         file copy -- [file join $root test fixtures recording_tk.tcl] $author
@@ -251,10 +296,11 @@ proc ::widgetTest::owners {packed} {
             after 20000
         }
         set driver [file join $::appcompiler::compilerDirectory driver.tcl]
-        foreach {project file modes} {managed requests.src {resume close wait_app} synchronous synchronous.src streams} {
+        foreach {project file modes} {managed requests.src {resume close wait_app faults} synchronous synchronous.src streams} {
             set manifest [file join $author $project.dict]
             set config [dict create schema 1 edition 1 minApi 30 tclEntry controller.tcl \
                 modules [list ui $file streams streams.src] assets {recording_tk.tcl lib/pkgIndex.tcl lib/barrier.tcl} packageDirs lib]
+            if {$project eq "managed"} {dict set config modules faults faults.src}
             ::appcompiler::project::stageBytes $manifest $config
             foreach mode $modes {runOwner [file join $tmp source-$mode] [list [info nameofexecutable] $driver run $manifest] $mode $helper}
             if {$packed} {
@@ -268,7 +314,7 @@ proc ::widgetTest::owners {packed} {
             file mkdir $delivery
             set host [file join $delivery machteld.exe]
             file copy -- [info nameofexecutable] $host
-            foreach {project modes} {managed {resume close wait_app} synchronous streams} {
+            foreach {project modes} {managed {resume close wait_app faults} synchronous streams} {
                 set archive [file join $delivery received-$project.machteld]
                 file rename -- [file join $tmp $project.machteld] $archive
                 set rebuilt [file join $delivery rebuilt-$project.machteld]

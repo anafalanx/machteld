@@ -32,6 +32,63 @@ proc ::until {condition} {
 }
 proc ::release {name} {close [open [file join $::work $name.release] {WRONLY CREAT EXCL}]}
 proc ::readAppTask {} {set ::appReply [::application::ui::finish $::tasks(app)]}
+proc ::fixtureFault {value} {
+    return -code error -errorcode {TEST WORKER_REPLY} -fixturevalue $value {cannot apply lookup}
+}
+proc ::faultPane {report} {
+    lappend ::reports $report
+    set ::rolledBack [expr {[::journal onecolumn {SELECT count(*) FROM journal}] == 0}]
+}
+proc ::faultClicks {writer} {
+    dict for {path state} $::recordTk::widgets {
+        switch [dict get $state kind] {
+            button {set buttons([$path cget -text]) $path}
+            label {set label $path}
+            window {if {[dict get $state title] eq "Reader"} {set reader $path}}
+        }
+    }
+    after 0 [list $buttons(Submit) invoke]
+    until {[file exists [file join $::work local.started]]}
+    after 0 [list $buttons(Refresh) invoke]
+    until {[$label cget -text] eq "ready"}
+    $label configure -text pending
+    release local
+    until {[llength $::reports]}
+    set report [lindex $::reports 0]
+    assert {[dict get $report operation] eq "worker-resume"} {resumed operation missing}
+    assert {[dict get $report message] eq "cannot apply lookup"} {original error message missing}
+    set options [dict get $report options]
+    assert {[dict get $options -fixturevalue] eq "local" && [dict get $options -errorcode] eq {TEST WORKER_REPLY}} {original error options missing}
+    set site [dict get $options -appcompilerlocation]
+    assert {[dict get $site module] eq "faults" && [dict get $site line] == 2 && [dict get $site column] == 41} {original extern target location missing}
+    assert {[string match {*typed source faults:2:41*} [dict get $options -errorinfo]]} {original stack trace missing}
+    assert {$::rolledBack} {journal entry visible when sink ran}
+    assert {[::application::@events::last_fault] eq $report} {diagnostic cannot be recovered}
+    assert {[winfo exists $writer] && [winfo exists $reader]} {the event closed an unrelated window}
+    after 0 [list $buttons(Refresh) invoke]
+    until {[$label cget -text] eq "ready"}
+    assert {[llength $::reports] == 1 && $::notes eq {} && $::backgroundFaults eq {}} {duplicate or modal fault delivery}
+    assert {[::machteld::child list] eq {}} {finished worker was retained}
+    destroy $writer
+}
+if {$mode eq "faults"} {
+    package require sqlite3
+    set file [file join $work fault.db]
+    sqlite3 ::journal $file
+    set ::reports {}
+    set ::backgroundFaults {}
+    interp bgerror {} [list lappend ::backgroundFaults]
+    ::application::@events::on_fault ::faultPane
+    set ::recordTk::waiting ::faultClicks
+    try {
+        ::journal eval {CREATE TABLE journal (n INTEGER)}
+        assert {[::application::faults::open $file] eq {ok {}}} {faulted event escaped the main loop}
+        assert {![dict size $::recordTk::widgets]} {scoped windows were retained}
+        assert {[interp bgerror {}] eq {lappend ::backgroundFaults}} {application modified interpreter background policy}
+    } finally {::journal close}
+    puts ok
+    return
+}
 proc ::click {window} {
     dict for {path state} $::recordTk::widgets {set widget([dict get $state kind]) $path}
     set button $widget(button)

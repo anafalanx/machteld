@@ -1,0 +1,30 @@
+extern fn .hold($name: text) -> text = ['::windowFixture::hold'] from 'window-fixture'
+extern fn .fail($name: text) -> unit = ['::fixtureFault']
+extern fn .note($text: text) -> unit = ['::note']
+worker .look($name: text) -> result<text,problem> => ok(.hold($name))
+
+fn .write($file: text) -> result<unit,problem> {
+    using $tx ::= sql_begin($file)? {
+        sql_exec($tx, 'INSERT INTO journal VALUES (1)')?
+        $reply ::= await(start .look('local'))?
+        .fail($reply)
+        return sql_commit($tx)
+    }
+}
+fn .on_write($file: text, $event: tk_action) -> unit =>
+    match .write($file) { ok($done) => .note('committed')
+        err($p) => .note('write returned an expected failure') }
+fn .on_read($label: tk_label, $event: tk_action) -> unit => tk_label_text($label, 'ready')
+export fn .open($file: text) -> result<unit,problem> {
+    using $writer ::= tk_open('Writer')? {
+        using $reader ::= tk_open('Reader')? {
+            $submit ::= tk_button($writer, 'Submit')
+            $refresh ::= tk_button($reader, 'Refresh')
+            $label ::= tk_label($reader, 'pending')
+            tk_on_action($submit, bind(.on_write, $file))
+            tk_on_action($refresh, bind(.on_read, $label))
+            tk_wait($writer)
+            return ok(unit)
+        }
+    }
+}

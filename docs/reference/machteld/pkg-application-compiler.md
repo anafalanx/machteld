@@ -140,6 +140,14 @@ reject further use. The compiler guide documents widget operations and the
 validated Tcl renderer bridge. The `examples/graphviz-table/typed-window.dict`
 project combines an X-owned UI with an existing Tcl Graphviz renderer.
 
+An uncaught callback fault ends its operation and runs scoped cleanup.
+Healthy windows keep receiving events. Use
+`::application::@events::on_fault $commandPrefix` in a Tcl entry to receive
+the fault dictionary with `operation`, `message` and the original Tcl
+`options`. A mapped X location appears in `-appcompilerlocation`.
+The default sink writes to stderr. `::application::@events::last_fault`
+returns the latest report even on a launch without a console.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type
