@@ -1924,6 +1924,7 @@ proc ::ref::main {argv} {
                 addUnique aliases [normalizeSearch $alias] $id
             }
             if {$isCompilerGuide} {
+                addUnique aliases [normalizeSearch X] $id
                 set lookups {
                     {project check} migrating-a-tcl-tk-project-one-file-at-a-time
                     {project check --json} migrating-a-tcl-tk-project-one-file-at-a-time
@@ -1935,6 +1936,8 @@ proc ::ref::main {argv} {
                     {project rebuild} migrating-a-tcl-tk-project-one-file-at-a-time
                     require_index list-values-and-lengths
                     list_append list-values-and-lengths
+                    fixed_assignment local-bindings-and-assignment
+                    not_comparable record-equality
                 }
                 foreach section $sections {
                     set slug [dict get $section slug]
@@ -1988,7 +1991,7 @@ proc ::ref::main {argv} {
             "machteld.exe --docs search canvas" \
             "machteld.exe --docs get tk/command/canvas --section synopsis" \
             "machteld.exe --docs get machteld/package/application-compiler" \
-            {machteld.exe --docs outline machteld/guide/application-compiler} \
+            {machteld.exe --docs get X} \
             "machteld.exe --docs get machteld/agent" "```" "" \
             "In a Tcl application, use `docs search canvas`, `docs get tk/command/canvas` and `docs schema` for the query contract." \
             "Read `machteld/command/docs` for query options and `tcl/application/tclsh` or `tk/application/wish` for the upstream shell manuals." \

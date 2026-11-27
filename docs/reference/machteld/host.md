@@ -26,7 +26,7 @@ machteld.exe pack source -o program.machteld
 machteld.exe wrap app.dict -o Program.exe --gui
 ```
 
-`--version` prints the product version on one line, currently `0.50-dev`.
+`--version` prints the product version on one line, currently `0.50`.
 `--version --api` prints the Tcl package API number (`30`) used by
 `package require machteld` and the project manifest's `minApi`.
 

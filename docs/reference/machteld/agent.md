@@ -9,7 +9,7 @@ commands: docs, help
 # Agent documentation bootstrap
 
 The Machteld distribution contains the complete, exact-version offline
-references for Machteld 0.50-dev, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
+references for Machteld 0.50, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
 `docs get cffi/manual/intro` for foreign calls and the Foreign calls section
 of the runtime contract for the bundled build's restrictions. The corpus includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not
@@ -89,9 +89,9 @@ For runtime packages, use `docs list -scope machteld -type package`.
 For example, `docs get machteld/package/sqlite3` describes typed parameters
 and `docs get machteld/package/network` describes UDP and authenticated time.
 
-For the typed language and project driver, start with the
+For X and its project driver, run `machteld.exe --docs get X` to read the
 [application compiler manual](../../../packages/application-compiler/README.md).
-Use `docs outline machteld/guide/application-compiler` for its section IDs,
+Use `docs outline X` for its section IDs,
 `docs get {project check}` for project checks, or `docs get require_index`
 for list lookup and its error result.
 

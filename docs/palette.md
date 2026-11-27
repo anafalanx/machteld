@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public commands in Machteld 0.50-dev and how to use them together.
+description: The public commands in Machteld 0.50 and how to use them together.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -14,9 +14,9 @@ This page is a composition tour. The [complete reference](reference/machteld/ind
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the embedded Machteld, Tcl, Tk and cffi manuals.
 
-This describes Machteld 0.50-dev and its Tcl package API 30. Its
-acceptance is in progress; check the selected executable's live `manifest`,
-artifact identity, and embedded reference.
+This describes Machteld 0.50 and its Tcl package API 30. Use the selected
+executable's live `manifest`, artifact identity and embedded reference to
+check its capabilities.
 
 ## Process control
 

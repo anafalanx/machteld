@@ -23,7 +23,7 @@ version shown in the host's help and Windows file properties.
 
 `version` returns the same value as `package require machteld` and
 `machteld.exe --version --api`, currently `30`.
-`version -product` and `machteld.exe --version` return `0.50-dev`.
+`version -product` and `machteld.exe --version` return `0.50`.
 
 ## Errors
 
@@ -44,7 +44,7 @@ puts "Machteld [version -product]"
 
 This reports Machteld, not Tcl, Tk, SQLite, Windows, or documentation-schema
 versions. Use `docs status` and `store version` for related exact versions.
-The development build is unsigned. A version number does not identify the exact source state,
+A version number does not identify the exact source state,
 prove that a build passed acceptance, or authenticate a publisher. Use
 artifact hashes and verification receipts, the executable's own `manifest`, and
 its reference corpus when provenance matters. Incremental builds also carry an
