@@ -2,20 +2,41 @@ namespace eval ::appcompiler::checker {}
 
 proc ::appcompiler::checker::issue {reportsVar code node message} {
     upvar 1 $reportsVar reports
-    lappend reports [::appcompiler::diagnostic $code $node $message]
+    dict lappend reports diagnostics [::appcompiler::diagnostic $code $node $message]
 }
 
-# Types compare by canonical spelling: .module::name for a nominal type.
-# Inside an expression, ? represents none with an as-yet-unknown payload;
-# an empty type instead means that an earlier diagnostic prevents inference.
+proc ::appcompiler::checker::fact {reportsVar node name value} {
+    upvar 1 $reportsVar reports
+    set key [list [dict get $node module] [dict get $node line] [dict get $node column] [dict get $node kind]]
+    dict set reports facts $key $name $value
+}
+
+proc ::appcompiler::checker::makeType {head arguments} {
+    if {$head eq "optional"} { return [lindex $arguments 0]? }
+    return [format {%s<%s>} $head [join $arguments ,]]
+}
+
+# Nominal types include the defining module. A '*' is an internal inference
+# variable for an absent payload. An empty type marks a prior diagnostic.
 proc ::appcompiler::checker::declaredType {type node world reportsVar} {
     upvar 1 $reportsVar reports
-    set base [string trimright $type "?"]
-    set suffix [string range $type [string length $base] end]
-    if {$base in {int text bool}} {
-        return $type
+    set parts [::appcompiler::typeParts $type]
+    set head [lindex $parts 0]
+    if {$head in {result list optional}} {
+        set arity [expr {$head eq "result" ? 2 : 1}]
+        if {[llength $parts] != $arity + 1} {
+            issue reports TYPE_ARITY $node "type '$head' requires $arity type arguments"
+            return ""
+        }
+        set args {}
+        foreach child [lrange $parts 1 end] {
+            lappend args [declaredType $child $node $world reports]
+        }
+        if {"" in $args} { return "" }
+        return [makeType $head $args]
     }
-    if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $base -> target name]} {
+    if {$type in {int text bool bytes problem unit}} { return $type }
+    if {![regexp {^\.(?:([a-zA-Z_][a-zA-Z_0-9]*)::)?([a-zA-Z_][a-zA-Z_0-9]*)$} $type -> target name]} {
         issue reports UNKNOWN_TYPE $node "unknown type '$type'"
         return ""
     }
@@ -25,12 +46,10 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
         return ""
     }
-    if {![dict exists $world modules $target]} {
-        return ""
-    }
+    if {![dict exists $world modules $target]} { return "" }
     set key [format {.%s::%s} $target $name]
     if {![dict exists $world schemas $key]} {
-        issue reports UNKNOWN_TYPE $node "unknown type '$base' in module '$target'"
+        issue reports UNKNOWN_TYPE $node "unknown type '$type' in module '$target'"
         return ""
     }
     set schema [dict get $world schemas $key]
@@ -39,15 +58,30 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
         issue reports NOT_EXPORTED $node "type '.$name' is private to module '$target'"
         return ""
     }
-    return $key$suffix
+    return $key
+}
+
+# Keep concrete information from both operands; e.g. result<int,*> joined
+# with result<*,problem> yields result<int,problem> for an exhaustive match.
+proc ::appcompiler::checker::joinTypes {left right} {
+    if {$left eq "" || $right eq ""} { return "" }
+    if {$left eq "*" || $left eq $right} { return $right }
+    if {$right eq "*"} { return $left }
+    set a [::appcompiler::typeParts $left]
+    set b [::appcompiler::typeParts $right]
+    set head [lindex $a 0]
+    if {$head ne [lindex $b 0] || [llength $a] != [llength $b] || [llength $a] < 2} { return "" }
+    set args {}
+    foreach x [lrange $a 1 end] y [lrange $b 1 end] {
+        set joined [joinTypes $x $y]
+        if {$joined eq ""} { return "" }
+        lappend args $joined
+    }
+    return [makeType $head $args]
 }
 
 proc ::appcompiler::checker::compatible {actual expected} {
-    if {$actual eq $expected} { return 1 }
-    # A hole at optional depth N fits any type with at least N optional layers.
-    if {[string index $actual 0] ne "?"} { return 0 }
-    set depth [expr {[string length $expected] - [string length [string trimright $expected "?"]]}]
-    return [expr {[string length $actual] <= $depth}]
+    return [expr {[joinTypes $actual $expected] ne ""}]
 }
 
 proc ::appcompiler::checker::signature {function world reportsVar} {
@@ -109,64 +143,151 @@ proc ::appcompiler::checker::bindLocal {scopeVar node type mutable reportsVar} {
     dict set scope $name [dict create type $type mutable $mutable]
 }
 
-proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
+proc ::appcompiler::checker::argumentTypes {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
-    set arguments [dict get $node args]
     set types {}
-    foreach argument $arguments {
+    foreach argument [dict get $node args] {
         lappend types [expressionType $argument $scope $imports $world reports]
     }
+    return $types
+}
 
+proc ::appcompiler::checker::checkArguments {node name actual expected reportsVar} {
+    upvar 1 $reportsVar reports
+    set count [llength $expected]
+    set valid [expr {$count == [llength $actual]}]
+    if {!$valid} {
+        issue reports CALL_ARITY $node "'$name' expects $count arguments, got [llength $actual]"
+    }
+    foreach have $actual want $expected arg [dict get $node args] {
+        if {$have eq "" || $want eq ""} {
+            set valid 0
+        } elseif {![compatible $have $want]} {
+            issue reports ARGUMENT_TYPE $arg "'$name' expects $want, got $have"
+            set valid 0
+        }
+    }
+    return $valid
+}
+
+proc ::appcompiler::checker::constructType {node spelling name ambiguous scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set actual [argumentTypes $node $scope $imports $world reports]
+    set where [dict getdef $node typeLocation $node]
+    set choice [declaredType $spelling $where $world reports]
+    if {$choice eq ""} { return "" }
+    if {[dict getdef $world schemas $choice kind {}] ne "choice"} {
+        issue reports EXPECTED_CHOICE $where "expected a choice type, got $choice"
+        return ""
+    }
+    set alternate [string range $spelling 1 end]
+    set function [dict getdef $world functions $alternate $name {}]
+    if {$ambiguous && $alternate in $imports && $function ne "" && [dict get $function exported]
+            && [dict exists $world schemas $choice members $name]} {
+        issue reports AMBIGUOUS_CALL $node "'[format {%s::%s} $spelling $name]' names both an imported function and a local choice variant"
+        return ""
+    }
+    if {![dict exists $world schemas $choice members $name]} {
+        issue reports UNKNOWN_VARIANT [dict getdef $node variantLocation $node] "unknown variant '$name' on $choice"
+        return ""
+    }
+    set payload [dict get $world schemas $choice members $name]
+    if {![checkArguments $node $name $actual $payload reports]} { return "" }
+    fact reports $node constructor $choice
+    return $choice
+}
+
+proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set name [dict get $node name]
+    set actual [argumentTypes $node $scope $imports $world reports]
+    set generic [dict getdef $node typeArgs {}]
+    set count [expr {$name eq "decode_json" ? 1 : 0}]
+    if {[llength $generic] != $count} {
+        issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
+        return ""
+    }
+    switch -exact -- $name {
+        ok - err - encode_json { set params [list *] }
+        problem - decode_json - write_stdout_utf8 { set params [list text] }
+        decode_utf8 { set params [list bytes] }
+        read_stdin_bytes { set params {} }
+        default {
+            issue reports UNKNOWN_FUNCTION $node "unknown standard function '$name'"
+            return ""
+        }
+    }
+    set valid [checkArguments $node $name $actual $params reports]
+    if {$name eq "decode_json"} {
+        set location [lindex [dict getdef $node typeLocations {}] 0]
+        if {$location eq ""} { set location $node }
+        set schema [declaredType [lindex $generic 0] $location $world reports]
+        if {$schema eq ""} { return "" }
+        if {[dict getdef $world schemas $schema kind {}] ne "record"} {
+            issue reports EXPECTED_RECORD $location "decode_json requires a record schema, got $schema"
+            return ""
+        }
+    }
+    if {!$valid} { return "" }
+    switch -exact -- $name {
+        ok { return [makeType result [list [lindex $actual 0] *]] }
+        err { return [makeType result [list * [lindex $actual 0]]] }
+        problem { return problem }
+        read_stdin_bytes { return result<bytes,problem> }
+        decode_utf8 { return result<text,problem> }
+        decode_json {
+            fact reports $node schema $schema
+            return [makeType result [list $schema problem]]
+        }
+        encode_json {
+            set schema [lindex $actual 0]
+            if {[dict getdef $world schemas $schema kind {}] ne "record"} {
+                issue reports EXPECTED_RECORD [lindex [dict get $node args] 0] "encode_json requires a record, got $schema"
+                return ""
+            }
+            fact reports $node schema $schema
+            return result<text,problem>
+        }
+        write_stdout_utf8 { return result<unit,problem> }
+    }
+}
+
+proc ::appcompiler::checker::callType {node scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
     set caller [dict get $node module]
     set target [dict get $node qualifier]
+    set name [dict get $node name]
+    set localChoice [format {.%s::%s} $caller $target]
+    if {$target ne "" && [dict getdef $world schemas $localChoice kind {}] eq "choice"
+            && ([dict exists $world schemas $localChoice members $name] || $target ni $imports)} {
+        return [constructType $node .$target $name 1 $scope $imports $world reports]
+    }
+    set actual [argumentTypes $node $scope $imports $world reports]
     if {$target eq ""} {
         set target $caller
     } elseif {$target ne $caller && $target ni $imports} {
         issue reports MISSING_IMPORT $node "module '$target' must be imported before use"
         return ""
     }
-    if {![dict exists $world functions $target]} {
-        # The module's missing import has its own diagnostic.
-        return ""
-    }
-    set name [dict get $node name]
+    if {![dict exists $world functions $target]} { return "" }
     if {![dict exists $world functions $target $name]} {
         issue reports UNKNOWN_FUNCTION $node "unknown function '.$name' in module '$target'"
         return ""
     }
     set function [dict get $world functions $target $name]
-    if {$function eq ""} {
-        return ""
-    }
+    if {$function eq ""} { return "" }
     if {$caller ne $target && ![dict get $function exported]} {
         issue reports NOT_EXPORTED $node "function '.$name' is private to module '$target'"
         return ""
     }
+    return [checkCall $node .$name $actual $function reports]
+}
 
-    set params [dict get $function params]
-    set expectedCount [llength $params]
-    set actualCount [llength $arguments]
-    set valid [expr {$actualCount == $expectedCount}]
-    if {!$valid} {
-        issue reports CALL_ARITY $node "'.$name' expects $expectedCount arguments, got $actualCount"
-    }
-    for {set i 0} {$i < min($actualCount, $expectedCount)} {incr i} {
-        set param [lindex $params $i]
-        set expected [dict get $param type]
-        set actual [lindex $types $i]
-        if {$actual eq "" || $expected eq ""} {
-            set valid 0
-        } elseif {![compatible $actual $expected]} {
-            set valid 0
-            set paramName [dict get $param name]
-            issue reports ARGUMENT_TYPE [lindex $arguments $i] "parameter '$paramName' expects $expected, got $actual"
-        }
-    }
-    set result [dict get $function result]
-    if {$valid} {
-        return $result
-    }
-    return ""
+proc ::appcompiler::checker::checkCall {node name actual function reportsVar} {
+    upvar 1 $reportsVar reports
+    set expected [lmap param [dict get $function params] {dict get $param type}]
+    if {![checkArguments $node $name $actual $expected reports]} { return "" }
+    return [dict get $function result]
 }
 
 proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
@@ -217,10 +338,81 @@ proc ::appcompiler::checker::recordExpression {node scope imports world reportsV
     return ""
 }
 
+proc ::appcompiler::checker::joinArm {body armType resultVar validVar reportsVar} {
+    upvar 1 $resultVar result $validVar valid $reportsVar reports
+    if {$armType eq ""} {
+        set valid 0
+    } elseif {$result eq ""} {
+        set result $armType
+    } else {
+        set joined [joinTypes $result $armType]
+        if {$joined eq ""} {
+            issue reports MATCH_ARM_TYPE $body "match arms have incompatible types $result and $armType"
+            set valid 0
+        } else {
+            set result $joined
+        }
+    }
+}
+
+proc ::appcompiler::checker::listMatchType {node element scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set seenFallback 0
+    set valid [expr {$element ne ""}]
+    set result ""
+    foreach arm [dict get $node arms] {
+        set local {}
+        if {$seenFallback} {
+            issue reports UNREACHABLE_ARM $arm "an earlier wildcard already matches every list"
+            set valid 0
+        }
+        switch -exact -- [dict get $arm kind] {
+            fallback { set seenFallback 1 }
+            listarm {
+                foreach pattern [dict get $arm elements] {
+                    if {[dict get $pattern kind] eq "patternText"} {
+                        if {$element ne "" && $element ne "text"} {
+                            issue reports PATTERN_TYPE $pattern "a text pattern cannot match a list element of type $element"
+                            set valid 0
+                        }
+                    } else {
+                        bindLocal local $pattern $element 0 reports
+                    }
+                }
+            }
+            default {
+                issue reports PATTERN_TYPE $arm "a list match requires a list pattern or a wildcard"
+                set valid 0
+            }
+        }
+        set body [dict get $arm body]
+        set armType [expressionType $body [dict merge $scope $local] $imports $world reports]
+        joinArm $body $armType result valid reports
+    }
+    if {!$seenFallback && $element ne ""} {
+        issue reports MATCH_NONEXHAUSTIVE $node "a list match requires a wildcard to cover other contents and lengths"
+        set valid 0
+    }
+    if {$valid} { return $result }
+    return ""
+}
+
 proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set value [dict get $node value]
     set choice [expressionType $value $scope $imports $world reports]
+    set parts [::appcompiler::typeParts $choice]
+    if {[lindex $parts 0] eq "list"} {
+        return [listMatchType $node [lindex $parts 1] $scope $imports $world reports]
+    }
+    set arms [dict get $node arms]
+    if {[llength $arms] && [dict get [lindex $arms 0] kind] in {listarm fallback}
+            && [dict getdef $world schemas $choice kind {}] ne "choice"} {
+        if {$choice ne ""} {
+            issue reports EXPECTED_LIST $value "expected a list for these patterns, got $choice"
+        }
+        return [listMatchType $node "" $scope $imports $world reports]
+    }
     if {$choice ne "" && [dict getdef $world schemas $choice kind {}] ne "choice"} {
         issue reports EXPECTED_CHOICE $value "expected a closed choice, got $choice"
         set choice ""
@@ -230,6 +422,14 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     set valid [expr {$choice ne ""}]
     set coverageKnown $valid
     foreach arm [dict get $node arms] {
+        if {[dict get $arm kind] ne "arm"} {
+            if {$choice ne ""} {
+                issue reports PATTERN_TYPE $arm "a closed choice match must explicitly name its variants"
+            }
+            set valid 0
+            set coverageKnown 0
+            continue
+        }
         set location [dict getdef $arm typeLocation $arm]
         set variantLocation [dict getdef $arm variantLocation $arm]
         set pattern [declaredType [dict get $arm type] $location $world reports]
@@ -275,14 +475,7 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
         }
         set body [dict get $arm body]
         set armType [expressionType $body [dict merge $scope $local] $imports $world reports]
-        if {$armType eq ""} {
-            set valid 0
-        } elseif {$result eq "" || [compatible $result $armType]} {
-            set result $armType
-        } elseif {![compatible $armType $result]} {
-            issue reports MATCH_ARM_TYPE $body "match arms have incompatible types $result and $armType"
-            set valid 0
-        }
+        joinArm $body $armType result valid reports
     }
     # An unresolved pattern might be precisely the missing case. Its own
     # diagnostic is sufficient until the intended variant is known.
@@ -300,16 +493,83 @@ proc ::appcompiler::checker::matchType {node scope imports world reportsVar} {
     return ""
 }
 
+# Equality visits each reachable type once, even for cyclic declarations.
+# A failed member declaration already has a diagnostic. Its unknown type
+# cannot establish either comparability or a second, independent error.
+proc ::appcompiler::checker::comparable {type world} {
+    set pending [list $type]
+    set seen {}
+    set known 1
+    for {set i 0} {$i < [llength $pending]} {incr i} {
+        set member [lindex $pending $i]
+        if {[dict exists $seen $member]} { continue }
+        dict set seen $member 1
+        if {$member eq ""} { set known -1; continue }
+        if {$member in {int text bool}} { continue }
+        set parts [::appcompiler::typeParts $member]
+        if {[lindex $parts 0] in {optional list}} {
+            lappend pending [lindex $parts 1]
+            continue
+        }
+        if {![dict exists $world schemas $member]} { return 0 }
+        set schema [dict get $world schemas $member]
+        if {[dict get $schema kind] eq "choice"} {
+            foreach payload [dict values [dict get $schema members]] { lappend pending {*}$payload }
+        } else {
+            lappend pending {*}[dict values [dict get $schema members]]
+        }
+    }
+    return $known
+}
+
+proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set op [dict get $node op]
+    set left [expressionType [dict get $node left] $scope $imports $world reports]
+    set right [expressionType [dict get $node right] $scope $imports $world reports]
+    if {$op in {== !=}} {
+        if {$left eq "" || $right eq ""} { return "" }
+        set type [joinTypes $left $right]
+        if {$type eq ""} {
+            issue reports OPERAND_TYPE $node "'$op' needs operands of the same type, got $left and $right"
+            return ""
+        }
+        set comparison [comparable $type $world]
+        if {$comparison < 0} { return "" }
+        if {!$comparison} {
+            issue reports NOT_COMPARABLE $node "value equality is not defined for $type"
+            return ""
+        }
+        fact reports $node operandType $type
+        return bool
+    }
+    if {$op ni {+ - *}} {
+        issue reports UNKNOWN_OPERATOR $node "unknown binary operator '$op'"
+        return ""
+    }
+    set valid 1
+    foreach side {left right} type [list $left $right] {
+        if {$type eq ""} {
+            set valid 0
+        } elseif {$type ne "int"} {
+            issue reports OPERAND_TYPE [dict get $node $side] "'$op' expects an int operand, got $type"
+            set valid 0
+        }
+    }
+    if {$valid} { return int }
+    return ""
+}
+
 proc ::appcompiler::checker::expressionType {node scope imports world reportsVar} {
     upvar 1 $reportsVar reports
     set kind [dict get $node kind]
     switch -exact -- $kind {
-        int - text - bool { return $kind }
-        none { return "?" }
+        int - text - bool - unit { return $kind }
+        none { return {*?} }
         some {
             set type [expressionType [dict get $node value] $scope $imports $world reports]
             if {$type eq ""} { return "" }
-            return ${type}?
+            return [makeType optional [list $type]]
         }
         field - update { return [recordExpression $node $scope $imports $world reports] }
         match { return [matchType $node $scope $imports $world reports] }
@@ -322,27 +582,28 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
             return [dict get $scope $name type]
         }
         call { return [callType $node $scope $imports $world reports] }
-        binary {
-            set op [dict get $node op]
-            set supported [expr {$op in {+ - *}}]
-            if {!$supported} {
-                issue reports UNKNOWN_OPERATOR $node "unknown binary operator '$op'"
+        builtin { return [builtinType $node $scope $imports $world reports] }
+        construct {
+            return [constructType $node [dict get $node type] [dict get $node variant] \
+                [dict getdef $node ambiguous 0] $scope $imports $world reports]
+        }
+        binary { return [binaryType $node $scope $imports $world reports] }
+        propagate {
+            set raw [expressionType [dict get $node value] $scope $imports $world reports]
+            if {$raw eq ""} { return "" }
+            set parts [::appcompiler::typeParts $raw]
+            set result [dict get $world returnType]
+            set target [::appcompiler::typeParts $result]
+            if {[lindex $parts 0] ne "result"} {
+                issue reports EXPECTED_RESULT $node "postfix '?' needs a result, got $raw"
+                return ""
             }
-            set valid $supported
-            foreach side {left right} {
-                set operand [dict get $node $side]
-                set type [expressionType $operand $scope $imports $world reports]
-                if {$type eq ""} {
-                    set valid 0
-                } elseif {$supported && $type ne "int"} {
-                    set valid 0
-                    issue reports OPERAND_TYPE $operand "'$op' expects an int operand, got $type"
-                }
+            if {$result eq ""} { return "" }
+            if {[lindex $target 0] ne "result" || ![compatible [lindex $parts 2] [lindex $target 2]]} {
+                issue reports PROPAGATION_TYPE $node "cannot propagate $raw from a function returning $result"
+                return ""
             }
-            if {$valid} {
-                return int
-            }
-            return ""
+            return [lindex $parts 1]
         }
         default {
             issue reports UNKNOWN_EXPRESSION $node "unknown expression kind '$kind'"
@@ -351,25 +612,28 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
     }
 }
 
-proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
+proc ::appcompiler::checker::checkBlock {statements scope imports world reportsVar} {
     upvar 1 $reportsVar reports
-    set scope {}
-    foreach param [dict get $function params] {
-        bindLocal scope $param [dict get $param type] 0 reports
-    }
-    set result [dict get $function result]
-    set sawReturn 0
-    foreach statement [dict get $function body] {
+    set result [dict get $world returnType]
+    set returns 0
+    foreach statement $statements {
         set kind [dict get $statement kind]
         switch -exact -- $kind {
             bind {
                 set value [dict get $statement value]
                 set type [expressionType $value $scope $imports $world reports]
-                if {[string index $type 0] eq "?"} {
-                    issue reports OPTIONAL_TYPE_REQUIRED $value "cannot infer an optional payload type from none"
-                    set type ""
+                set mutable [dict get $statement mutable]
+                if {[string first * $type] >= 0} {
+                    set head [lindex [::appcompiler::typeParts $type] 0]
+                    if {$head eq "optional"} {
+                        issue reports OPTIONAL_TYPE_REQUIRED $value "cannot infer an optional payload type from this expression"
+                        set type ""
+                    } elseif {$mutable} {
+                        issue reports INCOMPLETE_TYPE $value "a changeable binding needs a concrete type"
+                        set type ""
+                    }
                 }
-                bindLocal scope $statement $type [dict get $statement mutable] reports
+                bindLocal scope $statement $type $mutable reports
             }
             assign {
                 set value [dict get $statement value]
@@ -381,9 +645,7 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
                 }
                 set mutable [dict get $scope $name mutable]
                 set expected [dict get $scope $name type]
-                if {$mutable eq ""} {
-                    continue
-                }
+                if {$mutable eq ""} { continue }
                 if {!$mutable} {
                     issue reports FIXED_ASSIGNMENT $statement "cannot reassign fixed binding '$name'"
                 } elseif {$actual ne "" && $expected ne "" && ![compatible $actual $expected]} {
@@ -391,26 +653,51 @@ proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
                 }
             }
             return {
-                set sawReturn 1
+                set returns 1
                 set value [dict get $statement value]
                 set actual [expressionType $value $scope $imports $world reports]
                 if {$actual ne "" && $result ne "" && ![compatible $actual $result]} {
                     issue reports RETURN_TYPE $value "expected return type $result, got $actual"
                 }
             }
-            default {
-                issue reports UNKNOWN_STATEMENT $statement "unknown statement kind '$kind'"
+            if {
+                set condition [dict get $statement condition]
+                set actual [expressionType $condition $scope $imports $world reports]
+                if {$actual ne "" && $actual ne "bool"} {
+                    issue reports CONDITION_TYPE $condition "if requires bool, got $actual"
+                }
+                set thenReturns [checkBlock [dict get $statement body] $scope $imports $world reports]
+                set elseReturns [checkBlock [dict get $statement otherwise] $scope $imports $world reports]
+                if {$thenReturns && $elseReturns} { set returns 1 }
             }
+            expr {
+                set value [dict get $statement value]
+                set actual [expressionType $value $scope $imports $world reports]
+                if {[lindex [::appcompiler::typeParts $actual] 0] eq "result"} {
+                    issue reports DISCARDED_RESULT $value "handle, propagate or return the result of this expression"
+                }
+            }
+            default { issue reports UNKNOWN_STATEMENT $statement "unknown statement kind '$kind'" }
         }
     }
-    if {!$sawReturn} {
+    return $returns
+}
+
+proc ::appcompiler::checker::checkFunction {function imports world reportsVar} {
+    upvar 1 $reportsVar reports
+    set scope {}
+    foreach param [dict get $function params] {
+        bindLocal scope $param [dict get $param type] 0 reports
+    }
+    dict set world returnType [dict get $function result]
+    if {![checkBlock [dict get $function body] $scope $imports $world reports]} {
         set name [dict get $function name]
-        issue reports MISSING_RETURN $function "function '.$name' must return a value"
+        issue reports MISSING_RETURN $function "function '.$name' must return a value on every reachable path"
     }
 }
 
-proc ::appcompiler::checkDiagnostics {modules {unavailable {}}} {
-    set reports {}
+proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}}} {
+    set reports [dict create diagnostics {} facts {}]
     set world [dict create modules $modules schemas {} functions {}]
     # Establish nominal identities before resolving any field or signature types.
     dict for {module definition} $modules {
@@ -461,7 +748,11 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}}} {
             checker::checkFunction $function $imports $world reports
         }
     }
-    return $reports
+    if {$factsVar ne ""} {
+        upvar 1 $factsVar facts
+        set facts [dict get $reports facts]
+    }
+    return [dict get $reports diagnostics]
 }
 
 proc ::appcompiler::checkModules {modules} {

@@ -4,7 +4,7 @@ namespace eval ::appcompiler {}
 # not share source locations. The compiler consumes syntax trees, never source
 # text evaluated as Tcl.
 oo::class create ::appcompiler::ModuleParser {
-    variable module source offset line column token keywords
+    variable module source offset line column token keywords localChoices
 
     constructor {moduleName sourceText} {
         set module $moduleName
@@ -12,14 +12,15 @@ oo::class create ::appcompiler::ModuleParser {
         set offset 0
         set line 1
         set column 1
-        set keywords {fn export import return true false record choice match with some none}
+        set keywords {fn export import return true false record choice match with some none if else unit}
+        set localChoices {}
         my advance
     }
 
     method advance {} {
         # The final alternative consumes every remaining character. A search
         # beginning at offset therefore always matches at that exact offset.
-        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+|::=|:=|::|->|=>|.}
+        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+|::=|:=|::|->|=>|==|!=|.}
         while {$offset < [string length $source]} {
             regexp -start $offset -indices -- $pattern $source bounds
             lassign $bounds first last
@@ -59,7 +60,7 @@ oo::class create ::appcompiler::ModuleParser {
                         set kind integer
                     } elseif {[regexp {^[a-zA-Z_]} $word]} {
                         set kind [expr {$word in $keywords ? $word : "identifier"}]
-                    } elseif {$word in {+ - * ( ) \{ \} : , = ::= := :: -> => ?}} {
+                    } elseif {$word in {+ - * ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == !=}} {
                         set kind $word
                     } else {
                         ::appcompiler::fail E_PARSE_TOKEN $location "unexpected character '$word'"
@@ -90,11 +91,44 @@ oo::class create ::appcompiler::ModuleParser {
         while {[my at newline]} { my advance }
     }
 
+    method cursor {} { list $offset $line $column $token }
+
+    method restore {cursor} { lassign $cursor offset line column token }
+
+    method collectChoiceNames {} {
+        # .name::member(...) can denote an imported function or a locally
+        # declared choice. Collect declaration heads before parsing any uses.
+        # The lexer skips comments and keeps entire raw strings in one token.
+        set beginning [my cursor]
+        set depth 0
+        set declarationStart 1
+        while {![my at eof]} {
+            if {$declarationStart && [my at choice]} {
+                set choice [my typeDeclaration 0]
+                set members {}
+                foreach variant [dict get $choice variants] { dict set members [dict get $variant name] 1 }
+                dict set localChoices [dict get $choice name] $members
+                set declarationStart 0
+            } else {
+                if {[my at \{]} { incr depth }
+                if {[my at \}]} { incr depth -1 }
+                if {!($declarationStart && [my at export])} {
+                    set declarationStart [expr {$depth == 0 && [my at newline]}]
+                }
+                my advance
+            }
+        }
+        my restore $beginning
+    }
+
     method parse {} {
         set imports {}
         set importLocations {}
         set functions {}
         set types {}
+        if {[string first choice $source] >= 0 && [string first :: $source] >= 0} {
+            my collectChoiceNames
+        }
         my skipLines
         while {![my at eof]} {
             if {[my at import]} {
@@ -187,12 +221,32 @@ oo::class create ::appcompiler::ModuleParser {
         } else {
             set name [dict get [my take identifier {a type name}] value]
         }
+        if {[my at <]} {
+            set args [my typeArguments]
+            append name < [join [dict get $args types] ,] >
+            set end [dict get $args end]
+        }
         if {[my at ?]} {
             append name ?
             set end $token
             my advance
         }
         return [my typeLocation $start $end $name]
+    }
+
+    method typeArguments {} {
+        my take < {an opening angle bracket}
+        set locations {}
+        my skipLines
+        while {1} {
+            lappend locations [my typeAnnotation]
+            my skipLines
+            if {![my at ,]} break
+            my advance
+            my skipLines
+        }
+        set end [my take > {a closing angle bracket after the type arguments}]
+        return [dict create types [lmap location $locations {dict get $location name}] locations $locations end $end]
     }
 
     method typedName {name kind} {
@@ -239,12 +293,33 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method statement {} {
+        set start $token
         if {[my at return]} {
-            set start $token
             my advance
             return [my node $start return value [my expression]]
         }
-        set variable [my take dataName {a binding, assignment, or return}]
+        if {[my at if]} {
+            my advance
+            set condition [my expression]
+            my skipLines
+            set body [my braced statement {if body}]
+            set afterBody [my cursor]
+            my skipLines
+            set otherwise {}
+            if {[my at else]} {
+                my advance
+                my skipLines
+                set otherwise [my braced statement {else body}]
+            } else {
+                # The enclosing statement list still needs this line break.
+                my restore $afterBody
+            }
+            return [my node $start if condition $condition body $body otherwise $otherwise]
+        }
+        if {[my at identifier] || [my at dotName]} {
+            return [my node $start expr value [my expression]]
+        }
+        set variable [my take dataName {a binding, assignment, call, if, or return}]
         set name [dict get $variable value]
         set op [dict get $token kind]
         if {$op ni {:= ::= =}} {
@@ -258,11 +333,14 @@ oo::class create ::appcompiler::ModuleParser {
 
     method expression {{minimum 0}} {
         set left [my primary]
-        while {[my at dotName] || [my at with]} {
+        while {[my at dotName] || [my at with] || [my at ?]} {
             set where $token
             if {[my at dotName]} {
                 my advance
                 set left [my node $where field base $left name [dict get $where value]]
+            } elseif {[my at ?]} {
+                my advance
+                set left [my node $where propagate value $left]
             } else {
                 my advance
                 my skipLines
@@ -270,7 +348,7 @@ oo::class create ::appcompiler::ModuleParser {
                 set left [my node $where update base $left fields $fields]
             }
         }
-        set precedences {+ 1 - 1 * 2}
+        set precedences {== 1 != 1 + 2 - 2 * 3}
         while {[dict exists $precedences [dict get $token kind]]} {
             set op [dict get $token kind]
             set precedence [dict get $precedences $op]
@@ -322,6 +400,10 @@ oo::class create ::appcompiler::ModuleParser {
                 my advance
                 return [my node $start none]
             }
+            unit {
+                my advance
+                return [my node $start unit]
+            }
             some {
                 my advance
                 my take ( {'(' after some}
@@ -338,6 +420,18 @@ oo::class create ::appcompiler::ModuleParser {
                 return [my node $start match value $value arms [my braced matchArm {match arms}]]
             }
             dotName { return [my call] }
+            identifier {
+                my advance
+                set types {}
+                set locations {}
+                if {[my at <]} {
+                    set args [my typeArguments]
+                    set types [dict get $args types]
+                    set locations [dict get $args locations]
+                }
+                set args [my parenthesized expression]
+                return [my node $start builtin name [dict get $start value] typeArgs $types typeLocations $locations args $args]
+            }
             default { ::appcompiler::fail E_PARSE_EXPECTED $token {expected a value expression} }
         }
     }
@@ -355,6 +449,33 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method matchArm {} {
+        set start $token
+        if {[my at {[}]} {
+            my advance
+            my skipLines
+            set elements {}
+            if {![my at {]}]} {
+                while {1} {
+                    if {[my at text]} {
+                        set literal $token
+                        my advance
+                        lappend elements [my node $literal patternText value [dict get $literal value]]
+                    } else {
+                        lappend elements [my patternBinding]
+                    }
+                    my skipLines
+                    if {![my at ,]} break
+                    my advance
+                    my skipLines
+                }
+            }
+            my take {]} {a closing bracket after the list pattern}
+            return [my node $start listarm elements $elements body [my armBody]]
+        }
+        if {[my at identifier] && [dict get $token value] eq "_"} {
+            my advance
+            return [my node $start fallback body [my armBody]]
+        }
         # A local pattern has two components (.type::case); an imported
         # pattern has three (.module::type::case).
         set start [my take dotName {a dot-prefixed choice type in the match pattern}]
@@ -370,12 +491,16 @@ oo::class create ::appcompiler::ModuleParser {
         }
         set bindings {}
         if {[my at (]} { set bindings [my parenthesized patternBinding] }
-        my take => {'=>' after the match pattern}
-        my skipLines
-        set body [my expression]
+        set body [my armBody]
         set name [dict get $variant value]
         return [my node $start arm type $type typeLocation [my typeLocation $start $typeEnd $type] \
                 variant $name variantLocation [my node $variant variant name $name] bindings $bindings body $body]
+    }
+
+    method armBody {} {
+        my take => {'=>' after the match pattern}
+        my skipLines
+        return [my expression]
     }
 
     method call {} {
@@ -386,7 +511,29 @@ oo::class create ::appcompiler::ModuleParser {
         if {[my at ::]} {
             set qualifier $name
             my advance
-            set name [dict get [my take identifier {a function name in the imported module}] value]
+            set member [my take identifier {a qualified member name}]
+            set name [dict get $member value]
+            set type ".$qualifier"
+            set typeEnd $start
+            set ambiguous 0
+            if {[my at ::]} {
+                append type :: $name
+                set typeEnd $member
+                my advance
+                set member [my take identifier {a choice variant name}]
+                set name [dict get $member value]
+            } elseif {[dict exists $localChoices $qualifier $name] ||
+                    (![my at (] && [dict exists $localChoices $qualifier])} {
+                set ambiguous [my at (]
+            } else {
+                set type {}
+            }
+            if {$type ne {}} {
+                set args {}
+                if {[my at (]} { set args [my parenthesized expression] }
+                return [my node $start construct type $type typeLocation [my typeLocation $start $typeEnd $type] \
+                        variant $name variantLocation [my node $member variant name $name] ambiguous $ambiguous args $args]
+            }
         }
         set args [my parenthesized expression]
         return [my node $start call name $name qualifier $qualifier args $args]
