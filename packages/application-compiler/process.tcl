@@ -75,6 +75,34 @@ proc find_executable {name} {
     return [processProblem PROCESS_NOT_FOUND "executable not found on PATH: $name"]
 }
 
+# Preserve the launching handler's lifetime for callbacks and for any new
+# streams they start. A nested event loop can deliver unrelated events, so
+# a global "current window" would assign the wrong owner. Inspect only the
+# active synchronous callback frames, or the current worker coroutine.
+proc streamCallback {scope callback args} {
+    return [{*}$callback {*}$args]
+}
+proc streamScope {} {
+    set rt [namespace current]
+    for {set level [expr {[info level] - 1}]} {$level > 0} {incr level -1} {
+        set frame [info level $level]
+        if {[lindex $frame 0] eq "${rt}::streamCallback"} {return [lindex $frame 1]}
+    }
+    variable workerHandlers
+    if {[info exists workerHandlers]} {
+        set owner [dict getdef $workerHandlers [info coroutine] application]
+        if {$owner ne "application"} {
+            return [list [list ${rt}::workerOnClose $owner] [list ${rt}::workerForgetClose $owner] \
+                [list ${rt}::workerOwnerLive $owner]]
+        }
+    }
+    return {}
+}
+proc streamScopeLive {scope} {
+    if {$scope eq {}} {return 1}
+    return [{*}[lindex $scope 2]]
+}
+
 # Every channel handler carries the stream key. A retired or queued handler
 # can never operate on a newly assigned channel with the same native name.
 proc stream_process {exe arguments input chunk timeout stdout stderr done} {
@@ -101,8 +129,14 @@ proc stream_process {exe arguments input chunk timeout stdout stderr done} {
                 dict set channels $name $ch
             }
         }
+        set scope [streamScope]
         set streamJobs($key) [dict create child $child channels $channels input $input offset 0 chunk $chunk \
-            stdout $stdout stderr $stderr done $done stdout_bytes 0 stderr_bytes 0 native {} busy 0 timer {}]
+            stdout $stdout stderr $stderr done $done stdout_bytes 0 stderr_bytes 0 native {} busy 0 timer {} scope $scope]
+        if {$scope ne {}} {
+            lassign $scope register forget
+            set token [{*}$register [list [namespace current]::streamFinish $key ownerClosed]]
+            dict set streamJobs($key) detach [list {*}$forget $token]
+        }
         streamArm $key 1
     } on error {message options} {
         if {[info exists streamJobs($key)]} {
@@ -165,6 +199,8 @@ proc streamFinish {key reason {result {}}} {
     if {![info exists streamJobs($key)]} {return}
     set job $streamJobs($key)
     unset streamJobs($key)
+    if {![streamScopeLive [dict get $job scope]]} {set reason ownerClosed}
+    if {$reason ne "ownerClosed" && [dict exists $job detach]} {{*}[dict get $job detach]}
     if {[dict get $job timer] ne {}} {after cancel [dict get $job timer]}
     # The native child owns its channels, also when cancellation occurs
     # during a user callback. It closes only the original channel objects.
@@ -172,7 +208,7 @@ proc streamFinish {key reason {result {}}} {
     if {[catch {::machteld::child close [dict get $job child]} message]} {
         set result [processProblem PROCESS_IO $message]
     }
-    if {$reason eq "closed"} {return}
+    if {$reason in {closed ownerClosed} || ![streamScopeLive [dict get $job scope]]} {return}
     if {$result eq {}} {
         set native [dict get $job native]
         set status [dict getdef $native status canceled]
@@ -182,7 +218,7 @@ proc streamFinish {key reason {result {}}} {
     }
     # Release resources before notifying, including when the terminal
     # callback throws. Let Tcl's event error handler report its error once.
-    if {[catch {{*}[dict get $job done] $result} msg options]} {
+    if {[catch {[namespace current]::streamCallback [dict get $job scope] [dict get $job done] $result} msg options]} {
         after 0 [list ::return -options $options $msg]
     }
 }
@@ -226,6 +262,10 @@ proc streamWrite {key} {
 proc streamPump {key} {
     variable streamJobs
     if {![info exists streamJobs($key)] || [dict get $streamJobs($key) busy]} {return}
+    if {![streamScopeLive [dict get $streamJobs($key) scope]]} {
+        streamFinish $key ownerClosed
+        return
+    }
     set timer [dict get $streamJobs($key) timer]
     if {$timer ne {}} {after cancel $timer; dict set streamJobs($key) timer {}}
     dict set streamJobs($key) busy 1
@@ -243,7 +283,8 @@ proc streamPump {key} {
             if {[string length $bytes] == 0} continue
             set delivered 1
             dict incr streamJobs($key) ${name}_bytes [string length $bytes]
-            if {[catch {{*}[dict get $streamJobs($key) $name] $bytes} outcome]} {
+            if {[catch {[namespace current]::streamCallback [dict get $streamJobs($key) scope] \
+                    [dict get $streamJobs($key) $name] $bytes} outcome]} {
                 set outcome [processProblem PROCESS_CALLBACK $outcome]
             }
             if {![info exists streamJobs($key)]} {return}

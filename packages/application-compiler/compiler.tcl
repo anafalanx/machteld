@@ -127,6 +127,11 @@ proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
         dict append artifact script \n [list ::set ${rt}::workerTable $table]
         dict append artifact script \n [list ::set ${rt}::workerMessageTypes $messages]
     }
+    if {[dict getdef $analysis resolved usesTk 0]} {
+        variable widgetsDefinitions
+        dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $widgetsDefinitions]
+        dict append artifact script \n [tkBridge $targetNamespace $targetNamespace]
+    }
     if {[dict getdef $analysis resolved usesTemporal 0]} {
         variable temporalDefinitions
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $temporalDefinitions]
@@ -140,6 +145,14 @@ proc ::appcompiler::emitChecked {analysis targetNamespace {toolRoot {}}} {
         dict append artifact script \n [list ::namespace eval ${targetNamespace}::@rt $sqlDefinitions]
     }
     return $artifact
+}
+
+proc ::appcompiler::tkBridge {public implementation} {
+    set script [list ::namespace eval ${public}::@tk {}]
+    foreach {name helper} {canvas_path tkCanvasPath attach_items tkTagItems} {
+        append script \n [list ::interp alias {} ${public}::@tk::$name {} ${implementation}::@rt::$helper]
+    }
+    return $script
 }
 
 proc ::appcompiler::compile {sources {targetNamespace ::application}} {
@@ -224,6 +237,9 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs {toolRo
         if {[dict getdef $analysis resolved usesWorkers 0]} {
             append script [workerPrelude $implementation] \n
         }
+        if {[dict getdef $analysis resolved usesTk 0]} {
+            append script [tkBridge ::application $implementation] \n
+        }
         dict for {module functions} [dict get $analysis resolved functions] {
             set public ::application::${module}
             append script [list ::namespace eval $public {}] \n
@@ -256,12 +272,12 @@ proc ::appcompiler::tclApplication {sources entryPath minApi packageDirs {toolRo
 namespace eval ::appcompiler {
     variable compilerDirectory [file dirname [file normalize [info script]]]
     set modules {types.tcl parser.tcl check.tcl emit.tcl examples.tcl project.tcl project_pack.tcl reference.tcl}
-    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl process.tcl worker.tcl {*}$modules]
+    variable compilerFiles [list pkgIndex.tcl compiler.tcl driver.tcl README.md host.tcl decimal.tcl sql.tcl temporal.tcl zone.tcl process.tcl worker.tcl widgets.tcl {*}$modules]
     foreach module $modules {
         source -encoding utf-8 [file join $compilerDirectory $module]
     }
     unset module modules
-    foreach name {host decimal sql temporal zone process worker} {
+    foreach name {host decimal sql temporal zone process worker widgets} {
         set ch [open [file join $compilerDirectory $name.tcl] rb]
         try {
             set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]

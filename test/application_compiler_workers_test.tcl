@@ -85,7 +85,8 @@ worker .w($v: .message) -> result<int,problem> => ok(1)} WORKER_MESSAGE
 choice .response {found(.cell<list<task<text>>>)}
 worker .bad($value: int) -> result<.response,problem> => err(problem('empty'))}
     bad $nested WORKER_MESSAGE
-    foreach local {ref<int> callable<int,text> task<int> process_stream} {
+    foreach local {ref<int> callable<int,text> task<int> process_stream tk_window tk_canvas tk_button tk_label tk_item tk_click tk_action} {
+        bad [string map [list LOCAL $local] {worker .bad($v: LOCAL) -> result<int,problem> => ok(1)}] WORKER_MESSAGE
         bad [string map [list LOCAL $local] {record .leaf { value: LOCAL }
 choice .envelope { send(list<.leaf>) }
 worker .bad($v: map<text,.envelope>) -> result<int,problem> => ok(1)}] WORKER_MESSAGE
@@ -113,7 +114,8 @@ worker .w($v: .box<.cursor>) -> result<int,problem> => ok(1)} WORKER_MESSAGE
     equal [catch {${rt}::workerDecode text X1.!!!!}] 1 "malformed typed frame"
     equal [catch {${rt}::workerEncode list<int> {1 2}}] 1 "unregistered descriptor refused even for valid data"
     equal [catch {${rt}::workerEncode task<text> handle}] 1 "runtime refuses process-local descriptor"
-    foreach type {ref<int> callable<int,text> list<ref<int>> process_stream list<process_stream>} {
+    foreach type {ref<int> callable<int,text> list<ref<int>> process_stream list<process_stream>
+            tk_window tk_canvas tk_item list<tk_item> tk_click tk_action} {
         equal [catch {${rt}::workerEncode $type {local-token}}] 1 "wire registry rejects $type"
     }
     foreach display {3 12 17 24} {

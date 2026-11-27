@@ -57,3 +57,22 @@ Run `machteld.exe test/research_diagram_test.tcl -pack` for headless SQL,
 Graphviz, canvas interaction and relocation checks. On an attended desktop,
 `machteld.exe test/research_diagram_test.tcl --tk` exercises a real Tk
 canvas click and selection across edits.
+
+### A typed window
+
+`typed-window.dict` opens the same observations in a window created entirely
+by X. The canvas, detail label, Redraw button, grid layout, click handler and
+window lifetime are in `typed-window.src`. The small Tcl renderer reuses the
+original Graphviz layout and paint routines. It attaches the database's
+occurrence key to every native item belonging to a node. Select the box or
+its label to see the source, then press Redraw to restore the selection
+against newly created items.
+
+```powershell
+.\machteld.exe project pack examples/graphviz-table/typed-window.dict observations.machteld
+.\machteld.exe observations.machteld --lookup notes.db 2026-11-01T09:15:00Z 007-B
+```
+
+On an attended desktop, run `machteld.exe observations.machteld notes.db
+2026-11-01T09:15:00Z` to open the window. The `--lookup` form above uses
+the same typed provenance lookup without opening a display.

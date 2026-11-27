@@ -4,6 +4,7 @@ variable workerSequence 0
 variable workerOwners [dict create application {}]
 variable workerWindows {}
 variable workerHandlers {}
+variable workerCloseHooks {}
 variable workerTasks {}
 variable workerTimeout 300000
 
@@ -184,11 +185,32 @@ proc workerRunHandler {co command} {
     }
 }
 
+proc workerOwnerLive {owner} {
+    variable workerOwners
+    return [dict exists $workerOwners $owner]
+}
+proc workerOnClose {owner prefix} {
+    variable workerCloseHooks
+    variable workerSequence
+    if {$owner eq "application" || ![workerOwnerLive $owner]} {error "invalid handler owner"}
+    set token [incr workerSequence]
+    dict set workerCloseHooks $owner $token $prefix
+    return $token
+}
+proc workerForgetClose {owner token} {
+    variable workerCloseHooks
+    if {[dict exists $workerCloseHooks $owner $token]} {
+        dict unset workerCloseHooks $owner $token
+        if {![dict size [dict get $workerCloseHooks $owner]]} {dict unset workerCloseHooks $owner}
+    }
+}
+
 proc workerCloseOwner {owner} {
     variable workerOwners
     variable workerWindows
     variable workerTasks
     variable workerHandlers
+    variable workerCloseHooks
     if {$owner eq "application"} {error {application scope lasts until process exit}}
     if {![dict exists $workerOwners $owner]} return
     set window [dict get $workerOwners $owner]
@@ -200,6 +222,12 @@ proc workerCloseOwner {owner} {
         if {[winfo exists $window]} {
             bindtags $window [lsearch -all -inline -not -exact [bindtags $window] $tag]
         }
+    }
+    set hooks [dict getdef $workerCloseHooks $owner {}]
+    dict unset workerCloseHooks $owner
+    set faults {}
+    dict for {token prefix} $hooks {
+        if {[catch {{*}$prefix} message options]} {lappend faults [list $message $options]}
     }
     set stopped {}
     # Detach a window's suspended handler even when another scope owns its task.
@@ -217,7 +245,6 @@ proc workerCloseOwner {owner} {
             if {[dict get $workerTasks $task waiter] eq ""} {dict unset workerTasks $task}
         }
     }
-    set faults {}
     dict for {co unused} $stopped {
         if {[llength [info commands $co]] && [catch {$co closed} message options]} {
             lappend faults [list $message $options]

@@ -177,6 +177,62 @@ and interpreter. The boundary checks its owner and element type. A worker
 that needs the current contents can receive a serializable value obtained
 with `ref_get`. References themselves have no JSON or SQL representation.
 
+## Typed Tk windows and events
+
+An X entry can own its window and event loop. Checking a project or using
+its headless entry mode leaves Tk unloaded. Opening the window acquires Tk
+and returns a typed `TK_OPEN` problem if the toolkit or display fails.
+
+```text
+fn .clicked($label: tk_label, $event: tk_click) -> unit =>
+    tk_label_text($label, match $event.occurrence {
+        none => 'Background'
+        some($key) => $key
+    })
+
+fn .window() -> result<unit,problem> {
+    using $w ::= tk_open('Evidence')? {
+        $c ::= tk_canvas($w, 320, 120)
+        $label ::= tk_label($w, 'Select an occurrence')
+        tk_grid($c, 0, 0)
+        tk_grid($label, 1, 0)
+        tk_rectangle($c, '007', 10, 10, 120, 52)
+        tk_text($c, '007', 65, 31, 'Bay 07')
+        tk_on_click($c, bind(.clicked, $label))
+        tk_wait($w)
+        return ok(unit)
+    }
+}
+```
+
+| Operation | Result or effect |
+| --- | --- |
+| `tk_label(window,text)`, `tk_button(window,text)`, `tk_canvas(window,width,height)` | A `tk_label`, `tk_button` or `tk_canvas` owned by the window. Canvas dimensions are integers. |
+| `tk_grid(widget,row,column)` | Places a label, button or canvas at the given integer grid coordinates. |
+| `tk_title(window,text)`, `tk_label_text(label,text)`, `tk_button_text(button,text)` | Updates the window title or widget caption. |
+| `tk_on_click(canvas,callback)` | Registers a `callable<tk_click,unit>`. Its record carries `window`, `canvas`, widget-relative integer pixel coordinates `x` and `y`, and `occurrence: text?`. |
+| `tk_on_action(button,callback)` | Registers a `callable<tk_action,unit>`. Its record carries `window` and `button`. Keyboard and pointer activation share this action. |
+| `tk_rectangle(canvas,key,x1,y1,x2,y2)`, `tk_text(canvas,key,x,y,text)` | Creates a `tk_item` with a stable occurrence key. Several shapes can represent the same occurrence. |
+| `tk_remove(item)`, `tk_clear(canvas)` | Deletes an item or clears all items and highlights on the canvas. |
+| `tk_highlight(canvas,optionalKey)` | Outlines the items with that key and returns whether any match. Pass `none` to clear it. |
+| `tk_wait(window)`, `tk_close(window)` | Dispatches events until the window closes, or closes it explicitly. Leaving the owning block also closes it. |
+
+Replacement bindings supersede the prior callback. Closing a window
+invalidates its handles and detaches its callbacks. Capture a selection
+as `ref<text?>` inside an owner that remains active while events run.
+After redrawing, call `tk_highlight` with the saved occurrence key. Old item
+handles report `APPCOMPILER TK STALE`. Handles are local to the application
+and interpreter. Send the occurrence key to a worker when it needs to look
+up the observation.
+
+A trusted Tcl renderer can call `::application::@tk::canvas_path $canvas`
+to obtain the owning Tk command path. After painting, it can attach a group
+with `::application::@tk::attach_items $canvas $key $itemNumbers`. Both
+validate the typed canvas. The latter accepts native canvas item numbers.
+Event scripts keep arbitrary application keys and text as data.
+See `examples/graphviz-table/typed-window.dict` for the X-owned window
+that reuses the original graph drawing code.
+
 ## Type aliases
 
 `alias .titles = map<text,text>` gives an existing type a second name.
@@ -509,6 +565,14 @@ inside a chunk callback takes effect when that callback returns.
 every exit. Both operations accept an already finished handle from the same
 application. Keep any callback's captured references live until completion
 or close the stream before their scope ends.
+
+A stream started in a typed Tk button or canvas handler belongs to that
+window. Closing the window stops the child and suppresses further chunks
+and the terminal callback. A stream started by a chunk or terminal callback
+inherits the originating stream's owner. The same rules apply to a Tcl
+handler run through `::application::workers handle` with a window or
+explicit owner. Streams started in an application-owned handler continue
+until completion or explicit closure.
 
 The executable and argument rules match bounded capture. To deliberately
 search the machine's PATH, call `find_executable('converter.exe')`, which
