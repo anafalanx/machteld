@@ -133,6 +133,40 @@ label spellings are provisional.
 Run `machteld.exe test/application_compiler_iteration_test.tcl` for the
 iteration, scope and control-flow regressions.
 
+## Ordered maps
+
+`map<K,V>()` creates an empty map. `map_put` inserts or replaces a key
+and returns the updated map. An existing key keeps its original position.
+Keys can be `text`, `int`, `decimal` or `bool`. Key types match exactly.
+
+```text
+fn .titles($id: text, $title: text) -> map<text,text> {
+    $titles := map<text,text>()
+    $titles = map_put($titles, $id, $title)
+    return $titles
+}
+```
+
+`$titles[$id]` returns `none` for an absent key and `some('')` for a
+present key with an empty title. `require_key($titles, $id)` returns a
+typed result, with `MISSING_KEY` on failure. An update leaves earlier
+copies intact, including maps nested inside another map.
+
+`for $id in $titles` visits keys in insertion order. `sorted_keys($titles)`
+returns a new list. Text sorts in case-sensitive Tcl string order, integers
+and decimals in exact numeric order, and Booleans from false to true.
+Map equality compares keys and values independently of insertion order
+when the value type supports equality.
+
+At an exported Tcl boundary, supply a dictionary. Keys that normalize to
+the same typed key are rejected. For text keys, `007` and `7` remain
+distinct. In a record, a text-keyed map uses a JSON object, retaining
+arbitrary external key spellings. A non-text key has no JSON object
+encoding in this edition. The map built-in names are provisional.
+
+Run `machteld.exe test/application_compiler_map_test.tcl` for the map
+regressions.
+
 ## File-backed applications
 
 The development driver accepts a UTF-8 project dictionary. The following

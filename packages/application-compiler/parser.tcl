@@ -228,13 +228,19 @@ oo::class create ::appcompiler::ModuleParser {
             set args [my typeArguments]
             append name < [join [dict get $args types] ,] >
             set end [dict get $args end]
+            set type [my typeLocation $start $end $name]
+            dict set type typeLocations [dict get $args locations]
+        } else {
+            set type [my typeLocation $start $end $name]
         }
-        if {[my at ?]} {
+        while {[my at ?]} {
             append name ?
-            set end $token
+            set optional [my typeLocation $start $token $name]
+            dict set optional typeLocations [list $type]
+            set type $optional
             my advance
         }
-        return [my typeLocation $start $end $name]
+        return $type
     }
 
     method typeArguments {} {
@@ -370,7 +376,7 @@ oo::class create ::appcompiler::ModuleParser {
 
     method expression {{minimum 0}} {
         set left [my primary]
-        while {[my at dotName] || [my at with] || [my at ?]} {
+        while {[my at dotName] || [my at with] || [my at ?] || [my at {[}]} {
             set where $token
             if {[my at dotName]} {
                 my advance
@@ -378,6 +384,13 @@ oo::class create ::appcompiler::ModuleParser {
             } elseif {[my at ?]} {
                 my advance
                 set left [my node $where propagate value $left]
+            } elseif {[my at {[}]} {
+                my advance
+                my skipLines
+                set key [my expression]
+                my skipLines
+                my take {]} {a closing bracket after the map key}
+                set left [my node $where index base $left key $key]
             } else {
                 my advance
                 my skipLines

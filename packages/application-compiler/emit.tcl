@@ -28,6 +28,7 @@ proc ::appcompiler::emitTypeName {module type} {
     switch -exact -- $head {
         optional {return [emitTypeName $module $first]?}
         list {return list<[emitTypeName $module $first]>}
+        map {return map<[emitTypeName $module $first],[emitTypeName $module $second]>}
         result {return result<[emitTypeName $module $first],[emitTypeName $module $second]>}
     }
     if {[string index $type 0] eq "." && [string first :: $type] < 0} {
@@ -89,6 +90,19 @@ proc ::appcompiler::emitRuntime {targetNamespace modules} {
                 foreach item $value {
                     lappend result [guard $first $item $path.$index]
                     incr index
+                }
+                return $result
+            }
+            map {
+                if {$first ni {text int bool decimal} || [catch {dict size $value}]} {reject $path $type}
+                set result {}
+                dict for {external item} $value {
+                    set key [guard $first $external "$path key"]
+                    if {[dict exists $result $key]} {
+                        return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} \
+                            "map keys at $path normalize to the same $first key [list $key]"
+                    }
+                    dict set result $key [guard $second $item "$path\[[list $key]\]"]
                 }
                 return $result
             }
@@ -253,6 +267,11 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set base [emitExpression [dict get $node base] $context $bindings $depth]
             return [format {[::dict getdef %s %s none]} $base [list [dict get $node name]]]
         }
+        index {
+            set base [emitExpression [dict get $node base] $context $bindings $depth]
+            set key [emitExpression [dict get $node key] $context $bindings $depth]
+            return [format {[%s %s %s]} [list ${targetNamespace}::@rt::mapLookup] $base $key]
+        }
         update {
             set base [emitExpression [dict get $node base] $context $bindings $depth]
             set words [list ::dict replace $base]
@@ -285,6 +304,10 @@ proc ::appcompiler::emitCallPrefix {node context} {
             set name [dict get $node name]
             switch -exact -- $name {
                 unit {return [list ::list]}
+                map {return [list ::dict create]}
+                map_put {return [list ::dict replace]}
+                require_key {return [list [list ${target}::@rt::require_key]]}
+                sorted_keys {return [list [list ${target}::@rt::sorted_keys] [list [dict get $facts keyType]]]}
                 ok - err {return [list ::list $name]}
                 decode_json - encode_json {
                     return [list [list ${target}::@rt::${name}] [list [dict get $facts schema]]]
@@ -365,7 +388,17 @@ proc ::appcompiler::emitStatement {node context} {
         set code [loopCode [dict get $context loopIndices $label] $kind]
         return [list ::return -level 0 -code $code]
     }
-    set word [emitExpression [dict get $node value] $context]
+    set value [dict get $node value]
+    # A checked update of the same variable can use Tcl's copy-on-write
+    # dictionary instruction. Other holders keep the previous dictionary.
+    if {$kind eq "assign" && [dict get $value kind] eq "builtin" && [dict get $value name] eq "map_put"} {
+        lassign [dict get $value args] base key item
+        if {[dict get $base kind] eq "var" && [dict get $base name] eq [dict get $node name]} {
+            return [format {::dict set %s %s %s} [emitLocalName [dict get $node name]] \
+                [emitExpression $key $context] [emitExpression $item $context]]
+        }
+    }
+    set word [emitExpression $value $context]
     switch -exact -- $kind {
         bind - assign {
             return [format {::set %s %s} [emitLocalName [dict get $node name]] $word]
@@ -438,6 +471,8 @@ proc ::appcompiler::emitLoop {node context bodyVar locationsVar} {
             emitLine [format {::lassign %s %s %s %s} $iterable $local $limit $closed] $location body locations
             emitLine [format {::incr %s $%s} $limit $closed] $location body locations
             set header [format {::for {} {$%s < $%s} {::incr %s} %c} $local $limit $local 123]
+        } elseif {[lindex [typeParts $type] 0] eq "map"} {
+            set header [format {::dict for {%s m_mapvalue_%d} %s %c} $local $depth $iterable 123]
         } else {
             set header [format {::foreach %s %s %c} $local $iterable 123]
         }

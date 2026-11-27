@@ -22,15 +22,24 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar} {
     upvar 1 $reportsVar reports
     set parts [::appcompiler::typeParts $type]
     set head [lindex $parts 0]
-    if {$head in {result list optional range}} {
-        set arity [expr {$head eq "result" ? 2 : 1}]
+    if {$head in {result list optional range map}} {
+        set arity [expr {$head in {result map} ? 2 : 1}]
         if {[llength $parts] != $arity + 1} {
             issue reports TYPE_ARITY $node "type '$head' requires $arity type arguments"
             return ""
         }
         set args {}
-        foreach child [lrange $parts 1 end] {
-            lappend args [declaredType $child $node $world reports]
+        set locations [dict getdef $node typeLocations {}]
+        foreach child [lrange $parts 1 end] location $locations {
+            if {$location eq ""} { set location $node }
+            lappend args [declaredType $child $location $world reports]
+        }
+        set key [lindex $args 0]
+        if {$head eq "map" && $key ni {{} text int bool decimal}} {
+            set location [lindex $locations 0]
+            if {$location eq ""} { set location $node }
+            issue reports MAP_KEY_TYPE $location "map keys must be text, int, bool or decimal, got $key"
+            return ""
         }
         if {"" in $args} { return "" }
         if {$head eq "range" && [lindex $args 0] ne "int"} {
@@ -206,7 +215,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
     set name [dict get $node name]
     set actual [argumentTypes $node $scope $imports $world reports]
     set generic [dict getdef $node typeArgs {}]
-    set count [expr {$name eq "decode_json" ? 1 : 0}]
+    set count [dict getdef {decode_json 1 map 2} $name 0]
     if {[llength $generic] != $count} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
@@ -215,7 +224,8 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         ok - err - encode_json { set params [list *] }
         problem - decode_json - write_stdout_utf8 { set params [list text] }
         decode_utf8 { set params [list bytes] }
-        read_stdin_bytes { set params {} }
+        read_stdin_bytes - map { set params {} }
+        map_put - require_key - sorted_keys { return [mapCall $node $name $actual reports] }
         quotient { set params {int int} }
         divide_rounded { set params {numeric numeric int text} }
         default {
@@ -224,6 +234,11 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         }
     }
     set valid [checkArguments $node $name $actual $params reports]
+    if {$name eq "map"} {
+        set type [declaredType [makeType map $generic] $node $world reports]
+        if {!$valid} { return "" }
+        return $type
+    }
     if {$name eq "decode_json"} {
         set location [lindex [dict getdef $node typeLocations {}] 0]
         if {$location eq ""} { set location $node }
@@ -257,6 +272,53 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         write_stdout_utf8 { return result<unit,problem> }
         quotient { return result<int,problem> }
         divide_rounded { return result<decimal,problem> }
+    }
+}
+
+proc ::appcompiler::checker::mapParts {type base reportsVar} {
+    upvar 1 $reportsVar reports
+    if {$type eq ""} { return {} }
+    set parts [::appcompiler::typeParts $type]
+    if {[lindex $parts 0] eq "map"} { return $parts }
+    issue reports EXPECTED_MAP $base "expected a map, got $type"
+    return {}
+}
+
+proc ::appcompiler::checker::mapKeyMatches {actual expected key reportsVar} {
+    upvar 1 $reportsVar reports
+    if {$actual eq ""} { return 0 }
+    if {$actual eq $expected} { return 1 }
+    issue reports MAP_KEY_TYPE $key "map expects a $expected key, got $actual"
+    return 0
+}
+
+proc ::appcompiler::checker::mapCall {node name actual reportsVar} {
+    upvar 1 $reportsVar reports
+    set params [dict get {map_put {* * *} require_key {* *} sorted_keys {*}} $name]
+    set valid [checkArguments $node $name $actual $params reports]
+    set args [dict get $node args]
+    set mapType [lindex $actual 0]
+    set parts [mapParts $mapType [lindex $args 0] reports]
+    if {![llength $parts]} { return "" }
+    lassign $parts head keyType valueType
+    if {$name ne "sorted_keys" && ![mapKeyMatches [lindex $actual 1] $keyType [lindex $args 1] reports]} {
+        set valid 0
+    }
+    if {$name eq "map_put"} {
+        set value [lindex $actual 2]
+        if {$value ne "" && ![compatible $value $valueType]} {
+            issue reports ARGUMENT_TYPE [lindex $args 2] "'map_put' expects $valueType, got $value"
+            set valid 0
+        }
+    }
+    if {!$valid} { return "" }
+    switch -exact -- $name {
+        map_put { return $mapType }
+        require_key { return [makeType result [list $valueType problem]] }
+        sorted_keys {
+            fact reports $node keyType $keyType
+            return [makeType list [list $keyType]]
+        }
     }
 }
 
@@ -516,8 +578,8 @@ proc ::appcompiler::checker::comparable {type world} {
         if {$member in {int decimal text bool}} { continue }
         set parts [::appcompiler::typeParts $member]
         if {[lindex $parts 0] eq "range"} { return 0 }
-        if {[lindex $parts 0] in {optional list}} {
-            lappend pending [lindex $parts 1]
+        if {[lindex $parts 0] in {optional list map}} {
+            lappend pending {*}[lrange $parts 1 end]
             continue
         }
         if {![dict exists $world schemas $member]} { return 0 }
@@ -592,6 +654,15 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
             return [makeType optional [list $type]]
         }
         field - update { return [recordExpression $node $scope $imports $world reports] }
+        index {
+            set base [dict get $node base]
+            set key [dict get $node key]
+            set mapType [expressionType $base $scope $imports $world reports]
+            set keyType [expressionType $key $scope $imports $world reports]
+            set parts [mapParts $mapType $base reports]
+            if {![llength $parts] || ![mapKeyMatches $keyType [lindex $parts 1] $key reports]} { return "" }
+            return [makeType optional [list [lindex $parts 2]]]
+        }
         match { return [matchType $node $scope $imports $world reports] }
         var {
             set name [dict get $node name]
@@ -657,12 +728,12 @@ proc ::appcompiler::checker::iteratedElement {statement scope imports world repo
     set iterable [dict get $statement iterable]
     set type [expressionType $iterable $scope $imports $world reports]
     set parts [::appcompiler::typeParts $type]
-    if {[lindex $parts 0] eq "list" || $type eq "range<int>"} {
+    if {[lindex $parts 0] in {list map} || $type eq "range<int>"} {
         fact reports $statement iterableType $type
         return [lindex $parts 1]
     }
     if {$type ne ""} {
-        issue reports ITERABLE_TYPE $iterable "for requires a list or an integer range, got $type"
+        issue reports ITERABLE_TYPE $iterable "for requires a list, a map or an integer range, got $type"
     }
     return ""
 }

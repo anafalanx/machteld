@@ -13,7 +13,10 @@ proc example {} {
     id: text
     note: text?
     amount: decimal?
+    metadata: map<text,.entry>?
+    counts: map<int,int>?
 }
+record .entry { description: text }
 export choice .edit {
     keep
     clear
@@ -86,6 +89,11 @@ proc exercise {exe app} {
         1 {} {entry:14:*: *amount*expects a decimal number*}
     runCase $exe $app {} [string map {-987654321012345678900.0012300 1e99} $amount] \
         1 {} {entry:14:*: *amount*expects a fixed-point JSON number}
+    set metadata {{"version":1,"id":"a","metadata":{"007":{"description":"","future":[null,1e80]},"7":{"description":"é"},"":{"description":"雪"}}}}
+    runCase $exe $app {} [encoding convertto utf-8 $metadata] 0 $metadata {}
+    set bad [string map [list {"description":"é"} {"description":false}] $metadata]
+    runCase $exe $app {} [encoding convertto utf-8 $bad] 1 {} {entry:14:*: *description*expects text*}
+    runCase $exe $app {} {{"version":1,"id":"a","counts":{"1":7}}} 1 {} {entry:14:*: *text*}
 }
 
 proc writeArtifact {sources directory} {

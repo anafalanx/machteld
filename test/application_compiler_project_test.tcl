@@ -44,6 +44,11 @@ proc ::projectTest::exercise {exe caller prefix} {
     appCase $exe $caller $prefix {rebuild} {} [bytes rebuild] "driver verb passed to the application"
     appCase $exe $caller $prefix [list --pick {} {two words}] {} [bytes {two words}] \
         "labeled list iteration selects a complete argument"
+    appCase $exe $caller $prefix {--lookup 007} $payload $payload "text key preserves leading zeroes"
+    appCase $exe $caller $prefix {--lookup 7} $payload {} "present map entry can contain empty text"
+    lassign [command $exe $caller [list {*}$prefix --lookup absent] {} 0] failedOut failedErr
+    expect $failedOut {} "required lookup writes nothing on failure"
+    expect [regexp {logic:[0-9]+:[0-9]+: .*absent} $failedErr] 1 "missing key locates its source"
 
     lassign [command $exe $caller $prefix [binary decode hex 61ff] 0] out err
     expect $out {} "no output on invalid input"
@@ -62,6 +67,7 @@ export fn .answer($args: list<text>, $data: text) -> result<text,problem> {
         ['label'] => ok('météo 雪')
         ['--flag', $value, ''] => ok($value)
         ['--pick', $first, $second] => ok(.pick($args))
+        ['--lookup', $key] => .lookup($key, $data)
         [$one] => ok($one)
         _ => err(problem('expected zero or one argument'))
     }
@@ -77,6 +83,10 @@ fn .pick($values: list<text>) -> text {
         }
     }
     return $selected
+}
+fn .lookup($key: text, $value: text) -> result<text,problem> {
+    $entries ::= map_put(map<text,text>(), '007', $value)
+    return require_key(map_put($entries, '7', ''), $key)
 }}
     set main {import logic
 fn .start($args: list<text>) -> result<unit,problem> {

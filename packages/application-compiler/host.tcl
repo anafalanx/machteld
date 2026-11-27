@@ -90,6 +90,41 @@ proc invalidWire {message} {
     return -code error -errorcode {APPLICATION DATA} $message
 }
 
+proc mapLookup {map key} {
+    if {[dict exists $map $key]} {return [list some [dict get $map $key]]}
+    return [list none]
+}
+
+proc require_key {map key} {
+    if {[dict exists $map $key]} {return [list ok [dict get $map $key]]}
+    return [list err [dict create code MISSING_KEY message "missing map key [list $key]"]]
+}
+
+# Both int and decimal keys are already canonical. For equal signs and
+# integer widths, lexical order of the digits gives their exact magnitude.
+# Tcl's integer sort is machine-width and real sort converts to double.
+proc compareNumericMapKeys {left right} {
+    set negative [expr {[string index $left 0] eq "-"}]
+    set rightNegative [expr {[string index $right 0] eq "-"}]
+    if {$negative != $rightNegative} {return [expr {$negative ? -1 : 1}]}
+    set leftWidth [string first . $left]
+    set rightWidth [string first . $right]
+    if {$leftWidth < 0} {set leftWidth [string length $left]}
+    if {$rightWidth < 0} {set rightWidth [string length $right]}
+    set order [expr {$leftWidth - $rightWidth}]
+    if {$order == 0} {set order [string compare $left $right]}
+    return [expr {$negative ? -$order : $order}]
+}
+
+proc sorted_keys {keyType map} {
+    set keys [dict keys $map]
+    switch -exact -- $keyType {
+        text - bool {return [lsort -ascii $keys]}
+        int - decimal {return [lsort -command [namespace current]::compareNumericMapKeys $keys]}
+        default {error "unsupported map key type [list $keyType]"}
+    }
+}
+
 proc typedMembers {node} {
     set children {}
     foreach key [dict keys [::machteld::json unwrap $node]] {
@@ -148,6 +183,15 @@ proc fromWire {type node path} {
             }
             return $out
         }
+        map {
+            if {[lindex $parts 1] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
+            if {$actual ne "object"} {invalidWire "$path expects an object, got $actual"}
+            set out {}
+            dict for {key child} [typedMembers $node] {
+                dict set out $key [fromWire [lindex $parts 2] $child "$path\[[list $key]\]"]
+            }
+            return $out
+        }
     }
     set table [schemas]
     if {![dict exists $table $type] || [lindex [dict get $table $type] 0] ne "record"} {
@@ -177,6 +221,14 @@ proc toWire {type value path} {
             set nodes {}
             foreach element $value {lappend nodes [toWire [lindex $parts 1] $element $path]}
             return [::machteld::json value array $nodes]
+        }
+        map {
+            if {[lindex $parts 1] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
+            set nodes {}
+            dict for {key item} $value {
+                dict set nodes $key [toWire [lindex $parts 2] $item "$path\[[list $key]\]"]
+            }
+            return [::machteld::json value object $nodes]
         }
         optional {
             if {[lindex $value 0] ne "some"} {invalidWire "$path has no present value"}
@@ -282,6 +334,15 @@ proc equal {type left right} {
         list {
             if {[llength $left] != [llength $right]} {return 0}
             foreach a $left b $right {if {![equal [lindex $parts 1] $a $b]} {return 0}}
+            return 1
+        }
+        map {
+            if {[dict size $left] != [dict size $right]} {return 0}
+            dict for {key a} $left {
+                if {![dict exists $right $key] || ![equal [lindex $parts 2] $a [dict get $right $key]]} {
+                    return 0
+                }
+            }
             return 1
         }
     }
