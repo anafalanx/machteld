@@ -391,6 +391,13 @@ binary64 and back exposes the extra decimal digits of the stored measurement.
 The calibration example reads a gain and offset from JSON. Its multiplication
 can report overflow before the offset is applied.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, ordered conditions
+
+The two UTC instants for a repeated Brussels clock reading sort in
+chronological order. A text identifier keeps its leading zeroes when
+compared with another identifier. A condition can test a prerequisite
+before calling a fallible function on its right-hand side.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

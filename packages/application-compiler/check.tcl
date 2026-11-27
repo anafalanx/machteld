@@ -1317,6 +1317,18 @@ proc ::appcompiler::checker::comparisonType {left right op where world reportsVa
     if {$left in {int decimal} && $right in {int decimal}} {
         return [expr {$left eq "decimal" || $right eq "decimal" ? "decimal" : "int"}]
     }
+    if {$op in {< <= > >=}} {
+        if {$left ne $right} {
+            issue reports OPERAND_TYPE $where "'$op' needs operands of the same ordered type, got $left and $right"
+            return ""
+        }
+        set base [dict getdef $reports distinctBases $left $left]
+        if {$base ni {int decimal binary64 text instant local_datetime}} {
+            issue reports NOT_ORDERED $where "ordering is not defined for $left"
+            return ""
+        }
+        return $base
+    }
     set type [joinTypes $left $right]
     if {$type eq ""} {
         issue reports OPERAND_TYPE $where "'$op' needs operands of the same type, got $left and $right"
@@ -1345,7 +1357,16 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         if {$left eq "int" && $right eq "int"} { return range<int> }
         return ""
     }
-    if {$op in {== !=}} {
+    if {$op in {&& ||}} {
+        foreach side {left right} type [list $left $right] {
+            if {$type ni {{} bool}} {
+                issue reports OPERAND_TYPE [dict get $node $side] "'$op' expects bool, got $type"
+            }
+        }
+        if {$left eq "bool" && $right eq "bool"} {return bool}
+        return ""
+    }
+    if {$op in {== != < <= > >=}} {
         set type [comparisonType $left $right $op $node $world reports]
         if {$type eq ""} { return "" }
         fact reports $node operandType $type
@@ -1510,6 +1531,11 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             set operand [dict get $node value]
             set type [expressionType $operand $scope $imports $world reports]
             if {$type eq ""} { return "" }
+            if {[dict get $node op] eq "!"} {
+                if {$type eq "bool"} {return bool}
+                issue reports OPERAND_TYPE $operand "'!' expects bool, got $type"
+                return ""
+            }
             if {$type ni {int decimal binary64}} {
                 issue reports OPERAND_TYPE $operand "unary '-' expects int, decimal or binary64, got $type"
                 return ""

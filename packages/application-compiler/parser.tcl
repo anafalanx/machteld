@@ -139,7 +139,7 @@ oo::class create ::appcompiler::ModuleParser {
         }
         # The final alternative consumes every remaining character. A search
         # beginning at offset therefore always matches at that exact offset.
-        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|\.\.=?|::=|:=|::|->|=>|==|!=|.}
+        set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|\.\.=?|::=|:=|::|->|=>|==|!=|<=|&&|\|\||.}
         while {$offset < [string length $source]} {
             regexp -start $offset -indices -- $pattern $source bounds
             lassign $bounds first last
@@ -206,7 +206,7 @@ oo::class create ::appcompiler::ModuleParser {
                         set kind [expr {[string first . $word] < 0 ? "integer" : "decimal"}]
                     } elseif {[regexp {^[a-zA-Z_]} $word]} {
                         set kind [expr {$word in $keywords ? $word : "identifier"}]
-                    } elseif {$word in {+ - * / ( ) \{ \} [ ] < > : , = ::= := :: -> => ? == != |}} {
+                    } elseif {$word in {+ - * / ( ) \{ \} [ ] < > <= : , = ::= := :: -> => ? == != ! | && ||}} {
                         set kind $word
                     } else {
                         ::appcompiler::fail E_PARSE_TOKEN $location "unexpected character '$word'"
@@ -802,13 +802,21 @@ oo::class create ::appcompiler::ModuleParser {
                 set left [my node $where update base $left fields $fields]
             }
         }
-        set precedences {== 1 != 1 .. 2 ..= 2 + 3 - 3 * 4 / 4}
+        set precedences {|| 1 && 2 == 3 != 3 < 4 <= 4 > 4 .. 5 ..= 5 + 6 - 6 * 7 / 7}
         while {[dict exists $precedences [dict get $token kind]]} {
             set op [dict get $token kind]
             set precedence [dict get $precedences $op]
             if {$precedence < $minimum} break
             set where $token
             my advance
+            # Combine >= only at an expression operator. In a declaration
+            # the same '>' closes the type before '=', '=>' or '=='.
+            if {$op eq ">" && [my at =] && [dict get $where endLine] == [dict get $token line]
+                    && [dict get $where endColumn] == [dict get $token column]} {
+                set op >=
+                dict set where endColumn [dict get $token endColumn]
+                my advance
+            }
             my skipLines
             set right [my expression [expr {$precedence + 1}]]
             set left [my node $where binary op $op left $left right $right]
@@ -860,9 +868,9 @@ oo::class create ::appcompiler::ModuleParser {
     method primary {} {
         set start $token
         switch -exact -- [dict get $token kind] {
-            - {
+            - - ! {
                 my advance
-                return [my node $start unary op - value [my expression 5]]
+                return [my node $start unary op [dict get $start kind] value [my expression 8]]
             }
             decimal {
                 my advance

@@ -275,6 +275,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         }
         unary {
             set value [emitExpression [dict get $node value] $context $bindings $depth]
+            if {[dict get $node op] eq "!"} {return [format {[::tcl::mathop::! %s]} $value]}
             if {[dict get [emitFacts $node $context] operandType] eq "decimal"} {
                 return [format {[%s - 0 %s]} [list ${targetNamespace}::@rt::decimal::calc] $value]
             }
@@ -287,6 +288,22 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             set op [dict get $node op]
             set left [emitExpression [dict get $node left] $context $bindings $depth]
             set right [emitExpression [dict get $node right] $context $bindings $depth]
+            if {$op in {&& ||}} {
+                # Keep both substitutions in a braced expression so Tcl
+                # evaluates the right one only when the left demands it.
+                return [format {[::expr {%s %s %s}]} $left $op $right]
+            }
+            if {$op in {< <= > >=}} {
+                set type [dict get [emitFacts $node $context] operandType]
+                switch -exact -- $type {
+                    int - binary64 {return [format {[::tcl::mathop::%s %s %s]} $op $left $right]}
+                    decimal {set compare [list ${targetNamespace}::@rt::compareNumericMapKeys]}
+                    text {set compare [list ${targetNamespace}::@rt::compareText]}
+                    instant - local_datetime {set compare {::string compare}}
+                    default {error "unexpected ordered type: [list $type]"}
+                }
+                return [format {[::tcl::mathop::%s [%s %s %s] 0]} $op $compare $left $right]
+            }
             if {$op in {.. ..=}} {
                 return [format {[::list %s %s %d]} $left $right [expr {$op eq "..="}]]
             }
