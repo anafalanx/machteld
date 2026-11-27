@@ -74,6 +74,25 @@ same byte and error checks against a relocated archive. Run
 recompilation from bundled sources with only the executable and archive
 in the delivery directory.
 
+## Local bindings and assignment
+
+`:=` declares a mutable local binding. `::=` declares a fixed local
+binding. Both initializers run when execution reaches the declaration, so
+a fixed binding can take its value from a parameter or a function call.
+`=` assigns a new value of the same type to an existing mutable binding.
+
+```text
+fn .next_count($start: int) -> int {
+    $count := $start
+    $step ::= 1
+    $count = $count + $step
+    return $count
+}
+```
+
+An assignment such as `$step = 2` reports `FIXED_ASSIGNMENT`. Use `:=`
+at the declaration if the binding will need another value.
+
 ## Argument labels
 
 Write a label before a parameter's local name when callers should identify
@@ -704,6 +723,24 @@ preserves compatible unknown incoming fields, including their wire types.
 A fresh `make` has only the fields its author supplies. Run
 `machteld.exe project run examples/typed-request/project.dict 007` to build
 a lookup request in X and write it as JSON at the application boundary.
+
+## Record equality
+
+Whole-record `==` and `!=` require every declared field to support value
+equality, including fields inside nested records and collections. A
+callable field makes the record noncomparable. For the following
+`.action` type, `$left == $right` reports `NOT_COMPARABLE` at compile
+time. If the question is whether two actions have the same ID, compare
+their `id` fields directly.
+
+```text
+record .action {
+    id: text
+    callback: callable<unit>
+}
+fn .same_action_id($left: .action, $right: .action) -> bool =>
+    $left.id == $right.id
+```
 
 ## Exact arithmetic
 

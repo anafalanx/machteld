@@ -71,6 +71,11 @@ foreach lookup {{cffi::callback} {cffi::callback new} {cffi::callback free} cffi
 
 set schema [docs schema]
 set manualId machteld/guide/application-compiler
+set languagePage [json decode [::machteld::DocsHost get X --all 1 --json]]
+check {the X host lookup returns the complete language manual} [expr {
+    [dict get $languagePage ok] && [dict get $languagePage result id] eq $manualId &&
+    ![dict get $languagePage result truncated] &&
+    [dict get $languagePage result text] eq [dict get [docs get $manualId -all 1] text]}]
 check {the compiler manual has its own outline and the short package lookup still works} [expr {
     [dict get [docs get application-compiler -limit 1] id] eq "machteld/package/application-compiler" &&
     [dict get [docs outline {compiler manual}] sections grouping-choice-variants] eq "Grouping choice variants"}]
@@ -85,6 +90,8 @@ foreach {lookup section snippet} {
     {project docs} reading-the-offline-application-reference {docs sample.machteld search}
     require_index list-values-and-lengths {INDEX_OUT_OF_RANGE}
     list_append list-values-and-lengths {list_append($items, $value)}
+    FIXED_ASSIGNMENT local-bindings-and-assignment {$count = $count + $step}
+    NOT_COMPARABLE record-equality {$left.id == $right.id}
 } {
     set selection [docs get $lookup]
     set hit [lindex [dict get [docs search $lookup -limit 1] items] 0]

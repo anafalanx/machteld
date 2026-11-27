@@ -89,9 +89,9 @@ For runtime packages, use `docs list -scope machteld -type package`.
 For example, `docs get machteld/package/sqlite3` describes typed parameters
 and `docs get machteld/package/network` describes UDP and authenticated time.
 
-For the typed language and project driver, start with the
+For X and its project driver, run `machteld.exe --docs get X` to read the
 [application compiler manual](../../../packages/application-compiler/README.md).
-Use `docs outline machteld/guide/application-compiler` for its section IDs,
+Use `docs outline X` for its section IDs,
 `docs get {project check}` for project checks, or `docs get require_index`
 for list lookup and its error result.
 

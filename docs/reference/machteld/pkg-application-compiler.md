@@ -18,10 +18,10 @@ pack commands also generate executable Tcl.
 Editable archives also carry a copy of their compiler under `compiler/`
 and their manifest and original files under `project/inputs/`.
 
-The [application compiler manual](../../../packages/application-compiler/README.md)
-covers the full language and the project driver. Run
-`machteld.exe --docs outline machteld/guide/application-compiler` to list its
-sections or `machteld.exe --docs get "project check"` to read about source checks.
+Run `machteld.exe --docs get X` to read the
+[application compiler manual](../../../packages/application-compiler/README.md).
+Use `machteld.exe --docs outline X` to list its sections or
+`machteld.exe --docs get "project check"` to read about source checks.
 
 ## Checking an example
 
