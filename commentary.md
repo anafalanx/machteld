@@ -398,6 +398,13 @@ chronological order. A text identifier keeps its leading zeroes when
 compared with another identifier. A condition can test a prerequisite
 before calling a fallible function on its right-hand side.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, source diagnostics
+
+One project check now reports mistakes in two separate functions in the
+same file. A line beginning with `fn` inside a multiline string still
+belongs to the string. An importer can report its own misspelled binding
+while the imported file is being repaired.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

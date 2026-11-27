@@ -1097,7 +1097,11 @@ application entry idle, except for any explicit example calling that function.
 `pack` and `rebuild` require an archive-capable host with SQLite FTS5. A working archive
 is replaced only after the replacement has been built and checked.
 
-`check --json` writes one UTF-8 JSON document to standard output. A clean
+`check --json` writes one UTF-8 JSON document to standard output. After a
+syntax error the checker resumes at the next recognizable top-level
+declaration and can report another error in that file. It skips
+declaration-like text inside multiline strings, comments and unclosed blocks.
+Other modules still receive their independent type checks. A successful
 check exits with status 0 and prints an empty `diagnostics` array. A failed
 check exits with status 1. Each compiler diagnostic contains `code`,
 `message` and a `node` with the logical `module`, `line`, `column`,

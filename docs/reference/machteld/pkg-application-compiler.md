@@ -29,7 +29,10 @@ set modules [dict create sample {
 puts [::appcompiler::check $modules]
 ```
 
-A successful check returns an empty list. It validates example operands
+A check can report several independent syntax errors in a module. The
+checker resumes at the next recognizable top-level declaration and records
+the original source span for each error. A successful check returns an
+empty list. It validates example operands
 without evaluating them. To run all examples in an extracted application,
 use the driver from its compiler directory.
 

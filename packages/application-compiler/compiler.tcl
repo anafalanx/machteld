@@ -50,7 +50,12 @@ proc ::appcompiler::analyze {sources} {
         }
         dict set spelling $key $module
         try {
-            dict set modules $module [parseModule $module $source]
+            set parsed [parseModule $module $source diagnostics]
+            if {$parsed eq {}} {
+                dict set unavailable $module 1
+            } else {
+                dict set modules $module $parsed
+            }
         } trap {APPCOMPILER DIAGNOSTIC} {message options} {
             lappend diagnostics [dict get $options -diagnostic]
             dict set unavailable $module 1

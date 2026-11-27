@@ -304,7 +304,45 @@ oo::class create ::appcompiler::ModuleParser {
         my restore $beginning
     }
 
-    method parse {} {
+    # On a failed check, replay lexical tokens to find an independent
+    # declaration. Multiline strings and comments are single tokens. An
+    # unclosed block or interpolation does not establish a new top level.
+    method nextDeclaration {beginning failedLine} {
+        my restore $beginning
+        set expected {}
+        set atLineStart 0
+        while {![my at eof]} {
+            set kind [dict get $token kind]
+            if {$atLineStart && ![llength $expected] && [dict get $token line] > $failedLine} {
+                if {$kind in {export fn extern import record choice alias distinct} ||
+                    ($kind eq "identifier" && [dict get $token value] in {resource tool worker example})} {
+                    return 1
+                }
+            }
+            switch -exact -- $kind {
+                \{ {lappend expected \}}
+                {[} {lappend expected {]}}
+                ( {lappend expected )}
+                interpolateStart {lappend expected interpolateEnd}
+                \} - {]} - ) - interpolateEnd {
+                    if {![llength $expected] || [lpop expected] ne $kind} {return 0}
+                }
+            }
+            set atLineStart [expr {$kind eq "newline"}]
+            # Each of these errors consumed one ordinary character. Other
+            # lexical errors may leave a string boundary uncertain.
+            while {1} {
+                try {my advance; break} trap {APPCOMPILER DIAGNOSTIC E_PARSE_TOKEN} {} {
+                    set atLineStart 0
+                } trap {APPCOMPILER DIAGNOSTIC E_PARSE_NAME} {} {
+                    set atLineStart 0
+                }
+            }
+        }
+        return 0
+    }
+
+    method parse {{prescan 1}} {
         set imports {}
         set importLocations {}
         set functions {}
@@ -312,9 +350,14 @@ oo::class create ::appcompiler::ModuleParser {
         set resources {}
         set examples {}
         set owner {}
-        if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
+        if {$prescan && [string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
                 [string first alias $source] >= 0 || [string first distinct $source] >= 0)} {
-            my collectChoiceNames
+            set beginning [my cursor]
+            try {my collectChoiceNames} trap {APPCOMPILER DIAGNOSTIC} {} {
+                # Report a malformed declaration in source order in the
+                # real parse, after any preceding independent diagnostics.
+                my restore $beginning
+            }
         }
         my skipLines
         while {![my at eof]} {
@@ -1139,7 +1182,34 @@ oo::class create ::appcompiler::ModuleParser {
     }
 }
 
-proc ::appcompiler::parseModule {module source} {
+proc ::appcompiler::parseModule {module source {reportsVar {}}} {
     set parser [::appcompiler::ModuleParser new $module $source]
-    try { return [$parser parse] } finally { $parser destroy }
+    try {
+        if {$reportsVar eq {}} {return [$parser parse]}
+        upvar 1 $reportsVar reports
+        set first 1
+        while {1} {
+            set beginning [$parser cursor]
+            try {
+                set parsed [$parser parse $first]
+            } trap {APPCOMPILER DIAGNOSTIC} {message options} {
+                set error [dict get $options -diagnostic]
+                lappend reports $error
+                try {
+                    set resume [$parser nextDeclaration $beginning [dict get $error node line]]
+                } trap {APPCOMPILER DIAGNOSTIC} {message options} {
+                    # The lexer can encounter the original error again. A
+                    # later lexical failure also ends safe resynchronization.
+                    set next [dict get $options -diagnostic]
+                    if {[dict get $next node line] > [dict get $error node line]} {lappend reports $next}
+                    return {}
+                }
+                if {!$resume} {return {}}
+                set first 0
+                continue
+            }
+            if {!$first} {return {}}
+            return $parsed
+        }
+    } finally { $parser destroy }
 }

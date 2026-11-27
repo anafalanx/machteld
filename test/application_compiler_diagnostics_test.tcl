@@ -87,6 +87,60 @@ proc ::diagnosticTest::plain {root driver manifest expectedLines} {
     expect [lsort [split [string trimright $text \n] \n]] [lsort $expectedLines] "plain check stderr"
 }
 
+proc ::diagnosticTest::syntaxRecovery {root driver manifest} {
+    # These failures leave balanced declaration boundaries. A nested string
+    # contains a line that would look like another declaration to a text scan.
+    set first {fn .a() -> int { return [1,,2] }
+fn .message() -> text => 'verbatim
+fn .inside_string() -> int { return [3,,4] }
+end'
+# fn .inside_comment() -> int { return [5,,6] }
+fn .b() -> int { return [7,,8] }
+fn .ok() -> int => 9}
+    writeUtf8 [file join $root a.src] [string map [list \n \r\n] $first]
+    writeUtf8 [file join $root b.src] {import first
+fn .independent() -> int => $missing
+fn .dependent() -> int => .first::unknown()}
+    set r [invoke $root $driver --json $manifest]
+    expect [dict get $r exit] 1 "damaged module fails project check"
+    set items [json get [json decode -typed [dict get $r out]] diagnostics]
+    set locations {}
+    set messages {}
+    for {set i 0} {$i < [llength [json unwrap $items]]} {incr i} {
+        set item [json get $items $i]
+        set code [json unwrap [json get $item code]]
+        set where [json get $item node]
+        set span {}
+        foreach key {module line column endLine endColumn} {lappend span [json unwrap [json get $where $key]]}
+        lappend locations [list $code {*}$span]
+        lappend messages [located [dict create $code $item] $code $span]
+    }
+    expect $locations {{E_PARSE_EXPECTED first 1 28 1 29} {E_PARSE_EXPECTED first 6 28 6 29} {UNKNOWN_BINDING second 2 29 2 37}} \
+        "independent syntax errors keep spans and the importer suppresses speculative missing exports"
+    plain $root $driver $manifest $messages
+
+    writeUtf8 [file join $root b.src] {}
+    writeUtf8 [file join $root a.src] "fn .a() -> int \{ return \[1,,2\]\nfn .nested() -> int \{ return \[3,,4\] \}"
+    set report [report $root $driver $manifest 0 1]
+    located $report E_PARSE_EXPECTED {first 1 28 1 29}
+
+    writeUtf8 [file join $root a.src] {fn .a() -> int => 1 % 2
+fn .b() -> int { return [7,,8] }
+}
+    set items [report $root $driver $manifest 0 2]
+    located $items E_PARSE_TOKEN {first 1 21 1 22}
+    located $items E_PARSE_EXPECTED {first 2 28 2 29}
+
+    # Pre-scanning a broken choice must not hide a preceding bad character.
+    writeUtf8 [file join $root a.src] {fn .a() -> int => 1 % 2
+choice .thing { 5 }
+# local .thing::case
+}
+    set items [report $root $driver $manifest 0 2]
+    located $items E_PARSE_TOKEN {first 1 21 1 22}
+    located $items E_PARSE_EXPECTED {first 2 17 2 18}
+}
+
 proc ::diagnosticTest::run {root driver} {
     set manifest [file join $root project.dict]
     set base [dict create schema 1 edition 1 minApi 0.21 entry {main start} \
@@ -137,6 +191,7 @@ fn .bad() -> int { return .take("雪🚀", $lost) }}
     set firstLine [located $diagnostics ARGUMENT_TYPE {first 3 18 4 5}]
     set secondLine [located $diagnostics UNKNOWN_BINDING {second 2 39 2 44}]
     plain $root $driver $manifest [list $firstLine $secondLine]
+    syntaxRecovery $root $driver $manifest
 
     # Project errors have no application source range. Use a dictionary key so
     # even characters that Windows forbids in filenames can reach the reporter.
