@@ -1513,6 +1513,8 @@ machteld.exe project check --json examples/typed-text-length/project.dict
 {"schema":1,"ok":true,"diagnostics":[]}
 ```
 
+### Locating source files
+
 To find the file for a diagnostic's logical module, use `project locate`.
 Supply its one-based line number to see the project-relative path and the
 original line of source. For example, both commands below identify line 1
