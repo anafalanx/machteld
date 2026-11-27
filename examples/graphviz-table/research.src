@@ -1,0 +1,24 @@
+## One source observation covering the research instant.
+export record .occurrence {
+    occurrence_id: text
+    asset: text
+    observation: text
+    source_id: text
+    source_name: text
+    reference: text
+    starts: instant
+    ends: instant
+}
+
+## Converts a UTC or numeric-offset timestamp to an exact UTC instant.
+export fn .at($input: text) -> result<instant,problem> => parse_instant($input)
+example .at('2026-11-01T09:15:00') => error 'INVALID_INSTANT'
+
+## Lists occurrences with an inclusive start and an exclusive end.
+export fn .occurrences($database: text, $at: instant) -> result<list<.occurrence>,problem> =>
+    sql_many<.occurrence>($database,
+        'SELECT o.occurrence_id, o.asset, o.observation, o.source_id,
+                s.name AS source_name, o.reference, o.starts, o.ends
+           FROM occurrence AS o JOIN source AS s ON s.source_id = o.source_id
+          WHERE o.starts <= ?1 AND ?1 < o.ends
+          ORDER BY o.occurrence_id COLLATE BINARY', $at)

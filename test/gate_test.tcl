@@ -292,6 +292,14 @@ foreach {mode normal} [list default $releasePlan hosted-GUI $guiPlan] {
         [expr {$media eq {audio_test.tcl hls_test.tcl}}] $media
 }
 set attended [lmap step $guiPlan {if {[dict get $step group] ne "interactive"} continue; set step}]
+check {headless research coverage runs in packaging; real Tk selection requires the attended gate} \
+    [expr {[lmap step $releasePlan {
+        if {[file tail [lindex [dict get $step argv] 1]] ne "research_diagram_test.tcl"} continue
+        list [dict get $step group] [lindex [dict get $step argv] end]
+    }] eq {{packaging -pack}} && [lmap step $attended {
+        if {[file tail [lindex [dict get $step argv] 1]] ne "research_diagram_test.tcl"} continue
+        lindex [dict get $step argv] end
+    }] eq {--tk}}]
 set archiveLane [lindex $attended [lsearch -exact [labels $attended] "Tk app archive"]]
 check {the window-opening lanes run only behind --interactive-gui, last} \
     [expr {"child_window_test.tcl" ni [scripts $releasePlan] &&

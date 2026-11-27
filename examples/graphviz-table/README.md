@@ -14,3 +14,46 @@ Create an application archive and run it with the release candidate.
 .\out\machteld.exe pack .\examples\graphviz-table\app.dict -o .\out\graphviz-table.machteld
 .\out\machteld.exe .\out\graphviz-table.machteld
 ```
+
+## Edit a research instant
+
+The second example uses a Tcl/Tk entry and a typed X query. From the root
+of a checkout containing `machteld.exe`, pack the project and create its
+synthetic SQLite database. To run it elsewhere, copy `machteld.exe`,
+`research.machteld`, and `notes.db` together.
+
+```powershell
+.\machteld.exe project pack examples/graphviz-table/research.dict research.machteld
+.\machteld.exe research.machteld --create-sample notes.db
+.\machteld.exe research.machteld notes.db
+```
+
+Enter a timestamp with `Z` or a numeric UTC offset, then press Enter or
+Apply. At `2026-11-01T09:15:00Z`, two different sources report that Bay
+07 is open. Click the occurrence connected to **Field inspection** to see
+its identifier `007-B`, source reference **Card 12**, and validity interval.
+Change the instant to `09:29:00Z` on the same date and the selection stays
+on that occurrence. At `09:30:00Z` it expires, the selection clears, and
+the next inspection appears. Each interval includes its start and excludes
+its end. Applying an invalid timestamp leaves the last valid diagram in place.
+
+The data file is independent of the executable and archive. Its source and
+occurrence tables contain stable text IDs, source references and canonical
+UTC bounds with nine fractional digits. The query binds the research instant
+and joins the source metadata in one SQLite read. The diagram keys each
+occurrence by its stored ID across layout changes.
+
+The headless entry emits a Tcl dictionary containing the canonical instant,
+visible occurrence IDs, and the selected observation and its source. An
+absent occurrence produces an empty selection. From the repository, use
+the source project driver or run the delivered archive.
+
+```powershell
+.\machteld.exe project run examples/graphviz-table/research.dict --headless notes.db 2026-11-01T09:15:00Z 007-B
+.\machteld.exe research.machteld --headless notes.db 2026-11-01T09:30:00Z 007-B
+```
+
+Run `machteld.exe test/research_diagram_test.tcl -pack` for headless SQL,
+Graphviz, canvas interaction and relocation checks. On an attended desktop,
+`machteld.exe test/research_diagram_test.tcl --tk` exercises a real Tk
+canvas click and selection across edits.

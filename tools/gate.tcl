@@ -354,6 +354,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "application compiler offline reference" application_compiler_reference_test.tcl
                 addLane steps $runtime packaging "embedded project driver" application_compiler_host_test.tcl
                 addLane steps $runtime packaging "typed colleague import" typed_import_test.tcl
+                addLane steps $runtime packaging "editable research diagram (headless and packed)" research_diagram_test.tcl -pack
                 foreach suite {project io examples sql transaction migration temporal zone generics result_match labels resources} {
                     addLane steps $runtime packaging "application compiler $suite (direct and packed)" application_compiler_${suite}_test.tcl -pack
                 }
@@ -389,6 +390,7 @@ proc ::gate::plan {settings} {
             [file join $test fixtures window_fixture.c] -luser32 -lole32 -luuid -o $windowFixture]
         addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
+        addLane steps $runtime interactive "research occurrence selection on Tk" research_diagram_test.tcl --tk
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
         addLane steps $runtime interactive "Direct2D and Direct3D Tk rendering and pre-present readback" surface_test.tcl

@@ -343,6 +343,14 @@ The first-line preview returns from inside the reader's scope. The library
 closes the file before that result reaches its caller, even when decoding
 the line fails. Its exported type page identifies the cleanup function.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, following an observation
+
+At 09:15 two source records both described Bay 07 as open. Selecting the
+field inspection showed its reference, Card 12. When another observation
+entered the diagram, that selection followed its stored identifier through
+the new layout. Moving the research instant to 09:30 cleared the selection
+at the end of the inspection's validity.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls
