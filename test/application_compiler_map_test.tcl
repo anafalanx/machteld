@@ -18,6 +18,59 @@ proc ::mapTest::badBoundary {app fn args} {
     equal [dict get $opts -errorcode] {APPCOMPILER ARGUMENT TYPE} "structured binding error for $fn"
 }
 
+proc ::mapTest::wireEqual {result expected label} {
+    lassign $result tag actual
+    equal $tag ok "$label succeeds"
+    set encoded [::machteld::json encode -- [::machteld::json decode -typed $actual]]
+    set reference [::machteld::json encode -- [::machteld::json decode -typed $expected]]
+    equal $encoded $reference "$label preserves JSON member names, order and values"
+}
+proc ::mapTest::crossOrigin {app} {
+    set wire {{"data":{"a":"prefix","a\u0000b\\\"\ud83d\ude80z":"old","ab\\\"\ud83d\ude80z":"neighbor","tail":"last"}}}
+    set localKey "a\u0000b\\\"\U0001F680z"
+    set neighbor "ab\\\"\U0001F680z"
+    set original [dict create a prefix $localKey old $neighbor neighbor tail last]
+    set node [::machteld::json get [::machteld::json decode -typed $wire] data]
+    set nativeKey [lindex [dict keys [::machteld::json unwrap $node]] 1]
+    equal [binary encode hex [encoding convertto utf-8 $nativeKey]] \
+        [binary encode hex [encoding convertto utf-8 $localKey]] "native and Tcl fixture keys denote identical Unicode"
+    lassign [invoke $app read_map $wire] tag decoded
+    equal $tag ok "read a map containing an embedded NUL key"
+    equal [invoke $app wire_equal $wire $original] {ok 1} "decoded and constructed maps have equal keys and values"
+    equal [invoke $app wire_equal $wire [dict replace $original $neighbor different]] {ok 0} \
+        "adjacent lookalike key still has an independent value"
+
+    set keys [lmap k [dict keys $original] {binary encode hex [encoding convertto utf-8 $k]}]
+    foreach {from map lookup} [list decoded $decoded $localKey constructed $original $nativeKey] {
+        equal [invoke $app text_at $map $lookup] {some old} "$from optional lookup accepts the other key origin"
+        equal [invoke $app fetch $map $lookup] {ok old} "$from required lookup accepts the other key origin"
+        foreach fn {replace_text local_replace_text} {
+            set changed [invoke $app $fn $map $lookup new]
+            set actual [lmap k [dict keys $changed] {binary encode hex [encoding convertto utf-8 $k]}]
+            equal $actual $keys "$from $fn replaces one key in its original position"
+            equal [invoke $app fetch $changed $localKey] {ok new} "$from $fn updates the NUL key"
+            equal [invoke $app fetch $changed $neighbor] {ok neighbor} "$from $fn preserves the nearby key"
+        }
+    }
+
+    set mixed [dict create $nativeKey first $localKey second]
+    if {[dict size $mixed] == 2} {
+        # Older bindings expose two physical dictionary keys for the same text.
+        badBoundary $app text_keys $mixed
+    } else {
+        equal [llength [invoke $app text_keys $mixed]] 1 "host has already coalesced both representations"
+        equal [invoke $app fetch $mixed $localKey] {ok second} "host replacement retains the last value"
+    }
+    wireEqual [invoke $app write_map [dict create data $original]] $wire "encode a Tcl-constructed Unicode key"
+    wireEqual [invoke $app roundtrip_map $wire] $wire "decode and encode the original JSON"
+    set surrounding [format {{"before":"literal \\u0000 and \"quotes\"","data":%s,"after":{"\ud83d\ude80":"old"}}} \
+        [::machteld::json encode -- $node]]
+    wireEqual [invoke $app roundtrip_map $surrounding] $surrounding "adjacent parent fields survive the key round trip"
+    set replaced [invoke $app local_replace_text $decoded $localKey new]
+    wireEqual [invoke $app write_map [dict create data $replaced]] \
+        [string map [list {"old"} {"new"}] $wire] "encode the replacement after cross-origin lookup"
+}
+
 proc ::mapTest::exercise {app model} {
     set made [invoke $app made]
     equal [dict keys $made] {z 007 7 {}} "updating the first key retains its insertion position"
@@ -162,14 +215,38 @@ export fn .decimal_put($m: map<decimal,text>, $k: decimal, $v: text) -> map<deci
 }
 export fn .bool_keys($m: map<bool,text>) -> list<bool> { return sorted_keys($m) }
 export fn .same($a: map<text,list<int?>>, $b: map<text,list<int?>>) -> bool { return $a == $b }}
+    append model \n {export record .bag { data: map<text,text> }
+export fn .read_map($wire: text) -> result<map<text,text>,problem> {
+    $bag ::= decode_json<.bag>($wire)?
+    return ok($bag.data)
+}
+export fn .write_map($bag: .bag) -> result<text,problem> { return encode_json($bag) }
+export fn .roundtrip_map($wire: text) -> result<text,problem> {
+    $bag ::= decode_json<.bag>($wire)?
+    return encode_json($bag)
+}
+export fn .wire_equal($wire: text, $constructed: map<text,text>) -> result<bool,problem> {
+    $bag ::= decode_json<.bag>($wire)?
+    return ok($bag.data == $constructed)
+}
+export fn .replace_text($m: map<text,text>, $key: text, $value: text) -> map<text,text> {
+    return map_put($m, $key, $value)
+}
+export fn .local_replace_text($m: map<text,text>, $key: text, $value: text) -> map<text,text> {
+    $out := $m
+    $out = map_put($out, $key, $value)
+    return $out
+}}
     set sources [dict create maps $model]
     equal [::appcompiler::check $sources] {} "map source checks"
     diagnostics
     set compiled [::appcompiler::compile $sources ::mapApp]
     set app [interp create]
     try {
+        $app alias ::machteld::json ::machteld::json
         $app eval [dict get $compiled script]
         exercise $app $model
+        crossOrigin $app
     } finally {interp delete $app}
     puts "application compiler map: $count assertions passed"
 }

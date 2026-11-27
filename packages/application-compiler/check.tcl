@@ -312,13 +312,11 @@ proc ::appcompiler::checker::mapCall {node name actual reportsVar} {
         }
     }
     if {!$valid} { return "" }
+    fact reports $node keyType $keyType
     switch -exact -- $name {
         map_put { return $mapType }
         require_key { return [makeType result [list $valueType problem]] }
-        sorted_keys {
-            fact reports $node keyType $keyType
-            return [makeType list [list $keyType]]
-        }
+        sorted_keys { return [makeType list [list $keyType]] }
     }
 }
 
@@ -661,6 +659,7 @@ proc ::appcompiler::checker::expressionType {node scope imports world reportsVar
             set keyType [expressionType $key $scope $imports $world reports]
             set parts [mapParts $mapType $base reports]
             if {![llength $parts] || ![mapKeyMatches $keyType [lindex $parts 1] $key reports]} { return "" }
+            fact reports $node keyType $keyType
             return [makeType optional [list [lindex $parts 2]]]
         }
         match { return [matchType $node $scope $imports $world reports] }

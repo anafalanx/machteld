@@ -95,9 +95,11 @@ proc ::appcompiler::emitRuntime {targetNamespace modules} {
             }
             map {
                 if {$first ni {text int bool decimal} || [catch {dict size $value}]} {reject $path $type}
+                # Text map keys require one representation for equivalent Tcl strings.
+                set keyGuard [expr {$first eq "text" ? "@textKey" : $first}]
                 set result {}
                 dict for {external item} $value {
-                    set key [guard $first $external "$path key"]
+                    set key [guard $keyGuard $external "$path key"]
                     if {[dict exists $result $key]} {
                         return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} \
                             "map keys at $path normalize to the same $first key [list $key]"
@@ -155,6 +157,7 @@ proc ::appcompiler::emitRuntime {targetNamespace modules} {
                 if {$value ni {0 1 false true}} {reject $path bool}
                 return [expr {$value in {1 true}}]
             }
+            @textKey {return [mapTextKey $value]}
             text {return $value}
         }
         lassign [dict get [schemas] $type] kind members
@@ -193,6 +196,12 @@ proc ::appcompiler::emitLocation {node} {
 proc ::appcompiler::emitFacts {node context} {
     set key [list [dict get $node module] [dict get $node line] [dict get $node column] [dict get $node kind]]
     return [dict getdef $context facts $key {}]
+}
+
+proc ::appcompiler::emitMapKeyWord {node context word} {
+    if {[dict get [emitFacts $node $context] keyType] ne "text"} {return $word}
+    set command [dict get $context target]::@rt::mapTextKey
+    return [format {[%s %s]} [list $command] $word]
 }
 
 proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
@@ -247,9 +256,13 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         }
         call - construct - builtin {
             set words [emitCallPrefix $node $context]
-            foreach argument [dict get $node args] {
-                lappend words [emitExpression $argument $context $bindings $depth]
+            set arguments [lmap argument [dict get $node args] {
+                emitExpression $argument $context $bindings $depth
+            }]
+            if {$kind eq "builtin" && [dict get $node name] in {map_put require_key}} {
+                lset arguments 1 [emitMapKeyWord $node $context [lindex $arguments 1]]
             }
+            lappend words {*}$arguments
             return [format {[%s]} [join $words { }]]
         }
         propagate {
@@ -270,6 +283,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
         index {
             set base [emitExpression [dict get $node base] $context $bindings $depth]
             set key [emitExpression [dict get $node key] $context $bindings $depth]
+            set key [emitMapKeyWord $node $context $key]
             return [format {[%s %s %s]} [list ${targetNamespace}::@rt::mapLookup] $base $key]
         }
         update {
@@ -394,8 +408,9 @@ proc ::appcompiler::emitStatement {node context} {
     if {$kind eq "assign" && [dict get $value kind] eq "builtin" && [dict get $value name] eq "map_put"} {
         lassign [dict get $value args] base key item
         if {[dict get $base kind] eq "var" && [dict get $base name] eq [dict get $node name]} {
+            set keyWord [emitMapKeyWord $value $context [emitExpression $key $context]]
             return [format {::dict set %s %s %s} [emitLocalName [dict get $node name]] \
-                [emitExpression $key $context] [emitExpression $item $context]]
+                $keyWord [emitExpression $item $context]]
         }
     }
     set word [emitExpression $value $context]

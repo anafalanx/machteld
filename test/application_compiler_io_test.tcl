@@ -91,6 +91,8 @@ proc exercise {exe app} {
         1 {} {entry:14:*: *amount*expects a fixed-point JSON number}
     set metadata {{"version":1,"id":"a","metadata":{"007":{"description":"","future":[null,1e80]},"7":{"description":"é"},"":{"description":"雪"}}}}
     runCase $exe $app {} [encoding convertto utf-8 $metadata] 0 $metadata {}
+    set nulKey [string map [list {"007":} {"a\u0000b":}] $metadata]
+    runCase $exe $app {} [encoding convertto utf-8 $nulKey] 0 $nulKey {}
     set bad [string map [list {"description":"é"} {"description":false}] $metadata]
     runCase $exe $app {} [encoding convertto utf-8 $bad] 1 {} {entry:14:*: *description*expects text*}
     runCase $exe $app {} {{"version":1,"id":"a","counts":{"1":7}}} 1 {} {entry:14:*: *text*}

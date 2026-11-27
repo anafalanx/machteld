@@ -90,6 +90,28 @@ proc invalidWire {message} {
     return -code error -errorcode {APPLICATION DATA} $message
 }
 
+# A NUL read through older native JSON can have a different internal byte
+# spelling from the same Tcl character. Dictionary keys must use one spelling.
+proc mapTextKey {value} {
+    if {[string first \u0000 $value] < 0} {return $value}
+    return [encoding convertfrom -profile strict utf-8 [encoding convertto -profile strict utf-8 $value]]
+}
+
+# Ask the native decoder for its own string representation. Quote each
+# non-NUL part with the native writer so quotes, backslashes and literal
+# \u sequences stay distinct from the inserted JSON escape. Plain decode
+# suffices here: the constructed document is always a single JSON string.
+proc nativeJsonText {value} {
+    if {[string first \u0000 $value] < 0} {return $value}
+    set interiors {}
+    foreach part [split [mapTextKey $value] \u0000] {
+        if {$part eq {}} {lappend interiors {}; continue}
+        set encoded [::machteld::json encode -- [::machteld::json value string $part]]
+        lappend interiors [string range $encoded 1 end-1]
+    }
+    return [::machteld::json decode "\"[join $interiors {\u0000}]\""]
+}
+
 proc mapLookup {map key} {
     if {[dict exists $map $key]} {return [list some [dict get $map $key]]}
     return [list none]
@@ -155,11 +177,11 @@ proc fromWire {type node path} {
         text {
             if {$actual ne "string"} {invalidWire "$path expects text, got $actual"}
             set value [::machteld::json unwrap $node]
-            set rebuilt [::machteld::json value string $value]
+            set rebuilt [::machteld::json value string [nativeJsonText $value]]
             if {[::machteld::json encode -- $rebuilt] ne [::machteld::json encode -- $node]} {
                 invalidWire "$path cannot be preserved as text by this runtime"
             }
-            return $value
+            return [mapTextKey $value]
         }
         int {
             if {$actual ne "number"} {invalidWire "$path expects an integer, got $actual"}
@@ -188,6 +210,8 @@ proc fromWire {type node path} {
             if {$actual ne "object"} {invalidWire "$path expects an object, got $actual"}
             set out {}
             dict for {key child} [typedMembers $node] {
+                set key [mapTextKey $key]
+                if {[dict exists $out $key]} {invalidWire "$path contains duplicate Unicode map keys"}
                 dict set out $key [fromWire [lindex $parts 2] $child "$path\[[list $key]\]"]
             }
             return $out
@@ -213,7 +237,7 @@ proc fromWire {type node path} {
 proc toWire {type value path} {
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
-        text {return [::machteld::json value string $value]}
+        text {return [::machteld::json value string [nativeJsonText $value]]}
         int  {return [::machteld::json value number [guard int $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
@@ -226,7 +250,7 @@ proc toWire {type value path} {
             if {[lindex $parts 1] ne "text"} {invalidWire "$path requires text keys for a JSON object"}
             set nodes {}
             dict for {key item} $value {
-                dict set nodes $key [toWire [lindex $parts 2] $item "$path\[[list $key]\]"]
+                dict set nodes [nativeJsonText $key] [toWire [lindex $parts 2] $item "$path\[[list $key]\]"]
             }
             return [::machteld::json value object $nodes]
         }
@@ -262,6 +286,8 @@ proc decode_json {type text} {
         return [list ok [fromWire $type $root value]]
     } trap {APPLICATION DATA} {message opts} {
         return [list err [dict create code JSON_SCHEMA message $message]]
+    } trap {TCL ENCODING} {message opts} {
+        return [list err [dict create code JSON_SCHEMA message $message]]
     } trap {MACHTELD JSON} {message opts} {
         return [list err [dict create code JSON message $message]]
     }
@@ -271,6 +297,8 @@ proc encode_json {type value} {
     try {
         return [list ok [::machteld::json encode -- [toWire $type $value value]]]
     } trap {APPLICATION DATA} {message opts} {
+        return [list err [dict create code JSON_SCHEMA message $message]]
+    } trap {TCL ENCODING} {message opts} {
         return [list err [dict create code JSON_SCHEMA message $message]]
     } trap {MACHTELD JSON} {message opts} {
         return [list err [dict create code JSON message $message]]
@@ -325,7 +353,11 @@ proc equal {type left right} {
     switch -exact -- [lindex $parts 0] {
         int - bool {return [expr {$left == $right}]}
         decimal {return [string equal $left $right]}
-        text {return [string equal $left $right]}
+        text {
+            if {[string equal $left $right]} {return 1}
+            if {[string first \u0000 $left] < 0} {return 0}
+            return [string equal [mapTextKey $left] [mapTextKey $right]]
+        }
         optional {
             if {[lindex $left 0] ne [lindex $right 0]} {return 0}
             if {[lindex $left 0] eq "none"} {return 1}

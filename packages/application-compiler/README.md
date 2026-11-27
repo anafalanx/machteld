@@ -160,9 +160,11 @@ when the value type supports equality.
 
 At an exported Tcl boundary, supply a dictionary. Keys that normalize to
 the same typed key are rejected. For text keys, `007` and `7` remain
-distinct. In a record, a text-keyed map uses a JSON object, retaining
-arbitrary external key spellings. A non-text key has no JSON object
-encoding in this edition. The map built-in names are provisional.
+distinct. In a record, a text-keyed map uses a JSON object. The same
+Unicode key compares equal whether it came from Tcl or JSON, including
+keys containing U+0000. Encoding preserves those keys on both tested
+hosts. A non-text key has no JSON object encoding in this edition. The
+map built-in names are provisional.
 
 Run `machteld.exe test/application_compiler_map_test.tcl` for the map
 regressions.
