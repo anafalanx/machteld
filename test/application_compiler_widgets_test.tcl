@@ -390,6 +390,8 @@ if {$argv eq "--tk"} {
     } finally {
         after cancel $timer
         after cancel $timeout
+        # Tcl_Main keeps running while the withdrawn Tk root exists.
+        destroy .
     }
     if {[info exists ::widgetTest::failure]} {
         lassign $::widgetTest::failure message options

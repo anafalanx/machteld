@@ -392,8 +392,10 @@ proc ::gate::plan {settings} {
             [file join $test fixtures window_fixture.c] -luser32 -lole32 -luuid -o $windowFixture]
         addLane steps $runtime interactive "attended child window" child_window_test.tcl $windowFixture
         addLane steps $runtime interactive "Graphviz Tk table selection" graphviz_tk_test.tcl
-        addLane steps $runtime interactive "typed Tk handles and occurrence delivery" application_compiler_widgets_test.tcl --tk
-        addLane steps $runtime interactive "research occurrence selection on Tk" research_diagram_test.tcl --tk
+        addStep steps interactive "typed Tk handles and occurrence delivery" [list $runtime \
+            [file join $test application_compiler_widgets_test.tcl] --tk] timeout 60s
+        addStep steps interactive "research occurrence selection on Tk" [list $runtime \
+            [file join $test research_diagram_test.tcl] --tk] timeout 60s
         addLane steps $runtime interactive "desktop window selection" desktop_test.tcl --windows $windowFixture
         addLane steps $runtime interactive "UDP during Tk event delivery" udp_test.tcl --tk
         addLane steps $runtime interactive "Direct2D and Direct3D Tk rendering and pre-present readback" surface_test.tcl
