@@ -474,6 +474,45 @@ and the spring lookup reports a nonexistent clock reading. The executable
 examples also check conflicting evidence, adjacent one-nanosecond intervals
 and the uncovered instant after an interval ends.
 
+## Library-defined scoped resources
+
+A library can associate a locally declared record, choice or distinct type
+with a cleanup function. The function may be private or backed by a Tcl
+`extern`. It receives the resource and returns `unit` or
+`result<unit,problem>`. For example, a file library can declare
+`resource .reader using .close` beside its distinct `.reader` type. The
+resource declaration also appears on the exported type's archive reference
+page. A declaration on a generic type applies to each concrete use.
+
+```text
+using $reader ::= .readers::open($path)? {
+    return .readers::line($reader)
+}
+```
+
+Cleanup runs once after successful acquisition, including on return, loop
+exit, propagation and a Tcl error. Nested blocks release in reverse order.
+Failed acquisition skips the block and its cleanup. Copying a handle does
+not prolong the lifetime of the underlying resource.
+
+A fallible closer requires an enclosing function returning
+`result<…,problem>`. A cleanup failure replaces a successful exit. If
+the block is already returning a problem, its `cleanupFailures` list
+records each additional failure. A Tcl fault retains its original error
+code and source location and carries secondary failures in its
+`-appcompilercleanup` option. If an unexpected closer fault interrupts a
+typed error whose payload is a user-defined type, the Tcl fault carries
+the original result in `-appcompilerprimary`.
+
+The `examples/scoped-reader` project reads the first line of a UTF-8 file
+and closes it before returning, including when decoding fails.
+
+```powershell
+machteld.exe project pack examples/scoped-reader/project.dict preview.machteld
+machteld.exe preview.machteld examples/scoped-reader/sample.txt
+machteld.exe project docs preview.machteld get type/readers/reader
+```
+
 ## Typed SQLite reads
 
 Declare a record for one result row and supply a path to an existing

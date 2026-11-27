@@ -1,0 +1,11 @@
+## A read-only file channel owned by a using block.
+export distinct .reader = text
+resource .reader using .close
+
+## Opens a file of UTF-8 lines. The caller owns the returned reader.
+export extern fn .open($path: text) -> result<.reader,problem> = ['::reader::acquire'] from 'example::reader'
+
+## Returns the next line or none at the end of the file.
+export extern fn .line($reader: .reader) -> result<text?,problem> = ['::reader::line'] from 'example::reader'
+
+extern fn .close($reader: .reader) -> result<unit,problem> = ['::reader::release'] from 'example::reader'

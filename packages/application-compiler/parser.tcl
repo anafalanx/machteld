@@ -309,6 +309,7 @@ oo::class create ::appcompiler::ModuleParser {
         set importLocations {}
         set functions {}
         set types {}
+        set resources {}
         set examples {}
         set owner {}
         if {[string first :: $source] >= 0 && ([string first choice $source] >= 0 ||
@@ -319,6 +320,18 @@ oo::class create ::appcompiler::ModuleParser {
         while {![my at eof]} {
             if {[my at identifier] && [dict get $token value] eq "example"} {
                 lappend examples [my example $owner]
+            } elseif {[my at identifier] && [dict get $token value] eq "resource"} {
+                set owner {}
+                set start $token
+                my advance
+                set type [my take dotName {the local nominal type of the resource}]
+                set using [my take identifier {'using' before the cleanup function}]
+                if {[dict get $using value] ne "using"} {
+                    ::appcompiler::fail E_PARSE_EXPECTED $using {expected 'using' before the cleanup function}
+                }
+                set closer [my take dotName {the local cleanup function}]
+                lappend resources [my node $start resource name [dict get $type value] closer [dict get $closer value] \
+                    typeLocation [my node $type type] closerLocation [my node $closer fn]]
             } elseif {[my at import]} {
                 set owner {}
                 my advance
@@ -344,14 +357,14 @@ oo::class create ::appcompiler::ModuleParser {
                         lappend types [my documented $start [my typeDeclaration $exported]]
                     }
                     default {
-                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct or import declaration}
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected a function, external function, record, choice, alias, distinct, resource or import declaration}
                     }
                 }
             }
             if {![my at eof]} { my take newline {a line break between declarations} }
             my skipLines
         }
-        return [dict create imports $imports importLocations $importLocations types $types functions $functions examples $examples]
+        return [dict create imports $imports importLocations $importLocations types $types functions $functions resources $resources examples $examples]
     }
 
     method documented {start declaration} {
@@ -638,15 +651,21 @@ oo::class create ::appcompiler::ModuleParser {
                 set binding $token
                 my advance
                 my take ::= {'::=' after the scoped binding}
-                set resource [my take identifier {sql_begin to open a transaction}]
-                if {[dict get $resource value] ne "sql_begin"} {
-                    ::appcompiler::fail E_PARSE_EXPECTED $resource {expected sql_begin to open a transaction}
+                if {[my at identifier] && [dict get $token value] eq "sql_begin"} {
+                    set resource $token
+                    my advance
+                    set begin [my node $resource sqlBegin args [my parenthesized expression]]
+                    set question [my take ? {'?' to propagate failure when opening the transaction}]
+                    set value [my node $question propagate value $begin]
+                } else {
+                    set value [my expression]
+                    if {[dict get $value kind] ne "propagate"} {
+                        ::appcompiler::fail E_PARSE_EXPECTED $token {expected '?' to propagate failure when acquiring the resource}
+                    }
                 }
-                set begin [my node $resource sqlBegin args [my parenthesized expression]]
-                set question [my take ? {'?' to propagate failure when opening the transaction}]
                 my skipLines
                 return [my node $start using binding [my node $binding binding name [dict get $binding value]] \
-                    value [my node $question propagate value $begin] body [my braced statement {transaction body}]]
+                    value $value body [my braced statement {resource body}]]
             }
             my restore $beginning
         }

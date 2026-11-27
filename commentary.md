@@ -324,6 +324,12 @@ identifier `007` from another. The item type followed the value through
 the shared function and its choice result. At the Tcl boundary a caller
 could request text explicitly and retain both leading zeroes.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, scoped readers
+
+The first-line preview returns from inside the reader's scope. The library
+closes the file before that result reaches its caller, even when decoding
+the line fails. Its exported type page identifies the cleanup function.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

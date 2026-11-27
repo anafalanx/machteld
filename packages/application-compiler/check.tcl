@@ -261,6 +261,74 @@ proc ::appcompiler::checker::signature {function world reportsVar} {
     return $function
 }
 
+# Register one closer for every instantiation of a locally declared nominal
+# type. Its type variables may use different names or declaration order.
+proc ::appcompiler::checker::resourceProtocols {world reportsVar} {
+    upvar 1 $reportsVar reports
+    set protocols {}
+    dict for {module definition} [dict get $world modules] {
+        foreach node [dict getdef $definition resources {}] {
+            set type [format {.%s::%s} $module [dict get $node name]]
+            set where [dict get $node typeLocation]
+            if {[dict exists $protocols $type]} {
+                issue reports RESOURCE_DUPLICATE $where "a cleanup function is already declared for $type"
+                dict set protocols $type {}
+                continue
+            }
+            dict set protocols $type {}
+            if {[dict getdef $world schemas $type kind {}] ni {record choice distinct}} {
+                issue reports RESOURCE_TYPE $where "a resource must name a record, choice or distinct type declared in this module"
+                continue
+            }
+            set name [dict get $node closer]
+            set where [dict get $node closerLocation]
+            set function [dict getdef $world functions $module $name {}]
+            if {$function eq ""} {
+                issue reports RESOURCE_CLOSER $where "cleanup function '.$name' must be declared in module '$module'"
+                continue
+            }
+            set params [dict get $function params]
+            set variables [dict get $function typeVariables]
+            set formal [lindex $params 0]
+            set parts [::appcompiler::typeParts [dict getdef $formal type {}]]
+            set arguments [lrange $parts 1 end]
+            set result [dict get $function result]
+            if {[llength $params] != 1 || [lindex $parts 0] ne $type ||
+                    [lsort -ascii $arguments] ne [lsort -ascii $variables] ||
+                    $result ni {unit result<unit,problem>}} {
+                issue reports RESOURCE_CLOSER $where "'.$name' must accept one $type for every specialization and return unit or result<unit,problem>"
+                continue
+            }
+            set order [lmap variable $variables {lsearch -exact $arguments $variable}]
+            dict set protocols $type [dict create closer [list $module $name] order $order fallible [expr {$result ne "unit"}]]
+        }
+    }
+    return $protocols
+}
+
+proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
+    upvar 1 $reportsVar reports
+    if {$type in {{} @transaction}} {return}
+    set parts [::appcompiler::typeParts $type]
+    set head [lindex $parts 0]
+    if {![dict exists $world resources $head]} {
+        issue reports RESOURCE_REQUIRED [dict get $node value] "no scoped cleanup function is declared for $type"
+        return
+    }
+    set protocol [dict get $world resources $head]
+    if {$protocol eq ""} {return}
+    set fallible [dict get $protocol fallible]
+    set result [::appcompiler::typeParts [dict get $world returnType]]
+    if {$fallible && ([lindex $result 0] ne "result" || [lindex $result 2] ne "problem")} {
+        issue reports RESOURCE_PROPAGATION $node "fallible cleanup requires an enclosing function returning result<T,problem>"
+        return
+    }
+    set arguments [lrange $parts 1 end]
+    fact reports $node resourceCloser [dict get $protocol closer]
+    fact reports $node resourceTypeArguments [lmap index [dict get $protocol order] {lindex $arguments $index}]
+    fact reports $node resourceFallible $fallible
+}
+
 proc ::appcompiler::checker::readMembers {schema world reportsVar} {
     upvar 1 $reportsVar reports
     set members {}
@@ -1368,6 +1436,7 @@ proc ::appcompiler::checker::checkBlock {statements scope imports world reportsV
             }
             using {
                 set type [expressionType [dict get $statement value] $scope $imports $world reports]
+                scopeCleanup $statement $type $world reports
                 set innerScope $scope
                 bindLocal innerScope [dict get $statement binding] $type 0 reports
                 if {[checkBlock [dict get $statement body] $innerScope $imports $world reports]} {
@@ -1527,6 +1596,7 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             }
         }
     }
+    dict set world resources [checker::resourceProtocols $world reports]
     dict for {module definition} $modules {
         set imports [dict get $definition imports]
         foreach imported $imports {

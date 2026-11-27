@@ -1,0 +1,21 @@
+import readers
+
+## Returns the first line and closes the reader before the caller receives it.
+export fn .first_line($path: text) -> result<text,problem> {
+    using $reader ::= .readers::open($path)? {
+        $first ::= .readers::line($reader)?
+        return match $first {
+            none => ok('empty file')
+            some($line) => ok($line)
+        }
+    }
+}
+
+fn .main($args: list<text>) -> result<unit,problem> {
+    $response ::= match $args {
+        [$path] => .first_line($path)
+        _ => err(problem('usage: preview.machteld INPUT'))
+    }
+    $line ::= $response?
+    return write_stdout_utf8($"$line\n")
+}

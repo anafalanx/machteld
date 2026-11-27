@@ -66,6 +66,10 @@ proc ::appcompiler::reference::build {modules} {
             foreach module [lsort -ascii [dict keys $modules]] {
                 set definition [dict get $modules $module]
                 set examples {}
+                set closers {}
+                foreach resource [dict getdef $definition resources {}] {
+                    dict set closers [dict get $resource name] [dict get $resource closer]
+                }
                 foreach item [dict get $definition examples] {
                     dict lappend examples [dict get $item owner] [dict get $item source]
                 }
@@ -75,6 +79,9 @@ proc ::appcompiler::reference::build {modules} {
                         set name [dict get $decl name]
                         set id "$category/$module/$name"
                         set body "# .$module\::$name\n\n[codeBlock [signature $decl]]\n"
+                        if {$category eq "type" && [dict exists $closers $name]} {
+                            append body "\n[codeBlock [format {resource .%s using .%s} $name [dict get $closers $name]]]\n"
+                        }
                         if {[dict exists $decl doc]} {append body \n [dict get $decl doc] \n}
                         if {$category eq "fn" && [dict exists $examples $name]} {
                             append body "\n## Examples\n"
