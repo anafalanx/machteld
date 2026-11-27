@@ -56,6 +56,10 @@ proc ::appcompiler::emitRuntime {targetNamespace checkedSchemas} {
             ref {return [guardReference $first $value $path]}
             process_stream {return [guardStream $value $path]}
             task {return [guardTask $first $value $path]}
+            tk_window - tk_label - tk_button - tk_canvas - tk_item {
+                if {![llength [info commands [namespace current]::tkGuard]]} {reject $path "a live $head from this application"}
+                return [tkGuard $head $value $path]
+            }
             range {
                 if {$type ne "range<int>" || [catch {llength $value} size] || $size != 3} {reject $path $type}
                 lassign $value start end closed
@@ -345,7 +349,7 @@ proc ::appcompiler::emitExpression {node context {bindings {}} {depth 0}} {
             }
             return [format {[::tcl::mathop::%s %s %s]} $op $left $right]
         }
-        call - construct - builtin - sqlBegin - refCreate {
+        call - construct - builtin - sqlBegin - refCreate - tkOpen {
             set facts [emitFacts $node $context]
             if {[dict exists $facts recordConstructor]} {
                 set words [list ::dict create]
@@ -426,6 +430,7 @@ proc ::appcompiler::emitCallPrefix {node context} {
     switch -exact -- [dict get $node kind] {
         sqlBegin {return [list [list ${target}::@rt::sqlBegin]]}
         refCreate {return [list [list ${target}::@rt::newReference] [emitTypeWord [dict get $facts elementType] $context]]}
+        tkOpen {return [list [list ${target}::@rt::tk_open]]}
         construct {return [list ::list [list [dict get $node variant]]]}
         call {
             set name [dict get $node name]
@@ -443,6 +448,11 @@ proc ::appcompiler::emitCallPrefix {node context} {
         }
         builtin {
             set name [dict get $node name]
+            if {[dict exists $facts tkOperation]} {
+                set prefix [list [list ${target}::@rt::${name}]]
+                if {$name in {tk_on_click tk_on_action}} {lappend prefix [list [emitLocation $node]]}
+                return $prefix
+            }
             switch -exact -- $name {
                 unit - list {return [list ::list]}
                 list_append {return [list ::linsert]}

@@ -1,0 +1,16 @@
+import streams
+
+extern fn .observe($w: tk_window) -> unit = ['::observe']
+fn .pressed($helper: text, $event: tk_action) -> unit {
+    .observe($event.window)
+    return .streams::launch($helper)
+}
+export fn .show($mode: text, $helper: text) -> result<unit,problem> {
+    using $window ::= tk_open('Test')? {
+        $button ::= tk_button($window, 'Start stream')
+        tk_grid($button, 0, 0)
+        tk_on_action($button, bind(.pressed, $helper))
+        tk_wait($window)
+        return ok(unit)
+    }
+}

@@ -1,0 +1,47 @@
+import streams
+
+extern fn .hold($name: text) -> text = ['::windowFixture::hold'] from 'window-fixture'
+extern fn .saved($name: text, $task: task<text>) -> unit = ['::savedTask']
+extern fn .note($text: text) -> unit = ['::note']
+extern fn .observe($w: tk_window) -> unit = ['::observe']
+worker .job($name: text) -> result<text,problem> => ok(.hold($name))
+
+fn .show_reply($label: tk_label, $value: text) -> unit {
+    tk_label_text($label, $value)
+    return .note('updated')
+}
+fn .receive($label: tk_label, $task: task<text>) -> unit =>
+    match await($task) {
+        ok($value) => .show_reply($label, $value)
+        err($why) => .note('worker error')
+    }
+
+fn .pressed($mode: text, $helper: text, $label: tk_label, $event: tk_action) -> unit {
+    .note('pressed')
+    if $mode == 'resume' {
+        return .receive($label, start .job('local'))
+    }
+    $app ::= start_app .job('app')
+    .saved('app', $app)
+    if $mode == 'wait_app' {
+        return .receive($label, $app)
+    }
+    .observe($event.window)
+    .streams::launch($helper)
+    $local ::= start .job('local')
+    .saved('local', $local)
+    return .receive($label, $local)
+}
+
+export fn .finish($task: task<text>) -> result<text,problem> => await($task)
+export fn .show($mode: text, $helper: text) -> result<unit,problem> {
+    using $window ::= tk_open('Test')? {
+        $button ::= tk_button($window, 'Query')
+        $label ::= tk_label($window, 'pending')
+        tk_grid($button, 0, 0)
+        tk_grid($label, 1, 0)
+        tk_on_action($button, bind(.pressed, $mode, $helper, $label))
+        tk_wait($window)
+        return ok(unit)
+    }
+}

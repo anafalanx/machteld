@@ -446,6 +446,21 @@ original binding. A callback that captured the earlier list still sees
 its old contents. Optional and required index reads distinguish a missing
 row from a present row with an empty text value.
 
+### 2026-11-27 · Machteld 0.50-dev · comment · Codex, typed Tk
+
+The X-owned research window displays the same Graphviz drawing as its
+Tcl counterpart. A headless test delivered clicks on a polygon and its
+text. Both selected the same source record. Redrawing replaced the canvas
+items and restored the highlight from the stored occurrence key.
+
+The recording toolkit also delivered a button press to a real worker.
+The label stayed at its initial value while the worker waited. Its reply
+updated a live window. Closing a window with work outstanding stopped its
+worker and both stream children, including one started in a chunk callback.
+An application-owned worker kept running, and another handler collected
+its reply. The tests exercise the source project, packed archive and
+offline rebuild.
+
 <!-- machteld-version-history: end -->
 
 ### Build inputs and foreign calls

@@ -142,6 +142,21 @@ Leaving that block closes the cell on every exit. Subsequent access raises
 application and interpreter. Use `ref_same` to compare two live references
 for identity.
 
+## Owning a Tk window in X
+
+`using $w ::= tk_open('Observations')? { ... }` owns a window. Create
+a `tk_canvas`, `tk_label` and `tk_button` with the corresponding functions,
+place them with `tk_grid`, and dispatch events with `tk_wait($w)`.
+`tk_on_click` takes a `callable<tk_click,unit>`. Its event carries the
+window, canvas, integer `x` and `y`, and an optional occurrence key.
+`tk_on_action` on a button supplies a `tk_action` with its window and button.
+
+Give related rectangles and labels the same key. Save that key to restore
+the highlight after a redraw. A closed window and deleted canvas items
+reject further use. The compiler guide documents widget operations and the
+validated Tcl renderer bridge. The `examples/graphviz-table/typed-window.dict`
+project combines an X-owned UI with an existing Tcl Graphviz renderer.
+
 ## Generic application code
 
 Generic functions, records and closed choices declare dotted type
@@ -243,8 +258,10 @@ accept raw `bytes` and return `result<unit,problem>`. Choose 1 through
 with `result<process_exit,problem>`. The record contains `status`, `exit`,
 `stdout_bytes` and `stderr_bytes`. A successful start immediately returns a
 `process_stream` handle. `cancel_process` delivers a terminal cancellation.
-`close_process` and scope cleanup stop silently. The compiler guide has a
-headless event-loop example. For explicit PATH lookup, `find_executable`
+`close_process` and scope cleanup stop silently. Streams started in a
+typed Tk handler stop silently when its window closes. Streams started
+from their chunk or completion callbacks inherit the same owner. The
+compiler guide has a headless event-loop example. For explicit PATH lookup, `find_executable`
 accepts a bare .exe name and searches absolute PATH directories.
 
 ## Waiting for typed workers

@@ -1,0 +1,20 @@
+extern fn .exe() -> text = ['::info', 'nameofexecutable']
+extern fn .empty() -> bytes = ['::string', 'cat']
+extern fn .note($text: text) -> unit = ['::note']
+extern fn .unexpected($data: bytes) -> result<unit,problem> = ['::unexpectedChunk']
+extern fn .remember($ticket: process_stream) -> unit = ['::rememberStream']
+
+fn .done($r: result<process_exit,problem>) -> unit => .note('terminal')
+fn .chunk($helper: text, $bytes: bytes) -> result<unit,problem> {
+    $child ::= stream_process(.exe(), [$helper, 'nested'], .empty(), 64, 20000,
+        .unexpected, .unexpected, .done)?
+    .note('nested')
+    return ok(unit)
+}
+export fn .launch($helper: text) -> unit =>
+    match stream_process(.exe(), [$helper, 'parent'], .empty(), 64, 20000,
+        bind(.chunk, $helper), .unexpected, .done) {
+        ok($stream) => .remember($stream)
+        err($why) => .note('stream error')
+    }
+export fn .cancel($ticket: process_stream) -> unit => cancel_process($ticket)

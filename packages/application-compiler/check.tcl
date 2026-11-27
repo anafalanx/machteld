@@ -111,6 +111,10 @@ proc ::appcompiler::checker::declaredType {type node world reportsVar {allowTemp
         }
         return [checkedType $head $args $node reports]
     }
+    if {$type in {tk_window tk_label tk_button tk_canvas tk_item tk_click tk_action}} {
+        dict set reports usesTk 1
+        return $type
+    }
     if {$type in {instant local_datetime}} {
         dict set reports usesTemporal 1
         return $type
@@ -334,6 +338,13 @@ proc ::appcompiler::checker::scopeCleanup {node type world reportsVar} {
         }
         return
     }
+    if {$type eq "tk_window"} {
+        if {[dict get $node value value kind] ne "tkOpen"} {
+            issue reports TK_SCOPE [dict get $node value] {only tk_open creates an owning window scope}
+        }
+        fact reports $node builtinCloser tkEndWindow
+        return
+    }
     if {![dict exists $world resources $head]} {
         issue reports RESOURCE_REQUIRED [dict get $node value] "no scoped cleanup function is declared for $type"
         return
@@ -496,6 +507,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         issue reports TYPE_ARITY $node "'$name' expects $count type arguments, got [llength $generic]"
         return ""
     }
+    if {[string match tk_* $name]} {return [tkOperation $node $name $actual reports]}
     switch -exact -- $name {
         await - cancel {
             if {![checkArguments $node $name $actual {*} reports]} {return ""}
@@ -986,6 +998,50 @@ proc ::appcompiler::checker::referenceOperation {node operation actual reportsVa
     }
     if {![checkArguments $node $operation $actual $expected reports]} {return ""}
     return $result
+}
+
+proc ::appcompiler::checker::tkOperation {node name actual reportsVar} {
+    upvar 1 $reportsVar reports
+    set signatures {
+        tk_label        {tk_window text tk_label}
+        tk_button       {tk_window text tk_button}
+        tk_canvas       {tk_window int int tk_canvas}
+        tk_grid         {widget int int unit}
+        tk_label_text   {tk_label text unit}
+        tk_button_text  {tk_button text unit}
+        tk_title        {tk_window text unit}
+        tk_on_click     {tk_canvas callable<tk_click,unit> unit}
+        tk_on_action    {tk_button callable<tk_action,unit> unit}
+        tk_rectangle    {tk_canvas text int int int int tk_item}
+        tk_text         {tk_canvas text int int text tk_item}
+        tk_remove       {tk_item unit}
+        tk_clear        {tk_canvas unit}
+        tk_highlight    {tk_canvas text? bool}
+        tk_wait         {tk_window unit}
+        tk_close        {tk_window unit}
+    }
+    if {$name eq "tk_open"} {
+        issue reports TK_SCOPE $node {own a window with 'using $w ::= tk_open(title)?'}
+        return ""
+    }
+    if {![dict exists $signatures $name]} {
+        issue reports UNKNOWN_FUNCTION $node "unknown standard function '$name'"
+        return ""
+    }
+    set signature [dict get $signatures $name]
+    set parameters [lrange $signature 0 end-1]
+    if {$name eq "tk_grid" && [llength $actual]} {
+        set type [lindex $actual 0]
+        if {$type ni {{} tk_label tk_button tk_canvas}} {
+            issue reports ARGUMENT_TYPE [lindex [dict get $node args] 0] "tk_grid expects a label, button or canvas, got $type"
+            return ""
+        }
+        lset parameters 0 $type
+    }
+    if {![checkArguments $node $name $actual $parameters reports]} {return ""}
+    dict set reports usesTk 1
+    fact reports $node tkOperation $name
+    return [lindex $signature end]
 }
 
 proc ::appcompiler::checker::lookupField {fields field record reportsVar} {
@@ -1622,6 +1678,16 @@ proc ::appcompiler::checker::inferExpression {node scope imports world reportsVa
             dict set reports usesSql 1
             return result<@transaction,problem>
         }
+        tkOpen {
+            if {[llength [dict get $node typeArgs]]} {
+                issue reports TYPE_ARITY $node {tk_open takes no type arguments}
+                return ""
+            }
+            set actual [argumentTypes $node $scope $imports $world reports]
+            if {![checkArguments $node tk_open $actual {text} reports]} {return ""}
+            dict set reports usesTk 1
+            return result<tk_window,problem>
+        }
         refCreate {
             set actual [argumentTypes $node $scope $imports $world reports]
             set locations [dict get $node typeLocations]
@@ -1974,6 +2040,13 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     set exitFields {status text exit int stdout_bytes int stderr_bytes int}
     dict set world schemas process_exit [dict create kind record members $exitFields]
     dict set runtimeSchemas process_exit [list record $exitFields]
+    foreach {event fields} {
+        tk_click {window tk_window canvas tk_canvas x int y int occurrence text?}
+        tk_action {window tk_window button tk_button}
+    } {
+        dict set world schemas $event [dict create kind record members $fields]
+        dict set runtimeSchemas $event [list record $fields]
+    }
     dict set world runtimeSchemas $runtimeSchemas
     dict set world equalitySummaries [checker::equalitySummaries $runtimeSchemas]
     # Index normalized signatures before bodies to support forward and recursive calls.
@@ -2024,6 +2097,7 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
             callbackTargets [dict keys [dict getdef $reports callbackTargets {}]] \
             usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
+            usesTk [dict getdef $reports usesTk 0] \
             usesZone [dict getdef $reports usesZone 0] usesProcess [dict getdef $reports usesProcess 0] \
             usesWorkers [dict getdef $reports usesWorkers 0]]
     }

@@ -1,0 +1,7 @@
+schema 1
+edition 1
+minApi 30
+entry {browser main}
+modules {timeline research.src browser typed-window.src}
+assets {view.tcl research.tcl lib/pkgIndex.tcl lib/typed-diagram.tcl}
+packageDirs {lib}
