@@ -1374,14 +1374,14 @@ example .greeting() => "hello\n"
 fn .main($args: list<text>) -> result<unit,problem> => write_stdout_utf8(.greeting())
 ```
 
-From a terminal in that directory, run the commands below with the path to
-your copy of `machteld.exe`. The last command prints `hello` on its own line.
+Place `machteld.exe` beside those two files and open PowerShell in that
+directory. The last command prints `hello` on its own line.
 
-```text
-machteld.exe project check --json project.dict
-machteld.exe project test project.dict
-machteld.exe project pack project.dict hello.machteld
-machteld.exe hello.machteld
+```powershell
+.\machteld.exe project check --json project.dict
+.\machteld.exe project test project.dict
+.\machteld.exe project pack project.dict hello.machteld
+.\machteld.exe hello.machteld
 ```
 
 `schema` versions the manifest format. `edition` selects the source language
@@ -1557,8 +1557,8 @@ reference verifies the archive and reads its database without loading any of
 the application's Tcl or starting its examples. Rebuild an older archive
 with the current compiler to generate its reference.
 
-To rebuild with the exact compiler shipped by the application author,
-start `machteld.exe` in the directory containing the executable and archive.
+To rebuild with the exact compiler shipped by the application author, open
+PowerShell in the directory containing the executable and archive and run `.\machteld.exe`.
 Enter this Tcl at its prompt. It verifies the archive before loading the
 bundled compiler.
 
@@ -1573,8 +1573,8 @@ try {
 
 ### Editing a delivered application
 
-From a directory containing `machteld.exe` and `sample.machteld`, start
-`machteld.exe` and enter the following at its Tcl prompt. Use fresh names
+In PowerShell, change to the directory containing `machteld.exe` and
+`sample.machteld`. Run `.\machteld.exe` and enter the following at its Tcl prompt. Use fresh names
 for the two destination directories. `working-source` receives the project
 manifest, sources, assets and local Tcl packages. `local-compiler` receives
 the compiler, its driver and this guide.
@@ -1593,13 +1593,13 @@ Edit the files in `working-source`. From a terminal, check the edits, run
 the source project and build a new archive. These commands use the extracted
 compiler and work after the original archive has been put away.
 
-```text
-machteld.exe local-compiler/driver.tcl check --json working-source/application.dict
-machteld.exe local-compiler/driver.tcl test working-source/application.dict
-machteld.exe local-compiler/driver.tcl run working-source/application.dict "Snow 雪"
-machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
-machteld.exe local-compiler/driver.tcl docs revised.machteld get fn/textutil/describe
-machteld.exe revised.machteld "Snow 雪"
+```powershell
+.\machteld.exe local-compiler/driver.tcl check --json working-source/application.dict
+.\machteld.exe local-compiler/driver.tcl test working-source/application.dict
+.\machteld.exe local-compiler/driver.tcl run working-source/application.dict "Snow 雪"
+.\machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
+.\machteld.exe local-compiler/driver.tcl docs revised.machteld get fn/textutil/describe
+.\machteld.exe revised.machteld "Snow 雪"
 ```
 
 Run `machteld.exe test/application_compiler_project_test.tcl` to check
