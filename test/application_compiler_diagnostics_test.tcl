@@ -139,6 +139,27 @@ choice .thing { 5 }
     set items [report $root $driver $manifest 0 2]
     located $items E_PARSE_TOKEN {first 1 21 1 22}
     located $items E_PARSE_EXPECTED {first 2 17 2 18}
+
+    # A failed lookahead can be the head of the next declaration. A complete
+    # quoted string with a bad escape has a safe boundary after its close.
+    set broken {fn .b() -> int => [7,,8]}
+    foreach {prefix expected} [list \
+            {% invalid} {{E_PARSE_TOKEN 1 1 1 2} {E_PARSE_EXPECTED 2 22 2 23}} \
+            {fn .a() -> int =>} {{E_PARSE_EXPECTED 2 1 2 3} {E_PARSE_EXPECTED 2 22 2 23}} \
+            {fn .a() -> text => "bad\q"} {{E_PARSE_ESCAPE 1 24 1 25} {E_PARSE_EXPECTED 2 22 2 23}} \
+            {fn .a() -> text => $"bad\q
+fn .inside() -> int => [3,,4]"} {{E_PARSE_ESCAPE 1 25 1 26} {E_PARSE_EXPECTED 3 22 3 23}} \
+            {fn .a() -> text => "bad\q} {{E_PARSE_ESCAPE 1 24 1 25}}] {
+        writeUtf8 [file join $root a.src] "$prefix\n$broken"
+        set r [invoke $root $driver --json $manifest]
+        set diagnostics [json unwrap [json get [json decode -typed [dict get $r out]] diagnostics]]
+        set spans {}
+        foreach item $diagnostics {
+            set n [dict get $item node]
+            lappend spans [list [dict get $item code] {*}[lmap key {line column endLine endColumn} {dict get $n $key}]]
+        }
+        expect $spans $expected "recover from $prefix"
+    }
 }
 
 proc ::diagnosticTest::run {root driver} {

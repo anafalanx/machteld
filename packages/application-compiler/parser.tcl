@@ -24,7 +24,9 @@ oo::class create ::appcompiler::ModuleParser {
             set where [dict create module $module line $line column $column endLine $line endColumn [expr {$column + 1}]]
             ::appcompiler::fail E_SOURCE_UNICODE $where {source contains a Unicode surrogate code point}
         }
-        my advance
+        # Keep a cursor before the first token, which can itself be malformed.
+        set token [dict merge [my location] {kind start value {}}]
+        set consumed [list $offset $line $column]
     }
 
     method consume {spelling} {
@@ -47,7 +49,7 @@ oo::class create ::appcompiler::ModuleParser {
 
     # Leave the closing quote (or a physical interpolation marker) for the
     # caller. Decoded dollars never re-enter the lexer.
-    method quotedChunk {opening interpolated} {
+    method quotedChunk {opening interpolated {replaying 0}} {
         set value {}
         set escapes [list \" \" \\ \\ n \n r \r t \t 0 \u0000 b \b f \f]
         set markers {["\\]}
@@ -86,25 +88,29 @@ oo::class create ::appcompiler::ModuleParser {
                 # ASCII characters. Inspect only that bounded window.
                 set window [string range $source $offset $offset+8]
                 if {![regexp {\Au\{([0-9a-fA-F]{1,6})\}} $window spelling digits]} {
+                    if {$replaying} continue
                     ::appcompiler::fail E_PARSE_ESCAPE $where {expected one to six hex digits inside \u{...}}
                 }
                 scan $digits %x scalar
                 if {$scalar > 0x10ffff || ($scalar >= 0xd800 && $scalar <= 0xdfff)} {
+                    if {$replaying} continue
                     ::appcompiler::fail E_PARSE_ESCAPE $where {Unicode escape does not name a scalar value}
                 }
                 append value [format %c $scalar]
                 incr offset [string length $spelling]
                 incr column [string length $spelling]
             } elseif {$selector eq ""} {
+                if {$replaying} break
                 ::appcompiler::fail E_PARSE_ESCAPE $where {incomplete escape in double-quoted text}
             } else {
+                if {$replaying} continue
                 ::appcompiler::fail E_PARSE_ESCAPE $where {unknown escape in double-quoted text}
             }
         }
         ::appcompiler::fail E_PARSE_STRING $opening {unterminated double-quoted text literal}
     }
 
-    method interpolationToken {} {
+    method interpolationToken {replaying} {
         set start [my location]
         set mark [string index $source $offset]
         set next [string index $source $offset+1]
@@ -125,16 +131,16 @@ oo::class create ::appcompiler::ModuleParser {
             my consume $word
             return [my finishToken $start holeName [string range $word 1 end]]
         }
-        set chunk [my quotedChunk [lindex $stringModes end 1] 1]
+        set chunk [my quotedChunk [lindex $stringModes end 1] 1 $replaying]
         return [my finishToken $start interpolateText $chunk]
     }
 
-    method advance {} {
+    method advance {{replaying 0}} {
         # The cursor normally sits beyond the lookahead token. Save the end
         # of the consumed token before skipping trivia or reading ahead.
         set consumed [list $offset $line $column]
         if {[lindex $stringModes end 0] eq "text"} {
-            set token [my interpolationToken]
+            set token [my interpolationToken $replaying]
             return
         }
         # The final alternative consumes every remaining character. A search
@@ -174,7 +180,7 @@ oo::class create ::appcompiler::ModuleParser {
                 \" {
                     set kind text
                     try {
-                        set word [my quotedChunk $location 0]
+                        set word [my quotedChunk $location 0 $replaying]
                     } trap {APPCOMPILER DIAGNOSTIC E_PARSE_STRING} {message options} {
                         if {![llength $stringModes]} { return -options $options $message }
                         # In a hole the grammar distinguishes an unfinished
@@ -307,13 +313,16 @@ oo::class create ::appcompiler::ModuleParser {
     # On a failed check, replay lexical tokens to find an independent
     # declaration. Multiline strings and comments are single tokens. An
     # unclosed block or interpolation does not establish a new top level.
-    method nextDeclaration {beginning failedLine} {
+    method nextDeclaration {beginning failedAt} {
         my restore $beginning
         set expected {}
         set atLineStart 0
+        set failedLine [dict get $failedAt line]
         while {![my at eof]} {
             set kind [dict get $token kind]
-            if {$atLineStart && ![llength $expected] && [dict get $token line] > $failedLine} {
+            set currentLine [dict get $token line]
+            if {$atLineStart && ![llength $expected] && ($currentLine > $failedLine ||
+                    ($currentLine == $failedLine && [dict get $token column] >= [dict get $failedAt column]))} {
                 if {$kind in {export fn extern import record choice alias distinct} ||
                     ($kind eq "identifier" && [dict get $token value] in {resource tool worker example})} {
                     return 1
@@ -332,7 +341,7 @@ oo::class create ::appcompiler::ModuleParser {
             # Each of these errors consumed one ordinary character. Other
             # lexical errors may leave a string boundary uncertain.
             while {1} {
-                try {my advance; break} trap {APPCOMPILER DIAGNOSTIC E_PARSE_TOKEN} {} {
+                try {my advance 1; break} trap {APPCOMPILER DIAGNOSTIC E_PARSE_TOKEN} {} {
                     set atLineStart 0
                 } trap {APPCOMPILER DIAGNOSTIC E_PARSE_NAME} {} {
                     set atLineStart 0
@@ -343,6 +352,7 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method parse {{prescan 1}} {
+        if {[my at start]} {my advance}
         set imports {}
         set importLocations {}
         set functions {}
@@ -1204,7 +1214,7 @@ proc ::appcompiler::parseModule {module source {reportsVar {}}} {
                 set error [dict get $options -diagnostic]
                 lappend reports $error
                 try {
-                    set resume [$parser nextDeclaration $beginning [dict get $error node line]]
+                    set resume [$parser nextDeclaration $beginning [dict get $error node]]
                 } trap {APPCOMPILER DIAGNOSTIC} {message options} {
                     # The lexer can encounter the original error again. A
                     # later lexical failure also ends safe resynchronization.
