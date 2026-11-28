@@ -86,6 +86,72 @@ proc ::resultMatchTest::direct {} {
     } finally {interp delete $child}
 }
 
+proc ::resultMatchTest::armValues {} {
+    set source {extern fn .tap($v:text) -> text = ['::tap']
+export fn .first($keys:list<text>, $values:list<text>) -> map<text,text> {
+    $out := map<text,text>()
+    $i := 0
+    for $key in $keys {
+        $out = match $out[.tap($key)] {
+            some($saved) => $out
+            none => map_put($out, .tap($key), match $values[$i] {
+                some($v) => .tap($v)
+                none => .tap('absent') })
+        }
+        $i = $i + 1
+    }
+    return $out
+}
+export fn .nested($select:result<text,text>,$xs:list<text>) -> list<text> {
+    $value ::= match $select {
+        ok($v) => match $xs { [$x] => .tap($x)
+            _ => .tap($v) }
+        err($v) => match $xs { _ => .tap($v) }
+    }
+    return [$value,.tap('after')]
+}
+export fn .blank($key:text?) -> list<text> => [match $key {
+    none => ''
+    some($v) => .tap($v) }, .tap('after')]
+}
+    set app [interp create]
+    try {
+        $app eval [dict get [::appcompiler::compile [dict create select $source] ::selection] script]
+        $app eval {
+            proc tap v {
+                lappend ::events $v
+                if {$v eq {fail}} {return -code error -errorcode {FIXTURE ARM} -detail evidence rejected}
+                return $v
+            }
+            set ::events {}
+        }
+        set k "key\u0000\U0001F686"
+        set v [::machteld::json decode -typed 17]
+        set out [$app eval [list ::selection::select::first [list $k $k other missing] [list $v fail -code]]]
+        equal [dict keys $out] [list $k other missing] {ordered first occurrence index}
+        equal [dict values $out] [list $v -code absent] {first value and missing input payload}
+        equal [::machteld::json type [dict get $out $k]] number {selected value retains its native type}
+        equal [::machteld::json type $v] number {caller retains its native value}
+        equal [$app eval {set ::events}] [list $k $k $v $k other other -code missing missing absent] {ordered lookup, selected arm and operand effects}
+        foreach {choice items first} [list {ok fallback} [list $v] $v {ok fallback} {x y} fallback {err -level} {} -level] {
+            $app eval {set ::events {}}
+            set results [$app eval [list ::selection::select::nested $choice $items]]
+            equal $results [list $first after] {an arm produces its value and later statements run}
+            equal [$app eval {set ::events}] $results {only the selected nested arms run}
+        }
+        $app eval {set ::events {}}
+        equal [$app eval {::selection::select::blank none}] [list {} after] {an empty arm supplies its result}
+        equal [$app eval {set ::events}] after {later operand runs after the empty arm}
+        set status [catch {$app eval [list ::selection::select::nested {ok safe} {fail}]} msg options]
+        equal [list $status $msg [dict get $options -errorcode] [dict get $options -detail]] {1 rejected {FIXTURE ARM} evidence} {an arm propagates the original Tcl error}
+        equal [dict get $options -appcompilerlocation] {module select line 1 column 36} {failing extern retains its source location}
+        # The returned arm value may itself be a collection assigned back to
+        # its base in a loop. An extra result local would keep the previous
+        # dictionary shared and force a whole copy at every distinct key.
+        equal [string match {*::set m_result *} [$app eval {info body ::selection::select::first}]] 0 {arm results are not retained in a scratch local}
+    } finally {interp delete $app}
+}
+
 proc ::resultMatchTest::reject {signature arms code token} {
     set source [format {fn .bad($r: %s) -> text => match $r {
     %s
@@ -150,5 +216,6 @@ proc ::resultMatchTest::packed {} {
 if {$argv ni {{} -pack}} {error "usage: [file tail [info script]] ?-pack?"}
 ::resultMatchTest::direct
 ::resultMatchTest::diagnostics
+::resultMatchTest::armValues
 if {$argv eq "-pack"} {::resultMatchTest::packed}
 puts "application compiler result matching: $::resultMatchTest::checks assertions passed"

@@ -144,11 +144,12 @@ fn .run($args: .arguments) -> .outcome {
     return ok(unit)
 }}
     set implementation {format [impl].tcl}
-    set assets [list assets/blob.bin $packageDir/pkgIndex.tcl $packageDir/$implementation]
+    set assets [list assets/blob.bin assets/labels.src $packageDir/pkgIndex.tcl $packageDir/$implementation]
     set manifest "schema 1\r\nedition 1\r\nminApi 0.21\r\nentry {main start}\r\nmodules {logic lib/a.src main code/main.src}\r\nassets [list $assets]\r\npackageDirs [list [list $packageDir]]\r\n"
     set originals [dict create application.dict [bytes $manifest] \
         lib/a.src [bytes [string map [list "\n" "\r\n"] "$logic\n"]] \
         code/main.src [bytes "$main\n"] assets/blob.bin [binary decode hex 00ff0d0a807f00] \
+        assets/labels.src [bytes {a runtime data asset with the same extension as a module}] \
         $packageDir/pkgIndex.tcl [bytes {close [open package-index-visited w]
 package ifneeded sample::format 1.0 [list source -encoding utf-8 [file join $dir {format [impl].tcl}]]}] \
         $packageDir/$implementation [bytes {namespace eval ::sample {}
@@ -158,18 +159,73 @@ package provide sample::format 1.0}]]
     return $originals
 }
 
-proc ::projectTest::inspectArchive {archive originals} {
+proc ::projectTest::inspectArchive {archive originals {withSource 1} {withCompiler 1}} {
     set mount //zipfs:/application-project-test
     zipfs mount $archive $mount
     try {
-        foreach member {main.tcl compiler/pkgIndex.tcl compiler/compiler.tcl} {
+        ::machteld::ArchiveEntry $mount
+        foreach member {main.tcl project/reference.db} {
             expect [file isfile [file join $mount $member]] 1 "archive contains $member"
         }
+        expect [file exists [file join $mount compiler]] $withCompiler "compiler directory follows the requested output mode"
+        if {$withCompiler} {
+            foreach member {compiler.tcl pkgIndex.tcl driver.tcl README.md} {
+                expect [file isfile [file join $mount compiler $member]] 1 "snapshot contains $member"
+            }
+        }
+        set modules [dict values [dict get $originals application.dict modules]]
         dict for {relative data} $originals {
-            set packed [readBytes [file join $mount project inputs $relative]]
+            set path [file join $mount project inputs $relative]
+            if {!$withSource && ($relative eq "application.dict" || $relative in $modules)} {
+                expect [file exists $path] 0 "source-free archive omits $relative"
+                continue
+            }
+            set packed [readBytes $path]
             expect [binary encode hex $packed] [binary encode hex $data] "original bytes of $relative"
         }
     } finally {zipfs unmount $mount}
+}
+
+proc ::projectTest::archiveModes {exe caller driver manifest archive originals} {
+    foreach {action input} [list pack $manifest rebuild $archive] {
+        foreach {name options withSource withCompiler} {
+            source-only {--without-compiler} 1 0
+            compiler-only {--without-source} 0 1
+            neither {--without-compiler --without-source} 0 0
+        } {
+            if {$action eq "rebuild"} {set options [lreverse $options]}
+            set output [file join $caller $action-$name.machteld]
+            command $exe $caller [list $driver $action {*}$options $input $output] {}
+            inspectArchive $output $originals $withSource $withCompiler
+            appCase $exe $caller [list $output] {--format portable} {} [bytes {<portable>}] "$action $name launches with its Tcl package"
+            lassign [command $exe $caller [list $driver docs $output get fn/logic/answer] {}] page err
+            expect [string match {*export fn .answer(*} $page] 1 "$action $name retains its generated application reference"
+            if {!$withSource} {
+                set refused [file join $caller unavailable.machteld]
+                lassign [command $exe $caller [list $driver rebuild $output $refused] {} 0] out err
+                expect [string match {*use the original project*} $err] 1 "rebuild explains how to recover the missing source"
+                expect [file exists $refused] 0 "source-free input cannot create a rebuilt archive"
+                lassign [command $exe $caller [list $driver locate $output logic 1] {} 0] out err
+                expect [string match {*no editable project manifest*} $err] 1 "source lookup explains the missing source"
+            }
+        }
+        foreach options {{--without-source --without-source} {--unknown-mode}} {
+            set output [file join $caller invalid-options.machteld]
+            lassign [command $exe $caller [list $driver $action {*}$options $input $output] {} 0] out err
+            expect [string match {usage:*--without-source*--without-compiler*} $err] 1 "unsupported $action options display supported modes"
+            expect [file exists $output] 0 "unsupported options leave the destination absent"
+        }
+        foreach misplaced {--without-source --without-compiler} {
+            lassign [command $exe $caller [list $driver $action $input $misplaced] {} 0] out err
+            expect [string match {usage:*} $err] 1 "$action rejects $misplaced in place of the output"
+            expect [file exists [file join $caller $misplaced]] 0 "$action never writes an archive named for the option"
+        }
+    }
+    # An editable archive without a snapshot can still supply everything
+    # the current host needs to rebuild in the ordinary default mode.
+    set fresh [file join $caller restored-full.machteld]
+    command $exe $caller [list $driver rebuild [file join $caller pack-source-only.machteld] $fresh] {}
+    inspectArchive $fresh $originals
 }
 
 proc ::projectTest::extractKit {archive directory} {
@@ -321,6 +377,7 @@ source -encoding utf-8 $driver
     expect [file exists $marker] 0 "packing leaves the external package index unevaluated"
     inspectArchive $archive $originals
     set builtHash [::machteld::hash file sha256 $archive]
+    archiveModes $exe $caller $driver $manifest $archive $originals
 
     writeBytes $path [bytes {export fn .input() -> result<text,problem> { return 82 }
 export fn .answer($args: list<text>, $data: text) -> result<text,problem> {return ok($data)}}]

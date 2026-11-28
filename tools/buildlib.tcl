@@ -30,7 +30,10 @@ set ::machteld::build::SQLITE_FLAGS {
     -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_ENABLE_FTS5
     -DSQLITE_DQS=0 -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE
 }
-set ::machteld::build::YYJSON_FLAGS {-O2 -ffunction-sections -fdata-sections}
+# The private binary64 conversion is qualified only on the pinned fast reader.
+# Use this configuration for both yyjson.c and every consumer of its header.
+set ::machteld::build::YYJSON_CONFIG {-DMACHTELD_YYJSON_012_FAST=1 -DYYJSON_DISABLE_FAST_FP_CONV=0 -DYYJSON_DISABLE_NON_STANDARD=0}
+set ::machteld::build::YYJSON_FLAGS [list -O2 -ffunction-sections -fdata-sections {*}$::machteld::build::YYJSON_CONFIG]
 
 set ::machteld::build::SYSLIBS {
     -lnetapi32 -lkernel32 -luser32 -ladvapi32 -luserenv -lws2_32 -liphlpapi -lsecur32 -lcrypt32
@@ -65,7 +68,7 @@ proc ::machteld::build::common_flags {paths} {
     variable DEFINES
     set flags [list -std=c23 -O2 {*}$WARNINGS]
     if {[werror]} { lappend flags -Werror }
-    lappend flags {*}$DEFINES -ffunction-sections -fdata-sections \
+    lappend flags {*}$DEFINES {*}$::machteld::build::YYJSON_CONFIG -ffunction-sections -fdata-sections \
         -I[dict get $paths include] -I[dict get $paths sqlite] -I[dict get $paths yyjson]
     return $flags
 }

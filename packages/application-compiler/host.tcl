@@ -42,6 +42,7 @@ proc bindTypes {variables arguments} {
     if {[catch {llength $arguments} count] || $count != [llength $variables]} {
         reject {type arguments} "[llength $variables] concrete type argument(s)"
     }
+    if {!$count} {return {}}
     set schemas [schemas]
     set bindings {}
     foreach variable $variables argument $arguments {
@@ -60,6 +61,7 @@ proc callbackSignature {key types path} {
     if {![dict exists $targets $key]} {reject $path {a callable from this application}}
     lassign [dict get $targets $key] command variables parameters result
     set bindings [bindTypes $variables $types]
+    if {![dict size $bindings]} {return [list $command $parameters $result]}
     set parameters [lmap type $parameters {substituteType $type $bindings}]
     return [list $command $parameters [substituteType $result $bindings]]
 }
@@ -236,6 +238,7 @@ proc locationPrefix {location} {
 }
 
 proc guardLocation {location path} {
+    append location {}
     if {[catch {dict size $location}] || [dict getdef $location module {}] eq {}} {
         reject $path {a source location with a nonempty module}
     }
@@ -273,7 +276,15 @@ proc externInvoke {location prefix args} {
 }
 
 proc externResult {location type value} {
-    if {[catch {guard $type $value {extern result} 1} result options]} {
+    # Tcl values already satisfy text. Admit a declared int with the same
+    # normalizer as every other boundary, without parsing the type per call.
+    if {$type eq "text"} {return $value}
+    if {$type eq "int"} {
+        set status [catch {guardInteger $value {extern result}} result options]
+    } else {
+        set status [catch {guard $type $value {extern result} 1} result options]
+    }
+    if {$status} {
         dict set options -appcompilerlocation $location
         dict set options -errorcode {APPCOMPILER EXTERN RESULT}
         return -options $options $result
@@ -453,19 +464,40 @@ proc invalidWire {message} {
 
 # A NUL read through older native JSON can have a different internal byte
 # spelling from the same Tcl character. Dictionary keys must use one spelling.
-proc mapTextKey {value} {
-    if {[string first \u0000 $value] < 0} {return $value}
-    return [encoding convertfrom -profile strict utf-8 [encoding convertto -profile strict utf-8 $value]]
+if {[llength [info commands ::machteld::x::mapTextKey]] &&
+        "mapTextKey" in [namespace eval ::machteld::x {namespace export}]} {
+    namespace import -force ::machteld::x::mapTextKey
+} else {
+    proc mapTextKey {value} {
+        append value {}
+        if {[string first \u0000 $value] < 0} {return $value}
+        return [encoding convertfrom -profile strict utf-8 [encoding convertto -profile strict utf-8 $value]]
+    }
 }
 
-# Ask the native decoder for its own string representation. Quote each
-# non-NUL part with the native writer so quotes, backslashes and literal
-# \u sequences stay distinct from the inserted JSON escape. Plain decode
-# suffices here: the constructed document is always a single JSON string.
-proc nativeJsonText {value} {
-    if {[string first \u0000 $value] < 0} {return $value}
+if {[llength [info commands ::machteld::x::textHasNul]] &&
+        "textHasNul" in [namespace eval ::machteld::x {namespace export}]} {
+    proc nativeJsonText {value} {
+        if {![::machteld::x::textHasNul $value]} {return $value}
+        return [nativeJsonNulText $value]
+    }
+} else {
+    proc nativeJsonText {value} {
+        # Tcl's Unicode search can replace a caller's native representation.
+        append value {}
+        if {[string first \u0000 $value] < 0} {return $value}
+        return [nativeJsonNulText $value]
+    }
+}
+
+proc nativeJsonNulText {value} {
+    # Normalize before selecting a writer, including its strict Unicode errors.
+    set value [mapTextKey $value]
+    if {[jsonPreservesNul]} {return $value}
+    # Older JSON writers need their own spelling of an embedded NUL. Quote the
+    # individual parts to preserve literal backslashes and quotes around it.
     set interiors {}
-    foreach part [split [mapTextKey $value] \u0000] {
+    foreach part [split $value \u0000] {
         if {$part eq {}} {lappend interiors {}; continue}
         set encoded [::machteld::json encode -- [::machteld::json value string $part]]
         lappend interiors [string range $encoded 1 end-1]
@@ -479,10 +511,23 @@ proc listLookup {items index} {
     return [list some [lindex $items $index]]
 }
 
+proc indexFailure {items index} {
+    return [list err [dict create code INDEX_OUT_OF_RANGE message "index $index is outside a list of length [llength $items]"]]
+}
+
+# Tcl evaluates both source operands before entering this helper. A callback
+# may have installed read traces on either local after its public type guard.
+proc checkedIndex {items index location} {
+    if {$index < 0 || $index >= [llength $items]} {
+        tailcall propagate [indexFailure $items $index] $location
+    }
+    return [lindex $items $index]
+}
+
 proc require_index {items index} {
     lassign [listLookup $items $index] tag item
     if {$tag eq "some"} {return [list ok $item]}
-    return [list err [dict create code INDEX_OUT_OF_RANGE message "index $index is outside a list of length [llength $items]"]]
+    return [indexFailure $items $index]
 }
 
 proc mapLookup {map key} {
@@ -520,12 +565,50 @@ proc compareNumericMapKeys {left right} {
     return [expr {$negative ? -$order : $order}]
 }
 
+# Partition by sign and integer width once. Within each partition the
+# canonical digits have the same order as their exact magnitudes.
+proc sortedNumericKeys {keys} {
+    set negative {}
+    set positive {}
+    foreach key $keys {
+        set width [string first . $key]
+        if {$width < 0} {set width [string length $key]}
+        if {[string index $key 0] eq "-"} {
+            dict lappend negative $width $key
+        } else {
+            dict lappend positive $width $key
+        }
+    }
+    set result {}
+    foreach width [lsort -integer -decreasing [dict keys $negative]] {
+        lappend result {*}[lsort -ascii -decreasing [dict get $negative $width]]
+    }
+    foreach width [lsort -integer [dict keys $positive]] {
+        lappend result {*}[lsort -ascii [dict get $positive $width]]
+    }
+    return $result
+}
+
 proc sorted_keys {keyType map} {
     set keys [dict keys $map]
     switch -exact -- $keyType {
         text - bool {return [lsort -ascii $keys]}
-        int - decimal {return [lsort -command [namespace current]::compareNumericMapKeys $keys]}
+        int - decimal {
+            if {[llength $keys] < 8} {return [lsort -command [namespace current]::compareNumericMapKeys $keys]}
+            return [sortedNumericKeys $keys]
+        }
         default {error "unsupported map key type [list $keyType]"}
+    }
+}
+
+if {[llength [info commands ::machteld::x::textLength]] &&
+        "textLength" in [namespace eval ::machteld::x {namespace export}]} {
+    namespace import -force ::machteld::x::textLength
+} else {
+    proc textLength {value} {
+        # Character counting may replace a caller-owned Tcl object's internal representation.
+        append value {}
+        return [string length $value]
     }
 }
 
@@ -533,28 +616,80 @@ proc compareText {left right} {
     return [string compare [mapTextKey $left] [mapTextKey $right]]
 }
 
+# Some earlier hosts converted NUL to a noncanonical Tcl string or lost
+# part of a key. Probe both lookup and reconstruction before trusting a
+# native unwrap. Leave JSON untouched until the application first needs it.
+proc jsonPreservesNul {} {
+    variable jsonNulSafe
+    if {[info exists jsonNulSafe]} {return $jsonNulSafe}
+    set jsonNulSafe 0
+    set key "p\u0000q"
+    set value "v\u0000w"
+    set wire {{"p":null,"p\u0000q":"v\u0000w"}}
+    try {
+        set parsed [::machteld::json decode -typed $wire]
+        set built [::machteld::json value object [dict create p [::machteld::json value null] \
+            $key [::machteld::json value string $value]]]
+        if {[::machteld::json encode -- $built] ne $wire} {return 0}
+        foreach node [list $parsed $built] {
+            set plain [::machteld::json unwrap $node]
+            set text [::machteld::json unwrap [::machteld::json get $node $key]]
+            if {[dict get $plain $key] ne $value || ![dict exists [dict create $text 1] $value]} {return 0}
+        }
+        set jsonNulSafe 1
+    } on error {} {return 0}
+    return $jsonNulSafe
+}
+
+set jsonRowProjection [expr {[llength [info commands ::machteld::x::projectRows]] &&
+    "projectRows" in [namespace eval ::machteld::x {namespace export}]}]
+set jsonScalarProjection [expr {[llength [info commands ::machteld::x::projectScalars]] &&
+    "projectScalars" in [namespace eval ::machteld::x {namespace export}]}]
+
+proc jsonHasChildren {} {
+    variable jsonChildWalk
+    if {![info exists jsonChildWalk]} {
+        set jsonChildWalk [expr {[jsonPreservesNul] &&
+            ![catch {::machteld::json children [::machteld::json value array {}]}]}]
+    }
+    return $jsonChildWalk
+}
+
 proc typedMembers {node} {
+    if {[jsonHasChildren]} {return [::machteld::json children $node]}
     set children {}
     foreach key [dict keys [::machteld::json unwrap $node]] {
         dict set children $key [::machteld::json get $node $key]
     }
     # Older hosts can lose a NUL inside a key during Tcl conversion. Check
     # the reconstruction before permitting a write through such a boundary.
-    set rebuilt [::machteld::json value object $children]
-    if {[::machteld::json encode -- $rebuilt] ne [::machteld::json encode -- $node]} {
-        invalidWire "object keys cannot be preserved by this JSON runtime"
+    if {![jsonPreservesNul]} {
+        set rebuilt [::machteld::json value object $children]
+        if {[::machteld::json encode -- $rebuilt] ne [::machteld::json encode -- $node]} {
+            invalidWire "object keys cannot be preserved by this JSON runtime"
+        }
     }
     return $children
 }
 
 proc fromWire {type node path} {
-    set parts [typeParts $type]
-    set head [lindex $parts 0]
+    set head $type
+    switch -- [string index $type end] {
+        ? {return [list some [fromWire [string range $type 0 end-1] $node $path]]}
+        > {
+            if {[string range $type 0 4] eq "list<"} {
+                set head list
+                set element [string range $type 5 end-1]
+            } else {
+                set parts [typeParts $type]
+                set head [lindex $parts 0]
+            }
+        }
+    }
     set actual [::machteld::json type $node]
     switch -exact -- $head {
-        optional {return [list some [fromWire [lindex $parts 1] $node $path]]}
         binary64 {
-            if {$actual ne "number" || [catch {finiteBinary64 [::machteld::json unwrap $node]} value]} {
+            if {$actual ne "number" || [catch {lexicalBinary64 [::machteld::json unwrap $node]} value]} {
                 invalidWire "$path expects a finite binary64 JSON number"
             }
             return $value
@@ -566,14 +701,21 @@ proc fromWire {type node path} {
         }
         decimal {
             if {$actual ne "number"} {invalidWire "$path expects a decimal number, got $actual"}
-            if {[catch {decimal::canonical [::machteld::json unwrap $node]} value]} {
-                invalidWire "$path expects a fixed-point JSON number"
+            # A typed JSON number has already satisfied the JSON grammar.
+            # In fixed-point form, only trailing fractional zeros and -0
+            # can differ from X's canonical decimal spelling.
+            set value [::machteld::json unwrap $node]
+            if {[string match -nocase *e* $value]} {invalidWire "$path expects a fixed-point JSON number"}
+            if {[string first . $value] >= 0} {
+                set value [string trimright [string trimright $value 0] .]
             }
+            if {$value eq "-0"} {return 0}
             return $value
         }
         text {
             if {$actual ne "string"} {invalidWire "$path expects text, got $actual"}
             set value [::machteld::json unwrap $node]
+            if {[jsonPreservesNul]} {return $value}
             set rebuilt [::machteld::json value string [nativeJsonText $value]]
             if {[::machteld::json encode -- $rebuilt] ne [::machteld::json encode -- $node]} {
                 invalidWire "$path cannot be preserved as text by this runtime"
@@ -583,11 +725,10 @@ proc fromWire {type node path} {
         int {
             if {$actual ne "number"} {invalidWire "$path expects an integer, got $actual"}
             set digits [::machteld::json unwrap $node]
-            if {![regexp {\A-?(?:0|[1-9][0-9]*)\Z} $digits]} {
+            if {[string match {*[.eE]*} $digits]} {
                 invalidWire "$path expects an integer JSON literal"
             }
-            scan $digits %lld value
-            return $value
+            return [expr {$digits + 0}]
         }
         bool {
             if {$actual ne "boolean"} {invalidWire "$path expects a boolean, got $actual"}
@@ -596,10 +737,41 @@ proc fromWire {type node path} {
         bytes - callable - ref {invalidWire "$path has no JSON representation for $head"}
         list {
             if {$actual ne "array"} {invalidWire "$path expects an array, got $actual"}
+            if {[jsonHasChildren]} {
+                variable jsonScalarProjection
+                if {$jsonScalarProjection && $element in {text int bool}} {
+                    set projected [::machteld::x::projectScalars $element $node]
+                    if {[llength $projected]} {
+                        if {$element eq "text"} {return [lindex $projected 0]}
+                        # The integer and boolean readers call fromWire for each child.
+                        try {
+                            wireDepthAvailable 2
+                            return [lindex $projected 0]
+                        } trap {TCL LIMIT STACK} {} {
+                            # The portable reader determines whether this array fits.
+                        }
+                    }
+                }
+                set i -1
+                if {$element eq "text"} {
+                    return [lmap child [::machteld::json children $node] {
+                        incr i
+                        set kind [::machteld::json type $child]
+                        if {$kind ne "string"} {invalidWire "$path\[$i\] expects text, got $kind"}
+                        ::machteld::json unwrap $child
+                    }]
+                }
+                set reader [dict getdef [jsonListReaders] $element {}]
+                if {$reader ne {}} {return [$reader $node $path $element]}
+                return [lmap child [::machteld::json children $node] {
+                    incr i
+                    fromWire $element $child "$path\[$i\]"
+                }]
+            }
             set out {}
             set size [llength [::machteld::json unwrap $node]]
             for {set i 0} {$i < $size} {incr i} {
-                lappend out [fromWire [lindex $parts 1] [::machteld::json get $node $i] "$path\[$i\]"]
+                lappend out [fromWire $element [::machteld::json get $node $i] "$path\[$i\]"]
             }
             return $out
         }
@@ -615,7 +787,9 @@ proc fromWire {type node path} {
             return $out
         }
     }
-    lassign [specializeSchema $type [schemas]] kind members
+    set schema [dict getdef [schemas] $type {}]
+    if {[llength $schema] != 2} {set schema [specializeSchema $type [schemas]]}
+    lassign $schema kind members
     if {$kind eq "distinct"} {return [fromWire $members $node $path]}
     if {$kind ne "record"} {
         invalidWire "$path has no declared record wire format for $type"
@@ -633,18 +807,23 @@ proc fromWire {type node path} {
 }
 
 proc toWire {type value path} {
-    set parts [typeParts $type]
-    set head [lindex $parts 0]
-    switch -exact -- $head {
+    switch -exact -- $type {
         text {return [::machteld::json value string [nativeJsonText $value]]}
         instant - local_datetime {
             if {[catch {temporalCanonical $type $value}]} {invalidWire "$path expects canonical $type text"}
             return [::machteld::json value string $value]
         }
-        int  {return [::machteld::json value number [guard int $value $path]]}
+        int  {return [::machteld::json value number [guardInteger $value $path]]}
         decimal {return [::machteld::json value number [guard decimal $value $path]]}
-        binary64 {return [::machteld::json value number [format %.17g [guard binary64 $value $path]]]}
+        binary64 {
+            if {[catch {finiteBinary64 $value} number]} {reject $path {finite binary64}}
+            return [::machteld::json value number [binary64Text $number]]
+        }
         bool {return [::machteld::json value boolean [guard bool $value $path]]}
+    }
+    set parts [typeParts $type]
+    set head [lindex $parts 0]
+    switch -exact -- $head {
         bytes - callable - ref {invalidWire "$path has no JSON representation for $head"}
         list {
             set nodes {}
@@ -723,50 +902,246 @@ proc decimalKey {token} {
     return [list $sign$trimmed $power]
 }
 
-proc equalWire {left right} {
+# The private native walk inspects up to twelve levels. Reserve its portable
+# call depth as well, so equality preserves a nearly exhausted Tcl stack.
+proc wireDepthAvailable {remaining} {
+    if {$remaining} {return [wireDepthAvailable [expr {$remaining - 1}]]}
+}
+set evidenceProof [expr {[llength [info commands ::machteld::x::compareEvidence]] &&
+        "compareEvidence" in [namespace eval ::machteld::x {namespace export}]}]
+proc equalWire [list left right [list probe $evidenceProof]] {
     set type [::machteld::json type $left]
     if {$type ne [::machteld::json type $right]} {return 0}
+    if {$probe && $type in {object array}} {
+        set answer [::machteld::x::compareEvidence $left $right]
+        if {$answer >= 0} {
+            try {
+                wireDepthAvailable 16
+                return $answer
+            } trap {TCL LIMIT STACK} {} {
+                # Let the original walk determine whether this particular input fits.
+            }
+        }
+    }
     switch -exact -- $type {
         object {
             set l [typedMembers $left]
             set r [typedMembers $right]
             if {[dict size $l] != [dict size $r]} {return 0}
             dict for {key child} $l {
-                if {![dict exists $r $key] || ![equalWire $child [dict get $r $key]]} {return 0}
+                if {![dict exists $r $key] || ![equalWire $child [dict get $r $key] 0]} {return 0}
             }
             return 1
         }
         array {
+            if {[jsonHasChildren]} {
+                set a [::machteld::json children $left]
+                set b [::machteld::json children $right]
+                if {[llength $a] != [llength $b]} {return 0}
+                foreach x $a y $b {if {![equalWire $x $y 0]} {return 0}}
+                return 1
+            }
             set count [llength [::machteld::json unwrap $left]]
             if {$count != [llength [::machteld::json unwrap $right]]} {return 0}
             for {set i 0} {$i < $count} {incr i} {
-                if {![equalWire [::machteld::json get $left $i] [::machteld::json get $right $i]]} {return 0}
+                if {![equalWire [::machteld::json get $left $i] [::machteld::json get $right $i] 0]} {return 0}
             }
             return 1
         }
         number {
-            return [string equal [decimalKey [::machteld::json unwrap $left]] \
-                [decimalKey [::machteld::json unwrap $right]]]
+            set a [::machteld::json unwrap $left]
+            set b [::machteld::json unwrap $right]
+            if {[string equal $a $b]} {return 1}
+            return [string equal [decimalKey $a] [decimalKey $b]]
         }
         null {return 1}
         default {return [string equal [::machteld::json unwrap $left] [::machteld::json unwrap $right]]}
     }
 }
 
-# Accept decimal/scientific spelling at the Tcl and JSON boundaries. Constrain
-# the input before conversion so Tcl's base prefixes never change its value.
-proc finiteBinary64 {value} {
-    if {![regexp {\A[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\Z} $value]} {
+unset evidenceProof
+
+# Round positive decimal digits to the nearest binary64, choosing even on a tie.
+# A positive discarded tail can break a tie. Negative results share this rounding.
+proc roundBinary64 {digits order negative sticky nearest} {
+    set count [string length $digits]
+    set scale [expr {$order + 1 - $count}]
+    if {$nearest && $count <= 15 && $scale >= -22 && $scale <= 22} {
+        # The coefficient and powers of ten through 10^22 are exactly representable.
+        set power [expr {double(10 ** abs($scale))}]
+        set number [expr {$scale >= 0 ? double($digits) * $power : double($digits) / $power}]
+        return [expr {$negative ? -$number : $number}]
+    }
+    if {$scale >= 0} {
+        set numerator [expr {$digits * 10**$scale}]
+        set denominator 1
+    } else {
+        set numerator $digits
+        set denominator [expr {10**(-$scale)}]
+    }
+    # Start just below the binary exponent for this decimal order. The error
+    # of 3.32193 as log2(10) is below 0.001 bit throughout the admitted range.
+    set shift [expr {max(-1074, ($order * 332193) / 100000 - 53)}]
+    if {$shift < 0} {
+        set numerator [expr {$numerator << (-$shift)}]
+    } else {
+        set denominator [expr {$denominator << $shift}]
+    }
+    while {$numerator >= ($denominator << 53)} {
+        set denominator [expr {$denominator << 1}]
+        incr shift
+    }
+    set rounded [expr {$numerator / $denominator}]
+    set twiceRemainder [expr {2 * ($numerator % $denominator)}]
+    if {$twiceRemainder > $denominator || ($twiceRemainder == $denominator && ($sticky || ($rounded & 1)))} {
+        incr rounded
+    }
+    if {$rounded == (1 << 53)} {
+        set rounded [expr {$rounded >> 1}]
+        incr shift
+    }
+    if {$shift > 971} {error "binary64 overflow"}
+    if {$rounded == 0} {return 0.0}
+    set bits $rounded
+    if {$rounded >= (1 << 52)} {
+        set bits [expr {(($shift + 1075) << 52) | ($rounded - (1 << 52))}]
+    }
+    if {$negative} {set bits [expr {$bits | (1 << 63)}]}
+    binary scan [binary format W $bits] Q number
+    return $number
+}
+
+# A Tcl extension may temporarily change this thread's floating-point mode.
+# These adjacent integers have spacing two. Adding one tests both tie parities.
+proc binary64NearestMode {} {
+    set even 9007199254740992
+    set odd 9007199254740994
+    return [expr {$even + 1.0 == $even && $odd + 1.0 != $odd}]
+}
+
+proc decimalBinary64 {value nearest} {
+    # Parse a private value so even a failed conversion preserves the caller's object.
+    append value {}
+    # These small decimal inputs use Tcl's one-round conversion with exact operands.
+    if {$nearest && [string length $value] <= 14 && [regexp {\A[+-]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9])?\Z} $value]} {
+        set number [expr {double($value)}]
+        return [expr {$number == 0.0 ? 0.0 : $number}]
+    }
+    # Canonical integers this wide remain below 10^308. Tcl converts its
+    # integer representation directly, including when the integer is a bignum.
+    if {$nearest && [string length $value] <= 308 && [regexp {\A(?:0|-?[1-9][0-9]*)\Z} $value]} {
+        return [expr {double($value)}]
+    }
+    if {![regexp {\A([+-]?)([0-9]+)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?\Z} $value -> sign whole fraction exponent]} {
         error "expected a finite binary64 number"
     }
-    if {[regexp {\A[+-]?0[0-9]+\Z} $value]} {append value .0}
-    set number [expr {double($value)}]
-    if {abs($number) == Inf} {error "binary64 overflow"}
-    return [expr {$number == 0.0 ? 0.0 : $number}]
+    set nonzero [string trimleft $whole$fraction 0]
+    if {$nonzero eq {}} {return 0.0}
+    set order [expr {[string length $nonzero] - [string length $fraction] - 1}]
+    set magnitude [string trimleft $exponent +-0]
+    if {$magnitude ne {}} {
+        set subtract [expr {[string index $exponent 0] eq "-"}]
+        # Even the largest Tcl string cannot offset a 21-digit decimal exponent.
+        if {[string length $magnitude] > 20} {
+            if {$subtract} {return 0.0}
+            error "binary64 overflow"
+        }
+        set order [expr {$subtract ? $order - $magnitude : $order + $magnitude}]
+    }
+    if {$order > 308} {error "binary64 overflow"}
+    if {$order < -324} {return 0.0}
+    set digits [string trimright $nonzero 0]
+    set sticky [expr {[string length $digits] > 1400}]
+    if {$sticky} {
+        # Every binary64 midpoint is a multiple of 10^-1075. At decimal order
+        # <= 308, this prefix is finer. The discarded nonzero tail affects
+        # rounding only when the retained prefix itself equals a midpoint.
+        set digits [string range $digits 0 1399]
+    }
+    return [roundBinary64 $digits $order [expr {$sign eq "-"}] $sticky $nearest]
+}
+
+proc finiteBinary64Bytes {bytes} {
+    binary scan $bytes W word
+    set magnitude [expr {$word & 0x7fffffffffffffff}]
+    if {$magnitude >= 0x7ff0000000000000} {error "expected a finite binary64 number"}
+    if {!$magnitude} {return 0.0}
+    binary scan $bytes Q number
+    return $number
+}
+
+if {[llength [info commands ::machteld::x::boundedBinary64]] &&
+        "boundedBinary64" in [namespace eval ::machteld::x {namespace export}]} {
+    proc lexicalBinary64 {value} {
+        set number [::machteld::x::boundedBinary64 $value]
+        if {[string is double -strict $number]} {return $number}
+        return [decimalBinary64 $value [expr {$number eq "long"}]]
+    }
+} else {
+    proc lexicalBinary64 {value} {return [decimalBinary64 $value [binary64NearestMode]]}
+}
+
+if {[llength [info commands ::machteld::x::readBinary64]] &&
+        "readBinary64" in [namespace eval ::machteld::x {namespace export}]} {
+    proc finiteBinary64 {value} {
+        set number [::machteld::x::readBinary64 $value]
+        if {[string is double -strict $number]} {return $number}
+        if {$number eq "nonfinite"} {error "expected a finite binary64 number"}
+        return [decimalBinary64 $value [expr {$number eq "long"}]]
+    }
+} elseif {[llength [info commands ::tcl::unsupported::representation]]} {
+    proc finiteBinary64 {value} {
+        # A private copy can acquire its Tcl spelling without changing the
+        # caller. DAZ can give a nonzero subnormal a zero spelling.
+        set text $value
+        append text {}
+        switch -exact -- $text {
+            0 - -0 {return 0.0}
+            0.0 - -0.0 {
+                if {[catch {binary format Q $text} bytes]} {return 0.0}
+                binary scan $bytes W word
+                if {($word & 0x7fffffffffffffff) && [isPureBinary64 $value]} {
+                    return [finiteBinary64Bytes $bytes]
+                }
+                return 0.0
+            }
+        }
+        # Tcl prints a finite pure double with a point or a lowercase exponent.
+        # Its shortest binary64 spelling is less than 32 characters.
+        if {[string length $text] > 32 ||
+                ([string first . $text] < 0 && [string first e $text] < 0)} {
+            return [lexicalBinary64 $text]
+        }
+        try {
+            set number [lexicalBinary64 $text]
+        } on error {number options} {
+            if {[isPureBinary64 $value]} {return [finiteBinary64Bytes [binary format Q $value]]}
+            return -options $options $number
+        }
+        # Test the independent numeric view on another private copy. A
+        # string-length operation can discard that copy's double representation.
+        set copy $value
+        append copy {}
+        if {$number != 0.0 && ![catch {expr {double($copy) == $number}} same] && $same} {
+            return $number
+        }
+        if {[isPureBinary64 $value]} {return [finiteBinary64Bytes [binary format Q $value]]}
+        return $number
+    }
+    proc isPureBinary64 {value} {
+        # These pinned Tcl hosts expose object representation only in ordinary
+        # interpreters. A restricted interpreter keeps the lexical reading.
+        return [expr {![catch {::tcl::unsupported::representation $value} rep] &&
+                [string match {value is a double *, no string representation} $rep]}]
+    }
+} else {
+    # Safe Tcl interpreters hide object representations. Keep their existing
+    # lexical behavior, including the Tcl spelling of an incoming double.
+    proc finiteBinary64 {value} {return [lexicalBinary64 $value]}
 }
 
 proc to_binary64 {exact} {
-    if {[catch {finiteBinary64 $exact} number]} {
+    if {[catch {lexicalBinary64 $exact} number]} {
         return [list err [dict create code BINARY64_OVERFLOW message "conversion exceeds the finite binary64 range"]]
     }
     return [list ok $number]
@@ -778,9 +1153,13 @@ proc binaryArithmetic {op a b} {
     }
     set number [::tcl::mathop::$op $a $b]
     if {abs($number) == Inf} {
-        return [list err [dict create code BINARY64_OVERFLOW message "operation exceeds the finite binary64 range"]]
+        return [binaryOverflow]
     }
     return [list ok [expr {$number == 0.0 ? 0.0 : $number}]]
+}
+
+proc binaryOverflow {} {
+    return [list err [dict create code BINARY64_OVERFLOW message "operation exceeds the finite binary64 range"]]
 }
 
 # A binary64 value is an integer significand times a power of two. For a
@@ -794,19 +1173,138 @@ proc exact_decimal {number} {
     if {$significand == 0} {return 0}
     set shift [expr {max(1, $exponent) - 1075}]
     if {$shift >= 0} {return [expr {$significand << $shift}]}
-    return [decimal::fromParts [expr {$significand * 5**(-$shift)}] [expr {-$shift}]]
+    set scale [expr {-$shift}]
+    if {$scale <= 52 && ($significand & ((1 << $scale) - 1)) == 0} {
+        return [expr {$significand >> $scale}]
+    }
+    set sign [expr {$significand < 0 ? "-" : ""}]
+    if {$exponent != 0} {
+        # A denominator of 2^scale needs at most scale fractional digits.
+        # Only take those digits from %f. Its radix character follows the thread locale.
+        set fixed [format %.*f $scale $number]
+        set start [expr {[string length $fixed] - $scale}]
+        set fraction [string trimright [string range $fixed $start end] 0]
+        set whole [expr {abs($significand) >> $scale}]
+        return ${sign}${whole}.$fraction
+    }
+    # The C formatter can flush subnormals to zero. Render their exact
+    # coefficient in 18-digit blocks, each of which fits a signed 64-bit word.
+    set numerator [expr {abs($significand) * 5**1074}]
+    set parts {}
+    while {$numerator >= 1000000000000000000} {
+        lappend parts [format %018ld [expr {$numerator % 1000000000000000000}]]
+        set numerator [expr {$numerator / 1000000000000000000}]
+    }
+    lappend parts $numerator
+    set digits [join [lreverse $parts] {}]
+    set zeros [string repeat 0 [expr {1074 - [string length $digits]}]]
+    return ${sign}0.${zeros}[string trimright $digits 0]
+}
+
+proc binary64TextPortable {number} {
+    binary scan [binary format Q $number] Wu bits
+    set exponent [expr {($bits >> 52) & 0x7ff}]
+    set significand [expr {$bits & 0xfffffffffffff}]
+    set sign [expr {$bits >> 63 ? "-" : ""}]
+    if {$exponent == 2047} {return [format %.17g $number]}
+    if {$exponent} {
+        set significand [expr {$significand | (1 << 52)}]
+        set shift [expr {$exponent - 1075}]
+        set order2 [expr {$exponent - 1023}]
+    } elseif {$significand} {
+        set shift -1074
+        set order2 [expr {[string length [format %llb $significand]] - 1075}]
+    } else {
+        return ${sign}0
+    }
+    # Place 17 significant decimal digits in an integer quotient. The
+    # fixed-point estimate of log10(2) errs by less than .001 throughout
+    # binary64; the exact comparisons below settle either adjacent decade.
+    set power [expr {($order2 * 78913) >> 18}]
+    set scale [expr {16 - $power}]
+    set numerator $significand
+    set denominator 1
+    if {$scale >= 0} {
+        set numerator [expr {$numerator * 5**$scale}]
+    } else {
+        set denominator [expr {5**(-$scale)}]
+    }
+    set twos [expr {$shift + $scale}]
+    if {$twos >= 0} {
+        set numerator [expr {$numerator << $twos}]
+    } else {
+        set denominator [expr {$denominator << (-$twos)}]
+    }
+    if {$numerator >= 100000000000000000 * $denominator} {
+        incr power
+        set denominator [expr {10 * $denominator}]
+    } elseif {$numerator < 10000000000000000 * $denominator} {
+        incr power -1
+        set numerator [expr {10 * $numerator}]
+    }
+    set rounded [expr {$numerator / $denominator}]
+    set twice [expr {2 * ($numerator - $rounded * $denominator)}]
+    if {$twice > $denominator || ($twice == $denominator && ($rounded & 1))} {
+        incr rounded
+        if {$rounded == 100000000000000000} {incr power; set rounded 1}
+    }
+    set digits [string trimright $rounded 0]
+    if {$power < -4 || $power >= 17} {
+        set mantissa [string index $digits 0]
+        if {[string length $digits] > 1} {append mantissa . [string range $digits 1 end]}
+        return $sign$mantissa[format {e%+03d} $power]
+    }
+    if {$power < 0} {return ${sign}0.[string repeat 0 [expr {-$power - 1}]]$digits}
+    set zeros [expr {$power + 1 - [string length $digits]}]
+    if {$zeros >= 0} {return $sign$digits[string repeat 0 $zeros]}
+    return $sign[string range $digits 0 $power].[string range $digits $power+1 end]
+}
+
+if {[llength [info commands ::machteld::x::binary64Print]] &&
+        "binary64Print" in [namespace eval ::machteld::x {namespace export}]} {
+    proc binary64Text {number} {
+        set text [::machteld::x::binary64Print $number]
+        if {$text ne {}} {return $text}
+        tailcall binary64TextPortable $number
+    }
+} else {
+    proc binary64Text {number} {tailcall binary64TextPortable $number}
+}
+
+# Choose once. A separate Tcl helper for every unequal pair costs time in
+# a window query that compares a channel name with thousands of records.
+if {[llength [info commands ::machteld::x::textHasNul]] &&
+        "textHasNul" in [namespace eval ::machteld::x {namespace export}]} {
+    proc equalText {left right} {
+        if {[string equal $left $right]} {return 1}
+        if {![::machteld::x::textHasNul $left]} {return 0}
+        return [string equal [mapTextKey $left] [mapTextKey $right]]
+    }
+} else {
+    proc equalText {left right} {
+        if {[string equal $left $right]} {return 1}
+        append left {}
+        if {[string first \u0000 $left] < 0} {return 0}
+        return [string equal [mapTextKey $left] [mapTextKey $right]]
+    }
+}
+
+if {[llength [info commands ::machteld::x::binary64v1::add]] &&
+        "add" in [namespace eval ::machteld::x::binary64v1 {namespace export}]} {
+    proc binary64Equal {left right} {::machteld::x::binary64v1::equal $left $right}
+} else {
+    proc binary64Equal {left right} {expr {$left == $right}}
 }
 
 proc equal {type left right} {
+    switch -exact -- $type {
+        int - bool {return [expr {$left == $right}]}
+        binary64 {return [binary64Equal $left $right]}
+        decimal - instant - local_datetime {return [string equal $left $right]}
+        text {return [equalText $left $right]}
+    }
     set parts [typeParts $type]
     switch -exact -- [lindex $parts 0] {
-        int - bool - binary64 {return [expr {$left == $right}]}
-        decimal - instant - local_datetime {return [string equal $left $right]}
-        text {
-            if {[string equal $left $right]} {return 1}
-            if {[string first \u0000 $left] < 0} {return 0}
-            return [string equal [mapTextKey $left] [mapTextKey $right]]
-        }
         optional {
             if {[lindex $left 0] ne [lindex $right 0]} {return 0}
             if {[lindex $left 0] eq "none"} {return 1}
@@ -842,6 +1340,11 @@ proc equal {type left right} {
         dict unset left $name
         dict unset right $name
     }
+    tailcall equalExtras $left $right
+}
+
+# Preserve the comparator's Tcl call depth when descending into retained JSON.
+proc equalExtras {left right} {
     if {[dict size $left] != [dict size $right]} {return 0}
     dict for {key extra} $left {
         if {![dict exists $right $key] || ![equalWire $extra [dict get $right $key]]} {return 0}

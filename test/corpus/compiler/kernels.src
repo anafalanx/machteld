@@ -1,0 +1,208 @@
+## Sum the greatest common divisors of a deterministic sequence of integer pairs.
+export fn .gcd_sum($n: int) -> int {
+    $u := 17
+    $v := 23
+    $total := 0
+    for $i in 0..$n {
+        $u = $u + 37
+        if $u >= 509 { $u = $u - 509 }
+        $v = $v + 71
+        if $v >= 503 { $v = $v - 503 }
+        $a := $u + 1
+        $b := $v + 1
+        while $a != $b {
+            if $a > $b {
+                $a = $a - $b
+            } else {
+                $b = $b - $a
+            }
+        }
+        $total = $total + $a
+    }
+    return $total
+}
+example .gcd_sum(0) => 0
+example .gcd_sum(10) => 47
+
+## Sum the escape iterations on a regularly spaced Mandelbrot grid.
+export fn .escape_grid($width: int, $height: int, $limit: int) -> result<int,problem> {
+    $zero ::= to_binary64(0)?
+    $one ::= to_binary64(1)?
+    $two ::= to_binary64(2)?
+    $three ::= to_binary64(3)?
+    $four ::= to_binary64(4)?
+    $xstep ::= ($three / to_binary64($width)?)?
+    $ystep ::= ($two / to_binary64($height)?)?
+    $total := 0
+    for $y in 0..$height {
+        $cy ::= ((to_binary64($y)? * $ystep)? - $one)?
+        for $x in 0..$width {
+            $cx ::= ((to_binary64($x)? * $xstep)? - $two)?
+            $zx := $zero
+            $zy := $zero
+            $iterations := 0
+            while $iterations < $limit && (($zx * $zx)? + ($zy * $zy)?)? <= $four {
+                $next_x ::= ((($zx * $zx)? - ($zy * $zy)?)? + $cx)?
+                $next_y ::= ((($two * $zx)? * $zy)? + $cy)?
+                $zx = $next_x
+                $zy = $next_y
+                $iterations = $iterations + 1
+            }
+            $total = $total + $iterations
+        }
+    }
+    return ok($total)
+}
+example .escape_grid(4, 3, 8) => 62
+example .escape_grid(3, 2, 0) => 0
+example .escape_grid(0, 3, 8) => error 'DIVIDE_BY_ZERO'
+
+## Count each distinct text value in its original case.
+export fn .histogram($words: list<text>) -> map<text,int> {
+    $counts := map<text,int>()
+    for $word in $words {
+        $count ::= match $counts[$word] {
+            some($value) => $value
+            none => 0
+        }
+        $counts = map_put($counts, $word, $count + 1)
+    }
+    return $counts
+}
+example .histogram(['a', 'A', 'a']) => map_put(map_put(map<text,int>(), 'a', 2), 'A', 1)
+
+## Merge two sorted integer lists, taking ties from the left input.
+export fn .merge_sorted($left: list<int>, $right: list<int>) -> list<int> {
+    $left_count ::= len($left)
+    $right_count ::= len($right)
+    $i := 0
+    $j := 0
+    $merged := list<int>()
+    while $i < $left_count && $j < $right_count {
+        $a ::= match $left[$i] {
+            some($value) => $value
+            none => 0
+        }
+        $b ::= match $right[$j] {
+            some($value) => $value
+            none => 0
+        }
+        if $a <= $b {
+            $merged = list_append($merged, $a)
+            $i = $i + 1
+        } else {
+            $merged = list_append($merged, $b)
+            $j = $j + 1
+        }
+    }
+    while $i < $left_count {
+        $a ::= match $left[$i] {
+            some($value) => $value
+            none => 0
+        }
+        $merged = list_append($merged, $a)
+        $i = $i + 1
+    }
+    while $j < $right_count {
+        $b ::= match $right[$j] {
+            some($value) => $value
+            none => 0
+        }
+        $merged = list_append($merged, $b)
+        $j = $j + 1
+    }
+    return $merged
+}
+example .merge_sorted([-3, 2, 2, 8], [-1, 2, 7]) => [-3, -1, 2, 2, 2, 7, 8]
+example .merge_sorted([], [5]) => [5]
+
+## Compute Fibonacci by visiting both recursive branches on every non-base call.
+export fn .fib($n: int) -> int {
+    if $n < 2 { return $n }
+    return .fib($n - 1) + .fib($n - 2)
+}
+example .fib(0) => 0
+example .fib(10) => 55
+
+## Keep the first ID in each consecutive run, including arbitrarily large IDs.
+export fn .compact_ids($ids: list<int>) -> list<int> {
+    $out := list<int>()
+    $seen := false
+    $last := 0
+    for $id in $ids {
+        if $seen && $last == $id { continue }
+        $out = list_append($out, $id)
+        $last = $id
+        $seen = true
+    }
+    return $out
+}
+
+export record .event {
+    tick: int
+    channel: text
+    reading: int?
+}
+
+## Collect present readings for one channel inside a half-open interval.
+export fn .window_readings($events: list<.event>, $channel: text, $start: int, $end: int) -> list<int> {
+    $values := list<int>()
+    for $e in $events {
+        if $e.tick >= $start && $e.tick < $end && $e.channel == $channel {
+            $values = match $e.reading {
+                some($value) => list_append($values, $value)
+                none => $values
+            }
+        }
+    }
+    return $values
+}
+
+## Last recorded reading per channel at a cutoff. Input is chronological.
+export fn .snapshot($events: list<.event>, $cutoff: int) -> map<text,int> {
+    $state := map<text,int>()
+    for $e in $events {
+        if $e.tick > $cutoff { break }
+        $state = match $e.reading {
+            some($value) => map_put($state, $e.channel, $value)
+            none => $state
+        }
+    }
+    return $state
+}
+
+## Record the closing balance and its low and high points in exact currency units.
+export fn .reconcile($postings: list<decimal>) -> list<decimal> {
+    $balance := 0.00
+    $low := 0.00
+    $high := 0.00
+    for $amount in $postings {
+        $balance = $balance + $amount
+        if $balance < $low { $low = $balance }
+        if $balance > $high { $high = $balance }
+    }
+    return [$balance, $low, $high]
+}
+
+record .packet {
+    source: text
+    amount: int
+    adjustment: int?
+}
+
+fn .adjusted($p: .packet) -> int =>
+    $p.amount + match $p.adjustment { some($offset) => $offset
+        none => 0 }
+
+## Return a value or rejection for every input JSON document, in order.
+export fn .json_intake($documents: list<text>) -> list<int?> {
+    $out := list<int?>()
+    for $document in $documents {
+        $entry ::= match decode_json<.packet>($document) {
+            ok($p) => some(.adjusted($p))
+            err($problem) => none
+        }
+        $out = list_append($out, $entry)
+    }
+    return $out
+}

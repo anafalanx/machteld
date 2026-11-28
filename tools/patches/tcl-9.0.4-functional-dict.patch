@@ -1,0 +1,94 @@
+Machteld overlay for Tcl 9.0.4. The Tcl license applies to these modifications.
+Preserve dictionary iteration, key stringification, reference ownership and tracing while committing an eligible one-key replacement.
+
+--- a/tcl9.0.4/generic/tclDictObj.c
++++ b/tcl9.0.4/generic/tclDictObj.c
+@@ -3995,3 +3995,88 @@
+  * fill-column: 78
+  * End:
+  */
++
++#if defined(MACHTELD_TCL_FUNCTIONAL_UPDATES_904) && defined(_WIN64) \
++    && TCL_MAJOR_VERSION == 9 && TCL_MINOR_VERSION == 0 \
++    && TCL_RELEASE_LEVEL == TCL_FINAL_RELEASE && TCL_RELEASE_SERIAL == 4 \
++    && !defined(TCL_COMPILE_DEBUG) && !defined(TCL_COMPILE_STATS) \
++    && !defined(TCL_MEM_DEBUG) && !defined(USE_DTRACE)
++/* Only a real, unobserved, exact dictionary command on its normal host. */
++MODULE_SCOPE int
++TclTryFunctionalDictStore(Tcl_Interp *interp, Tcl_Obj *implementation,
++        Tcl_Obj *const args[], Var *dest)
++{
++    Interp *iPtr = (Interp *)interp;
++    Tcl_Obj *base = args[2], *key = args[3], *value = args[4], *prior;
++    if (!TclHasStringRep(implementation)
++            || (implementation->typePtr && implementation->typePtr != &tclCmdNameType
++                    && implementation->typePtr != &tclStringType)
++            || implementation->length != sizeof("::tcl::dict::replace") - 1
++            || memcmp(implementation->bytes, "::tcl::dict::replace", implementation->length)
++            || iPtr->resolverPtr || iPtr->varFramePtr->nsPtr->cmdResProc
++            || iPtr->globalNsPtr->cmdResProc || iPtr->tracePtr
++            || iPtr->activeCmdTracePtr || iPtr->limit.active
++            || iPtr->deferredCallbacks || iPtr->lookupNsPtr || iPtr->errorCode || iPtr->errorInfo
++            || iPtr->returnOpts || iPtr->returnLevel != 1 || iPtr->returnCode != TCL_OK
++            || !iPtr->resetErrorStack || iPtr->objResultPtr->typePtr
++            || iPtr->objResultPtr->bytes != &tclEmptyString
++            || iPtr->numLevels + 1 >= iPtr->maxNestingDepth
++            || iPtr->execEnvPtr->rewind || Tcl_AsyncReady()
++            || (iPtr->flags & (DELETED | CANCELED | TCL_CANCEL_UNWIND
++                    | INTERP_DEBUG_FRAME | DONT_COMPILE_CMDS_INLINE | SAFE_INTERP
++                    | ERR_LEGACY_COPY | ERR_ALREADY_LOGGED))
++            || args[0]->refCount < 2 || args[1]->refCount < 2
++            || implementation->refCount < 2) return 0;
++    /* No implicit release of a C extension's value while storing or popping
++     * the stack. The original implementation retains the complete old map
++     * until its returned value is assigned. */
++    Command *cmd = (Command *)Tcl_GetCommandFromObj(interp, implementation);
++    if (!cmd || cmd->objProc != DictReplaceCmd || cmd->nreProc
++            || (cmd->flags & CMD_HAS_EXEC_TRACES)) return 0;
++    if (dest->flags || dest->value.objPtr != base || base->refCount != 2
++            || base->typePtr != &tclDictType || !TclHasStringRep(key)) return 0;
++    if (key->refCount == 1 && key->typePtr && key->typePtr->freeIntRepProc
++            && key->typePtr != &tclStringType && key->typePtr != &tclIntType) return 0;
++    Dict *dict;
++    DictGetInternalRep(base, dict);
++    if (dict->refCount != 1 || dict->chain) return 0;
++    /* An extension may have invalidated the cached spelling of a stored
++     * key. Only equal-hash entries will be compared by CreateChainEntry.
++     * Fall back before an extension's stringifier can run in the commit. */
++    size_t hash = TclHashObjKey(NULL, key);
++    Tcl_HashEntry *found = NULL;
++    prior = NULL;
++    for (Tcl_HashEntry *entry = dict->table.buckets[hash & dict->table.mask];
++            entry; entry = entry->nextPtr) {
++        if (entry->hash != hash) continue;
++        Tcl_Obj *stored = entry->key.objPtr;
++        if (stored != key) {
++            if (!TclHasStringRep(stored)) return 0;
++            if (stored->length != key->length || memcmp(stored->bytes, key->bytes, key->length)) continue;
++        }
++        found = entry;
++        prior = (Tcl_Obj *)Tcl_GetHashValue(entry);
++        break;
++    }
++    if (prior && prior->refCount == 1 && prior->typePtr && prior->typePtr->freeIntRepProc
++            && prior->typePtr != &tclStringType && prior->typePtr != &tclIntType) return 0;
++    dest->value.objPtr = NULL;
++    Tcl_DecrRefCount(base);
++    if (found) {
++        /* The verified dictionary and existing entry are already known.
++         * No keys are replaced, with identical value reference ordering. */
++        TclInvalidateStringRep(base);
++        Tcl_IncrRefCount(value);
++        TclDecrRefCount(prior);
++        Tcl_SetHashValue(found, value);
++        ++dict->epoch;
++    } else {
++        Tcl_DictObjPut(NULL, base, key, value);
++    }
++    Tcl_IncrRefCount(base);
++    dest->value.objPtr = base;
++    ++iPtr->cmdCount; /* stock Dispatch counts this ensemble implementation */
++    return 1;
++}
++
++#endif

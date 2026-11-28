@@ -14,7 +14,8 @@ errors, resource lifetime, constraints, and examples. Use `manifest` for a
 structured inventory of the running API and the documentation interface for
 exact lookup and search.
 
-This tree builds Machteld 0.50 with Tcl package API 30.
+This tree builds Machteld 0.51 with Tcl package API 30.
+Use `--docs get "intervals gaps"` for the native batch interval operation.
 Match these pages to the executable's corpus and artifact identity, not merely
 its package version: builds can change without a new version number.
 Conceptual guides state design intent and history separately from the

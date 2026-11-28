@@ -202,7 +202,7 @@ proc ::appcompiler::project::load {manifest} {
         if {$module ne ""} {dict set sources $module [decode $bytes $path]}
         if {$path eq $tclEntry} {checkTclEntry [decode $bytes $path] $path}
     }
-    return [dict merge [dict remove $project selected] [dict create sources $sources files $files]]
+    return [dict merge $project [dict create sources $sources files $files]]
 }
 
 proc ::appcompiler::project::locateModule {manifest module args} {

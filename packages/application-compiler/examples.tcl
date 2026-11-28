@@ -1,6 +1,10 @@
 # Example operands use the regular emitter. Each compiled word runs in a
 # fresh procedure frame, once, and only under an explicit test request.
 proc ::appcompiler::exampleValue {node context} {
+    dict set context nativeFloat [expr {[llength [info commands ::machteld::x::binary64v1::add]] &&
+        "add" in [namespace eval ::machteld::x::binary64v1 {namespace export}]}]
+    dict set context floatPairs [expr {[llength [info commands ::machteld::x::binary64v1::rightPair]] &&
+        "rightPair" in [namespace eval ::machteld::x::binary64v1 {namespace export}]}]
     set word [emitExpression $node $context]
     return [apply [list {} "::return $word" [dict get $context target]]]
 }

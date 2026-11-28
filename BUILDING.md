@@ -6,8 +6,8 @@ and its packaged application examples. Keep those executables inside the job. CI
 publish test results and checksums. Run the commands below from the repository
 root in PowerShell.
 
-Machteld 0.50 combines the application compiler with the Tcl/Tk runtime.
-`machteld.exe --version` reports `0.50`. Its Tcl package
+Machteld 0.51 combines the application compiler with the Tcl/Tk runtime.
+`machteld.exe --version` reports `0.51`. Its Tcl package
 API is `30`, also available from `machteld.exe --version --api`. The
 earlier Beta 1 run produced an unsigned test
 ZIP before the current CI policy was adopted.
@@ -21,7 +21,7 @@ ZIP before the current CI policy was adopted.
    `1027eef12fdb5512fb28cebb539abfac798fa32f055ec62c82e48a56ca51f3f7`, signed
    by Open Source Developer Vincent Vercauteren). The build tools and the
    driver tests are machteld programs whose first line requires 0.21. Use
-   this signed driver through the 0.50 build and signed-file acceptance.
+   this signed driver through the 0.51 build and signed-file acceptance.
    After publication, qualify any driver switch to signed 0.50 in a
    separate change. Three interpreters share the work:
    - the build runtime runs `tools\bootstrap.tcl`, `release.tcl`, `gate.tcl`,
@@ -145,7 +145,7 @@ Keep commit ancestry, branches and release tags when integrating on local
 `main`. Push the reconciled source directly to GitHub `main` after its
 checks pass. Record the tested commit and executable hash with the results.
 
-The release label in `src/machteld.h` is `0.50`. Verify that the CLI and
+The release label in `src/machteld.h` is `0.51`. Verify that the CLI and
 Windows version strings both report this value and that the Windows
 prerelease flag is clear. Keep the Tcl package API at `30` and the fixed
 Windows version fields at `30.0.0.0`. Test exact and bounded Tcl package
@@ -175,7 +175,7 @@ compare the runtime’s linked RT_MANIFEST with the authored file, and check
 the console subsystem and detached console allocation setting.
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
-Run the runtime checks, compiler suites and packaged applications for 0.50.
+Run the runtime checks, compiler suites and packaged applications for 0.51.
 Verify the Tcl-only, typed-only and mixed Tcl/X paths with the built candidate.
 The packaging gate builds and relocates standalone executables, reads their Windows resources and inspects their contents. Compare the console and GUI fixture hashes in the build-PC and hosted logs, in addition to the hash of the distribution executable. Automate
 repeatable GUI checks on an isolated desktop. Before release, verify
@@ -216,12 +216,12 @@ SDK and the Certum code-signing certificate of Open Source Developer Vincent
 Vercauteren. After acceptance, the owner signs a copy at a dedicated release
 path. The signature follows the appended payload. The signed 0.21 release
 demonstrated that the runtime could still find that payload. Verify the
-signature and signer on the 0.50 copy. Run the gate on that exact file
+signature and signer on the 0.51 copy. Run the gate on that exact file
 with `--skip-build --runtime FILE`, using the signed 0.21 driver. Record
 the signed file's SHA-256 and obtain the owner's publication decision.
 The owner procedure covers a clean Windows installation, mixed Tcl/X source
 recovery, terminal and Tk behavior, and a live archive update on the managed
-share. [Signed 0.50 acceptance on Windows](docs/releases/0.50-attended.md)
+share. Use the 0.51 product label when repeating the [attended Windows checks](docs/releases/0.50-attended.md).
 
 ## Incremental builds and version numbers
 
@@ -234,3 +234,19 @@ share. [Signed 0.50 acceptance on Windows](docs/releases/0.50-attended.md)
 2. `src\machteld.h` declares the product label in `MACHTELD_PRODUCT_VERSION`
    and the Tcl package API in `MACHTELD_VERSION`. The version gate checks the
    roadmap's current heading and the package declaration in `tcl\machteld.tcl`.
+
+## Testing X compiler optimizations
+
+The [X compiler optimization plan](docs/proposals/x-compiler-optimization.md)
+records the measured baseline, the order of work and the evidence to collect.
+
+The fast gate checks expression results, evaluation order and error locations.
+It also compiles X workloads and compares their complete output with handwritten
+Tcl. For a change to the emitter, add cases for the affected types and the
+neighboring types that follow a different code path. When a workload exposed
+the issue, keep an input that exercises it in the corpus.
+
+The [workload corpus](test/corpus/compiler/README.md) checks correctness by
+default. Use `--timings` for a single compiler or `--compare-with directory`
+to measure a candidate against a previous compiler with identical inputs
+on the same runtime.

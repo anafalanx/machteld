@@ -44,7 +44,7 @@ oo::class create ::appcompiler::ModuleParser {
     method location {} { dict create module $module line $line column $column }
 
     method finishToken {start kind value} {
-        return [dict merge $start [dict create endLine $line endColumn $column kind $kind value $value]]
+        return [dict replace $start endLine $line endColumn $column kind $kind value $value]
     }
 
     # Leave the closing quote (or a physical interpolation marker) for the
@@ -147,17 +147,48 @@ oo::class create ::appcompiler::ModuleParser {
         # beginning at offset therefore always matches at that exact offset.
         set pattern {[ \t]+|\r\n|[\r\n]|#[^\r\n]*|'[^']*'|[.$]?[A-Za-z_][A-Za-z_0-9]*|[0-9]+(?:\.[0-9]+)?|\.\.=?|::=|:=|::|->|=>|==|!=|<=|&&|\|\||.}
         while {$offset < [string length $source]} {
-            regexp -start $offset -indices -- $pattern $source bounds
-            lassign $bounds first last
+            set first $offset
+            set initial [string index $source $first]
+            if {$initial eq " " || $initial eq "\t"} {
+                set next [string index $source $first+1]
+                if {$next eq " " || $next eq "\t"} {
+                    regexp -start $first -indices {[ \t]+} $source bounds
+                    set offset [expr {[lindex $bounds 1] + 1}]
+                    incr column [expr {$offset - $first}]
+                } else {
+                    incr offset
+                    incr column
+                }
+                continue
+            }
+            # None of these single-character tokens can begin a longer lexer
+            # match. Other characters still use the complete lexical rule.
+            if {$initial in {+ * / ( ) \{ \} [ ] , ? >} || $initial eq "\n"} {
+                set last $first
+            } else {
+                regexp -start $first -indices -- $pattern $source bounds
+                set last [lindex $bounds 1]
+            }
             set word [string range $source $first $last]
-            set location [my location]
-            my consume $word
-            dict set location endLine $line
-            dict set location endColumn $column
+            set startLine $line
+            set startColumn $column
+            # Raw text may contain any number of physical lines. All other
+            # lexemes either occupy part of one line or are one newline.
+            if {$initial eq "'"} {
+                my consume $word
+            } else {
+                set offset [expr {$last + 1}]
+                if {$initial eq "\r" || $initial eq "\n"} {
+                    incr line
+                    set column 1
+                } else {
+                    incr column [expr {$last - $first + 1}]
+                }
+            }
+            set location [dict create module $module line $startLine column $startColumn \
+                endLine $line endColumn $column]
 
-            set initial [string index $word 0]
             switch -exact -- $initial {
-                " " - "\t" { continue }
                 "#" {
                     if {[string range $word 0 1] eq "##"} {
                         set startOfLine [expr {$first - [dict get $location column] + 1}]
@@ -230,7 +261,9 @@ oo::class create ::appcompiler::ModuleParser {
                     set kind holeEnd
                 }
             }
-            set token [dict merge $location [dict create kind $kind value $word]]
+            dict set location kind $kind
+            dict set location value $word
+            set token $location
             return
         }
         if {[llength $stringModes]} { my unclosedHole }
@@ -806,7 +839,7 @@ oo::class create ::appcompiler::ModuleParser {
     }
 
     method node {where kind args} {
-        return [dict merge [dict remove $where value] [dict create kind $kind {*}$args]]
+        return [dict replace [dict remove $where value] kind $kind {*}$args]
     }
 
     method typeLocation {start end name} {
@@ -919,26 +952,24 @@ oo::class create ::appcompiler::ModuleParser {
 
     method expression {{minimum 0}} {
         set left [my primary]
-        while {[my at dotName] || [my at with] || [my at ?] || [my at {[}]} {
+        while {[dict get $token kind] in {dotName with ? {[}}} {
             set where $token
-            if {[my at dotName]} {
-                my advance
-                set left [my node $where field base $left name [dict get $where value]]
-            } elseif {[my at ?]} {
-                my advance
-                set left [my node $where propagate value $left]
-            } elseif {[my at {[}]} {
-                my advance
-                my skipLines
-                set key [my expression]
-                my skipLines
-                my take {]} {a closing bracket after the map key}
-                set left [my node $where index base $left key $key]
-            } else {
-                my advance
-                my skipLines
-                set fields [my braced fieldAssignment {record update} 1]
-                set left [my node $where update base $left fields $fields]
+            my advance
+            switch -exact -- [dict get $where kind] {
+                dotName {set left [my node $where field base $left name [dict get $where value]]}
+                ? {set left [my node $where propagate value $left]}
+                {[} {
+                    my skipLines
+                    set key [my expression]
+                    my skipLines
+                    my take {]} {a closing bracket after the map key}
+                    set left [my node $where index base $left key $key]
+                }
+                with {
+                    my skipLines
+                    set fields [my braced fieldAssignment {record update} 1]
+                    set left [my node $where update base $left fields $fields]
+                }
             }
         }
         set precedences {|| 1 && 2 == 3 != 3 < 4 <= 4 > 4 .. 5 ..= 5 + 6 - 6 * 7 / 7}

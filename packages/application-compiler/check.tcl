@@ -13,6 +13,15 @@ proc ::appcompiler::checker::fact {reportsVar node name value} {
     upvar 1 $reportsVar reports
     set key [list [dict get $node module] [dict get $node line] [dict get $node column] [dict get $node kind]]
     dict set reports facts $key $name $value
+    if {$name eq "operandType" && $value eq "binary64" && [dict exists $reports checkingFunction]} {
+        set function [dict get $reports checkingFunction]
+        dict set reports binary64Functions $function 1
+        if {[dict get $node kind] eq "binary" && [dict get $node op] in {+ - * < <= > >= == !=} &&
+                [dict get $node right kind] eq "propagate" && [dict get $node right value kind] eq "binary" &&
+                [dict get $node right value op] in {+ - *}} {
+            dict set reports binary64PairFunctions $function 1
+        }
+    }
 }
 
 proc ::appcompiler::checker::makeType {head arguments} {
@@ -643,6 +652,7 @@ proc ::appcompiler::checker::builtinType {node scope imports world reportsVar} {
         decode_utf8 - decode_text - preview_text { return result<text,problem> }
         decode_json {
             fact reports $node schema $schema
+            dict set reports jsonDecodeRoots $schema 1
             return [makeType result [list $schema problem]]
         }
         encode_json {
@@ -740,6 +750,7 @@ proc ::appcompiler::checker::sqlCall {node name actual world reportsVar} {
     }
     if {!$valid} { return "" }
     dict set reports usesSql 1
+    dict set reports sqlRowTypes $row 1
     fact reports $node schema $row
     fact reports $node transaction [expr {[lindex $actual 0] eq "@transaction"}]
     fact reports $node sqlBindings [lrange $actual 2 end]
@@ -970,6 +981,21 @@ proc ::appcompiler::checker::checkCall {node name actual function world reportsV
         return [checkedType callable [list {*}$expected $result] $node reports]
     }
     if {![checkArguments $node $name $actual $expected reports [dict get $function params]]} { return "" }
+    # A Tcl entry must normalize its arguments. A checked direct call already
+    # has X values, but capabilities (even inside records or callbacks) may
+    # have expired since creation. Only skip guards for wholly portable data.
+    if {[dict get $function exported] && [dict get $function kind] ne "worker"
+            && [llength $expected] && [lsearch -not -exact $expected text] >= 0} {
+        set portable 1
+        foreach type [concat $expected $arguments] {
+            if {![workerData $type $world]} {set portable 0; break}
+        }
+        if {$portable} {
+            set key [list [dict get $function module] [dict get $function name]]
+            dict set reports directTargets $key 1
+            fact reports $node directEntry $variables
+        }
+    }
     return $result
 }
 
@@ -1564,6 +1590,9 @@ proc ::appcompiler::checker::binaryType {node scope imports world reportsVar} {
         set type [comparisonType $left $right $op $node $world reports]
         if {$type eq ""} { return "" }
         fact reports $node operandType $type
+        if {$op in {== !=} && [string index $type 0] eq "."} {
+            dict set reports equalityTypes $type 1
+        }
         return bool
     }
     if {$op ni {+ - * /}} {
@@ -2111,7 +2140,9 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
             if {[dict get $function kind] eq "worker"} {
                 checker::checkWorker $function $world reports
             }
+            dict set reports checkingFunction [list $module [dict get $function name]]
             checker::checkFunction $function $imports $world reports
+            dict unset reports checkingFunction
         }
         foreach example [dict getdef $definition examples {}] {
             checker::checkExample $example $imports $world reports
@@ -2124,6 +2155,12 @@ proc ::appcompiler::checkDiagnostics {modules {unavailable {}} {factsVar {}} {re
     if {$resolvedVar ne ""} {
         upvar 1 $resolvedVar resolved
         set resolved [dict create schemas $runtimeSchemas functions [dict get $world functions] \
+            directTargets [dict getdef $reports directTargets {}] \
+            binary64Functions [dict getdef $reports binary64Functions {}] \
+            binary64PairFunctions [dict getdef $reports binary64PairFunctions {}] \
+            equalityTypes [dict keys [dict getdef $reports equalityTypes {}]] \
+            sqlRowTypes [dict keys [dict getdef $reports sqlRowTypes {}]] \
+            jsonDecodeRoots [dict keys [dict getdef $reports jsonDecodeRoots {}]] \
             callbackTargets [dict keys [dict getdef $reports callbackTargets {}]] \
             usesSql [dict getdef $reports usesSql 0] usesTemporal [dict getdef $reports usesTemporal 0] \
             usesTk [dict getdef $reports usesTk 0] \

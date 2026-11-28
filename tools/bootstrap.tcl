@@ -487,7 +487,7 @@ proc ::boot::buildTclTk {msys home sourceRoot prefix jobs} {
     # dependency cache. The source-prefix map keeps __FILE__ reproducible.
     set runtimeRoot //zipfs:/app
     set map "-ffile-prefix-map=[string map {{ } {\ }} [mixedPath $msys $sourceRoot]]=tcltk-9.0.4"
-    set optimize [shq "CFLAGS_OPTIMIZE=-O2 -fomit-frame-pointer $map"]
+    set optimize "CFLAGS_OPTIMIZE=-O2 -fomit-frame-pointer $map"
     set pkgconfig {}
     foreach {name value} [list \
             LIB_INSTALL_DIR_NATIVE $runtimeRoot BIN_INSTALL_DIR_NATIVE $runtimeRoot \
@@ -504,7 +504,7 @@ proc ::boot::buildTclTk {msys home sourceRoot prefix jobs} {
     # Only the core static runtime, headers, stubs and script libraries are
     # build inputs; upstream's all/install also build bundled extensions and
     # install manuals, neither of which is linked or packaged.
-    msysRun $msys $home $tclWin "mingw32-make -j $jobs binaries $optimize [join $pkgconfig { }]"
+    msysRun $msys $home $tclWin "mingw32-make -j $jobs binaries [shq "$optimize -DMACHTELD_TCL_FUNCTIONAL_UPDATES_904"] [join $pkgconfig { }]"
     # The virtual runtime paths are not passed to installation: these targets
     # stage the files already built into the real dependency cache.
     foreach target {install-binaries install-libraries install-headers} {
@@ -513,7 +513,7 @@ proc ::boot::buildTclTk {msys home sourceRoot prefix jobs} {
     if {![file isfile [file join $tkWin Makefile]]} {
         msysRun $msys $home $tkWin "./configure --enable-64bit --disable-shared --with-tcl=[shq [unixPath $msys $tclWin]] --prefix=[shq $prefixUnix]"
     }
-    msysRun $msys $home $tkWin "mingw32-make -j $jobs binaries $optimize"
+    msysRun $msys $home $tkWin "mingw32-make -j $jobs binaries [shq $optimize]"
     foreach target {install-binaries install-libraries} {
         msysRun $msys $home $tkWin "mingw32-make $target"
     }
@@ -659,6 +659,8 @@ proc ::boot::main {argv} {
     }
     applyLockedFilePatch $lock $extract tcl-windows-acl-normalize
     applyLockedFilePatch $lock $extract tcl-windows-delete-symlinks
+    applyLockedFilePatch $lock $extract tcl-functional-execute
+    applyLockedFilePatch $lock $extract tcl-functional-dict
 
     if {!$sourcesOnly} {
         # bash's HOME: an empty folder of this build, deleted with src.

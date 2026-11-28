@@ -1,0 +1,140 @@
+## Fixture clocks are exact integer ticks. Run IDs identify scheduled runs uniquely.
+record .run { id: text
+    bench: text
+    start: int
+    stop: int }
+record .assignment { id: text
+    run: text
+    probe: text
+    start: int
+    stop: int }
+record .span { start: int
+    stop: int }
+record .gap { run: text
+    start: int
+    stop: int }
+record .observed { probes: map<text,bool>
+    ends_by_run: map<text,map<int,int>>
+    evidence: int }
+export record .report { runs: list<text>
+    probes: list<text>
+    gaps: list<.gap>
+    evidence: int }
+
+fn .later($a:int, $b:int) -> int {
+    if $a > $b { return $a }
+    return $b
+}
+fn .earlier($a:int, $b:int) -> int {
+    if $a < $b { return $a }
+    return $b
+}
+fn .select_runs($runs:list<.run>, $bench:text, $start:int, $stop:int) -> map<text,.span> {
+    $selected := map<text,.span>()
+    for $run in $runs {
+        if $run.bench != $bench { continue }
+        $lo ::= .later($run.start,$start)
+        $hi ::= .earlier($run.stop,$stop)
+        if $lo < $hi {
+            $selected = map_put($selected,$run.id,make<.span>(start:$lo,stop:$hi))
+        }
+    }
+    return $selected
+}
+fn .repeated($old:.assignment, $claim:.assignment) -> result<bool,problem> {
+    if $old == $claim { return ok(true) }
+    return err(problem($"source reused evidence id '${$claim.id}' with different content"))
+}
+fn .collect($selected:map<text,.span>, $north:list<.assignment>, $south:list<.assignment>) -> result<.observed,problem> {
+    $probes := map<text,bool>()
+    $ends := map<text,map<int,int>>()
+    $evidence := 0
+    for $feed in [$north,$south] {
+        $seen := map<text,.assignment>()
+        for $a in $feed {
+            $duplicate ::= match $seen[$a.id] {
+                some($old) => .repeated($old,$a)?
+                none => false
+            }
+            if $duplicate { continue }
+            $seen = map_put($seen,$a.id,$a)
+            $run ::= match $selected[$a.run] {
+                some($window) => $window
+                none => make<.span>(start:0,stop:0)
+            }
+            $lo ::= .later($run.start,$a.start)
+            $hi ::= .earlier($run.stop,$a.stop)
+            if $lo >= $hi { continue }
+            $evidence = $evidence + 1
+            $probes = map_put($probes,$a.probe,true)
+            $starts ::= match $ends[$a.run] {
+                some($intervals) => $intervals
+                none => map<int,int>()
+            }
+            $stop ::= match $starts[$lo] {
+                some($prior) => .later($prior,$hi)
+                none => $hi
+            }
+            $ends = map_put($ends,$a.run,map_put($starts,$lo,$stop))
+        }
+    }
+    return ok(make<.observed>(probes:$probes,ends_by_run:$ends,evidence:$evidence))
+}
+fn .summarize($selected:map<text,.span>, $observed:.observed) -> result<.report,problem> {
+    $runs ::= sorted_keys($selected)
+    $gaps := list<.gap>()
+    for $id in $runs {
+        $window ::= require_key($selected,$id)?
+        $cursor := $window.start
+        $starts ::= match $observed.ends_by_run[$id] {
+            some($intervals) => $intervals
+            none => map<int,int>()
+        }
+        for $at in sorted_keys($starts) {
+            if $at > $cursor { $gaps = list_append($gaps,make<.gap>(run:$id,start:$cursor,stop:$at)) }
+            $cursor = .later($cursor,require_key($starts,$at)?)
+        }
+        if $cursor < $window.stop { $gaps = list_append($gaps,make<.gap>(run:$id,start:$cursor,stop:$window.stop)) }
+    }
+    return ok(make<.report>(runs:$runs,probes:sorted_keys($observed.probes),gaps:$gaps,evidence:$observed.evidence))
+}
+export fn .research($runs:list<.run>, $north:list<.assignment>, $south:list<.assignment>,
+                    $bench:text, $start:int, $stop:int) -> result<.report,problem> {
+    $selected ::= .select_runs($runs,$bench,$start,$stop)
+    return .summarize($selected,.collect($selected,$north,$south)?)
+}
+
+## Rows 1–4 describe selected runs, distinct probes, uncovered spans and the
+## evidence count. The schedule is fixed. Only evidence received by known_at
+## can cover a span, including when a later import describes an earlier event.
+export record .coverage_row { kind: int
+    name: text
+    low: int
+    high: int }
+export fn .archive_coverage($db:text, $bench:text, $start:int, $stop:int, $known_at:int) -> result<list<.coverage_row>,problem> =>
+    sql_many<.coverage_row>($db,
+        'WITH chosen AS MATERIALIZED (
+             SELECT run_id, max(starts, ?2) AS lo, min(ends, ?3) AS hi
+               FROM instrument_run
+              WHERE bench = ?1 AND starts < ends AND starts < ?3 AND ends > ?2 AND ?2 < ?3
+         ), clipped AS MATERIALIZED (
+             SELECT r.run_id, e.probe, max(r.lo, e.starts) AS lo, min(r.hi, e.ends) AS hi
+               FROM chosen AS r CROSS JOIN evidence AS e ON e.run_id = r.run_id
+              WHERE e.recorded <= ?4 AND e.starts < r.hi AND e.ends > r.lo AND e.starts < e.ends
+         ), spans AS (
+             SELECT run_id, lo, hi FROM clipped
+             UNION ALL SELECT run_id, lo, lo FROM chosen
+             UNION ALL SELECT run_id, hi, hi FROM chosen
+         ), frontier AS (
+             SELECT run_id, lo, max(hi) OVER (
+                 PARTITION BY run_id ORDER BY lo, hi
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS previous_end FROM spans
+         ), report(kind, name, low, high) AS (
+             SELECT 1, cast(run_id AS TEXT), lo, hi FROM chosen
+             UNION ALL SELECT 2, probe, 0, 0 FROM clipped GROUP BY probe
+             UNION ALL SELECT 3, cast(run_id AS TEXT), previous_end, lo FROM frontier WHERE previous_end < lo
+             UNION ALL SELECT 4, cast(0 AS TEXT), count(*), 0 FROM clipped
+         )
+         SELECT kind, name, low, high FROM report ORDER BY kind, name COLLATE BINARY, low, high',
+        $bench,$start,$stop,$known_at)

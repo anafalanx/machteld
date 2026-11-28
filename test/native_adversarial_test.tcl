@@ -87,6 +87,14 @@ check {decoded subtree composition obeys total depth} {
     [code [list json value array [list $immutable]]] eq {MACHTELD JSON depth}
 }
 check {depth failure leaves input intact} {[json encode $max] eq [json encode $immutable]}
+foreach parent [list $max $immutable] {
+    set child [lindex [json children $parent] 0]
+    set restored [json value array [list $child]]
+    check {shallow children retain a maximum-depth subtree} {[json encode $restored] eq [json encode $parent]}
+    check {the existing depth limit still applies to a retained child} {
+        [code [list json value object [dict create x $restored]]] eq {MACHTELD JSON depth}
+    }
+}
 
 # A fixed LCG makes failures reproducible without a fuzzing dependency. These
 # strings exercise all escaping paths, combining marks, supplementary planes,

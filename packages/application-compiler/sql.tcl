@@ -96,14 +96,9 @@ proc sqlBinding {type value slot} {
     sqlFail SQL_BIND "parameter $slot has unsupported type $type"
 }
 
-proc sqlCell {type cell column} {
+proc sqlCell {type base optional cell column} {
     lassign $cell storage value
-    set optional [expr {[string index $type end] eq "?"}]
-    if {$optional} {
-        if {$storage eq "null"} {return [list none]}
-        set type [string range $type 0 end-1]
-    }
-    set base [scalarBase $type]
+    if {$optional && $storage eq "null"} {return [list none]}
     switch -- $base {
         int {set valid [expr {$storage eq "integer"}]}
         bool {set valid [expr {$storage eq "integer" && $value in {0 1}}]}
@@ -111,8 +106,15 @@ proc sqlCell {type cell column} {
         bytes {set valid [expr {$storage eq "blob"}]}
         binary64 {
             set valid [expr {$storage eq "real"}]
-            if {$valid && [catch {finiteBinary64 $value} value]} {
-                sqlFail SQL_TYPE "column [list $column] requires a finite REAL"
+            if {$valid} {
+                # Typed SQLite REAL cells carry a Tcl_NewDoubleObj. Inspect the
+                # binary value so a floating-point mode cannot flush a subnormal.
+                binary scan [binary format Q $value] W bits
+                set magnitude [expr {$bits & 0x7fffffffffffffff}]
+                if {$magnitude >= 0x7ff0000000000000} {
+                    sqlFail SQL_TYPE "column [list $column] requires a finite REAL"
+                }
+                if {$magnitude == 0} {set value 0.0}
             }
         }
         decimal {
@@ -163,6 +165,16 @@ proc sqlReadRows {db cardinality rowType sql bindTypes bindValues} {
     return [sqlRows $db $cardinality $rowType $sql $statement $bindTypes $bindValues]
 }
 
+# Keep the per-field loop in a procedure. SQLite evaluates its row callback
+# as a script, while this procedure can use compiled local variable slots.
+proc sqlDecodeRow {decoders cells} {
+    set row {}
+    foreach {field type base optional} $decoders {
+        dict set row $field [sqlCell $type $base $optional [dict get $cells $field] $field]
+    }
+    return $row
+}
+
 proc sqlRows {db cardinality rowType sql statement bindTypes bindValues} {
     set bindings [sqlBindings $statement $bindTypes $bindValues]
     set fields [lindex [specializeSchema $rowType [schemas]] 1]
@@ -172,16 +184,23 @@ proc sqlRows {db cardinality rowType sql statement bindTypes bindValues} {
         sqlFail SQL_COLUMNS "expected columns [list [dict keys $fields]] for $rowType, got [list $columns]"
     }
 
+    set decoder [dict getdef [sqlReaders] $rowType {}]
+    if {$decoder eq {}} {
+        # The general reader resolves field types once per statement.
+        set decoders {}
+        dict for {field type} $fields {
+            set optional [expr {[string index $type end] eq "?"}]
+            if {$optional} {set type [string range $type 0 end-1]}
+            lappend decoders $field $type [scalarBase $type] $optional
+        }
+        set decoder [list sqlDecodeRow $decoders]
+    }
     set rows {}
     $db eval -typed -asdict -parameters $bindings $sql cells {
         if {$cardinality ne "many" && [llength $rows]} {
             sqlFail CARDINALITY "expected at most one row, got at least two"
         }
-        set row {}
-        dict for {field type} $fields {
-            dict set row $field [sqlCell $type [dict get $cells $field] $field]
-        }
-        lappend rows $row
+        lappend rows [{*}$decoder $cells]
     }
     switch -- $cardinality {
         many {return $rows}
@@ -204,6 +223,9 @@ proc sqlOpen {path readonly} {
     variable sqlReadSerial
     set db [namespace current]::sqlConnection[incr sqlReadSerial]
     while {[llength [info commands $db]]} {set db [namespace current]::sqlConnection[incr sqlReadSerial]}
+    # Unicode and filesystem operations can replace an opaque Tcl representation.
+    # Keep the caller's object available after both a successful and a failed open.
+    append path {}
     if {$path eq "" || [string first \u0000 $path] >= 0 || ![file isfile $path]
         || [lindex [file system $path] 0] ne "native"} {
         sqlFail SQL_OPEN "expected an existing database file, got [list $path]"

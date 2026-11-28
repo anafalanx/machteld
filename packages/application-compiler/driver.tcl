@@ -3,7 +3,7 @@ package require machteld
 namespace eval ::projectDriver {}
 
 proc ::projectDriver::synopsis {} {
-    return [format {usage: %s check ?--json? MANIFEST | locate MANIFEST|ARCHIVE MODULE ?LINE? | test MANIFEST | run MANIFEST ?ARG ...? | pack MANIFEST OUTPUT | rebuild ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
+    return [format {usage: %s check ?--json? MANIFEST | locate MANIFEST|ARCHIVE MODULE ?LINE? | test MANIFEST | run MANIFEST ?ARG ...? | pack ?--without-source? ?--without-compiler? MANIFEST OUTPUT | rebuild ?--without-source? ?--without-compiler? ARCHIVE OUTPUT | docs ARCHIVE|--runtime search QUERY ?LIMIT? | docs ARCHIVE|--runtime get ID ?OFFSET? ?LIMIT?} [file tail $::argv0]]
 }
 
 proc ::projectDriver::usage {} {
@@ -112,8 +112,17 @@ proc ::projectDriver::main {argv driverDirectory} {
                 return [uplevel #0 [dict get $projectBuild artifact script]]
             }
             pack - rebuild {
-                if {$argc != 3} {usage}
-                puts [::appcompiler::project::$action $input $output]
+                set switches {--without-source --without-compiler}
+                set options [lrange $argv 1 end-2]
+                if {$argc < 3 || [llength $options] != [llength [lsort -unique $options]]} {usage}
+                foreach option $options {
+                    if {$option ni $switches} {usage}
+                }
+                lassign [lrange $argv end-1 end] input output
+                if {$input in $switches || $output in $switches} {usage}
+                set withSource [expr {"--without-source" ni $options}]
+                set withCompiler [expr {"--without-compiler" ni $options}]
+                puts [::appcompiler::project::$action $input $output $withSource $withCompiler]
             }
             docs {
                 if {$argc < 4} {usage}

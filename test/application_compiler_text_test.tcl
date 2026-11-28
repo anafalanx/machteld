@@ -1,7 +1,6 @@
 package require machteld
-lappend auto_path [file join [file dirname [file dirname [file normalize [info script]]]] \
-    packages application-compiler]
-package require application-compiler 0.1
+set root [file dirname [file dirname [file normalize [info script]]]]
+source -encoding utf-8 [file join $root packages application-compiler compiler.tcl]
 
 namespace eval ::textTest {variable count 0}
 proc ::textTest::equal {actual expected label} {
@@ -78,6 +77,8 @@ proc ::textTest::at {source code line first last label} {
         [dict get $node endLine] [dict get $node endColumn]] [list words $line $first $line $last] "$label source span"
 }
 proc ::textTest::locations {} {
+    at "## route \U0001F682\r\n\t   \t@" E_PARSE_TOKEN 2 6 7 \
+        "mixed tabs and spaces before a malformed token"
     set open [format "fn .bad() -> text %c\n    return " 123]
     set quote [format %c 34]
     set slash [format %c 92]

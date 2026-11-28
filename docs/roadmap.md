@@ -1,13 +1,19 @@
 ---
 type: roadmap
 title: Roadmap
-description: The integrated compiler and runtime in release 0.50, the unsigned development baselines, and release acceptance.
+description: The 0.51 compiler and runtime, earlier integration milestones and release acceptance.
 tags: [machteld, roadmap, windows]
 ---
 
 # Roadmap
 
-## 0.50
+## 0.51
+
+This release improves generated Tcl, adds a native interval operation and
+supports independent opt-outs for source and compiler in packed projects.
+The language edition is 1 and the Tcl package API is 30. [Release notes](release-notes.md)
+
+## Earlier compiler integration
 
 On 2026-11-27 the owner chose **one release integrating the application
 compiler with the Tcl/Tk runtime**. The release displays `0.50` and

@@ -9,7 +9,7 @@ description: Native safety regressions, analysis coverage, instrumentation limit
 Step 10 of stabilization adds repeatable, headless checks at the native
 boundaries. These are development checks, not a claim of memory safety or
 a release approval. The measurements below record earlier stabilization runs.
-Run fresh native validation for the integrated 0.50 candidate.
+Run fresh native validation for the integrated 0.51 candidate.
 
 The recorded stabilization runs used Windows 11 Pro x64, version 10.0.26200
 (build 26200). Windows Server 2025 remains an intended target, not a separately

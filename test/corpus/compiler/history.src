@@ -1,0 +1,52 @@
+import kernels
+
+export record .query {
+    cutoff: int
+    channel: text
+    start: int
+    stop: int
+}
+export record .answer {
+    state: map<text,int>
+    readings: list<int>
+}
+
+## Both feeds are chronological. For an equal tick, emit all first-feed rows
+## before second-feed rows while retaining the order within each feed.
+export fn .merge_feeds($first: list<.kernels::event>, $second: list<.kernels::event>) -> result<list<.kernels::event>,problem> {
+    $out := list<.kernels::event>()
+    $i := 0
+    $n ::= len($first)
+    for $right in $second {
+        while $i < $n {
+            $left ::= require_index($first, $i)?
+            if $left.tick > $right.tick { break }
+            $out = list_append($out, $left)
+            $i = $i + 1
+        }
+        $out = list_append($out, $right)
+    }
+    while $i < $n {
+        $out = list_append($out, require_index($first, $i)?)
+        $i = $i + 1
+    }
+    return ok($out)
+}
+
+## These exports isolate entry validation on exactly the public query inputs.
+export fn .snapshot_entry($events: list<.kernels::event>, $cutoff: int) -> int => 0
+export fn .window_entry($events: list<.kernels::event>, $channel: text, $start: int, $end: int) -> int => 0
+
+export fn .query_batch($events: list<.kernels::event>, $queries: list<.query>) -> list<.answer> {
+    $out := list<.answer>()
+    for $q in $queries {
+        $answer ::= make<.answer>(
+            state: .kernels::snapshot($events, $q.cutoff),
+            readings: .kernels::window_readings($events, $q.channel, $q.start, $q.stop))
+        $out = list_append($out, $answer)
+    }
+    return $out
+}
+
+export fn .import_and_query($first: list<.kernels::event>, $second: list<.kernels::event>, $queries: list<.query>) -> result<list<.answer>,problem> =>
+    ok(.query_batch(.merge_feeds($first, $second)?, $queries))

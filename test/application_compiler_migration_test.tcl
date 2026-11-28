@@ -235,7 +235,7 @@ proc ::migrationTest::exercise {work root packed} {
     set draft [file join $author draft.machteld]
     success $exe $caller $driver pack $project $draft
     set guardedArchive [file join $work guarded.machteld]
-    success $exe $caller $driver pack $guarded $guardedArchive
+    success $exe $caller $driver pack --without-source --without-compiler $guarded $guardedArchive
     set archive [file join $recipient cards.machteld]
     file rename -- $draft $archive
     set host [file join $recipient machteld.exe]
@@ -244,7 +244,7 @@ proc ::migrationTest::exercise {work root packed} {
     equal [lsort [glob -directory $recipient -tails *]] {cards.machteld machteld.exe} "relocated runtime and archive"
     equal [callbacks $host $caller [list $archive]] $original "relocated archive needs no author directory"
     context $host $caller [list $archive] $archive 1
-    equal [success $host $caller $guardedArchive id 007] $once "entry adapter starts unchanged guarded code once from an archive"
+    equal [success $host $caller $guardedArchive id 007] $once "a source-free mixed archive keeps its Tcl entry and packages"
 
     set mount [zipfs mount $archive mixed-migration]
     set compiler [file join $recipient compiler]

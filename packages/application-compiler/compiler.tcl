@@ -290,7 +290,9 @@ namespace eval ::appcompiler {
     foreach name {host decimal sql temporal zone process worker widgets} {
         set ch [open [file join $compilerDirectory $name.tcl] rb]
         try {
-            set ${name}Definitions [encoding convertfrom -profile strict utf-8 [read $ch]]
+            # These scripts are evaluated from strings. Fold physical newlines as source does.
+            set ${name}Definitions [string map [list \r\n \n \r \n] \
+                [encoding convertfrom -profile strict utf-8 [read $ch]]]
         } finally {close $ch}
     }
     unset name ch

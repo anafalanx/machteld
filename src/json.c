@@ -34,8 +34,23 @@
 #undef USE_TCL_STUBS
 #include "machteld.h"
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include "yyjson.h"
+#include <float.h>
+
+#if defined(MACHTELD_YYJSON_012_FAST) && MACHTELD_YYJSON_012_FAST && \
+    YYJSON_VERSION_HEX == 0x000C00 && defined(YYJSON_DISABLE_FAST_FP_CONV) && \
+    !YYJSON_DISABLE_FAST_FP_CONV && defined(YYJSON_DISABLE_NON_STANDARD) && !YYJSON_DISABLE_NON_STANDARD && \
+    defined(_WIN64) && (defined(_M_X64) || defined(__x86_64__)) && \
+    !defined(__FAST_MATH__) && !defined(_M_FP_FAST) && \
+    FLT_RADIX == 2 && DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024 && DBL_MIN_EXP == -1021
+#define MACHTELD_BOUNDED_BINARY64 1
+#include <fenv.h>
+#include <math.h>
+#include <stdint.h>
+#include <xmmintrin.h>
+#endif
 
 /* Nesting cap. JSONTestSuite deliberately includes 100000-deep input; yyjson
  * parses iteratively so nothing can smash a stack, but the CONTRACT caps the
@@ -50,29 +65,60 @@ static int JsonErr(Tcl_Interp *interp, const char *code, const char *msg);
 /* Tcl's string representation is modified UTF-8 (notably C0 80 for NUL).
  * JSON strings and member names use real UTF-8. Keep this boundary explicit:
  * a lone surrogate must fail, never become replacement text or invalid JSON. */
-static int JsonStringBytes(Tcl_Obj *value, Tcl_DString *bytes) {
+/* Standard UTF-8 and Tcl's encoding agree for nonzero ASCII bytes. */
+static int JsonAsciiString(const char *text, Tcl_Size length) {
+    const uint64_t ones = UINT64_C(0x0101010101010101);
+    const uint64_t high = UINT64_C(0x8080808080808080);
+    while (length >= (Tcl_Size)sizeof(uint64_t)) {
+        uint64_t word;
+        memcpy(&word, text, sizeof(word));
+        /* With no high bits, subtracting one per byte identifies NUL. */
+        if (((word | (word - ones)) & high) != 0) return 0;
+        text += sizeof(word);
+        length -= sizeof(word);
+    }
+    while (length-- > 0) {
+        unsigned char byte = (unsigned char)*text++;
+        if (byte == 0 || byte >= 0x80) return 0;
+    }
+    return 1;
+}
+
+/* Borrow ASCII directly while the caller holds value. All other inputs
+ * use the strict conversion in bytes. The caller frees bytes in both cases. */
+static int JsonStringBytes(Tcl_Obj *value, Tcl_DString *bytes, const char **data, Tcl_Size *size) {
     Tcl_Size length;
     const char *text = Tcl_GetStringFromObj(value, &length);
-    Tcl_Encoding utf8 = Tcl_GetEncoding(NULL, "utf-8");
     Tcl_DStringInit(bytes);
+    if (JsonAsciiString(text, length)) {
+        *data = text;
+        *size = length;
+        return TCL_OK;
+    }
+    Tcl_Encoding utf8 = Tcl_GetEncoding(NULL, "utf-8");
     if (utf8 == NULL) return TCL_ERROR;
     int status = Tcl_UtfToExternalDStringEx(NULL, utf8, text, length,
         TCL_ENCODING_START | TCL_ENCODING_END | TCL_ENCODING_PROFILE_STRICT,
         bytes, NULL);
     Tcl_FreeEncoding(utf8);
+    if (status == TCL_OK) {
+        *data = Tcl_DStringValue(bytes);
+        *size = Tcl_DStringLength(bytes);
+    }
     return status;
 }
 
 static yyjson_mut_val *JsonMutString(yyjson_mut_doc *doc, Tcl_Obj *value,
                                     const char **err) {
     Tcl_DString bytes;
-    if (JsonStringBytes(value, &bytes) != TCL_OK) {
+    const char *data;
+    Tcl_Size size;
+    if (JsonStringBytes(value, &bytes, &data, &size) != TCL_OK) {
         Tcl_DStringFree(&bytes);
         *err = "string contains an unpaired Unicode surrogate";
         return NULL;
     }
-    yyjson_mut_val *node = yyjson_mut_strncpy(doc, Tcl_DStringValue(&bytes),
-        (size_t)Tcl_DStringLength(&bytes));
+    yyjson_mut_val *node = yyjson_mut_strncpy(doc, data, (size_t)size);
     Tcl_DStringFree(&bytes);
     if (node == NULL) *err = "out of memory";
     return node;
@@ -190,16 +236,16 @@ static Tcl_Obj *yy_to_tcl(yyjson_val *v, int depth, int *depthErr) {
  * "true", indistinguishable from one that was never typed, so silence here
  * would readmit the exact corruption class this mode exists to kill.
  *
- * The wrapper is refcounted and holds either an immutable document (from
- * `json decode -typed`) or a mutable one (from the constructors); a typed
+ * The refcounted wrapper owns an immutable document, a mutable document,
+ * or a constructed scalar stored immediately after the wrapper. A typed
  * Tcl_Obj's intrep is {wrapper, node}. A typed value's STRING REP is its
  * JSON text - honest for debugging, and a value rebuilt from that text is
  * plain by design (text carries no type authority). */
 
 typedef struct {
     int refCount;
-    yyjson_doc     *idoc;            /* exactly one of idoc/mdoc is set */
-    yyjson_mut_doc *mdoc;
+    yyjson_doc     *idoc;            /* non-NULL for immutable documents */
+    yyjson_mut_doc *mdoc;            /* NULL for an inline scalar */
 } JsonDocWrap;
 
 static void JsonTypeFree(Tcl_Obj *o);
@@ -278,6 +324,51 @@ static Tcl_Obj *JsonNewTyped(JsonDocWrap *w, void *node) {
 
 static int JsonIsTyped(Tcl_Obj *o) {
     return o->typePtr == &jsonValueType;
+}
+
+/* Return just this container's direct children. Each typed handle keeps the
+ * document alive and shares its subtree with the parent, exactly as get does. */
+static Tcl_Obj *JsonChildren(Tcl_Obj *parent) {
+    JsonDocWrap *w = JWRAP(parent);
+    size_t i, count;
+    if (w->idoc != NULL) {
+        yyjson_val *node = JNODE(parent), *key, *value;
+        if (yyjson_is_arr(node)) {
+            Tcl_Obj *out = Tcl_NewListObj(0, NULL);
+            yyjson_arr_foreach(node, i, count, value) {
+                Tcl_ListObjAppendElement(NULL, out, JsonNewTyped(w, value));
+            }
+            return out;
+        }
+        if (yyjson_is_obj(node)) {
+            Tcl_Obj *out = Tcl_NewDictObj();
+            yyjson_obj_foreach(node, i, count, key, value) {
+                Tcl_Obj *name = JsonTclString(yyjson_get_str(key), yyjson_get_len(key));
+                Tcl_DictObjPut(NULL, out, name, JsonNewTyped(w, value));
+                Tcl_BounceRefCount(name);
+            }
+            return out;
+        }
+    } else {
+        yyjson_mut_val *node = JNODE(parent), *key, *value;
+        if (yyjson_mut_is_arr(node)) {
+            Tcl_Obj *out = Tcl_NewListObj(0, NULL);
+            yyjson_mut_arr_foreach(node, i, count, value) {
+                Tcl_ListObjAppendElement(NULL, out, JsonNewTyped(w, value));
+            }
+            return out;
+        }
+        if (yyjson_mut_is_obj(node)) {
+            Tcl_Obj *out = Tcl_NewDictObj();
+            yyjson_mut_obj_foreach(node, i, count, key, value) {
+                Tcl_Obj *name = JsonTclString(yyjson_mut_get_str(key), yyjson_mut_get_len(key));
+                Tcl_DictObjPut(NULL, out, name, JsonNewTyped(w, value));
+                Tcl_BounceRefCount(name);
+            }
+            return out;
+        }
+    }
+    return NULL;
 }
 
 /* A typed subtree's root can be shallow while its descendants are not.
@@ -599,8 +690,12 @@ static int json_is_number_literal(const char *s, Tcl_Size n) {
 
 static void json_quote(Tcl_DString *out, const char *s, Tcl_Size n) {
     Tcl_DStringAppend(out, "\"", 1);
+    Tcl_Size start = 0;
     for (Tcl_Size i = 0; i < n; i++) {
         unsigned char c = (unsigned char)s[i];
+        if (c >= 0x20 && c != '"' && c != '\\') continue;
+        if (i > start) Tcl_DStringAppend(out, s + start, i - start);
+        start = i + 1;
         switch (c) {
             case '"':  Tcl_DStringAppend(out, "\\\"", 2); break;
             case '\\': Tcl_DStringAppend(out, "\\\\", 2); break;
@@ -609,26 +704,27 @@ static void json_quote(Tcl_DString *out, const char *s, Tcl_Size n) {
             case '\n': Tcl_DStringAppend(out, "\\n", 2);  break;
             case '\r': Tcl_DStringAppend(out, "\\r", 2);  break;
             case '\t': Tcl_DStringAppend(out, "\\t", 2);  break;
-            default:
-                if (c < 0x20) {
-                    char b[8];
-                    snprintf(b, sizeof b, "\\u%04x", c);
-                    Tcl_DStringAppend(out, b, 6);
-                } else {
-                    Tcl_DStringAppend(out, (const char *)&s[i], 1);
-                }
+            default: {
+                char escape[8];
+                snprintf(escape, sizeof escape, "\\u%04x", c);
+                Tcl_DStringAppend(out, escape, 6);
+                break;
+            }
         }
     }
+    if (start < n) Tcl_DStringAppend(out, s + start, n - start);
     Tcl_DStringAppend(out, "\"", 1);
 }
 
 static int json_quote_obj(Tcl_Interp *interp, Tcl_DString *out, Tcl_Obj *value) {
     Tcl_DString bytes;
-    if (JsonStringBytes(value, &bytes) != TCL_OK) {
+    const char *data;
+    Tcl_Size size;
+    if (JsonStringBytes(value, &bytes, &data, &size) != TCL_OK) {
         Tcl_DStringFree(&bytes);
         return JsonErr(interp, "type", "string contains an unpaired Unicode surrogate");
     }
-    json_quote(out, Tcl_DStringValue(&bytes), Tcl_DStringLength(&bytes));
+    json_quote(out, data, size);
     Tcl_DStringFree(&bytes);
     return TCL_OK;
 }
@@ -781,12 +877,90 @@ static void *JsonStep(JsonDocWrap *w, void *node, Tcl_Obj *step,
     return NULL;
 }
 
+enum JsonKind { KSTRING, KNUMBER, KBOOLEAN, KNULL, KARRAY, KOBJECT };
+enum { JSON_INLINE_SCALAR_BYTES = 127 };
+
+/* A short scalar has no children. Its wrapper owns the mutable value and its
+ * spelling in one allocation. Larger spellings use yyjson's document allocator
+ * so a burst of long strings or numbers can release its large allocations. */
+typedef struct {
+    JsonDocWrap wrap;
+    yyjson_mut_val node;
+    char bytes[];
+} JsonScalar;
+
+static Tcl_Obj *JsonOwnedMutable(yyjson_mut_doc *doc, yyjson_mut_val *node) {
+    JsonDocWrap *w = (JsonDocWrap *)Tcl_Alloc(sizeof(*w));
+    *w = (JsonDocWrap){.mdoc = doc};
+    return JsonNewTyped(w, node);
+}
+
+static int JsonReturnScalar(Tcl_Interp *interp, int kind, const char *bytes,
+                            size_t length, int boolean) {
+    if (length > JSON_INLINE_SCALAR_BYTES) {
+        yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+        if (!doc) return JsonErr(interp, "limit", "out of memory");
+        yyjson_mut_val *node = kind == KSTRING
+            ? yyjson_mut_strncpy(doc, bytes, length)
+            : yyjson_mut_rawncpy(doc, bytes, length);
+        if (!node) {
+            yyjson_mut_doc_free(doc);
+            return JsonErr(interp, "type", "out of memory");
+        }
+        Tcl_SetObjResult(interp, JsonOwnedMutable(doc, node));
+        return TCL_OK;
+    }
+
+    JsonScalar *scalar = (JsonScalar *)Tcl_AttemptAlloc(sizeof(*scalar) + length + 1);
+    if (!scalar) return JsonErr(interp, "limit", "out of memory");
+    scalar->wrap = (JsonDocWrap){0};
+    scalar->node = (yyjson_mut_val){0};
+    if (bytes) {
+        memcpy(scalar->bytes, bytes, length);
+        scalar->bytes[length] = '\0';
+        if (kind == KSTRING) yyjson_mut_set_strn(&scalar->node, scalar->bytes, length);
+        else yyjson_mut_set_raw(&scalar->node, scalar->bytes, length);
+    } else if (kind == KBOOLEAN) {
+        yyjson_mut_set_bool(&scalar->node, boolean != 0);
+    } else {
+        yyjson_mut_set_null(&scalar->node);
+    }
+    Tcl_SetObjResult(interp, JsonNewTyped(&scalar->wrap, &scalar->node));
+    return TCL_OK;
+}
+
+static int JsonSetScalar(Tcl_Interp *interp, int kind, Tcl_Obj *value) {
+    if (kind == KSTRING) {
+        Tcl_DString buffer;
+        const char *bytes;
+        Tcl_Size length;
+        int status;
+        if (JsonStringBytes(value, &buffer, &bytes, &length) == TCL_OK) {
+            status = JsonReturnScalar(interp, kind, bytes, (size_t)length, 0);
+        } else {
+            status = JsonErr(interp, "type", "string contains an unpaired Unicode surrogate");
+        }
+        Tcl_DStringFree(&buffer);
+        return status;
+    }
+    if (kind == KNUMBER) {
+        Tcl_Size length;
+        const char *bytes = Tcl_GetStringFromObj(value, &length);
+        /* Raw output is available only for the exact JSON number grammar. */
+        if (!json_is_number_literal(bytes, length)) return JsonErr(interp, "type", "not a JSON number literal");
+        return JsonReturnScalar(interp, kind, bytes, (size_t)length, 0);
+    }
+    int boolean = 0;
+    if (kind == KBOOLEAN && Tcl_GetBooleanFromObj(interp, value, &boolean) != TCL_OK) return TCL_ERROR;
+    return JsonReturnScalar(interp, kind, NULL, 0, boolean);
+}
+
 static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]) {
     (void)cd;
     static const char *const subs[] = {
-        "decode", "encode", "value", "type", "unwrap", "get", "exists", NULL
+        "decode", "encode", "value", "type", "unwrap", "get", "exists", "children", NULL
     };
-    enum { DECODE, ENCODE, VALUE, TYPE, UNWRAP, GET, EXISTS };
+    enum { DECODE, ENCODE, VALUE, TYPE, UNWRAP, GET, EXISTS, CHILDREN };
     int idx;
     if (objc < 2) {
         Tcl_WrongNumArgs(interp, 1, objv, "subcommand ?arg ...?");
@@ -835,12 +1009,10 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             s = (const char *)Tcl_GetBytesFromObj(interp, textObj, &n);
             if (s == NULL) return TCL_ERROR;
         } else {
-            if (JsonStringBytes(textObj, &bytes) != TCL_OK) {
+            if (JsonStringBytes(textObj, &bytes, &s, &n) != TCL_OK) {
                 Tcl_DStringFree(&bytes);
                 return JsonErr(interp, "parse", "JSON text contains an unpaired Unicode surrogate");
             }
-            s = Tcl_DStringValue(&bytes);
-            n = Tcl_DStringLength(&bytes);
         }
         if (typed) {
             if (maxBytes > (Tcl_WideInt)JSON_TYPED_HARD_MAXBYTES) {
@@ -900,7 +1072,6 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         static const char *const kinds[] = {
             "string", "number", "boolean", "null", "array", "object", NULL
         };
-        enum { KSTRING, KNUMBER, KBOOLEAN, KNULL, KARRAY, KOBJECT };
         int kind;
         if (objc < 3) {
             Tcl_WrongNumArgs(interp, 2, objv, "kind ?value?");
@@ -911,41 +1082,12 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
             Tcl_WrongNumArgs(interp, 3, objv, kind == KNULL ? NULL : "value");
             return TCL_ERROR;
         }
+        if (kind <= KNULL) return JsonSetScalar(interp, kind, kind == KNULL ? NULL : objv[3]);
         yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
         if (doc == NULL) return JsonErr(interp, "limit", "out of memory");
         yyjson_mut_val *node = NULL;
         const char *err = NULL;
         switch (kind) {
-            case KSTRING: {
-                node = JsonMutString(doc, objv[3], &err);
-                break;
-            }
-            case KNUMBER: {
-                Tcl_Size sl;
-                const char *ss = Tcl_GetStringFromObj(objv[3], &sl);
-                /* The number gate: the ONLY position where caller bytes
-                 * reach the wire unquoted gets the exact JSON grammar,
-                 * fail-closed (the panel's raw-escape-hatch finding). */
-                if (!json_is_number_literal(ss, sl)) {
-                    yyjson_mut_doc_free(doc);
-                    return JsonErr(interp, "type",
-                        "not a JSON number literal");
-                }
-                node = yyjson_mut_rawncpy(doc, ss, (size_t)sl);
-                break;
-            }
-            case KBOOLEAN: {
-                int b;
-                if (Tcl_GetBooleanFromObj(interp, objv[3], &b) != TCL_OK) {
-                    yyjson_mut_doc_free(doc);
-                    return TCL_ERROR;
-                }
-                node = yyjson_mut_bool(doc, b != 0);
-                break;
-            }
-            case KNULL:
-                node = yyjson_mut_null(doc);
-                break;
             case KARRAY: {
                 Tcl_Size an;
                 Tcl_Obj **el;
@@ -986,18 +1128,20 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
                 err != NULL && strcmp(err, "value is too deeply nested") == 0 ? "depth" : "type",
                 err != NULL ? err : "out of memory");
         }
-        JsonDocWrap *w = (JsonDocWrap *)Tcl_Alloc(sizeof(JsonDocWrap));
-        w->refCount = 0;
-        w->idoc = NULL;
-        w->mdoc = doc;
-        Tcl_SetObjResult(interp, JsonNewTyped(w, node));
+        Tcl_SetObjResult(interp, JsonOwnedMutable(doc, node));
         return TCL_OK;
     }
 
-    if (idx == TYPE || idx == UNWRAP) {
+    if (idx == TYPE || idx == UNWRAP || idx == CHILDREN) {
         if (objc != 3) { Tcl_WrongNumArgs(interp, 2, objv, "value"); return TCL_ERROR; }
         if (!JsonIsTyped(objv[2])) {
             return JsonErr(interp, "type", "not a typed json value");
+        }
+        if (idx == CHILDREN) {
+            Tcl_Obj *children = JsonChildren(objv[2]);
+            if (children == NULL) return JsonErr(interp, "type", "children requires a typed array or object");
+            Tcl_SetObjResult(interp, children);
+            return TCL_OK;
         }
         if (idx == TYPE) {
             Tcl_SetObjResult(interp, Tcl_NewStringObj(JsonNodeTag(objv[2]), -1));
@@ -1032,12 +1176,13 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         for (int i = 3; i < objc; i++) {
             int stepErr = 0;
             Tcl_DString bytes;
-            if (JsonStringBytes(objv[i], &bytes) != TCL_OK) {
+            const char *key;
+            Tcl_Size length;
+            if (JsonStringBytes(objv[i], &bytes, &key, &length) != TCL_OK) {
                 Tcl_DStringFree(&bytes);
                 return JsonErr(interp, "type", "path contains an unpaired Unicode surrogate");
             }
-            node = JsonStep(w, node, objv[i], Tcl_DStringValue(&bytes),
-                (size_t)Tcl_DStringLength(&bytes), &stepErr);
+            node = JsonStep(w, node, objv[i], key, (size_t)length, &stepErr);
             Tcl_DStringFree(&bytes);
             if (node == NULL) {
                 if (idx == EXISTS) {
@@ -1083,6 +1228,17 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
         return JsonErr(interp, "usage", "-dict and -list are exclusive");
     }
 
+    /* A typed handle's string is the native writer's JSON for its node.
+     * Its document has already passed the depth check at construction.
+     * Return a plain Tcl string, including when the caller retains the handle
+     * for another export. Nested handles still require the outer depth check. */
+    if (!as_list && !plainOnly && JsonIsTyped(val)) {
+        Tcl_Size length;
+        const char *text = Tcl_GetStringFromObj(val, &length);
+        Tcl_SetObjResult(interp, Tcl_NewStringObj(text, length));
+        return TCL_OK;
+    }
+
     Tcl_DString out;
     Tcl_DStringInit(&out);
     if (as_list) {
@@ -1102,7 +1258,366 @@ static int JsonCmd(void *cd, Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]
     return TCL_OK;   /* unreachable: Tcl_GetIndexFromObj admits every branch */
 }
 
+#ifdef MACHTELD_BOUNDED_BINARY64
+static int JsonBinary64Text(Tcl_Interp *interp, const char *text, Tcl_Size length) {
+    /* The pinned reader truncates long mantissas above 768 significant digits.
+     * Cap this path at 128 total bytes. Tcl can still use its nearest-mode
+     * shortcuts for wider canonical integers on this thread. */
+    if (length > 128) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("long", -1));
+        return TCL_OK;
+    }
+    const char *end = text + length;
+    int negative = text != end && *text == '-';
+    if (text != end && (*text == '+' || negative)) text++;
+    if (text == end || *text < '0' || *text > '9') goto invalid;
+    /* X permits leading decimal zeroes. Leave one digit for the JSON reader. */
+    while (text + 1 < end && *text == '0' && text[1] >= '0' && text[1] <= '9') text++;
+    yyjson_val parsed;
+    if (yyjson_read_number(text, &parsed, YYJSON_READ_ALLOW_INF_AND_NAN, NULL, NULL) != end) goto invalid;
+    double number = yyjson_get_num(&parsed);
+    if (!isfinite(number)) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("binary64 overflow", -1));
+        return TCL_ERROR;
+    }
+    Tcl_SetObjResult(interp, Tcl_NewDoubleObj(negative && number != 0.0 ? -number : number));
+    return TCL_OK;
+invalid:
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("expected a finite binary64 number", -1));
+    return TCL_ERROR;
+}
+
+static int JsonBoundedBinary64(void *data, Tcl_Interp *interp, Tcl_Size objc, Tcl_Obj *const objv[]) {
+    if (objc != 2) {
+        Tcl_WrongNumArgs(interp, 1, objv, "value");
+        return TCL_ERROR;
+    }
+    Tcl_Obj *value = objv[1];
+    Tcl_ObjInternalRep *rep = data != NULL && !Tcl_HasStringRep(value)
+            ? Tcl_FetchInternalRep(value, data) : NULL;
+    if (rep != NULL) {
+        /* A string spelling, when present, is authoritative. A pure Tcl
+         * double already contains the wire bits, even with DAZ active. */
+        uint64_t bits;
+        memcpy(&bits, &rep->doubleValue, sizeof(bits));
+        uint64_t magnitude = bits & UINT64_C(0x7fffffffffffffff);
+        if (magnitude >= UINT64_C(0x7ff0000000000000)) {
+            /* An error from Tcl_EvalObjv may stringify its arguments to make
+             * the stack trace. Reject in the generated caller without giving
+             * a borrowed infinity or NaN a string representation. */
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("nonfinite", -1));
+            return TCL_OK;
+        }
+        Tcl_SetObjResult(interp, magnitude ? Tcl_DuplicateObj(value) : Tcl_NewDoubleObj(0.0));
+        return TCL_OK;
+    }
+    /* The default SSE control bits select nearest, mask exceptions and keep
+     * subnormals. Empty selects Tcl's integer-only path on other controls. */
+    if ((_mm_getcsr() & 0xffc0u) != 0x1f80u || fegetround() != FE_TONEAREST) return TCL_OK;
+    Tcl_Obj *copy = NULL;
+    if (!Tcl_HasStringRep(value)) {
+        copy = Tcl_DuplicateObj(value);
+        Tcl_IncrRefCount(copy);
+        value = copy;
+    }
+    Tcl_Size length;
+    const char *text = Tcl_GetStringFromObj(value, &length);
+    int code = JsonBinary64Text(interp, text, length);
+    if (copy != NULL) Tcl_DecrRefCount(copy);
+    return code;
+}
+#endif
+
+/* Return -1 when the language's order-independent object or decimal-number
+ * comparison is needed. Inspect each corresponding member at most once. */
+static int JsonCompareOrdered(yyjson_val *left, yyjson_val *right, unsigned depth) {
+    if (depth >= 12) return -1;
+    yyjson_type type = yyjson_get_type(left);
+    yyjson_type other = yyjson_get_type(right);
+    if (type == YYJSON_TYPE_NUM || other == YYJSON_TYPE_NUM) return -1;
+    if (other != type) return 0;
+    switch (type) {
+        case YYJSON_TYPE_NULL:
+        case YYJSON_TYPE_BOOL:
+        case YYJSON_TYPE_STR: return yyjson_equals(left, right);
+        case YYJSON_TYPE_RAW: return yyjson_equals(left, right) ? 1 : -1;
+        case YYJSON_TYPE_ARR: {
+            if (yyjson_arr_size(left) != yyjson_arr_size(right)) return 0;
+            yyjson_arr_iter a = yyjson_arr_iter_with(left), b = yyjson_arr_iter_with(right);
+            yyjson_val *child;
+            while ((child = yyjson_arr_iter_next(&a)) != NULL) {
+                int same = JsonCompareOrdered(child, yyjson_arr_iter_next(&b), depth + 1);
+                if (same != 1) return same;
+            }
+            return 1;
+        }
+        case YYJSON_TYPE_OBJ: {
+            if (yyjson_obj_size(left) != yyjson_obj_size(right)) return 0;
+            yyjson_obj_iter a = yyjson_obj_iter_with(left), b = yyjson_obj_iter_with(right);
+            yyjson_val *key;
+            while ((key = yyjson_obj_iter_next(&a)) != NULL) {
+                yyjson_val *otherKey = yyjson_obj_iter_next(&b);
+                if (!yyjson_equals(key, otherKey)) return -1;
+                int same = JsonCompareOrdered(yyjson_obj_iter_get_val(key),
+                        yyjson_obj_iter_get_val(otherKey), depth + 1);
+                if (same != 1) return same;
+            }
+            return 1;
+        }
+        default: return -1;
+    }
+}
+
+/* The normal Tcl path already handles empty containers and a single scalar
+ * cheaply. A single nested container may hold a large evidence document. */
+static int JsonEvidenceContainer(yyjson_val *node) {
+    if (!yyjson_is_ctn(node) || yyjson_get_len(node) == 0) return 0;
+    if (yyjson_get_len(node) > 1) return 1;
+    if (yyjson_is_arr(node)) return yyjson_is_ctn(yyjson_arr_get_first(node));
+    yyjson_obj_iter members = yyjson_obj_iter_with(node);
+    return yyjson_is_ctn(yyjson_obj_iter_get_val(yyjson_obj_iter_next(&members)));
+}
+
+static int JsonCompareEvidence(void *data, Tcl_Interp *interp, Tcl_Size objc, Tcl_Obj *const objv[]) {
+    (void)data;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "left right");
+        return TCL_ERROR;
+    }
+    int same = -1;
+    if (JsonIsTyped(objv[1]) && JsonIsTyped(objv[2]) &&
+            JWRAP(objv[1])->idoc != NULL && JWRAP(objv[2])->idoc != NULL) {
+        yyjson_val *left = JNODE(objv[1]);
+        if (JsonEvidenceContainer(left)) {
+            same = JsonCompareOrdered(left, JNODE(objv[2]), 0);
+        }
+    }
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(same));
+    return TCL_OK;
+}
+
+
+/* Convert required scalar fields from an already parsed wire document.
+ * Refuse slower scalar kinds so the regular validator supplies its diagnostics. */
+enum { JSON_PROJECTION_FIELDS = 16, JSON_PROJECTION_NAME = 255 };
+typedef struct {
+    char name[JSON_PROJECTION_NAME];
+    size_t length;
+    char kind;
+} JsonProjectionField;
+
+/* Inspect only an existing spelling. A caller may own a native type whose
+ * string conversion is observable. */
+static char JsonProjectionKind(Tcl_Obj *type) {
+    if (!Tcl_HasStringRep(type)) return 0;
+    Tcl_Size length;
+    const char *name = Tcl_GetStringFromObj(type, &length);
+    if (length == 3 && memcmp(name, "int", 3) == 0) return 'i';
+    if (length == 4 && memcmp(name, "text", 4) == 0) return 't';
+    if (length == 4 && memcmp(name, "bool", 4) == 0) return 'b';
+    return 0;
+}
+
+/* Only the built-in dict iterator sees the caller's descriptor. Capture a
+ * small private schema without requesting a foreign object's string rep. */
+static int JsonProjectionSchema(Tcl_Obj *layout, JsonProjectionField *fields) {
+    if (layout->typePtr == NULL || layout->typePtr != Tcl_GetObjType("dict")) return 0;
+    Tcl_Size count;
+    if (Tcl_DictObjSize(NULL, layout, &count) != TCL_OK ||
+            count == 0 || count > JSON_PROJECTION_FIELDS) return 0;
+    Tcl_DictSearch search;
+    Tcl_Obj *key, *value;
+    int done, used = 0;
+    if (Tcl_DictObjFirst(NULL, layout, &search, &key, &value, &done) != TCL_OK) return 0;
+    for (; !done; Tcl_DictObjNext(&search, &key, &value, &done)) {
+        if (!Tcl_HasStringRep(key)) break;
+        Tcl_Size length;
+        const char *name = Tcl_GetStringFromObj(key, &length);
+        if (length < 1 || length > JSON_PROJECTION_NAME) break;
+        size_t len = (size_t)length;
+        size_t j = 0;
+        while (j < len) {
+            char c = name[j];
+            if (!(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (j != 0 && c >= '0' && c <= '9'))) break;
+            ++j;
+        }
+        if (j != len) break;
+        char tag = JsonProjectionKind(value);
+        if (!tag) break;
+        JsonProjectionField *field = &fields[used++];
+        memcpy(field->name, name, len);
+        field->length = len;
+        field->kind = tag;
+    }
+    Tcl_DictObjDone(&search);
+    return used == count ? used : 0;
+}
+
+static Tcl_Obj *JsonFieldScalar(char kind, yyjson_val *node) {
+    if (kind == 't') return yyjson_is_str(node)
+        ? JsonTclString(yyjson_get_str(node), yyjson_get_len(node)) : NULL;
+    if (kind == 'b') return yyjson_is_bool(node)
+        ? Tcl_NewBooleanObj(yyjson_get_bool(node)) : NULL;
+    if (!yyjson_is_raw(node)) return NULL;
+    const char *digits = yyjson_get_raw(node);
+    size_t n = yyjson_get_len(node), start = digits[0] == '-';
+    if (n - start > 18) {
+        /* JSON forbids padding. A long integral literal already has X's
+         * canonical spelling; let Tcl build its exact integer representation. */
+        for (size_t i = start; i < n; ++i) {
+            if (digits[i] < '0' || digits[i] > '9') return NULL;
+        }
+        Tcl_Obj *exact = Tcl_NewStringObj(digits, (Tcl_Size)n);
+        void *number;
+        int type;
+        if (Tcl_GetNumberFromObj(NULL, exact, &number, &type) == TCL_OK &&
+                (type == TCL_NUMBER_INT || type == TCL_NUMBER_BIG)) {
+            /* fromWire returns the numeric result of expr {$digits + 0}.
+             * Extensions see that fresh number without cached text. */
+            Tcl_InvalidateStringRep(exact);
+            return exact;
+        }
+        Tcl_BounceRefCount(exact);
+        return NULL;
+    }
+    Tcl_WideInt value = 0;
+    for (size_t i = start; i < n; ++i) {
+        if (digits[i] < '0' || digits[i] > '9') return NULL;
+        value = value * 10 + (digits[i] - '0');
+    }
+    return Tcl_NewWideIntObj(start ? -value : value);
+}
+
+static Tcl_Obj *JsonFieldRow(JsonDocWrap *wrap, yyjson_val *row,
+        const JsonProjectionField *fields, int count) {
+    if (!yyjson_is_obj(row)) return NULL;
+    Tcl_Obj *out = Tcl_NewDictObj();
+    yyjson_val *key, *value;
+    size_t i, size;
+    Tcl_Size found = 0;
+    yyjson_obj_foreach(row, i, size, key, value) {
+        const char *spelling = yyjson_get_str(key);
+        size_t length = yyjson_get_len(key);
+        int which = 0;
+        while (which < count && (fields[which].length != length ||
+                memcmp(fields[which].name, spelling, length))) ++which;
+        Tcl_Obj *member;
+        if (which != count) {
+            member = JsonFieldScalar(fields[which].kind, value);
+            if (!member) {
+                Tcl_BounceRefCount(out);
+                return NULL;
+            }
+            ++found;
+        } else {
+            member = JsonNewTyped(wrap, value);
+        }
+        Tcl_Obj *name = JsonTclString(spelling, length);
+        Tcl_DictObjPut(NULL, out, name, member);
+        Tcl_BounceRefCount(name);
+    }
+    /* Typed decode already checked that object member names are unique. */
+    if (found == count) return out;
+    Tcl_BounceRefCount(out);
+    return NULL;
+}
+
+static int JsonProjectRows(void *data, Tcl_Interp *ip, Tcl_Size objc, Tcl_Obj *const args[]) {
+    (void)data;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(ip, 1, args, "layout array");
+        return TCL_ERROR;
+    }
+    Tcl_Obj *array = args[2], *layout = args[1];
+    if (!JsonIsTyped(array) || !JWRAP(array)->idoc ||
+            !yyjson_is_arr((yyjson_val *)JNODE(array))) return TCL_OK;
+    JsonDocWrap *wrap = JWRAP(array);
+    yyjson_val *root = JNODE(array);
+    ++wrap->refCount;
+    JsonProjectionField fields[JSON_PROJECTION_FIELDS];
+    int count = JsonProjectionSchema(layout, fields);
+    if (!count) {
+        JsonWrapRelease(wrap);
+        return TCL_OK;
+    }
+    Tcl_Obj *out = Tcl_NewListObj(0, NULL);
+    yyjson_val *row;
+    size_t i, size;
+    yyjson_arr_foreach(root, i, size, row) {
+        Tcl_Obj *result = JsonFieldRow(wrap, row, fields, count);
+        if (!result) {
+            Tcl_Obj *failed[] = {Tcl_NewWideIntObj((Tcl_WideInt)i), JsonNewTyped(wrap, row)};
+            Tcl_SetObjResult(ip, Tcl_NewListObj(2, failed));
+            Tcl_BounceRefCount(out);
+            JsonWrapRelease(wrap);
+            return TCL_OK;
+        }
+        Tcl_ListObjAppendElement(NULL, out, result);
+    }
+    Tcl_SetObjResult(ip, Tcl_NewListObj(1, &out));
+    JsonWrapRelease(wrap);
+    return TCL_OK;
+}
+
+/* A single result word holds the projected list. An empty result leaves the
+ * original array to the Tcl reader, including its first failing index. */
+static int JsonProjectScalars(void *data, Tcl_Interp *interp, Tcl_Size objc, Tcl_Obj *const args[]) {
+    (void)data;
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 1, args, "type array");
+        return TCL_ERROR;
+    }
+    Tcl_Obj *array = args[2];
+    if (!JsonIsTyped(array) || !JWRAP(array)->idoc ||
+            Tcl_LimitTypeEnabled(interp, TCL_LIMIT_COMMANDS) ||
+            Tcl_LimitTypeEnabled(interp, TCL_LIMIT_TIME)) return TCL_OK;
+    yyjson_val *root = JNODE(array);
+    if (!yyjson_is_arr(root) || yyjson_arr_size(root) == 0) return TCL_OK;
+    char kind = JsonProjectionKind(args[1]);
+    if (!kind) return TCL_OK;
+    JsonDocWrap *wrap = JWRAP(array);
+    ++wrap->refCount;
+    Tcl_Obj *out = Tcl_NewListObj(0, NULL);
+    Tcl_IncrRefCount(out);
+    size_t i, count;
+    yyjson_val *node;
+    yyjson_arr_foreach(root, i, count, node) {
+        if ((i & 63) == 0 && Tcl_AsyncReady()) break;
+        Tcl_Obj *value = JsonFieldScalar(kind, node);
+        if (!value) break;
+        Tcl_ListObjAppendElement(NULL, out, value);
+    }
+    if (i == count) Tcl_SetObjResult(interp, Tcl_NewListObj(1, &out));
+    Tcl_DecrRefCount(out);
+    JsonWrapRelease(wrap);
+    return TCL_OK;
+}
+
 int Machteldjson_Init(Tcl_Interp *interp) {
+    Tcl_Namespace *ns = Tcl_FindNamespace(interp, "::machteld::x", NULL, TCL_GLOBAL_ONLY);
+    if (ns == NULL) ns = Tcl_CreateNamespace(interp, "::machteld::x", NULL, NULL);
+    if (!ns || !Tcl_CreateObjCommand2(interp, "::machteld::x::projectRows", JsonProjectRows, NULL, NULL)
+            || Tcl_Export(interp, ns, "projectRows", 0) != TCL_OK) return TCL_ERROR;
+    if (!Tcl_CreateObjCommand2(interp, "::machteld::x::projectScalars", JsonProjectScalars, NULL, NULL)
+            || Tcl_Export(interp, ns, "projectScalars", 0) != TCL_OK) return TCL_ERROR;
+    if (ns == NULL || !Tcl_CreateObjCommand2(interp, "::machteld::x::compareEvidence",
+            JsonCompareEvidence, NULL, NULL) || Tcl_Export(interp, ns, "compareEvidence", 0) != TCL_OK) {
+        return TCL_ERROR;
+    }
+#ifdef MACHTELD_BOUNDED_BINARY64
+    if (yyjson_version() == YYJSON_VERSION_HEX) {
+        const Tcl_ObjType *doubleType = Tcl_GetObjType("double");
+        if (!Tcl_CreateObjCommand2(interp, "::machteld::x::boundedBinary64",
+                JsonBoundedBinary64, NULL, NULL) || Tcl_Export(interp, ns, "boundedBinary64", 0) != TCL_OK) {
+            return TCL_ERROR;
+        }
+        if (doubleType && (!Tcl_CreateObjCommand2(interp, "::machteld::x::readBinary64",
+                JsonBoundedBinary64, (void *)doubleType, NULL) || Tcl_Export(interp, ns, "readBinary64", 0) != TCL_OK)) {
+            return TCL_ERROR;
+        }
+    }
+#endif
     if (Tcl_CreateObjCommand(interp, "::machteld::json", JsonCmd, NULL, NULL) == NULL) {
         return TCL_ERROR;
     }

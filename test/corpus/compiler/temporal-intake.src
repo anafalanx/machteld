@@ -1,0 +1,22 @@
+export record .observation {
+    id: int
+    stamp: instant
+}
+
+export fn .ingest($path: text, $inputs: list<text>) -> result<int,problem> {
+    $id := 0
+    using $tx ::= sql_begin($path)? {
+        for $raw in $inputs {
+            $stamp ::= parse_instant($raw)?
+            sql_exec($tx, 'INSERT INTO observed(id,stamp) VALUES (?1,?2)', $id, $stamp)?
+            $id = $id + 1
+        }
+        sql_commit($tx)?
+    }
+    return ok($id)
+}
+
+export fn .window($path: text, $start: instant, $end: instant) -> result<list<.observation>,problem> =>
+    sql_many<.observation>($path,
+        'SELECT id, stamp FROM observed WHERE stamp >= ?1 AND stamp < ?2 ORDER BY stamp, id',
+        $start, $end)

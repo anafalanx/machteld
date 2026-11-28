@@ -3,7 +3,7 @@ id: machteld/command/json
 type: command
 title: json
 summary: Decode and encode JSON values, plainly or with real JSON types.
-commands: json, json decode, json encode, json value, json type, json unwrap, json get, json exists
+commands: json, json decode, json encode, json value, json type, json unwrap, json get, json exists, json children
 ---
 
 # json
@@ -19,6 +19,7 @@ json type VALUE
 json unwrap VALUE
 json get VALUE ?key|index ...?
 json exists VALUE key|index ...
+json children VALUE
 ```
 
 ## Arguments and options
@@ -113,7 +114,8 @@ cap is 64 MiB.
 #### Results
 
 Plain: Tcl dict/list/scalar values retaining JSON container identity. Typed:
-one opaque typed value answering `json type`, `unwrap`, `get`, `exists`.
+one opaque typed value usable with `json type`, `unwrap`, `get`, `exists` and
+`children`.
 
 #### Errors
 
@@ -364,6 +366,53 @@ component reports `JSON type`.
 #### See also
 
 `machteld/command/json#get`.
+
+<a id="children"></a>
+### children
+
+#### Synopsis
+
+`json children VALUE`
+
+#### Arguments and options
+
+Pass a typed JSON array or object.
+
+#### Results
+
+An array yields a Tcl list of its immediate typed elements in array order.
+An object yields a Tcl dictionary mapping its member names to typed values
+in member order. Each child retains its original JSON type and number spelling.
+
+#### Errors
+
+A plain Tcl value or a typed JSON scalar reports `JSON type`.
+
+#### Lifetime and timeouts
+
+Traversal is synchronous. Each child keeps the backing document alive,
+including after the parent Tcl variable is released.
+
+#### Examples
+
+```tcl
+set samples [json decode -typed {[{"id":1},{"id":2}]}]
+foreach sample [json children $samples] {
+    puts [json unwrap [json get $sample id]]
+}
+```
+
+#### Constraints
+
+The command walks the container once. It allocates a Tcl handle per immediate
+child and copies object member names. Nested containers remain typed handles.
+The original typed value has already passed the 512-level nesting limit.
+For input decoded from wire bytes, the decode byte limit applies when
+`json decode -typed` reads those bytes.
+
+#### See also
+
+`machteld/command/json#get`, `machteld/command/json#unwrap`.
 
 ## See also
 

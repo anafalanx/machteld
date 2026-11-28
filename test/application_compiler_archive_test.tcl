@@ -27,6 +27,33 @@ proc buildSample {exe source sources archive} {
     dict for {module program} $sources { writeText [file join $source $module.src] $program }
     invoke $exe [file dirname $source] pack $source -o $archive
 }
+proc exerciseHelperEndings {exe source caller archive} {
+    writeText [file join $source main.tcl] {package require machteld
+set here [file dirname [info script]]
+source -encoding utf-8 [file join $here compiler compiler.tcl]
+set program {export fn .label() -> text => '雪'}
+set compiled [::appcompiler::compile [dict create sample $program] ::probe]
+namespace eval :: [dict get $compiled script]
+puts [list [::probe::sample::label] [::probe::@rt::decimalKey 3]]
+}
+    set host [file join $source compiler host.tcl]
+    set ch [open $host r]
+    try {
+        chan configure $ch -encoding utf-8 -translation auto
+        set script [read $ch]
+    } finally {close $ch}
+    foreach style {LF CRLF mixed} {
+        switch $style {
+            LF    {set body $script}
+            CRLF  {set body [string map [list \n \r\n] $script]}
+            mixed {set body [string map [list \n\n \r\n\n \n \r] $script]}
+        }
+        writeText $host $body
+        invoke $exe $caller pack $source -o $archive
+        expect [invoke $exe $caller $archive] [list 雪 {3 0}] \
+            "compile and evaluate with $style Tcl helper source in an archive"
+    }
+}
 proc exercise {work compilerDir} {
     set exe [info nameofexecutable]
     set source [file join $work {build folder}]
@@ -72,6 +99,7 @@ puts [::sample::main::main [lindex $argv 1]]
     expect [lsort [glob -tails -directory $delivery *]] {example.machteld machteld.exe} "two-file distribution"
     expect [invoke $shippedExe $caller $shippedApp run 2] 120 "relocated archive"
     expect [invoke $shippedExe $caller $shippedApp rebuild 3] 180 "recompile bundled originals in the relocated archive"
+    exerciseHelperEndings $shippedExe $source $caller [file join $work helper-endings.machteld]
 }
 set temp [file normalize [file tempdir]]
 try {

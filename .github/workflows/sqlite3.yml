@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - dev/050-qualification
+      - codex/051-qualification
       - dev/22-sqlite3
       - dev/22-sqlite-gui
 
@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 150
     env:
-      FULL_QUALIFICATION: ${{ github.ref_name == 'main' || github.ref_name == 'dev/050-qualification' }}
+      FULL_QUALIFICATION: ${{ github.ref_name == 'main' || github.ref_name == 'codex/051-qualification' }}
     defaults:
       run:
         shell: pwsh

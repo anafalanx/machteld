@@ -19,7 +19,7 @@ proc ::groupTest::direct {sources} {
     try {
         $app eval [dict get $compiled script]
         $app eval {set ::calls {}; set ::probe 0; proc ::seen {name args} {lappend ::calls $name}}
-        set procBody [$app eval {info body ::groupApp::view::render}]
+        set procBody [$app eval {info body ::groupApp::view::@render}]
         foreach name {observed nested_body group_body} {
             set command ::groupApp::view::$name
             equal [expr {[string first $command $procBody] >= 0 && [string first $command $procBody] == [string last $command $procBody]}] \

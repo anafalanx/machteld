@@ -90,6 +90,13 @@ set ::machteld::manifest::native {
             xdot   {options {} doc machteld/command/graphviz#xdot}
         }
     }
+    intervals {
+        kind c domain INTERVALS codes {input memory usage} options {-pairs}
+        doc machteld/command/intervals
+        subcommands {
+            gaps {options {-pairs} doc machteld/command/intervals#gaps}
+        }
+    }
     hash {
         kind c domain HASH codes {badvalue nohandle notfound oserror usage}
         doc machteld/command/hash
@@ -131,6 +138,7 @@ set ::machteld::manifest::native {
             unwrap {options {} doc machteld/command/json#unwrap}
             get    {options {} doc machteld/command/json#get}
             exists {options {} doc machteld/command/json#exists}
+            children {options {} doc machteld/command/json#children}
         }
     }
     links {

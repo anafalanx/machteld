@@ -115,6 +115,15 @@ source -encoding utf-8 [file join $root compiler driver.tcl]
     set rebuilt [file join $delivery rebuilt.machteld]
     expect [call $exe $delivery project rebuild labels.machteld $rebuilt] $rebuilt "rebuild without the source directory"
     expect [call $exe $delivery $rebuilt $label] $label "rebuilt application"
+    set minimal [file join $delivery minimal.machteld]
+    expect [call $exe $delivery project rebuild --without-source --without-compiler labels.machteld $minimal] $minimal "embedded driver accepts both delivery options"
+    set mount [zipfs mount $minimal minimal-host]
+    try {
+        ::machteld::ArchiveEntry $mount
+        expect [file exists [file join $mount compiler]] 0 "minimal delivery omits compiler"
+        expect [file exists [file join $mount project inputs]] 0 "minimal pure-X application needs no runtime inputs"
+    } finally {zipfs unmount $mount}
+    expect [call $exe $delivery $minimal $label] $label "source-free pure-X application runs from generated Tcl"
 
     expect [call $exe $other project local] {script: local} "real program named project takes precedence"
     expect [call $exe $other --project docs $archive search label] fn/labels/label "reserved project selector"

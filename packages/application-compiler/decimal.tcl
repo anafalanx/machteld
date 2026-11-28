@@ -1,15 +1,33 @@
 # Both the compiler and the generated application install these procedures in
 # their own decimal namespace. A fixed-point value is coefficient / 10**scale.
-proc parts {value} {
-    if {![regexp {\A([+-]?)([0-9]+)(?:\.([0-9]+))?\Z} $value -> sign whole fraction]} {
+proc canonical {value} {
+    # A native value can expose decimal text while its caller retains the handle.
+    append value {}
+    if {![regexp {\A[+-]?[0-9]+(?:\.[0-9]+)?\Z} $value]} {
         return -code error -errorcode {APPCOMPILER ARGUMENT TYPE} "expected a fixed-point decimal"
     }
-    set fraction [string trimright $fraction 0]
-    # Strip leading zeroes before Tcl arithmetic can interpret them as octal.
-    set digits [string trimleft $whole$fraction 0]
-    if {$digits eq {}} { return {0 0} }
-    if {$sign eq "-"} { set digits -$digits }
-    return [list $digits [string length $fraction]]
+    set magnitude [string trimleft $value +-0]
+    if {[string first . $magnitude] >= 0} {
+        set magnitude [string trimright [string trimright $magnitude 0] .]
+        if {[string index $magnitude 0] eq "."} {set magnitude 0$magnitude}
+    }
+    if {$magnitude eq ""} {return 0}
+    if {[string index $value 0] eq "-"} {return -$magnitude}
+    return $magnitude
+}
+
+if {[llength [info commands ::interp]] && [llength [info commands ::machteld::x::canonicalDecimal]] &&
+        "canonicalDecimal" in [namespace eval ::machteld::x {namespace export}]} {
+    interp alias {} [namespace current]::canonical {} ::machteld::x::canonicalDecimal
+}
+
+# Typed operands have canonical fixed-point spelling. Use a base-ten scan
+# because removing the point from 0.08 leaves digits Tcl would read as octal.
+proc canonicalParts {value} {
+    set point [string first . $value]
+    if {$point < 0} {return [list $value 0]}
+    scan [string replace $value $point $point] %lld coefficient
+    return [list $coefficient [expr {[string length $value] - $point - 1}]]
 }
 
 proc fromParts {coefficient scale} {
@@ -27,29 +45,38 @@ proc fromParts {coefficient scale} {
     return $magnitude
 }
 
-proc canonical {value} { return [fromParts {*}[parts $value]] }
-
 proc calc {op a b} {
-    lassign [parts $a] left leftScale
-    lassign [parts $b] right rightScale
+    lassign [canonicalParts $a] left leftScale
+    lassign [canonicalParts $b] right rightScale
     if {$op eq "*"} {
         return [fromParts [expr {$left * $right}] [expr {$leftScale + $rightScale}]]
     }
-    set scale [expr {max($leftScale, $rightScale)}]
-    set left [expr {$left * 10**($scale - $leftScale)}]
-    set right [expr {$right * 10**($scale - $rightScale)}]
+    if {$leftScale < $rightScale} {
+        set left [expr {$left * 10**($rightScale - $leftScale)}]
+        set leftScale $rightScale
+    } elseif {$rightScale < $leftScale} {
+        set right [expr {$right * 10**($leftScale - $rightScale)}]
+    }
     switch -exact -- $op {
-        + { return [fromParts [expr {$left + $right}] $scale] }
-        - { return [fromParts [expr {$left - $right}] $scale] }
+        + { return [fromParts [expr {$left + $right}] $leftScale] }
+        - { return [fromParts [expr {$left - $right}] $leftScale] }
         default { return -code error -errorcode {APPCOMPILER ARGUMENT OPERATOR} "unknown decimal operator" }
     }
 }
 
-# Return a reduced fraction with positive denominator. Denominator zero
-# marks a division failure for all three public division operations.
-proc ratio {a b} {
-    lassign [parts $a] numerator aScale
-    lassign [parts $b] denominator bScale
+if {[llength [info commands ::machteld::x::tryDecimalArithmetic]] &&
+        "tryDecimalArithmetic" in [namespace eval ::machteld::x {namespace export}]} {
+    proc calc {op a b} [string cat {
+        set bounded [::machteld::x::tryDecimalArithmetic $op $a $b]
+        if {$bounded ne {}} {return $bounded}
+    } [info body calc]]
+}
+
+# Exact division needs a reduced fraction. Short rounded division can use
+# the original integer ratio. A zero denominator marks division failure.
+proc ratio {a b {allowUnreduced 0}} {
+    lassign [canonicalParts $a] numerator aScale
+    lassign [canonicalParts $b] denominator bScale
     if {$denominator == 0} { return {0 0} }
     if {$numerator == 0} { return {0 1} }
     if {$denominator < 0} {
@@ -62,7 +89,12 @@ proc ratio {a b} {
         set denominator [expr {$denominator * 10**($aScale - $bScale)}]
     }
     set x [expr {abs($numerator)}]
-    if {$x == 1 || $denominator == 1} { return [list $numerator $denominator] }
+    # Long division at this scale needs no GCD for ordinary integer operands.
+    # Retain the original arithmetic and Tcl diagnostics on trace replacements.
+    if {$x == 1 || $denominator == 1 || ($allowUnreduced &&
+            [string is wideinteger -strict $x] && [string is wideinteger -strict $denominator])} {
+        return [list $numerator $denominator]
+    }
     set y $denominator
     while {$y != 0} {
         set remainder [expr {$x % $y}]
@@ -142,15 +174,18 @@ proc quotient {a b} {
 }
 
 proc rounded {a b places mode} {
-    set integerPlaces [regexp {\A[+-]?[0-9]+\Z} $places]
-    if {$integerPlaces} { set places [lindex [parts $places] 0] }
-    if {!$integerPlaces || $places < 0} {
-        return [divisionError ROUND_PLACES "rounding requires a nonnegative number of decimal places"]
+    # A single ASCII digit is already a canonical number of decimal places.
+    if {![string match {[0-9]} $places]} {
+        set integerPlaces [regexp {\A[+-]?[0-9]+\Z} $places]
+        if {$integerPlaces} {scan $places %lld places}
+        if {!$integerPlaces || $places < 0} {
+            return [divisionError ROUND_PLACES "rounding requires a nonnegative number of decimal places"]
+        }
     }
     if {$mode ni {half_even half_away}} {
         return [divisionError ROUND_MODE "rounding requires half_even or half_away"]
     }
-    lassign [ratio $a $b] numerator denominator
+    lassign [ratio $a $b [expr {$places <= 18}]] numerator denominator
     if {$denominator == 0} { return [divisionError DIVIDE_BY_ZERO "division by zero"] }
     if {$places > 100000} {
         # A terminating value needs no artificial padding at a huge scale.

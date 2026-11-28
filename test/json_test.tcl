@@ -102,6 +102,14 @@ check "the seven short escapes are the short forms" [expr {
 check "solidus is not escaped" [expr {[json encode "a/b"] eq {"a/b"}}]
 check "non-ASCII passes through as raw UTF-8" [expr {
     [json encode "héllo"] eq "\"héllo\""}]
+foreach width {0 1 127 8192} {
+    set run [string repeat {列車/source} $width]
+    set key "\"$run\u0000"
+    set value "\n$run\\\u001b$run\t"
+    set expected [format {{"\"%s\u0000":"\n%s\\\u001b%s\t"}} $run $run $run]
+    check "plain transport quotes escaped keys and values around $width runs" [expr {
+        [json encode -plain -dict -- [dict create $key $value]] eq $expected}]
+}
 
 # The depth law applies to VALID JSON that is too deep for the contract; an
 # unclosed bracket flood is invalid JSON and fails as parse (a J1-table
@@ -175,6 +183,20 @@ check "typed: route b documented - a typed leaf in a PLAIN dict encodes while it
     [json encode [dict create wrap [json value boolean true]]] eq {{"wrap":true}}}]
 
 # J4: strict decode.
+foreach width {0 7 8 9 15 16 17 63 64 65} {
+    set prefix [string repeat A $width]
+    foreach {suffix escaped} [list Z Z \u0000 {\u0000} é é 🚆 🚆] {
+        set key $prefix$suffix
+        set wire [format {{"%s":true}} $prefix$escaped]
+        set length [string length [encoding convertto utf-8 $wire]]
+        set read [json decode -typed -maxbytes $length $wire]
+        set built [json value object [dict create $key [json value boolean true]]]
+        check "typed: text and key at byte $width in [list $escaped]" [expr {
+            [json encode -- $built] eq $wire && [json unwrap [json get $read $key]] == 1 &&
+            [catch {json decode -typed -maxbytes [expr {$length-1}] $wire} m opts] &&
+            [dict get $opts -errorcode] eq {MACHTELD JSON limit}}]
+    }
+}
 check "typed: duplicate keys refuse by name" [expr {
     [catch {json decode -typed {{"a":1,"a":2}}} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON strict}}]
@@ -210,8 +232,17 @@ check "typed: a duplicate deep in a large object refuses" [expr {
     [dict get $opts -errorcode] eq {MACHTELD JSON strict}}]
 unset members
 
-# The access surface: type, unwrap, get, exists.
+# Inspecting typed values and walking their children.
 set TYPEDDOC [json decode -typed {{"id":7,"result":{"ok":true,"n":42},"s":"S1"}}]
+foreach handle [list [json get $TYPEDDOC result] \
+        [json value object [dict create ok [json value boolean true] n [json value number 42]]]] {
+    set first [json encode -- $handle]
+    set second [json encode -dict -- $handle]
+    check "typed root exports plain text and retains its typed children" [expr {
+        $first eq {{"ok":true,"n":42}} && $second eq $first &&
+        [catch {json type $first}] && [catch {json type $second}] &&
+        [json type $handle] eq "object" && [json type [json get $handle n]] eq "number"}]
+}
 check "typed: type reads the tag" [expr {
     [json type $TYPEDDOC] eq "object" &&
     [json type [json get $TYPEDDOC result ok]] eq "boolean" &&
@@ -225,6 +256,82 @@ check "typed: exists answers, get refuses by name" [expr {
     [catch {json get $TYPEDDOC nope} m opts] &&
     [dict get $opts -errorcode] eq {MACHTELD JSON absent}}]
 check "typed: exists requires at least one path step" [catch {json exists $TYPEDDOC}]
+
+# Return the children out of the parent's scope, for both document backends.
+proc keptObjectChildren {built} {
+    set key "a\u0000b"
+    if {$built} {
+        set array [json value array [list [json value boolean true] [json value number 1.00e+7] \
+            [json value null] [json value object [dict create c [json value number 8]]]]]
+        set parent [json value object [dict create a [json value string primary] $key $array]]
+    } else {
+        set parent [json decode -typed {{"a":"primary","a\u0000b":[true,1.00e+7,null,{"c":8}]}}]
+    }
+    return [json children $parent]
+}
+foreach backend {parsed built} {
+    set children [keptObjectChildren [expr {$backend eq "built"}]]
+    set key "a\u0000b"
+    check "typed: $backend children preserve key spelling and member order" [expr {
+        [dict keys $children] eq [list a $key] && [json unwrap [dict get $children a]] eq "primary"}]
+    set leaves [json children [dict get $children $key]]
+    unset children
+    check "typed: $backend children retain identity, numeric spelling and nested documents" [expr {
+        [lmap item $leaves {json type $item}] eq {boolean number null object} &&
+        [json unwrap [lindex $leaves 1]] eq "1.00e+7" &&
+        [json unwrap [dict get [json children [lindex $leaves 3]] c]] eq "8"}]
+}
+# Keep constructed scalars and nested child handles independently across
+# both scalar allocation paths. The string sizes below count external UTF-8.
+foreach size {126 127 128 129 4097} {
+    set number "-[string repeat 9 [expr {$size-1}]]"
+    set text "[string repeat a [expr {$size-7}]]é\u0000🌍"
+    set leaf [json value string $text]
+    set numberNode [json value number $number]
+    set paired [json value object [dict create s $leaf n $numberNode]]
+    set packed [json value array [list $paired $leaf]]
+    set child [json get $packed 0]
+    set alias $leaf
+    unset numberNode paired packed leaf
+    set nestedText [json get $child s]
+    set nestedNumber [json get $child n]
+    unset child
+    check "typed: independent scalar and nested children at $size bytes" [expr {
+        [json type $alias] eq "string" && [json unwrap $alias] eq $text &&
+        [json unwrap $nestedText] eq $text && [json type $nestedNumber] eq "number" &&
+        [json encode -- $nestedNumber] eq $number}]
+    check "typed: malformed $size-byte numeric spelling is rejected" [expr {
+        [catch {json value number "[string repeat 8 [expr {$size-1}]]x"} m opts] &&
+        [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+}
+foreach kind {array object} {
+    check "typed: empty $kind has no children" [expr {[json children [json value $kind {}]] eq {}}]
+}
+foreach value [list [json value null] [json value number 1] [json value string ""] "plain"] {
+    check "typed: children rejects a scalar or plain value" [expr {
+        [catch {json children $value} msg opts] && [dict get $opts -errorcode] eq {MACHTELD JSON type}}]
+}
+check "typed: children takes exactly one argument" [expr {
+    [catch {json children}] && [catch {json children $TYPEDDOC id}]}]
+
+if {[llength [info commands ::machteld::x::compareEvidence]]} {
+    foreach {left right expected} {
+        {{"a\u0000":[1.00,true,"𐐷"]}} {{"a\u0000":[1.00,true,"\ud801\udc37"]}} 1
+        {["a\u0000b",null]} {["a\u0000c",null]} 0
+        {{"x":1,"y":2}} {{"y":2,"x":1}} -1
+        {[1.00e200]} {[10e199]} -1
+    } {
+        set a [json decode -typed $left]
+        set b [json decode -typed $right]
+        check "evidence proof: $left compared with $right" [expr {[::machteld::x::compareEvidence $a $b] == $expected}]
+    }
+    set parsed [json decode -typed {[1.00]}]
+    set built [json value array [list [json value number 1.00]]]
+    check "evidence proof delegates constructed and untyped inputs" [expr {
+        [::machteld::x::compareEvidence $built $parsed] == -1 &&
+        [::machteld::x::compareEvidence $parsed plain] == -1 &&
+        [json encode -- $parsed] eq {[1.00]} && [json encode -- $built] eq {[1.00]}}]
+}
 
 # J7's organ half: the wire path refuses typed values by name.
 check "typed: encode -plain refuses a typed value" [expr {
@@ -325,6 +432,66 @@ if {![file isdirectory $CORPUS]} {
     check "the i_ table holds, case by case ([expr {[llength $ITABLE] / 2}] pinned)" \
         [expr {$itableBad eq "" && [dict size $idict] == [llength $ITABLE] / 2}]
     if {$itableBad ne ""} { puts "     [join [lrange $itableBad 0 6] {; }]" }
+}
+
+# Private compiler projection takes a dictionary layout and an intact typed array.
+if {[llength [info commands ::machteld::x::projectRows]]} {
+    set layout [dict create label text verified bool n int]
+    set array [json decode -typed {[{"n":-0,"retained":{"k\u0000v":1.200e4},"label":"雪\u0000z","verified":false}]}]
+    set projected [::machteld::x::projectRows $layout $array]
+    set row [lindex $projected 0 0]
+    check "projection preserves field order, text and exact integer" [expr {
+        [dict keys $row] eq {n retained label verified} && [dict get $row label] eq "雪\u0000z" &&
+        [dict get $row n] eq "0" && [dict get $row verified] eq "0"}]
+    set child [dict get $row retained]
+    unset row projected array
+    check "projected evidence survives its document handle" [expr {
+        [json type $child] eq "object" && [json encode -- $child] eq {{"k\u0000v":1.200e4}}}]
+    foreach exact [list 1000000000000000000 9223372036854775808 -9223372036854775809 [string repeat 9 200]] {
+        set document [json decode -typed [format {[{"label":"coil","verified":true,"n":%s}]} $exact]]
+        set projected [::machteld::x::projectRows $layout $document]
+        set number [dict get [lindex $projected 0 0] n]
+        check "projected integer has the portable reader's fresh numeric representation" \
+            [string match {*no string representation} [tcl::unsupported::representation $number]]
+        check "projected arbitrary-precision integer is exact" [expr {
+            [llength $projected] == 1 && [dict get [lindex $projected 0 0] n] eq $exact}]
+    }
+    set large {}
+    for {set i 0} {$i<17} {incr i} {dict set large k$i int}
+    set array [json decode -typed {[{"label":"x","verified":true,"n":2},{"label":"y","n":1e3,"verified":true}]}]
+    lassign [::machteld::x::projectRows $layout $array] failed row
+    check "projection identifies the first failed row" [expr {$failed == 1 && [json type $row] eq "object"}]
+    # Direct callers may alias the source, use opaque layout entries or supply a
+    # long identifier. The ordinary generated reader handles declined layouts.
+    set longName [string repeat x 256]
+    foreach descriptor [list $large $child $array [dict create $longName text] [dict create title $child]] {
+        check "invalid row or layout declines without mutating input" [expr {
+            [::machteld::x::projectRows $descriptor $array] eq {} && [json type $array] eq "array" && [json type $child] eq "object"}]
+    }
+}
+
+if {[llength [info commands ::machteld::x::projectScalars]]} {
+    set read ::machteld::x::projectScalars
+    foreach {type wire expected} {
+        int {[-0,1000000000000000000,-9223372036854775809]} {0 1000000000000000000 -9223372036854775809}
+        bool {[true,false,true]} {1 0 1}
+        text {["","雪\u0000\ud83d\udd2c"]} {{} "雪\x00🔬"}
+    } {
+        set array [json decode -typed $wire]
+        set projected [$read $type $array]
+        unset array
+        check "projected $type list owns all its values" [expr {
+            [llength $projected] == 1 && [lindex $projected 0] eq [list {*}$expected]}]
+    }
+    foreach {type wire} {int {[1,1e2]} int {[2,1.0]} bool {[true,1]} text {["x",null]} int {[]} int {{}}} {
+        set input [json decode -typed $wire]
+        check "unsupported $type list uses the original reader" [expr {[$read $type $input] eq {}}]
+    }
+    set array [json decode -typed {[1,2]}]
+    check "typed array also supplied as descriptor retains its type" [expr {
+        [$read $array $array] eq {} && [json type $array] eq "array"}]
+    check "constructed arrays use the portable reader" [expr {
+        [$read int [json value array [list [json value number 1]]]] eq {}}]
 }
 
 puts "\n[expr {$fails == 0 ? {ALL PASS} : {FAILURES}}]: $fails failure(s)"

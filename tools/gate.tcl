@@ -248,6 +248,7 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "browser session boundaries" browser_test.tcl
                 addLane steps $runtime fast "SQLite Tcl interface" sqlite3_test.tcl
                 addLane steps $runtime fast "Graphviz layout and drawing" graphviz_test.tcl
+                addLane steps $runtime fast "Inclusive integer interval gaps" intervals_test.tcl
                 addLane steps $runtime fast "XXH3-64 catalog checksums" xxh3_test.tcl
                 addLane steps $runtime fast "Directory metadata and local-only reads" localfiles_test.tcl
                 addLane steps $runtime fast "Text encoding detector" encoding_test.tcl
@@ -260,9 +261,21 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime fast "native adversarial inputs" native_adversarial_test.tcl
                 addLane steps $runtime fast "native filesystem boundaries" native_filesystem_test.tcl
                 addLane steps $runtime fast "application compiler" application_compiler_test.tcl
-                foreach suite {semantics decimal distinct map} {
+                foreach suite {semantics decimal distinct integer_list map optimization record_admission} {
                     addLane steps $runtime fast "application compiler $suite" application_compiler_${suite}_test.tcl
                 }
+                addLane steps $runtime fast "X workloads against handwritten Tcl" corpus/compiler/run.tcl
+                addLane steps $runtime fast "X two-source history queries" corpus/compiler/history.tcl
+                addLane steps $runtime fast "X checked floating-point grid" corpus/compiler/checked-grid.tcl
+                addLane steps $runtime fast "X typed JSON batch export" corpus/compiler/wire-batch.tcl
+                addLane steps $runtime fast "X nested-evidence SQLite replay" corpus/compiler/sqlite-replay.tcl
+                addLane steps $runtime fast "X binary block archive" corpus/compiler/blob-archive.tcl
+                addLane steps $runtime fast "X research occurrence queries" corpus/compiler/temporal-rows.tcl
+                addLane steps $runtime fast "X probe coverage" corpus/compiler/probe-window.tcl
+                addLane steps $runtime fast "X Unicode document selections" corpus/compiler/document-selections.tcl
+                addLane steps $runtime fast "X calibrated SQLite measurements" corpus/compiler/calibrated-series.tcl
+                addLane steps $runtime fast "X exact invoice totals" corpus/compiler/invoice-totals.tcl
+                addLane steps $runtime fast "X numeric map order" corpus/compiler/numeric-order.tcl
             }
             integration {
                 if {[dict get $settings cloud]} {
@@ -355,6 +368,18 @@ proc ::gate::plan {settings} {
                 addLane steps $runtime packaging "application compiler archive" application_compiler_archive_test.tcl
                 addLane steps $runtime packaging "application compiler offline reference" application_compiler_reference_test.tcl
                 addLane steps $runtime packaging "embedded project driver" application_compiler_host_test.tcl
+                addLane steps $runtime packaging "embedded X compiler workloads" corpus/compiler/run.tcl --embedded
+                addLane steps $runtime packaging "embedded X two-source history queries" corpus/compiler/history.tcl --embedded
+                addLane steps $runtime packaging "embedded X checked floating-point grid" corpus/compiler/checked-grid.tcl --embedded
+                addLane steps $runtime packaging "embedded X typed JSON batch export" corpus/compiler/wire-batch.tcl --embedded
+                addLane steps $runtime packaging "embedded X nested-evidence SQLite replay" corpus/compiler/sqlite-replay.tcl --embedded
+                addLane steps $runtime packaging "embedded X binary block archive" corpus/compiler/blob-archive.tcl --embedded
+                addLane steps $runtime packaging "embedded X research occurrence queries" corpus/compiler/temporal-rows.tcl --embedded
+                addLane steps $runtime packaging "embedded X probe coverage" corpus/compiler/probe-window.tcl --embedded
+                addLane steps $runtime packaging "embedded X Unicode document selections" corpus/compiler/document-selections.tcl --embedded
+                addLane steps $runtime packaging "embedded X calibrated SQLite measurements" corpus/compiler/calibrated-series.tcl --embedded
+                addLane steps $runtime packaging "embedded X exact invoice totals" corpus/compiler/invoice-totals.tcl --embedded
+                addLane steps $runtime packaging "embedded X numeric map order" corpus/compiler/numeric-order.tcl --embedded
                 addLane steps $runtime packaging "typed colleague import" typed_import_test.tcl
                 addLane steps $runtime packaging "editable research diagram (headless and packed)" research_diagram_test.tcl -pack
                 foreach suite {project io examples sql schema transaction migration temporal zone generics result_match labels resources process callable lists shared binary64 operators streams workers records widgets} {

@@ -11,12 +11,13 @@ are no compute engines, `macht`, or Lua. This repository also holds the
 application compiler, written in Tcl. It checks typed modules and compiles them
 to Tcl for this runtime.
 
-## Machteld 0.50
+## Machteld 0.51
 
-Machteld 0.50 brings the
-compiler and Tcl/Tk runtime into one development and delivery tool. Existing
-projects can keep a Tcl entry and migrate individual modules.
-`machteld.exe --version` prints `0.50`. To check the Tcl package API
+Machteld 0.51 improves the Tcl emitted by the X compiler for calls, branches,
+arithmetic and collections. A native interval operation finds every uncovered
+range in a batch of signed 64-bit endpoints. Existing projects can keep a
+Tcl entry and migrate individual modules. [Release notes](docs/release-notes.md)
+`machteld.exe --version` prints `0.51`. To check the Tcl package API
 used by existing applications, run `machteld.exe --version --api` (currently `30`).
 The 0.30 work was an unsigned development baseline.
 The build tools use the signed executable at `dist/0.21/machteld.exe`.
@@ -26,7 +27,10 @@ The build tools use the signed executable at `dist/0.21/machteld.exe`.
 The runtime runs Tcl scripts and launches
 `.machteld` application archives. Use `machteld.exe project check project.dict`
 and `machteld.exe project pack project.dict app.machteld` for typed or mixed
-Tcl projects. To distribute a standalone Windows app,
+Tcl projects. The default archive includes the editable project and its
+compiler. The packer accepts `--without-source` and
+`--without-compiler` independently after `project pack` or `project rebuild`.
+To distribute a standalone Windows app,
 `machteld.exe wrap app.dict -o MyApp.exe --gui` embeds the selected app and
 runtime and can set the app's icon and Windows file properties. The full
 host keeps the offline reference. It covers the shipped
@@ -55,7 +59,7 @@ windows and clipboard ownership queries. The exact Beta 1 revision passed
 
 The offline manual stays in the full host. Standalone apps can include their own help files and use their own Windows identity. [Standalone packaging](docs/reference/machteld/command/wrap.md)
 
-Before signing 0.50, the build PC and hosted Windows CI must produce
+Before signing 0.51, the build PC and hosted Windows CI must produce
 byte-identical clean unsigned executables from the same revision and
 locked inputs. The runtime and packaged examples must pass acceptance,
 including attended checks of user-visible behavior. The owner signs a copy,
@@ -70,13 +74,13 @@ documentation in the executable you actually use.
 ## The plan and the commentary
 
 The roadmap gives the compiler integration sequence, the file-by-file
-Tcl/Tk migration checks and the runtime capabilities required for 0.50.
+Tcl/Tk migration checks and the runtime capabilities qualified for each release.
 The implementation plan records the corresponding runtime gates. [Roadmap](docs/roadmap.md) ·
 [Implementation and release gates in the release plan](plan-machteld22.md)
 
-Agents: what you find in the runtime while you use it or work on it, good or
-bad, goes in [commentary.md](commentary.md), as an entry of your own at its
-end. The owner reads it when the next machteld is planned.
+Agents using Machteld or X are encouraged to append first-hand feedback to
+`agent-comments.md` at the root of the project they’re working on. Earlier
+feedback about the runtime is collected in [commentary.md](commentary.md).
 
 ## Scope and trust
 
@@ -256,7 +260,7 @@ The bundled Tcl is 9.0.4 with the pinned upstream ACL-path correction for
 [ticket d40d8db3](https://core.tcl-lang.org/tcl/tktview/d40d8db3fb). Dependency
 versions, source hashes, and the backport identity are recorded in
 [the lock](tools/dependencies.lock.json). The file and product version strings in
-Windows show `0.50`. The fixed numeric fields encode the API as `30.0.0.0`. Its author,
+Windows show `0.51`. The fixed numeric fields encode the API as `30.0.0.0`. Its author,
 publisher, and copyright holder are Vincent Vercauteren. Build paths are
 scrubbed from the packaged runtime.
 

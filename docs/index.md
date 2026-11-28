@@ -1,14 +1,14 @@
 ---
 type: index
 title: machteld documentation
-description: Documentation for the integrated compiler and runtime in Machteld 0.50, with Tcl package API 30.
+description: Documentation for the integrated compiler and runtime in Machteld 0.51, with Tcl package API 30.
 tags: [machteld, windows, tcl, runtime]
 ---
 
-# Machteld 0.50
+# Machteld 0.51
 
 These pages describe the typed application compiler and Tcl/Tk runtime
-in Machteld 0.50. Its Tcl package API is `30`.
+in Machteld 0.51. Its Tcl package API is `30`. [Release notes](release-notes.md)
 The older signed release's own embedded reference and release notes
 describe its behavior. Use the selected executable's
 `manifest`, `docs status`, and (for incremental development builds)

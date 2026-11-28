@@ -88,6 +88,13 @@ proc ::callableTest::direct {} {
     set inc [::calls::library::increment]
     equal [::calls::client::apply $inc 041] 42 "private callable through exported X and Tcl"
     equal [{*}$inc 0008] 9 "canonical input to a private callable"
+    set emptyTypes [lreplace $inc 2 2 " \t\n"]
+    equal [{*}$emptyTypes 8] 9 "a concrete callback accepts any valid empty Tcl type list"
+    set malformedTypes [lreplace $inc 2 2 \{]
+    equal [catch {{*}$malformedTypes} message options] 1 "type list checked before callback argument count"
+    equal [list [dict get $options -errorcode] $message] \
+        [list {APPCOMPILER ARGUMENT TYPE} {expected 0 concrete type argument(s) at type arguments}] \
+        "a concrete callback preserves the type-argument diagnostic"
     set ::returnedCallback $inc
     equal [::calls::client::from_tcl 2] 3 "extern returns a typed callable"
     set identity [::calls::client::identity text]

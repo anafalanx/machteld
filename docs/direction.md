@@ -1,7 +1,7 @@
 ---
 type: decision-record
 title: Direction
-description: Current product boundary and decision rules for Machteld 0.50.
+description: Current product boundary and decision rules for Machteld 0.51.
 tags: [machteld, direction, scope]
 ---
 
@@ -48,8 +48,8 @@ The compute-engine architecture, its wire, `macht`, Lua, LPeg, lua-cjson, and
 the engine-bound column library were removed. They leave no compatibility
 command or migration layer. The unsigned 0.22 and 0.30 development
 baselines supplied the starting point for the integrated release.
-The integrated build reports `0.50`. Subsequent release numbers continue with
-`0.51` and `0.52`. Applications can use Tcl package API `30` as a compatibility
+The integrated build reports `0.51`. The following release is
+`0.52`. Applications can use Tcl package API `30` as a compatibility
 requirement across these builds. The baseline includes explicit wrapper inventories,
 optional Windows metadata and icons for wrapped applications, and native
 hardening. The shared executable runs scripts and archives. The owner signs and

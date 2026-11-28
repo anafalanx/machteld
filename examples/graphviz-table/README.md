@@ -68,6 +68,19 @@ occurrence key to every native item belonging to a node. Select the box or
 its label to see the source, then press Redraw to restore the selection
 against newly created items.
 
+The window keeps its admitted occurrence list in a scoped `ref`. The click
+and redraw callbacks capture the same reference and read the snapshot with
+`ref_get`. Each event checks that the reference is live. The enclosing
+`using` retains the rows through window cleanup and releases them on exit.
+Use this pattern when several events need the same large, stable query result.
+
+On a Windows development host, querying 384 occurrences and handling four
+clicks took a median of 19 ms with the scoped snapshot and 11 ms in
+handwritten Tcl using the same linear search. With the rows already loaded,
+the four callbacks took 1.74 ms in X and 0.56 ms in Tcl. These 30 paired
+trials timed the operation inside a running process and checked the full
+ordered rows, label text, selection state and canvas commands off screen.
+
 ```powershell
 .\machteld.exe project pack examples/graphviz-table/typed-window.dict observations.machteld
 .\machteld.exe observations.machteld --lookup notes.db 2026-11-01T09:15:00Z 007-B

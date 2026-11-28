@@ -1,7 +1,6 @@
 package require machteld
-lappend auto_path [file join [file dirname [file dirname [file normalize [info script]]]] \
-    packages application-compiler]
-package require application-compiler 0.1
+set root [file dirname [file dirname [file normalize [info script]]]]
+source -encoding utf-8 [file join $root packages application-compiler compiler.tcl]
 
 namespace eval ::mapTest {variable count 0}
 proc ::mapTest::equal {actual expected label} {
@@ -25,6 +24,148 @@ proc ::mapTest::wireEqual {result expected label} {
     set reference [::machteld::json encode -- [::machteld::json decode -typed $expected]]
     equal $encoded $reference "$label preserves JSON member names, order and values"
 }
+# A text key is a value at the Tcl boundary. Its spelling can be projected
+# without losing a retained native handle or exposing that handle as a key.
+proc ::mapTest::keyOwnership {} {
+    set source {export fn .put($key:text) -> map<text,int> => map_put(map<text,int>(), $key, 42)}
+    set program [::appcompiler::compile [dict create keytest $source] ::checkedKeys]
+    set app [interp create]
+    try {
+        # Exercise the portable host first, and the optional native capability
+        # through an interpreter alias if the current runtime supplies it.
+        set modes {portable}
+        if {[llength [info commands ::machteld::x::mapTextKey]]} {lappend modes native}
+        foreach mode $modes {
+            if {$mode eq "native"} {
+                $app eval {namespace eval ::machteld::x {namespace export mapTextKey}}
+                $app alias ::machteld::x::mapTextKey ::machteld::x::mapTextKey
+            }
+            $app eval [dict get $program script]
+            set node [::machteld::json decode -typed 17]
+            set result [$app eval [list ::checkedKeys::keytest::put $node]]
+            equal [::machteld::json type $node] number "$mode retains the incoming native handle"
+            equal [dict get $result 17] 42 "$mode projects the key spelling"
+            equal [catch {::machteld::json type [lindex [dict keys $result] 0]}] 1 "$mode produces an ordinary text key"
+        }
+    } finally {interp delete $app}
+}
+proc ::mapTest::counterUpdates {} {
+    set counter {export fn .count($seed: map<text,int>, $keys: list<text>, $other: text) -> list<map<text,int>> {
+    $out := $seed
+    for $k in $keys {
+        $n ::= match $out[$k] { none => 0
+            some($old) => $old }
+        $out = map_put($out, $k, $n + 3)
+    }
+    return [$seed, $out]
+}}
+    set src {extern fn .tap($key: text) -> text = ['::tap']}
+    foreach {fn replacements} {
+        count {}
+        large {{+ 3} {+ 9999999999999999999999999999999999}}
+        zero {{+ 3} {+ 0}}
+        otherkey {{map_put($out, $k} {map_put($out, $other}}
+        nonzero {{none => 0} {none => 7}}
+        effect {{[$k]} {[.tap($k)]} {map_put($out, $k} {map_put($out, .tap($k)}}
+        decimal {{map<text,int>} {map<text,decimal>} {none => 0} {none => 0.0}}
+        observed {{, $n + 3)} {, $n + 3)
+        if $n == 0 { $out = map_put($out, $other, 19) }}}
+    } {
+        append src \n [string map [list .count .$fn {*}$replacements] $counter]
+    }
+    set app [interp create]
+    try {
+        $app eval {proc ::tap {k} {lappend ::events $k; return $k}}
+        $app eval [dict get [::appcompiler::compile [dict create counters $src] ::counters] script]
+        set ns ::counters::counters
+        set huge [string repeat 9 150]
+        set key "x\u0000雪"
+        set seed [dict create $key $huge]
+        set result [$app eval [list ${ns}::count $seed [list 007 $key 7 007 {}] outside]]
+        equal [lindex $result 0] $seed "prior dictionary stays intact"
+        equal [lindex $result 1] [dict create $key [expr {$huge + 3}] 007 6 7 3 {} 3] "increment preserves bignums, spelling and insertion order"
+        equal [lindex [$app eval [list ${ns}::large {a 1} a b]] 1] {a 10000000000000000000000000000000000} "arbitrary-precision literal increment"
+        equal [lindex [$app eval [list ${ns}::zero {} a b]] 1] {a 0} "an absent key still gets inserted with a zero increment"
+        equal [lindex [$app eval [list ${ns}::otherkey {} a b]] 1] {b 3} "different read and write keys"
+        equal [lindex [$app eval [list ${ns}::nonzero {} a b]] 1] {a 10} "nonzero initial count"
+        equal [lindex [$app eval [list ${ns}::observed {} a b]] 1] {a 3 b 19} "later statement observes the prior count"
+        equal [lindex [$app eval [list ${ns}::decimal {a 0.5} a b]] 1] {a 3.5} "decimal counters retain their precision"
+        $app eval [list ${ns}::effect {} {a b} z]
+        equal [$app eval {set ::events}] {a a b b} "both effectful key expressions evaluate every iteration"
+    } finally {interp delete $app}
+}
+proc ::mapTest::counterTraces {} {
+    set source {extern fn .hook() -> unit = ['::hook']
+export fn .count($words:list<text>) -> map<text,int> {
+    $out := map<text,int>()
+    for $key in $words {
+        .hook()
+        $n ::= match $out[$key] { some($old) => $old
+            none => 0 }
+        $out = map_put($out, $key, $n + 1)
+    }
+    return $out
+}}
+    set pure [string map [list "        .hook()\n" {}] $source]
+    set app [interp create]
+    try {
+        set modules [dict create callback $source pure $pure]
+        $app eval [dict get [::appcompiler::compile $modules ::counterTraces] script]
+        $app eval [list set ::keyLocal [::appcompiler::emitLocalName key]]
+        $app eval [list set ::outLocal [::appcompiler::emitLocalName out]]
+        $app eval [list set ::countLocal [::appcompiler::emitLocalName n]]
+        $app eval {
+            proc ::hook {} {}
+            proc ::alternate {name index op} {
+                upvar 1 $name key
+                set key [expr {[incr ::reads] % 2 ? "read" : "written"}]
+            }
+            proc ::badCount {name index op} {upvar 1 $name out; set out {a nope}}
+            proc ::setCount {name index op} {upvar 1 $name n; set n 41}
+            proc ::install {cmd op} {
+                if {[incr ::calls] == 2} {
+                    uplevel 1 [list trace add variable $::watch $::operation $::action]
+                }
+            }
+            proc ::invokePure {} {::counterTraces::pure::count a}
+            proc ::observeStep {cmd op} {
+                # The count's right-hand side has already looked up the first key.
+                # Inspect the command words without reading the observed variable.
+                if {[lindex $cmd 0] eq "::set" && [llength $cmd] == 3 &&
+                    [lindex $cmd 1] eq $::countLocal && [incr ::calls] == 1} {
+                    uplevel 1 [list trace add variable $::keyLocal read ::alternate]
+                }
+            }
+        }
+        set hook ::counterTraces::callback::hook
+        $app eval [list trace add execution $hook enter ::install]
+        try {
+            $app eval {set ::calls 0; set ::reads 0; set ::operation read; set ::watch $::keyLocal; set ::action ::alternate}
+            equal [$app eval {::counterTraces::callback::count {a a}}] {a 1 written 1} \
+                "Tcl callback can change the key between the lookup and the update"
+            equal [$app eval {set ::reads}] 2 "both source key reads are observable"
+            $app eval {set ::calls 0; set ::watch $::outLocal; set ::action ::badCount}
+            set status [catch {$app eval {::counterTraces::callback::count {a a}}} message options]
+            equal $status 1 "the source addition rejects an invalid count"
+            equal [dict get $options -errorcode] {ARITH DOMAIN {non-numeric string}} "arithmetic failure category"
+            set site [$app eval [list ::counterTraces::@rt::mappedLocation $options \
+                [$app eval {::counterTraces::@rt::sourceMap}]]]
+            equal $site {module callback line 8 column 9} "arithmetic failure maps to the update"
+            $app eval {set ::calls 0; set ::watch $::countLocal; set ::operation write; set ::action ::setCount}
+            equal [$app eval {::counterTraces::callback::count {a a}}] {a 42} \
+                "the intermediate count binding is written before addition"
+        } finally {$app eval [list trace remove execution $hook enter ::install]}
+
+        # An enclosing Tcl caller can begin observing after the key was first
+        # evaluated, even when the X loop itself calls no application code.
+        $app eval {set ::calls 0; set ::reads 0; trace add execution ::invokePure enterstep ::observeStep}
+        try {
+            equal [$app eval ::invokePure] {read 1} "the later key read can affect a pure loop"
+            equal [$app eval {set ::reads}] 1 "only the remaining source read fires the new trace"
+        } finally {$app eval {trace remove execution ::invokePure enterstep ::observeStep}}
+    } finally {interp delete $app}
+}
+
 proc ::mapTest::crossOrigin {app} {
     set wire {{"data":{"a":"prefix","a\u0000b\\\"\ud83d\ude80z":"old","ab\\\"\ud83d\ude80z":"neighbor","tail":"last"}}}
     set localKey "a\u0000b\\\"\U0001F680z"
@@ -69,6 +210,44 @@ proc ::mapTest::crossOrigin {app} {
     set replaced [invoke $app local_replace_text $decoded $localKey new]
     wireEqual [invoke $app write_map [dict create data $replaced]] \
         [string map [list {"old"} {"new"}] $wire] "encode the replacement after cross-origin lookup"
+    set bytes [encoding convertto -profile strict utf-8 {{"data":{"雪":"before\u0000after"}}}]
+    foreach call {first second} {
+        equal [invoke $app read_map $bytes] [list ok [dict create 雪 "before\u0000after"]] \
+            "$call decode preserves UTF-8 input bytes, key and embedded text NUL"
+    }
+}
+
+# Model a binding that truncates a string or object key when it crosses into
+# Tcl. Its native typed JSON still retains the complete original wire value.
+proc ::mapTest::lossyJson {op args} {
+    set result [::machteld::json $op {*}$args]
+    if {$op ne "unwrap"} {return $result}
+    switch -- [::machteld::json type [lindex $args 0]] {
+        string {return [lindex [split $result \u0000] 0]}
+        object {
+            set shortened {}
+            dict for {key value} $result {dict set shortened [lindex [split $key \u0000] 0] $value}
+            return $shortened
+        }
+        default {return $result}
+    }
+}
+proc ::mapTest::legacyJson {script} {
+    set app [interp create]
+    try {
+        $app alias ::machteld::json ::mapTest::lossyJson
+        $app eval $script
+        equal [invoke $app read_map {{"data":{"normal":"雪"}}}] [list ok [dict create normal 雪]] \
+            "ordinary strings work through the legacy JSON compatibility path"
+        foreach {wire message} {
+            {{"data":{"item":"a\u0000b"}}} {value.data[item] cannot be preserved as text by this runtime}
+            {{"data":{"part":"first","part\u0000rest":"second"}}} {object keys cannot be preserved by this JSON runtime}
+        } {
+            lassign [invoke $app read_map $wire] tag problem
+            equal [list $tag [dict get $problem code] [dict get $problem message]] \
+                [list err JSON_SCHEMA $message] "legacy conversion detects a lossy read"
+        }
+    } finally {interp delete $app}
 }
 
 proc ::mapTest::exercise {app model} {
@@ -240,6 +419,9 @@ export fn .local_replace_text($m: map<text,text>, $key: text, $value: text) -> m
     set sources [dict create maps $model]
     equal [::appcompiler::check $sources] {} "map source checks"
     diagnostics
+    counterUpdates
+    counterTraces
+    keyOwnership
     set compiled [::appcompiler::compile $sources ::mapApp]
     set app [interp create]
     try {
@@ -248,5 +430,6 @@ export fn .local_replace_text($m: map<text,text>, $key: text, $value: text) -> m
         exercise $app $model
         crossOrigin $app
     } finally {interp delete $app}
+    legacyJson [dict get $compiled script]
     puts "application compiler map: $count assertions passed"
 }

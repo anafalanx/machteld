@@ -1,0 +1,117 @@
+Machteld overlay for Tcl 9.0.4. The Tcl license applies to these modifications.
+Reuse an exclusively owned Tcl collection for an immediately following local assignment after evaluating the functional operands in order.
+
+Keep either already evaluated element of a two-element list selected by an adjacent immediate index.
+
+--- a/tcl9.0.4/generic/tclExecute.c
++++ b/tcl9.0.4/generic/tclExecute.c
+@@ -2813,6 +2813,30 @@
+ 	opnd = TclGetUInt1AtPtr(pc + 5);
+ 	objPtr = POP_OBJECT();
+ 	objv = &OBJ_AT_DEPTH(objc-1);
++#if defined(MACHTELD_TCL_FUNCTIONAL_UPDATES_904) && defined(_WIN64) \
++    && TCL_MAJOR_VERSION == 9 && TCL_MINOR_VERSION == 0 \
++    && TCL_RELEASE_LEVEL == TCL_FINAL_RELEASE && TCL_RELEASE_SERIAL == 4 \
++    && !defined(TCL_COMPILE_DEBUG) && !defined(TCL_COMPILE_STATS) \
++    && !defined(TCL_MEM_DEBUG) && !defined(USE_DTRACE)
++        /* All arguments are present and retain their original order. The
++         * stock invocation remains intact for aliases, traces and limits. */
++        if (objc == 5 && opnd == 2
++                && pc + 6 < codePtr->codeStart + codePtr->numCodeBytes
++                && (pc[6] == INST_STORE_SCALAR1 || pc[6] == INST_STORE_SCALAR4)) {
++            MODULE_SCOPE int TclTryFunctionalDictStore(Tcl_Interp *, Tcl_Obj *, Tcl_Obj *const[], Var *);
++            size_t slot = pc[6] == INST_STORE_SCALAR1
++                    ? TclGetUInt1AtPtr(pc + 7) : TclGetUInt4AtPtr(pc + 7);
++            if (TclTryFunctionalDictStore(interp, objPtr, objv, LOCAL(slot))) {
++                objResultPtr = objv[2];
++                Tcl_DecrRefCount(objPtr);
++                /* Stock command-return cleanup also checks async readiness.
++                 * If a mark arrived during the insertion, service it directly
++                 * after the store, even between the VM's periodic polls. */
++                if (interruptCounter == 1 || TclAsyncReady(iPtr)) interruptCounter = 2;
++                NEXT_INST_V(6, objc, 1);
++            }
++        }
++#endif
+ 	cleanup = objc;
+ #ifdef TCL_COMPILE_DEBUG
+ 	if (tclTraceExec >= 2) {
+@@ -4679,6 +4703,32 @@
+ 	 */
+ 
+ 	opnd = TclGetUInt4AtPtr(pc + 1);
++#if defined(MACHTELD_TCL_FUNCTIONAL_UPDATES_904) && defined(_WIN64) \
++    && TCL_MAJOR_VERSION == 9 && TCL_MINOR_VERSION == 0 \
++    && TCL_RELEASE_LEVEL == TCL_FINAL_RELEASE && TCL_RELEASE_SERIAL == 4 \
++    && !defined(TCL_COMPILE_DEBUG) && !defined(TCL_COMPILE_STATS) \
++    && !defined(TCL_MEM_DEBUG) && !defined(USE_DTRACE)
++        /* list a b followed immediately by lindex 0 or 1. Ordinary Tcl
++         * compilation evaluated both words in source order.
++         * Only discard a shared object: a custom destructor must not run. */
++        if (opnd == 2 && codePtr->codeStart + codePtr->numCodeBytes - pc >= 10
++                && pc[5] == INST_LIST_INDEX_IMM) {
++            int selected = TclGetInt4AtPtr(pc + 6);
++            if ((selected == 0 || selected == 1) && (OBJ_AT_DEPTH(selected))->refCount > 1
++                    && interruptCounter > 1 && !iPtr->limit.active
++                    && !(iPtr->flags & (DELETED | CANCELED | TCL_CANCEL_UNWIND | INTERP_DEBUG_FRAME))) {
++                if (selected == 1) {
++                    Tcl_Obj *keep = tosPtr[0];
++                    tosPtr[0] = tosPtr[-1];
++                    tosPtr[-1] = keep;
++                }
++                /* The first stock dispatch must not poll here. The second
++                 * still advances and checks the original interrupt counter. */
++                --interruptCounter;
++                NEXT_INST_F(10, 1, 0);
++            }
++        }
++#endif
+ 	objResultPtr = Tcl_NewListObj(opnd, &OBJ_AT_DEPTH(opnd-1));
+ 	TRACE_WITH_OBJ(("%u => ", opnd), objResultPtr);
+ 	NEXT_INST_V(5, opnd, 1);
+@@ -5188,6 +5238,45 @@
+ 
+ 	CACHE_STACK_INFO();
+ 
++#if defined(MACHTELD_TCL_FUNCTIONAL_UPDATES_904) && defined(_WIN64) \
++    && TCL_MAJOR_VERSION == 9 && TCL_MINOR_VERSION == 0 \
++    && TCL_RELEASE_LEVEL == TCL_FINAL_RELEASE && TCL_RELEASE_SERIAL == 4 \
++    && !defined(TCL_COMPILE_DEBUG) && !defined(TCL_COMPILE_STATS) \
++    && !defined(TCL_MEM_DEBUG) && !defined(USE_DTRACE)
++        /* A plain local immediately overwritten by this instruction cannot
++         * retain the old list. The VM stack and that slot supply both
++         * counted references. All three expression operands ran already. */
++        if (opnd == 3 && !haveSecondIndex && fromIdx == length && fromIdxObj->refCount > 1
++                && !iPtr->limit.active && !Tcl_AsyncReady()
++                && !(iPtr->flags & (DELETED | CANCELED | TCL_CANCEL_UNWIND | INTERP_DEBUG_FRAME))
++                && valuePtr->typePtr == &tclListType && !ListObjSpanPtr(valuePtr)
++                && valuePtr->refCount == 2 && pc + 6 < codePtr->codeStart + codePtr->numCodeBytes
++                && (pc[6] == INST_STORE_SCALAR1 || pc[6] == INST_STORE_SCALAR4)) {
++            size_t slot = pc[6] == INST_STORE_SCALAR1
++                    ? TclGetUInt1AtPtr(pc + 7) : TclGetUInt4AtPtr(pc + 7);
++            Var *dest = LOCAL(slot);
++            if (dest->flags == 0 && dest->value.objPtr == valuePtr) {
++                /* No trace, abstract list callback or slice-element disposal
++                 * is possible. The unchanged logical contents survive an
++                 * allocation failure. Restore the slot in either case. */
++                dest->value.objPtr = NULL;
++                Tcl_DecrRefCount(valuePtr);
++                int rc = Tcl_ListObjReplace(interp, valuePtr, fromIdx, 0, 1, &OBJ_AT_TOS);
++                Tcl_IncrRefCount(valuePtr);
++                dest->value.objPtr = valuePtr;
++                if (rc != TCL_OK) {
++                    goto gotError;
++                }
++                /* The periodic check normally occurs after cleanup, just
++                 * before the store. This pure append has no callback.
++                 * A pending request used the stock path above. Defer a due
++                 * poll by one opcode so a concurrent request sees a fully
++                 * committed assignment directly after the scalar store. */
++                if (interruptCounter == 1) interruptCounter = 2;
++                NEXT_INST_V(6, opnd - 1, 0);
++            }
++        }
++#endif
+ 	if (Tcl_IsShared(valuePtr)) {
+ 	    objResultPtr = Tcl_DuplicateObj(valuePtr);
+ 	    if (Tcl_ListObjReplace(interp, objResultPtr, fromIdx, numToDelete,

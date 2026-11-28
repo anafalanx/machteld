@@ -22,11 +22,13 @@ machteld.exe program.machteld argument ...
 machteld.exe project check project.dict
 machteld.exe project run project.dict argument ...
 machteld.exe project pack project.dict program.machteld
+machteld.exe project pack --without-compiler project.dict editable.machteld
+machteld.exe project rebuild --without-source --without-compiler editable.machteld runnable.machteld
 machteld.exe pack source -o program.machteld
 machteld.exe wrap app.dict -o Program.exe --gui
 ```
 
-`--version` prints the product version on one line, currently `0.50`.
+`--version` prints the product version on one line, currently `0.51`.
 `--version --api` prints the Tcl package API number (`30`) used by
 `package require machteld` and the project manifest's `minApi`.
 

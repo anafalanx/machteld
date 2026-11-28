@@ -49,7 +49,7 @@ proc ::appcompiler::project::stageBytes {path bytes} {
     try { puts -nonewline $channel $bytes } finally { close $channel }
 }
 
-proc ::appcompiler::project::pack {manifest output} {
+proc ::appcompiler::project::pack {manifest output {withSource 1} {withCompiler 1}} {
     requirePacker
     set built [build $manifest project/inputs]
     set manifest [file normalize $manifest]
@@ -70,12 +70,22 @@ proc ::appcompiler::project::pack {manifest output} {
         set app [file join $work app]
         stageBytes [file join $app main.tcl] [encoding convertto -profile strict utf-8 [dict get $built artifact script]]
         set originals [file join $app project inputs]
-        stageBytes [file join $originals application.dict] [dict get $project manifestBytes]
-        dict for {name bytes} $inputs { stageBytes [file join $originals $name] $bytes }
+        if {$withSource} {
+            stageBytes [file join $originals application.dict] [dict get $project manifestBytes]
+        }
+        dict for {name bytes} $inputs {
+            # Only module inputs have a name in the manifest's selection map.
+            # A Tcl entry, package files and declared assets are runtime inputs.
+            if {$withSource || [dict get $project selected $name] eq {}} {
+                stageBytes [file join $originals $name] $bytes
+            }
+        }
         stageBytes [file join $app project reference.db] [::appcompiler::reference::build [dict get $built artifact modules]]
-        file mkdir [file join $app compiler]
-        foreach member $::appcompiler::compilerFiles {
-            file copy -- [file join $::appcompiler::compilerDirectory $member] [file join $app compiler $member]
+        if {$withCompiler} {
+            file mkdir [file join $app compiler]
+            foreach member $::appcompiler::compilerFiles {
+                file copy -- [file join $::appcompiler::compilerDirectory $member] [file join $app compiler $member]
+            }
         }
         # This is the implementation dispatched by the host's pack command.
         # Absolute paths keep the operation independent of the caller's cwd.
@@ -99,14 +109,16 @@ proc ::appcompiler::project::withArchiveManifest {archive command args} {
     try {
         ::machteld::ArchiveEntry $mount
         set manifest [file join $mount project inputs application.dict]
-        if {![file isfile $manifest]} {invalid "archive has no editable project manifest"}
+        if {![file isfile $manifest]} {
+            invalid "archive has no editable project manifest; use the original project or an archive that includes X source"
+        }
         return [$command $manifest {*}$args]
     } finally { zipfs unmount $mount }
 }
 
-proc ::appcompiler::project::rebuild {archive output} {
+proc ::appcompiler::project::rebuild {archive output {withSource 1} {withCompiler 1}} {
     requirePacker
     set archive [file normalize $archive]
     set output [outputPath $output [list $archive]]
-    return [withArchiveManifest $archive ::appcompiler::project::pack $output]
+    return [withArchiveManifest $archive ::appcompiler::project::pack $output $withSource $withCompiler]
 }

@@ -11,6 +11,8 @@ export fn .nested() -> list<list<int>> => [
     [],
 ]
 export fn .numbers($v: list<int>) -> int => len($v)
+export fn .flags($bits: list<bool>) -> list<bool> => $bits
+export fn .matrix($bits: list<list<bool>>) -> list<list<bool>> => $bits
 export fn .as_argument() -> int => .numbers([])
 export fn .with_sibling() -> list<list<text>> => .pair([], ['007'])
 export fn .optional() -> list<int?> => [none, some(9)]
@@ -46,6 +48,32 @@ export fn .lookup<.t>($values: list<.t>, $i: int) -> .t? => $values[$i]
 example .lookup<text>(['', '007'], 0) => some('')
 export fn .required<.t>($values: list<.t>, $i: int) -> result<.t,problem> =>
     require_index($values, $i)
+export fn .required_value<.t>($values: list<.t>, $i: int) -> result<.t,problem> =>
+    ok(require_index($values, $i)?)
+export fn .required_effects($values: list<text>) -> result<text,problem> =>
+    ok(require_index(list_append($values, .observe('base')), len(.observe('x')))?)
+extern fn .index_hook() -> unit = ['::index_hook']
+export fn .present_at($values:list<text>, $i:int) -> bool {
+    .index_hook()
+    return match $values[$i] {some(_) => true
+        none => false}
+}
+export fn .assign_only($maybe:int?) -> int {
+    $unused := 0
+    .index_hook()
+    $unused = match $maybe { some($n) => $n
+        none => 19 }
+    return 42
+}
+export fn .watched($values:list<text>, $i:int) -> result<text,problem> {
+    .index_hook()
+    return ok(require_index($values, $i)?)
+}
+export fn .watched_bound($values:list<text>, $i:int) -> result<text,problem> {
+    .index_hook()
+    $selected ::= require_index($values, $i)?
+    return ok($selected)
+}
 export fn .inferred() -> list<text> {
     $names := list_append([], '007')
     return list_append($names, '7')
@@ -94,6 +122,36 @@ export fn .groups($rows: list<.observation>) -> map<text,list<text>> {
     return $groups
 }
 extern fn .observe($id: text) -> text = ['::observe']
+export fn .match_history($items: list<int?>) -> list<list<int>> {
+    $out := [10]
+    $versions := list<list<int>>()
+    for $item in $items {
+        $versions = list_append($versions, $out)
+        $out = match $item { none => $out
+            some($n) => list_append($out, $n) }
+    }
+    return list_append($versions, $out)
+}
+export fn .match_put($item: int?, $key: text, $divisor: int) -> result<list<map<text,int>>,problem> {
+    $state := map_put(map<text,int>(), 'seed', 1)
+    $saved ::= $state
+    $state = match $item {
+        some($n) => map_put($state, .observe($key), quotient($n, $divisor)?)
+        none => $state
+    }
+    return ok([$saved, $state])
+}
+export fn .match_other($captured: list<int>?) -> list<int> {
+    $out := [99]
+    $out = match $captured { none => $out
+        some($v) => list_append($v, 7) }
+    return $out
+}
+export fn .match_argument($item: int?) -> list<list<int>> {
+    $out := [1]
+    return [$out, match $item { some($n) => list_append($out, $n)
+        none => $out }, $out]
+}
 export fn .seen($divisor: int) -> result<list<text>,problem> => ok([
     .observe('before'),
     $"value ${quotient(8, $divisor)?}",
@@ -108,6 +166,128 @@ proc ::listsTest::equal {value expected label} {
     incr checks
 }
 
+proc ::listsTest::watchedReads {app fn} {
+    $app eval [list set ::selectedLocal [::appcompiler::emitLocalName selected]]
+    $app eval {
+        proc ::index_hook {} {}
+        proc ::installIndexReads {cmd op} {
+            if {$::action eq "write"} {
+                uplevel 1 [list trace add variable $::selectedLocal write ::destinationWrite]
+            }
+            foreach name [info args ::typed::values::watched] label {list index} {
+                uplevel 1 [list trace add variable $name read [list ::indexRead $label]]
+            }
+        }
+        proc ::destinationWrite {name sub op} {
+            upvar 1 $name selected
+            lappend ::reads write
+            set selected "observed $selected"
+        }
+        proc ::indexRead {label name sub op} {
+            upvar 1 $name value
+            lappend ::reads $label
+            if {$label eq "list" && $::action eq "fail"} {error "unavailable"}
+            if {$label eq "index" && $::action eq "move"} {set value [incr ::position]}
+            if {$label eq "index" && $::action eq "replace"} {
+                upvar 1 [lindex [info args ::typed::values::watched] 0] original
+                set original {changed}
+            }
+        }
+        trace add execution ::typed::values::index_hook enter ::installIndexReads
+    }
+    try {
+        foreach action {move replace} {
+            $app eval [list set ::action $action]
+            $app eval {set ::reads {}; set ::position -1}
+            equal [$app eval [list $fn {first second third} 0]] {ok first} \
+                "required lookup uses its original list and index under $action"
+            equal [$app eval {set ::reads}] {list index} "each operand is read once in source order"
+        }
+        $app eval {set ::reads {}; set ::action fail}
+        set status [catch {$app eval [list $fn first 0]} msg opts]
+        equal $status 1 "failure while reading the first operand reaches the Tcl caller"
+        equal [dict get $opts -errorcode] {TCL READ VARNAME} "original variable-read error"
+        equal [$app eval {set ::reads}] list "the index is never read after the list read fails"
+        if {$fn eq "watched_bound"} {
+            $app eval {set ::reads {}; set ::action write}
+            equal [$app eval [list $fn first 0]] {ok {observed first}} "destination write trace sees the element"
+            equal [$app eval {set ::reads}] {list index write} "the lookup completes before writing its destination"
+            lassign [$app eval [list $fn first [expr {1 << 200}]]] tag problem
+            equal [list $tag [dict get $problem code]] {err INDEX_OUT_OF_RANGE} "a bound lookup propagates huge misses"
+        }
+    } finally {$app eval {trace remove execution ::typed::values::index_hook enter ::installIndexReads}}
+    # A Tcl abstract list may compute its length in a callback. A positive
+    # miss asks once for the bounds check and once for the diagnostic.
+    $app eval {
+        proc ::observeLength {cmd op} {
+            if {[lindex $cmd 1] eq {unique witness list}} {incr ::lengthCalls}
+        }
+        trace add execution ::llength enter ::observeLength
+    }
+    try {
+        foreach {index expected} {-1 1 1 1 12 2} {
+            $app eval {set ::lengthCalls 0}
+            $app eval [list $fn {unique witness list} $index]
+            equal [$app eval {set ::lengthCalls}] $expected "$fn list length evaluations for index $index"
+        }
+    } finally {$app eval {trace remove execution ::llength enter ::observeLength}}
+}
+
+proc ::listsTest::discardedIndex {app} {
+    $app eval {
+        proc ::replaceIndex {local command op} {uplevel 1 [list set $local $::dynamicIndex]}
+        proc ::failElement {command op} {
+            if {[lindex $command 1] eq {witness values}} {
+                return -code error -errorcode {TEST ELEMENT} {element could not be read}
+            }
+        }
+        set indexLocal [lindex [info args ::typed::values::present_at] 1]
+        set callback [list ::replaceIndex $indexLocal]
+        trace add execution ::typed::values::index_hook enter $callback
+    }
+    try {
+        foreach value {0.5 NaN} {
+            $app eval [list set ::dynamicIndex $value]
+            set answer [$app eval {
+                list [catch {::typed::values::present_at {first second} 0} message opts] \
+                    [dict getdef $opts -errorcode {}]
+            }]
+            equal $answer {1 {TCL VALUE INDEX}} "invalid dynamic index $value still reaches lindex"
+        }
+    } finally {$app eval {trace remove execution ::typed::values::index_hook enter $callback}}
+    $app eval {trace add execution ::lindex enter ::failElement}
+    try {
+        equal [$app eval {
+            list [catch {::typed::values::present_at {witness values} 0} message opts] \
+                [dict getdef $opts -errorcode {}]
+        }] {1 {TEST ELEMENT}} "discarded capture preserves the selected element fault"
+        equal [$app eval {::typed::values::present_at {witness values} 99}] 0 "absent index skips the element read"
+    } finally {$app eval {trace remove execution ::lindex enter ::failElement}}
+}
+
+proc ::listsTest::matchDestination {app} {
+    $app eval [list set ::unusedLocal [::appcompiler::emitLocalName unused]]
+    $app eval {
+        proc ::watchDestination {cmd op} {
+            uplevel 1 [list trace add variable $::unusedLocal {read write} ::noticeDestination]
+        }
+        proc ::noticeDestination {name element op} {
+            if {$op eq "read"} {error "the program never reads this binding"}
+            upvar 1 $name value
+            lappend ::writes $value
+        }
+        trace add execution ::typed::values::index_hook enter ::watchDestination
+    }
+    try {
+        $app eval {set ::writes {}}
+        foreach value {{some 8} none} {
+            equal [$app eval [list ::typed::values::assign_only $value]] 42 \
+                "discarded match assignment does not read its destination"
+        }
+        equal [$app eval {set ::writes}] {8 19} "each selected arm writes the destination once"
+    } finally {$app eval {trace remove execution ::typed::values::index_hook enter ::watchDestination}}
+}
+
 proc ::listsTest::direct {} {
     variable source
     set modules [dict create values $source]
@@ -116,6 +296,40 @@ proc ::listsTest::direct {} {
     try {
         $app eval [dict get [::appcompiler::compile $modules ::typed] script]
         $app eval {namespace path ::typed::values; set ::events {}; proc ::observe {v} {lappend ::events $v; return $v}}
+        equal [$app eval {flags {  true  {false}  1  0  }}] {1 0 1 0} "public boolean lists have canonical values"
+        equal [$app eval {matrix {{true false} {} {0 1}}}] {{1 0} {} {0 1}} "nested boolean lists use the same admission"
+        foreach {bad path} {{true 1 TRUE} {$bits.2} {{false} {1 01}} {$bits.1.1}} cmd {flags matrix} {
+            if {![catch {$app eval [list $cmd $bad]} message options]} {error "accepted invalid boolean list"}
+            equal [list $message [dict get $options -errorcode]] \
+                [list "expected bool at $path" {APPCOMPILER ARGUMENT TYPE}] "first invalid boolean position"
+        }
+        interp alias $app ::jsonValue {} ::machteld::json
+        foreach prefix {0 1 false true} {
+            set wire [format {"%s\u0000tail"} $prefix]
+            set raw [$app eval [list jsonValue unwrap [::machteld::json decode -typed $wire]]]
+            foreach arg [list $raw [list $raw]] {
+                if {![catch {$app eval [list flags $arg]} msg opts]} {error "accepted text after a boolean prefix"}
+                equal [list $msg [dict get $opts -errorcode]] \
+                    {{expected bool at $bits.0} {APPCOMPILER ARGUMENT TYPE}} "a native NUL is part of the boolean spelling"
+            }
+        }
+        equal [$app eval {
+            set root [jsonValue decode -typed 1]
+            set child [jsonValue decode -typed false]
+            set bad [jsonValue decode -typed 2]
+            set first [flags $root]
+            set second [flags [list $child]]
+            catch {flags [list $bad]}
+            list $first $second [jsonValue type $root] [jsonValue type $child] [jsonValue type $bad]
+        }] {1 0 number boolean number} "boolean list admission preserves callers' JSON handles"
+        foreach wire {17 true {"雪"} {[1,null]} {{"x":"a\u0000b"}}} {
+            set retained [$app eval [list apply {{wire} {
+                set node [jsonValue decode -typed $wire]
+                set count [name_size $node]
+                list $count [jsonValue encode -- $node]
+            }} $wire]]
+            equal $retained [list [string length $wire] $wire] "text length preserves the borrowed JSON handle"
+        }
         equal [$app eval {empty text}] {} "declared generic result supplies empty list type"
         equal [$app eval nested] {{} 7 {}} "sibling determines nested empty element type"
         equal [$app eval as_argument] 0 "parameter supplies element type"
@@ -145,7 +359,7 @@ proc ::listsTest::direct {} {
         equal [$app eval snapshots] {{1 2} {1 2} {1 2 3 4}} "copy, callback and iteration retain their snapshots"
         equal [$app eval different_base] {other tail} "assignment can build from a different local"
         set step [list apply {{words op} {
-            if {[lindex $words 0] eq "::lappend" && [string match v_* [lindex $words 1]]} {incr ::updates}
+            if {[lindex $words 0] eq "::linsert" && [lindex $words 2] eq "end"} {incr ::updates}
         }}]
         $app eval {set ::updates 0}
         $app eval [list trace add execution ::typed::values::append_quotient enterstep $step]
@@ -165,6 +379,24 @@ proc ::listsTest::direct {} {
             equal [list $tag [dict get $failure code]] {err INDEX_OUT_OF_RANGE} "required bounds failure for $index"
         }
         equal [$app eval {required text {{} 007} 0}] {ok {}} "required empty text"
+        equal [$app eval {required_value text {{} 007} 0}] {ok {}} "propagated lookup preserves a present empty string"
+        equal [$app eval {required_value text {{} 007} 1}] {ok 007} "propagated lookup preserves integer-looking text"
+        equal [$app eval {required_value int? {none} 0}] {ok none} "lookup propagates exactly one result layer"
+        set originLine {    ok(require_index($values, $i)?)}
+        set expectedOrigin [dict create module values line [expr {1+[lsearch -exact [split $::listsTest::source \n] $originLine]}] \
+            column [expr {1+[string first ? $originLine]}]]
+        foreach index [list -1 2 [string repeat 9 100] -[string repeat 9 100]] {
+            lassign [$app eval [list required_value text {{} 007} $index]] tag failure
+            equal [list $tag [dict get $failure code] [dict get $failure message] [dict get $failure origin]] \
+                [list err INDEX_OUT_OF_RANGE "index $index is outside a list of length 2" $expectedOrigin] "checked lookup keeps the entire bounds failure"
+        }
+        $app eval {set ::events {}}
+        equal [$app eval {required_effects {first}}] {ok base} "computed indices retain their value"
+        equal [$app eval {set ::events}] {base x} "computed operands run once in source order"
+        watchedReads $app watched
+        watchedReads $app watched_bound
+        discardedIndex $app
+        matchDestination $app
         set raw [binary decode hex 00ffc0af]
         set extended [$app eval [list extend bytes {} $raw]]
         equal [binary encode hex [lindex [$app eval [list lookup bytes $extended 0]] 1]] 00ffc0af "append and lookup preserve raw bytes"
@@ -176,7 +408,25 @@ proc ::listsTest::direct {} {
         equal [$app eval [list groups $rows]] {A {007 7} C {{}}} "filter and group preserve order, spelling and the empty id"
         set values [$app eval {collect 40000}]
         equal [list [llength $values] [lindex $values 0] [lindex $values end]] {40000 0 39999} "large collector preserves all positions"
-        equal [regexp -line {^::lappend v_[0-9a-f]+ } [$app eval {info body ::typed::values::collect}]] 1 "repeated direct append uses the local Tcl instruction"
+        equal [regexp -line {^::set (v_[0-9a-f]+) \[::linsert \$\1 end } [$app eval {info body ::typed::values::@collect}]] 1 "collector evaluates its base before the item"
+        equal [$app eval {match_history {{some 4} none {some 8}}}] {10 {10 4} {10 4} {10 4 8}} "each retained list keeps its value across match updates"
+        equal [$app eval {match_other {some {2 3}}}] {2 3 7} "a captured base takes its own value"
+        equal [$app eval {match_argument {some 7}}] {1 {1 7} 1} "match in an expression leaves its source local unchanged"
+        set key "key\u0000tail"
+        $app eval {set ::events {}}
+        set pair [$app eval [list match_put {some 8} $key 2]]
+        equal [lindex $pair 0] ok "map update succeeds"
+        equal [lindex $pair 1] [list {seed 1} [dict create seed 1 $key 4]] "retained map and normalized key survive a match update"
+        equal [$app eval {set ::events}] [list $key] "reached key evaluates once"
+        $app eval {set ::events {}}
+        set failed [$app eval [list match_put {some 8} $key 0]]
+        equal [dict get [lindex $failed 1] code] DIVIDE_BY_ZERO "failed element propagates before storing the result"
+        equal [$app eval {set ::events}] [list $key] "key is evaluated before the failing map value"
+        $app eval {set ::events {}}
+        equal [$app eval [list match_put none $key 0]] {ok {{seed 1} {seed 1}}} "unselected arm skips the fallible value"
+        equal [$app eval {set ::events}] {} "unselected arm skips the key"
+        equal [regexp {::set (v_[0-9a-f]+) \[::linsert \$\1 end \[::lindex \$m_} [$app eval {info body ::typed::values::match_history}]] 1 "match assignment uses the captured list value"
+        equal [regexp {::set (v_[0-9a-f]+) \[::dict replace \$\1 } [$app eval {info body ::typed::values::match_put}]] 1 "match assignment reads the map before the key"
         equal [catch {$app eval {lookup text {x} end}} msg options] 1 "Tcl end index rejected at typed boundary"
         equal [dict get $options -errorcode] {APPCOMPILER ARGUMENT TYPE} "invalid index has a typed boundary error"
         equal [catch {$app eval {extend int {1 2} bad}} msg options] 1 "Tcl append item checked against its descriptor"

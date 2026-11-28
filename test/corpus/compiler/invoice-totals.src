@@ -1,0 +1,31 @@
+export record .entry {
+    id: int
+    issued: decimal
+    returned: decimal
+    price: decimal
+}
+export record .sum {
+    lines: int
+    units: decimal
+    amount: decimal
+    smallest: decimal
+    largest: decimal
+}
+export fn .sum_rows($rows: list<.entry>) -> .sum {
+    $count := 0
+    $total := 0.0
+    $amount := 0.0
+    $low := 0.0
+    $high := 0.0
+    for $row in $rows {
+        $net ::= $row.issued - $row.returned
+        $total = $total + $net
+        $amount = $amount + ($net * $row.price)
+        if $count == 0 || $net < $low { $low = $net }
+        if $count == 0 || $net > $high { $high = $net }
+        $count = $count + 1
+    }
+    return make<.sum>(lines:$count,units:$total,amount:$amount,smallest:$low,largest:$high)
+}
+export fn .report($path: text) -> result<.sum,problem> =>
+    ok(.sum_rows(sql_many<.entry>($path,'SELECT id,issued,returned,price FROM entry ORDER BY id')?))

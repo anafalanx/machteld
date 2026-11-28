@@ -9,7 +9,7 @@ commands: docs, help
 # Agent documentation bootstrap
 
 The Machteld distribution contains the complete, exact-version offline
-references for Machteld 0.50, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
+references for Machteld 0.51, Tcl 9.0.4, Tk 9.0.4 and cffi 2.0.3. Read
 `docs get cffi/manual/intro` for foreign calls and the Foreign calls section
 of the runtime contract for the bundled build's restrictions. The corpus includes the Tcl
 language and C API manuals and the Tk application, widget, and C API manuals—not
@@ -20,6 +20,12 @@ recalled or online documentation may describe a different release. Different
 artifacts can report the same product version and Tcl package API.
 Check the corpus/build identity and live `manifest`, not version alone.
 Design guides and historical notes are context, not additional command options.
+
+As you use Machteld or X, you’re encouraged to append a short note to
+`agent-comments.md` at the root of the project you’re working on. What helped
+you get something working? Where did you lose time? A command you tried, a
+diagnostic you received, or an example you wish you’d had can make the
+feedback easier to act on.
 
 ```tcl
 # 1. Establish versions, corpus identity, and available products.

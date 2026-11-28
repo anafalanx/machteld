@@ -9,6 +9,11 @@ record .reading {
     local_time: local_datetime?
 }
 record .series { readings: list<.reading> }
+record .period {
+    starts: instant
+    ends: instant
+    source: text
+}
 
 export fn .parse($text: text) -> result<instant,problem> => parse_instant($text)
 export fn .local($text: text) -> result<local_datetime,problem> => parse_local_datetime($text)
@@ -30,6 +35,10 @@ export fn .store($path: text, $stamp: text, $local: local_datetime?) -> result<u
 }
 export fn .rows($path: text, $sql: text) -> result<list<.reading>,problem> =>
     sql_many<.reading>($path, $sql)
+export fn .periods($path: text, $start: instant, $end: instant) -> result<list<.period>,problem> =>
+    sql_many<.period>($path,
+        'SELECT starts, ends, source FROM periods WHERE starts < ?2 AND ?1 < ends ORDER BY starts',
+        $start, $end)
 fn .ordered($path: text) -> result<unit,problem> {
     $rows ::= .rows($path, 'SELECT stamp, local_time FROM readings ORDER BY stamp COLLATE BINARY')?
     for $row in $rows {
@@ -72,6 +81,13 @@ proc ::temporalTest::static {} {
 }
 
 proc ::temporalTest::scalars {} {
+    foreach fn {parse local} {
+        foreach wire {17 {"2024-02-29T00:00:00Z"} {{"value":"2024-02-29"}}} {
+            set node [::machteld::json decode -typed $wire]
+            equal [::timeApp::events::$fn $node] [::timeApp::events::$fn $wire] "$fn diagnoses the same text spelling"
+            equal [::machteld::json encode -- $node] $wire "$fn preserves the caller's JSON handle"
+        }
+    }
     foreach {input expected} {
         0001-01-01T14:00:00+14:00 0001-01-01T00:00:00.000000000Z
         9999-12-31T09:59:59.999999999-14:00 9999-12-31T23:59:59.999999999Z
@@ -81,6 +97,8 @@ proc ::temporalTest::scalars {} {
         1582-10-10T00:00:00Z 1582-10-10T00:00:00.000000000Z
         1199-12-31T23:40:00-00:45 1200-01-01T00:25:00.000000000Z
         2000-02-29T23:59:59.000000000+00:00 2000-02-29T23:59:59.000000000Z
+        2024-02-29T23:59:59.09+00:00 2024-02-29T23:59:59.090000000Z
+        2024-02-29T23:59:59.000000001Z 2024-02-29T23:59:59.000000001Z
         2009-09-09T08:09:08.010100+08:59 2009-09-08T23:10:08.010100000Z
     } {
         equal [::timeApp::events::parse $input] [list ok $expected] $input
@@ -95,7 +113,21 @@ proc ::temporalTest::scalars {} {
     foreach input {0001-01-01T00:00:00+00:01 9999-12-31T23:59:59-00:01} {
         problem [::timeApp::events::parse $input] INSTANT_RANGE "UTC year overflow"
     }
+    set spelling 2400-03-01T05:44:00.0100+05:45
+    foreach input [list [binary format a* $spelling] [list $spelling]] {
+        equal [::timeApp::events::parse $input] {ok 2400-02-29T23:59:00.010000000Z} \
+            "a borrowed Tcl value crosses leap day with its fraction intact"
+        equal $input $spelling "parsing preserves the caller's input"
+    }
     set wall 2026-10-25T02:30:00.000000001
+    foreach suffix {{} .0 .000000000} {
+        equal [::timeApp::events::local 0001-01-01T00:00:00$suffix] {ok 0001-01-01T00:00:00} \
+            "zero fraction preserves the local date, clock and seconds"
+    }
+    equal [catch {::timeApp::@rt::temporalCanonical parts $wall} message] 1 "parts is not a public temporal type"
+    equal $message {unknown temporal type parts} "unknown temporal type diagnostic"
+    equal [::timeApp::events::local [binary format a* 2400-02-29T05:06:07.1000200]] \
+        {ok 2400-02-29T05:06:07.10002} "retained decimal places in a byte-array timestamp"
     equal [::timeApp::events::local 2026-10-25T02:30:00.1200] {ok 2026-10-25T02:30:00.12} "canonical local precision"
     equal [::timeApp::events::local_string $wall] $wall "local time needs no zone"
     equal [::timeApp::events::resolve $wall 120] {ok 2026-10-25T00:30:00.000000001Z} "first repeated wall time"
@@ -104,10 +136,19 @@ proc ::temporalTest::scalars {} {
         problem [::timeApp::events::local $value] INVALID_LOCAL_DATETIME "invalid local input"
     }
     foreach offset {-841 841} {problem [::timeApp::events::resolve $wall $offset] INVALID_OFFSET "offset range"}
+    foreach value {2000-02-29T23:59:50 2000-02-29T23:59:50.01 2000-02-29T23:59:50.000000001} {
+        equal [::timeApp::events::local_string $value] $value "canonical local spelling"
+    }
     foreach {fn input code} {
         instant_string 2026-01-01T00:00:00Z {APPCOMPILER ARGUMENT TYPE}
         instant_string 2026-01-01T01:00:00.000000000+01:00 {APPCOMPILER ARGUMENT TYPE}
+        instant_string 1900-02-29T00:00:00.000000000Z {APPCOMPILER ARGUMENT TYPE}
+        instant_string 2024-02-29T24:00:00.000000000Z {APPCOMPILER ARGUMENT TYPE}
+        local_string 2024-02-29T23:60:59.000000001 {APPCOMPILER ARGUMENT TYPE}
+        instant_string 2000-02-29T00:00:00.000000000z {APPCOMPILER ARGUMENT TYPE}
         local_string 2026-01-01T00:00:00.00 {APPCOMPILER ARGUMENT TYPE}
+        local_string 2000-02-29T23:59:50.000000010 {APPCOMPILER ARGUMENT TYPE}
+        local_string 2000-02-29T23:59:60.1 {APPCOMPILER ARGUMENT TYPE}
         from_tcl 2026-01-01T00:00:00.3Z {APPCOMPILER EXTERN RESULT}
     } {
         equal [catch {::timeApp::events::$fn $input} msg options] 1 "$fn rejects noncanonical boundary data"
@@ -148,10 +189,36 @@ proc ::temporalTest::wireAndDatabase {path} {
         foreach badSql {
             {SELECT '2000-03-01T00:00:00Z' AS stamp, NULL AS local_time}
             {SELECT 0 AS stamp, NULL AS local_time}
+            {SELECT CAST('2000-03-01T00:00:00.000000000Z' AS BLOB) AS stamp, NULL AS local_time}
             {SELECT stamp, '2000-03-01T00:00:00Z' AS local_time FROM readings}
         } {problem [::timeApp::events::rows $path $badSql] SQL_TYPE "typed SQL refuses noncanonical stored data"}
     } finally {db close}
     return [list $first $next $end]
+}
+
+proc ::temporalTest::windows {path} {
+    sqlite3 [namespace current]::db $path
+    try {
+        db eval {CREATE TABLE periods(starts TEXT PRIMARY KEY, ends TEXT NOT NULL, source TEXT NOT NULL) STRICT}
+        set rows {}
+        db transaction {
+            for {set i 0} {$i < 33} {incr i} {
+                set starts [format {2024-02-29T23:59:59.%09dZ} [expr {4*$i}]]
+                set ends [format {2024-02-29T23:59:59.%09dZ} [expr {4*$i+2}]]
+                set source "log-$i"
+                db eval {INSERT INTO periods VALUES ($starts, $ends, $source)}
+                lappend rows [dict create starts $starts ends $ends source $source]
+            }
+        }
+        set start [dict get [lindex $rows 0] ends]
+        set end [dict get [lindex $rows end] starts]
+        equal [::timeApp::events::periods $path $start $end] [list ok [lrange $rows 1 end-1]] \
+            "a half-open window returns both exact instants from each overlapping period"
+        set next [dict get [lindex $rows 1] starts]
+        equal [::timeApp::events::periods $path $start $next] {ok {}} "nanosecond gap between periods"
+        db eval {UPDATE periods SET ends='2024-03-01T00:00:00+00:00' WHERE source='log-31'}
+        problem [::timeApp::events::periods $path $start $end] SQL_TYPE "a late noncanonical timestamp rejects the query"
+    } finally {db close}
 }
 
 proc ::temporalTest::packed {work path expected} {
@@ -187,6 +254,7 @@ try {
     ::temporalTest::scalars
     set path [file join $work records.db]
     set ordered [::temporalTest::wireAndDatabase $path]
+    ::temporalTest::windows $path
     if {$argv eq "-pack"} {::temporalTest::packed $work $path $ordered}
 } finally {
     if {[file dirname $work] ne $work && [file normalize $work] eq $work} {file delete -force -- $work}

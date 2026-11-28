@@ -144,6 +144,7 @@ proc ::widgetTest::recorded {window} {
     ::application::@events::on_fault [list ::saveEvent closing]
     ::application::@rt::tkOnClose $::retainedWindow [list ::error {close observer failed} {} {TEST CLOSE}]
     ::application::@rt::tkOnClose $::retainedWindow [list lappend ::hookRuns kept]
+    ::application::@rt::tkOnClose $::retainedWindow ::saveClosingSnapshot
     set forgotten [::application::@rt::tkOnClose $::retainedWindow [list lappend ::hookRuns forgotten]]
     ::application::@rt::tkForgetClose $::retainedWindow $forgotten
     destroy $window
@@ -171,7 +172,19 @@ proc ::widgetTest::headless {} {
         interp alias $app crossInterpreter {} ::widgetTest::crossInterpreter $neighbor
         $app eval [list lappend auto_path [file join $sample lib]]
         $app eval [list set ::sampleKey $key]
+        $app eval [list set ::windowRows $rows]
         $app eval $generated
+        $app eval {
+            proc watchSnapshot {command operation} {
+                set ticket [lindex $command 1]
+                if {![info exists ::windowSnapshot]} {set ::windowSnapshot $ticket}
+                equal [::application::@rt::ref_same $::windowSnapshot $ticket] 1 "window handlers share one snapshot"
+                equal [::application::@rt::ref_get $ticket] $::windowRows "callback reads the admitted occurrence rows"
+                lappend ::snapshotHandlers [namespace tail [lindex $command 0]]
+            }
+            proc saveClosingSnapshot {} {set ::closingRows [::application::@rt::ref_get $::windowSnapshot]}
+            foreach name {selected redraw} {trace add execution ::application::browser::$name enter ::watchSnapshot}
+        }
         $app eval [dict get [::appcompiler::compile [dict create probe $probes] ::foreign] script]
         $app eval {
             set ::stderrLines {}
@@ -206,6 +219,10 @@ proc ::widgetTest::headless {} {
         $app eval [list proc inspectWindow {window} [info body ::widgetTest::recorded]]
         $app eval {set ::recordTk::waiting inspectWindow}
         equal [$app eval [list ::application::browser::display $rows]] {ok {}} "X-authored Tk window and real Graphviz drawing"
+        equal [$app eval {lsort -unique $::snapshotHandlers}] {redraw selected} "click and redraw use the snapshot"
+        equal [$app eval {set ::closingRows}] $rows "window cleanup observes the live snapshot"
+        equal [catch {$app eval {::application::@rt::ref_get $::windowSnapshot}} message options] 1 "snapshot expires after display returns"
+        equal [dict get $options -errorcode] {APPCOMPILER REFERENCE EXPIRED} "expired snapshot diagnostic"
         equal [$app eval {dict size $::recordTk::bindings}] 0 "private bindtags released"
         equal [$app eval {array size ::application::@rt::tkState}] 0 "all window and child records released"
         set stale [$app eval {set ::retainedCanvas}]
@@ -215,6 +232,7 @@ proc ::widgetTest::headless {} {
         $app eval {rename ::toplevel {}; proc ::toplevel args {error {no display}}}
         lassign [$app eval [list ::application::browser::display $rows]] tag problem
         equal [list $tag [dict get $problem code]] {err TK_OPEN} "failed acquisition returns a typed problem"
+        equal [$app eval {array size ::application::@rt::referenceCells}] 0 "failed window acquisition releases both references"
     } finally {interp delete $app; interp delete $neighbor}
 
     bad {fn .a($l: tk_label) -> unit => tk_clear($l)} ARGUMENT_TYPE

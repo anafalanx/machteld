@@ -15,33 +15,35 @@ fn .caption($rows: list<.timeline::occurrence>, $key: text?) -> text =>
     match $key { none => 'Select an occurrence'
         some($id) => .description($rows, $id) }
 
-fn .selected($rows: list<.timeline::occurrence>, $label: tk_label, $selected: ref<text?>, $event: tk_click) -> unit {
+fn .selected($snapshot: ref<list<.timeline::occurrence>>, $label: tk_label, $selected: ref<text?>, $event: tk_click) -> unit {
     ref_set($selected, $event.occurrence)
     tk_highlight($event.canvas, $event.occurrence)
-    return tk_label_text($label, .caption($rows, $event.occurrence))
+    return tk_label_text($label, .caption(ref_get($snapshot), $event.occurrence))
 }
 
-fn .redraw($rows: list<.timeline::occurrence>, $canvas: tk_canvas, $selected: ref<text?>, $action: tk_action) -> unit {
+fn .redraw($snapshot: ref<list<.timeline::occurrence>>, $canvas: tk_canvas, $selected: ref<text?>, $action: tk_action) -> unit {
     tk_clear($canvas)
-    .paint($canvas, $rows)
+    .paint($canvas, ref_get($snapshot))
     tk_highlight($canvas, ref_get($selected))
     return unit
 }
 
 fn .display($rows: list<.timeline::occurrence>) -> result<unit,problem> {
-    using $selected ::= ref<text?>(none) {
-        using $window ::= tk_open('Observations in time')? {
-            $canvas ::= tk_canvas($window, 640, 300)
-            $label ::= tk_label($window, 'Select an occurrence')
-            $redraw ::= tk_button($window, 'Redraw')
-            tk_grid($canvas, 0, 0)
-            tk_grid($label, 1, 0)
-            tk_grid($redraw, 2, 0)
-            .paint($canvas, $rows)
-            tk_on_click($canvas, bind(.selected, $rows, $label, $selected))
-            tk_on_action($redraw, bind(.redraw, $rows, $canvas, $selected))
-            tk_wait($window)
-            return ok(unit)
+    using $snapshot ::= ref<list<.timeline::occurrence>>($rows) {
+        using $selected ::= ref<text?>(none) {
+            using $window ::= tk_open('Observations in time')? {
+                $canvas ::= tk_canvas($window, 640, 300)
+                $label ::= tk_label($window, 'Select an occurrence')
+                $redraw ::= tk_button($window, 'Redraw')
+                tk_grid($canvas, 0, 0)
+                tk_grid($label, 1, 0)
+                tk_grid($redraw, 2, 0)
+                .paint($canvas, $rows)
+                tk_on_click($canvas, bind(.selected, $snapshot, $label, $selected))
+                tk_on_action($redraw, bind(.redraw, $snapshot, $canvas, $selected))
+                tk_wait($window)
+                return ok(unit)
+            }
         }
     }
 }

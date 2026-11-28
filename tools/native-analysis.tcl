@@ -100,6 +100,11 @@ proc ::na::trappedSteps {layout gcc out {runtime {}}} {
     lappend steps [dict create label "trapped command line: compile" argv [list $gcc {*}$flags \
         [file join $test cmdline_test.c] [file join $src winjob_cmdline.c] -static-libgcc -o $cmdline]]
     lappend steps [dict create label "trapped command line" argv [list $cmdline]]
+    set compilerGuard [file join $out compiler-guard-trap.exe]
+    lappend steps [dict create label "trapped compiler integer list guard: compile" argv [list $gcc {*}$flags \
+        [file join $fixtures compiler_guard_driver.c] [file join $src compiler_guard.c] \
+        [file join $src compiler_binary64.c] {*}$tcl -o $compilerGuard]]
+    lappend steps [dict create label "trapped compiler integer list guard" argv [list $compilerGuard]]
     set allocation [file join $out cmdline-allocation-trap.exe]
     lappend steps [dict create label "trapped command-line allocation failures: compile" argv [list $gcc {*}$flags \
         [file join $test cmdline_alloc_test.c] -static-libgcc -o $allocation]]
@@ -116,9 +121,11 @@ proc ::na::trappedSteps {layout gcc out {runtime {}}} {
         argv [list $identity [file join $test identity_native_test.tcl] $runtime]]
     set json [file join $out json-trap.exe]
     set yyjson [dict get $layout yyjson]
-    lappend steps [dict create label "trapped JSON: compile" argv [list $gcc {*}$flags -municode -I$yyjson \
-        [file join $fixtures native_analysis_driver.c] [file join $src json.c] [file join $src wintext.c] \
+    lappend steps [dict create label "trapped JSON: compile" argv [list $gcc {*}$flags {*}$::machteld::build::YYJSON_CONFIG -municode -I$yyjson \
+        [file join $fixtures native_analysis_driver.c] [file join $fixtures binary64_guard_check.c] \
+        [file join $src json.c] [file join $src wintext.c] \
         [file join $yyjson yyjson.c] {*}$tcl -o $json]]
+    lappend steps [dict create label "trapped binary64 guard" argv [list $json --binary64-guard]]
     lappend steps [dict create label "trapped JSON corpus" argv [list $json [file join $test json_test.tcl]]]
     lappend steps [dict create label "trapped JSON adversarial inputs" \
         argv [list $json [file join $test native_adversarial_test.tcl] --json-only]]
@@ -293,6 +300,7 @@ proc ::na::main {argv} {
         dependency_instrumentation {S {Tcl/Tk and SQLite archives are not instrumented; yyjson is instrumented with the JSON harness.}} \
         instrumented_scope [strings {
             {command-line quoting and allocation failures}
+            {compiler integer list validation and borrowed Tcl object ownership}
             {UTF-8/UTF-16 conversion and Windows argv round trips}
             {JSON reader/emitter/typed-tree ownership with yyjson}
             {filesystem length/capacity boundaries}
@@ -340,6 +348,7 @@ proc ::na::main {argv} {
             test/fixtures/nts_crypto.c test/fixtures/nts_lifetime.c test/fixtures/nts_server.c test/nts_test.tcl
             test/json_test.tcl test/native_adversarial_test.tcl
             test/fixtures/native_analysis_canary.c test/fixtures/native_analysis_driver.c test/fixtures/audio_output_startup.c
+            test/fixtures/compiler_guard_driver.c test/fixtures/binary64_guard_check.c
             test/fixtures/native_boundary_driver.c test/fixtures/tk_index_format_test.c
             test/fixtures/publish_driver.c test/fixtures/publish_recovery.tcl
         } {

@@ -41,8 +41,70 @@ fn .compute() -> int {
     }
     equal [::compiled::main::compute] 120 "two modules, case-distinct locals, fixed and mutable bindings"
     equal [dict get $compiled sourceMap ::compiled::units::seconds 1 line] 1 "source map argument validation"
-    equal [dict get $compiled sourceMap ::compiled::units::seconds 3 line] 3 "source map return line"
-    equal [dict get $compiled sourceMap ::compiled::units::seconds 3 module] units "source map module"
+    equal [dict get $compiled sourceMap ::compiled::units::@seconds 2 line] 3 "source map return line"
+    equal [dict get $compiled sourceMap ::compiled::units::@seconds 2 module] units "source map module"
+
+    set mixed "export fn .label() -> text \{\r\n\treturn '🚆\r雪'\n\}"
+    set analyzed [::appcompiler::analyze [dict create mixed $mixed]]
+    equal [dict get $analyzed diagnostics] {} "mixed physical line endings"
+    set function [lindex [dict get $analyzed modules mixed functions] 0]
+    set literal [dict get [lindex [dict get $function body] 0] value]
+    equal $literal [dict create module mixed line 2 column 9 endLine 3 endColumn 3 \
+        kind text value "🚆\r雪"] "multiline raw literal span and spelling"
+    set artifact [::appcompiler::emitChecked $analyzed ::position]
+    equal [dict get $artifact sourceMap ::position::mixed::label 1] \
+        {module mixed line 2 column 2} "source map after CRLF and a tab"
+    set bad [string map [list {雪'} {雪'  @}] $mixed]
+    set diagnostic [lindex [::appcompiler::check [dict create mixed $bad]] 0]
+    equal [dict get $diagnostic code] E_PARSE_TOKEN "unexpected character after raw text"
+    equal [dict get $diagnostic node] {module mixed line 3 column 5 endLine 3 endColumn 6} \
+        "invalid token span after a multiline literal and horizontal space"
+
+    set calls [dict create library {
+export fn .countdown($n: int) -> int {
+    if $n == 0 { return 0 }
+    return .countdown($n - 1)
+}
+export fn .id<.t>($v: .t) -> .t => $v
+export record .holder { items: list<ref<int>> }
+export fn .ignore($x: .holder) -> int => 9
+export fn .sum($n: int) -> int => $n
+export fn .callback() -> callable<int,int> => .sum
+extern fn .host_value() -> int = ['::compilerTest::hostValue']
+export fn .from_host() -> int => .sum(.host_value())
+} client {
+import library
+export fn .start($n: int) -> int => .library::countdown(.library::id($n))
+fn .stale() -> ref<int> {
+    using $r ::= ref(1) {return $r}
+}
+export fn .expired() -> int => .library::ignore(make<.library::holder>(items: [.stale()]))
+export fn .generic_expired() -> ref<int> => .library::id(.stale())
+}]
+    set callsArtifact [::appcompiler::compile $calls ::calls]
+    namespace eval :: [dict get $callsArtifact script]
+    set guards {}
+    proc recordGuard {command operation} {lappend ::compilerTest::guards [lindex $command 3]}
+    trace add execution ::calls::@rt::guard enter ::compilerTest::recordGuard
+    try {
+        equal [::calls::client::start 0008] 0 "recursive exported calls and concrete generic cross-module calls"
+        equal $guards {{$n}} "normalize once at the Tcl entry and never again during direct recursion"
+        equal [::calls::library::id int 008] 8 "generic Tcl entry normalizes its supplied value"
+        equal [catch {::calls::library::id invalid 0} msg options] 1 "generic Tcl entry checks descriptors"
+        equal [dict get $options -errorcode] {APPCOMPILER ARGUMENT TYPE} "invalid generic descriptor code"
+        foreach caller {expired generic_expired} {
+            equal [catch {::calls::client::$caller} msg options] 1 "$caller rejects a reference that expired earlier"
+            equal [dict get $options -errorcode] {APPCOMPILER REFERENCE EXPIRED} "$caller retains the boundary error"
+        }
+        set callback [::calls::library::callback]
+        equal [catch {{*}$callback bad} msg options] 1 "Tcl callback argument checks survive direct calls to the same target"
+        equal [dict get $options -errorcode] {APPCOMPILER ARGUMENT TYPE} "callback argument error code"
+        proc hostValue {} {return bad}
+        equal [catch {::calls::library::from_host} msg options] 1 "extern result checked before direct call"
+        equal [dict get $options -errorcode] {APPCOMPILER EXTERN RESULT} "extern result error code"
+    } finally {
+        trace remove execution ::calls::@rt::guard enter ::compilerTest::recordGuard
+    }
 
     set fixed [string map [list {return $minutes} "\$factor = 30\n    return \$minutes"] $example]
     set reports [::appcompiler::check [dict create scale $fixed]]

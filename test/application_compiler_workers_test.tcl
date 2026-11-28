@@ -1,5 +1,6 @@
 package require machteld
 source -encoding utf-8 [file join [file dirname [info script]] .. packages application-compiler compiler.tcl]
+source -encoding utf-8 [file join [file dirname [info script]] fixtures compiler_numeric_locale.tcl]
 
 namespace eval ::workerTest {
     variable checks 0
@@ -109,6 +110,13 @@ worker .w($v: .box<.cursor>) -> result<int,problem> => ok(1)} WORKER_MESSAGE
     set rt ::workerChecks::@rt
     set data [dict create text "037\n雪" raw [binary format H* 00ff80] child 0 delay 0]
     set frame [${rt}::workerEncode .jobs::request $data]
+    ::compilerNumericLocale::withDecimalComma {
+        set row [dict create id 007 value 3.141592653589793]
+        set wire [${rt}::workerEncode .jobs::pair [dict create left $row right $row]]
+        set decoded [${rt}::workerDecode .jobs::pair $wire]
+        equal [binary encode hex [binary format Q [dict get $decoded left value]]] 400921fb54442d18 \
+            "worker transport preserves binary64 bits under a decimal-comma locale"
+    }
     equal [${rt}::workerDecode .jobs::request $frame] $data "schema-bound round trip"
     set summary [dict create status ok exit 0 stdout_bytes 128 stderr_bytes 43]
     equal [${rt}::workerDecode process_exit [${rt}::workerEncode process_exit $summary]] $summary "a completed process report is portable data"

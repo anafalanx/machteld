@@ -8,7 +8,7 @@
 /* The Tcl package and archive compatibility level is independent of the
  * product label displayed by the host and Windows file properties. */
 #define MACHTELD_VERSION "30"
-#define MACHTELD_PRODUCT_VERSION "0.50"
+#define MACHTELD_PRODUCT_VERSION "0.51"
 
 /* The byte rule shared by every value-consuming native verb -- hash, store put,
  * http post, run/child -stdin: a byte array is its bytes exactly; any other

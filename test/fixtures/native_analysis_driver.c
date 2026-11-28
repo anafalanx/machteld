@@ -7,8 +7,10 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern int Machteldjson_Init(Tcl_Interp *interp);
+extern int CheckBinary64Guard(Tcl_Interp *interp);
 
 int wmain(int argc, wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -39,7 +41,10 @@ int wmain(int argc, wchar_t **argv) {
     if (result == TCL_OK) result = Tcl_CreateAlias(interp, "json", interp,
         "::machteld::json", 0, NULL);
     if (result == TCL_OK) result = Tcl_PkgProvide(interp, "machteld", MACHTELD_VERSION);
-    if (result == TCL_OK) result = Tcl_EvalFile(interp, Tcl_DStringValue(&script));
+    if (result == TCL_OK) {
+        result = strcmp(Tcl_DStringValue(&script), "--binary64-guard") == 0 ?
+            CheckBinary64Guard(interp) : Tcl_EvalFile(interp, Tcl_DStringValue(&script));
+    }
     Tcl_DStringFree(&script);
     if (result != TCL_OK) {
         const char *error = Tcl_GetVar(interp, "errorInfo", TCL_GLOBAL_ONLY);

@@ -41,6 +41,36 @@ proc ::importTest::at {cwd host at {entity 007}} {
     return $findings
 }
 
+proc ::importTest::borrowedEvidence {archive database} {
+    set mount [zipfs mount $archive import-evidence]
+    try {
+        source -encoding utf-8 [file join $mount compiler compiler.tcl]
+        set bytes [inputFile [file join $mount project inputs observations.src]]
+        set sources [dict create observations [encoding convertfrom -profile strict utf-8 $bytes]]
+        set compiled [::appcompiler::compile $sources ::importEvidence]
+        namespace eval :: [dict get $compiled script]
+    } finally {zipfs unmount $mount}
+    try {
+        set evidence [::machteld::json decode -typed 17]
+        set original [dict create id saved entity E field label starts 0 ends 10 value $evidence evidence $evidence]
+        set batch [dict create source borrowed claims [list $original]]
+        equal [::importEvidence::observations::merge $database $batch] {ok 1} "commit a Tcl-supplied claim with aliased text and JSON evidence"
+        equal [::machteld::json type $evidence] number "writing declared text preserves its opaque alias in the caller"
+        set claims [list [dict replace $original id pending] [dict replace $original ends 11]]
+        lassign [::importEvidence::observations::merge $database [dict replace $batch claims $claims]] status problem
+        equal [list $status [string match {*reused claim id 'saved'*} [dict get $problem message]]] {err 1} "late conflict after writing aliased evidence"
+        equal [::machteld::json type $evidence] number "rollback preserves the caller's borrowed evidence"
+        equal [::importEvidence::observations::merge $database $batch] {ok 0} "replay the original Tcl objects after rollback"
+        sqlite3 evidenceDb $database -readonly 1 -create 0
+        try {
+            equal [evidenceDb eval {
+                SELECT id,ends,value,json_type(payload,'$.value'),json_type(payload,'$.evidence'),
+                       json_extract(payload,'$.evidence') FROM claims WHERE source='borrowed' ORDER BY id
+            }] {saved 10 17 text integer 17} "only the earlier commit survives, with distinct JSON types for the two aliases"
+        } finally {evidenceDb close}
+    } finally {namespace delete ::importEvidence}
+}
+
 proc ::importTest::exercise {work root} {
     set author [file join $work author]
     file copy [file join $root examples typed-import] $author
@@ -92,15 +122,23 @@ proc ::importTest::exercise {work root} {
     set agreement [string map {north east} $north]
     equal [invoke $recipient $host $merge $agreement] {inserted 1} "two sources can reuse a local id"
     equal [at $recipient $host 12] [list [lreplace $first 0 0 east] $first] "independent sources agreeing are both retained"
-    set utf8 [encoding convertto utf-8 {{"source":"sud","claims":[
-        {"id":"é1","entity":"007","field":"label","starts":40,"ends":50,"value":"café 雪"}]}}]
-    equal [invoke $recipient $host $merge $utf8] {inserted 1} "UTF-8 batch"
+    set unicode {{"source":"sud","claims":[
+        {"id":"é1","entity":"007","field":"label","starts":40,"ends":50,"value":"café 雪",
+         "evidence":[{"n":1.00e+50,"unit":"mm"},[true,null,9007199254740993]]}]}}
+    equal [invoke $recipient $host $merge [encoding convertto utf-8 $unicode]] {inserted 1} "UTF-8 batch"
+    set newSpelling [string map [list {"n":1.00e+50,"unit":"mm"} {"unit":"mm","n":10e49}] $unicode]
+    equal [invoke $recipient $host $merge [encoding convertto utf-8 $newSpelling]] {inserted 0} "equivalent nested source evidence replays"
+    set different [string map {9007199254740993 9007199254740992} $unicode]
+    invoke $recipient $host $merge [encoding convertto utf-8 $different] {*reused claim id*}
     equal [at $recipient $host 42] {{sud é1 label 40 50 {café 雪} 0}} "UTF-8 evidence survives the archive boundary"
     sqlite3 verify $database -readonly 1 -create 0
     try {
         equal [verify onecolumn {SELECT count(*) FROM claims}] 5 "durable count including replays and rollbacks"
         equal [verify onecolumn {SELECT json_extract(payload, '$.page') FROM claims WHERE source='north' AND id='n1'}] 4 "original source-specific evidence preserved"
+        equal [verify onecolumn {SELECT json_extract(payload, '$.evidence[1][2]') FROM claims WHERE source='sud'}] \
+            9007199254740993 "a rejected replay preserves the last nested evidence value exactly"
     } finally {verify close}
+    borrowedEvidence [file join $recipient observations.machteld] $database
 }
 
 set root [file dirname [file dirname [file normalize [info script]]]]

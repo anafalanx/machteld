@@ -62,7 +62,7 @@ try {
     set header [file join $work machteld.h]
     set rc [file join $work version.rc]
     set generator [list [info nameofexecutable] [file join $ROOT tools generate-version-resource.tcl] $header $rc]
-    foreach {label flags} {0.50-dev 2 0.50 0} {
+    foreach {label flags} {0.50-dev 2 0.50 0 0.51 0} {
         bytes $header "#define MACHTELD_VERSION \"$runtime\"\n#define MACHTELD_PRODUCT_VERSION \"$label\"\n"
         exec {*}$generator
         set resource [slurp $rc]

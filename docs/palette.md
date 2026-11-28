@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Command palette
-description: The public commands in Machteld 0.50 and how to use them together.
+description: The public commands in Machteld 0.51 and how to use them together.
 tags: [machteld, api, tcl, windows]
 ---
 
@@ -14,9 +14,13 @@ This page is a composition tour. The [complete reference](reference/machteld/ind
 has the exact command pages; `[manifest]` describes the running build and `docs`
 queries the embedded Machteld, Tcl, Tk and cffi manuals.
 
-This describes Machteld 0.50 and its Tcl package API 30. Use the selected
+This describes Machteld 0.51 and its Tcl package API 30. Use the selected
 executable's live `manifest`, artifact identity and embedded reference to
 check its capabilities.
+
+Use `intervals gaps lower upper endpoints` to find missing coverage in a
+closed range. The endpoints can come directly from a two-column SQLite
+query. [Interval operations](reference/machteld/command/intervals.md)
 
 ## Process control
 
@@ -255,7 +259,12 @@ json type VALUE      ;# string|number|boolean|null|array|object
 json unwrap VALUE    ;# the plain-mode mapping of the subtree
 json get VALUE ?key|index ...?   ;# a typed child; absent refuses by name
 json exists VALUE key|index ...
+json children VALUE
 ```
+
+`json children` visits the immediate members of a typed container in order.
+For arrays it returns a Tcl list of typed values. For objects it returns
+a Tcl dictionary of keys and typed values. Each child retains the document.
 
 Typed values are opaque, document-backed handles. The laws: `json value
 number` validates the exact JSON number grammar fail-closed (a leading zero,

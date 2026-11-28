@@ -15,8 +15,22 @@ with `machteld.exe app.machteld`. Use `--project` to select the built-in
 driver explicitly when the current directory contains a file named `project`.
 The check stops after validating the manifest, modules and entry. The run and
 pack commands also generate executable Tcl.
-Editable archives also carry a copy of their compiler under `compiler/`
-and their manifest and original files under `project/inputs/`.
+By default, an archive carries the complete editable project under
+`project/inputs/` and the author's compiler under `compiler/`.
+The options below apply independently to the output. For either command,
+place the options before the input, in either order.
+
+```text
+machteld.exe project pack ?--without-source? ?--without-compiler? MANIFEST OUTPUT
+machteld.exe project rebuild ?--without-source? ?--without-compiler? ARCHIVE OUTPUT
+```
+
+Use `--without-compiler` to rely on the compiler in `machteld.exe`.
+Use `--without-source` to omit the editable X modules and manifest. The
+archive still runs its generated Tcl, includes its declared assets, packages
+and Tcl entry, and answers queries against its offline application reference.
+To build another version from this form, use the original project directory.
+`project rebuild` requires archived sources and uses the host compiler.
 
 Run `machteld.exe --docs get X` to read the
 [application compiler manual](../../../packages/application-compiler/README.md).
@@ -40,20 +54,20 @@ A check can report several independent syntax errors in a module. The
 checker resumes at the next recognizable top-level declaration and records
 the original source span for each error. A successful check returns an
 empty list. It validates example operands
-without evaluating them. To run all examples in an extracted application,
-use the driver from its compiler directory.
+without evaluating them. To run all examples in an extracted editable
+application, use the project commands in the host.
 
 ```text
-machteld.exe local-compiler/driver.tcl test working-source/application.dict
-machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
-machteld.exe local-compiler/driver.tcl docs revised.machteld search seconds
+machteld.exe project test working-source/application.dict
+machteld.exe project pack working-source/application.dict revised.machteld
+machteld.exe project docs revised.machteld search seconds
 ```
 
 Packing requires a host with archive support and SQLite FTS5. Each public
 function or type gets a Markdown page. After a search, pass a returned ID to
-`docs revised.machteld get ID`. To read the host's manual through this driver,
-use `docs --runtime get ID`. The compiler's bundled `README.md` describes
-extracting the driver and sources, the project manifest, and typed examples.
+`project docs revised.machteld get ID`. To read the host's manual through
+the driver, use `project docs --runtime get ID`. The language manual
+describes extracting and explicitly selecting an archived compiler.
 
 ## Binary64 measurements
 
@@ -66,6 +80,9 @@ multiplication failure propagates before the addition. Overflow reports
 `BINARY64_OVERFLOW` and a zero divisor reports `DIVIDE_BY_ZERO`. The domain
 includes subnormal values and a single zero. NaN and infinities fail the Tcl,
 SQL and JSON boundary checks. A typed SQL parameter or column uses REAL.
+Archives select the installed binary64 operators at load time. On older
+runtimes, Tcl extensions and traces must return to X arithmetic with
+round-to-nearest-even, gradual underflow and masked floating-point exceptions.
 The runnable `examples/typed-calibration` project reads a measurement from JSON.
 
 ## Ordering and boolean conditions

@@ -22,6 +22,34 @@ proc refused {script code} {
         [dict get $options -errorcode] eq [list MACHTELD BROWSER $code]}
 }
 
+# Preserve the failed check and its error code even when releasing its resources
+# also fails. Cleanup errors still fail an otherwise successful test.
+proc withCleanup {body cleanup} {
+    set code [catch {uplevel 1 $body} message options]
+    if {[catch {uplevel 1 $cleanup} cleanupMessage cleanupOptions]} {
+        if {!$code} {return -options $cleanupOptions $cleanupMessage}
+        dict append options -errorinfo "\n    additional cleanup error: [dict get $cleanupOptions -errorinfo]"
+    }
+    return -options $options $message
+}
+
+proc closeTestBrowser {session profile} {
+    if {$session ne {}} {
+        if {![catch {browser close $session}]} return
+        catch {browser release $session}
+    }
+    # The test may have released its token, or its launch host may have exited
+    # before handing it back. Use only this profile's verified ownership record.
+    lassign [::machteld::browser::Profile $profile 0] path owner
+    set receipt [::machteld::browser::Receipt [dict create profile $path owner $owner]]
+    if {$receipt eq {} || ![::machteld::BrowserPeer [dict get $receipt pid] [dict get $receipt stamp]]} return
+    set attached [browser attach -profile $path -timeout 8s]
+    try {browser close $attached} on error {message options} {
+        catch {browser release $attached}
+        return -options $options $message
+    }
+}
+
 # Serve only static test pages from this process. A request to /slow receives
 # no response until the client cancels, making timeout and cancellation exact.
 proc acceptPage {chan ip port} {
@@ -47,7 +75,7 @@ proc readPage {chan} {
 proc exercise {exe profile origin} {
     set name [file tail $exe]
     set session [browser launch -executable $exe -profile $profile -headless true -timeout 25s]
-    try {
+    withCleanup {
         check "$name refuses a simultaneous second controller" [refused {browser attach -profile $profile} busy]
         set copy [file join [file dirname $profile] "$name-copy"]
         file mkdir $copy
@@ -78,16 +106,21 @@ proc exercise {exe profile origin} {
         try {set stopped [browser wait $session $slow -timeout 4s]} finally {after cancel $timer}
         check "$name Tk timers and cancellation run during a wait" [expr {$::receivedSlow && [dict get $stopped status] eq "cancelled"}]
         browser release $session
-        check "$name expires the released handle" [refused {browser navigate $session $origin/done} closed]
+        set released $session
+        set session {}
+        check "$name expires the released handle" [refused {browser navigate $released $origin/done} closed]
         set changed $receipt
         dict incr changed stamp
         publish bytes $receiptPath [encoding convertto utf-8 $changed]
-        try {
+        withCleanup {
             check "$name refuses a stale process creation time" [refused {browser attach -profile $profile} closed]
-        } finally {publish bytes $receiptPath [encoding convertto utf-8 $receipt]}
+        } {publish bytes $receiptPath [encoding convertto utf-8 $receipt]}
         set resumed [run -timeout 12s -- [info nameofexecutable] $::script --resume $profile]
-        check "$name reacquires the profile from another host process" [expr {[dict get $resumed status] eq "ok" &&
-            [dict get $resumed exit] == 0 && [string trim [dict get $resumed out]] eq "resumed"}]
+        if {[dict get $resumed status] ne "ok" || [dict get $resumed exit] != 0 ||
+                [string trim [dict get $resumed out]] ne "resumed"} {
+            error "FAIL $name reacquires the profile from another host process: $resumed"
+        }
+        puts "ok   $name reacquires the profile from another host process"
         check "$name prevents launching over a live detached session" [refused {browser launch -profile $profile -executable $exe} busy]
         set session [browser attach -profile $profile -timeout 8s]
         set next [browser navigate $session $origin/resumed]
@@ -96,24 +129,23 @@ proc exercise {exe profile origin} {
         set session {}
         check "$name closes the exact recorded process" [refused {browser attach -profile $profile} closed]
         # Ordinary host termination drops the controller connection and lock.
-        # The private outer test job still contains all processes on failure.
         set started [exec [info nameofexecutable] $::script --launch $exe $profile]
         set session [browser attach -profile $profile -timeout 8s]
         check "$name survives the launch host exiting and reuses its owned profile" [expr {$started eq "started"}]
-        browser close $session
+        browser release $session
         set session {}
-    } finally {
-        if {$session ne {}} {
-            if {[catch {browser close $session}]} {
-                catch {browser release $session}
-                catch {browser close [browser attach -profile $profile]}
-            }
-        }
-    }
+    } {closeTestBrowser $session $profile}
+    check "$name cleanup closes a detached test browser" [refused {browser attach -profile $profile} closed]
 }
 
 set scratch [file tempdir]
-try {
+withCleanup {
+    set failed [catch {withCleanup {
+        error "primary check failed" {} {TEST PRIMARY}
+    } {error "secondary cleanup failed"}} message options]
+    check {cleanup preserves the original failure and reports both errors} [expr {$failed == 1 &&
+        $message eq "primary check failed" && [dict get $options -errorcode] eq {TEST PRIMARY} &&
+        [string first {additional cleanup error: secondary cleanup failed} [dict get $options -errorinfo]] >= 0}]
     set unowned [file join $scratch unowned]
     file mkdir $unowned
     close [open [file join $unowned sentinel.txt] w]
@@ -140,15 +172,26 @@ try {
         if {![llength $executables]} {error "browser integration requires an installed Edge or Chromium browser"}
         set server [socket -server acceptPage -myaddr 127.0.0.1 0]
         set origin "http://127.0.0.1:[lindex [fconfigure $server -sockname] end]"
-        try {
+        withCleanup {
             foreach exe [lsort -unique $executables] {
                 # Exercise a path alias even on volumes without 8.3 names.
                 set profile [file join $scratch .. [file tail $scratch] [file tail $exe]]
                 exercise $exe $profile $origin
             }
-        } finally {
+        } {
             close $server
             foreach chan [array names ::requests] {finishPage $chan}
         }
     }
-} finally {file delete -force $scratch}
+} {
+    # Chromium can briefly keep a profile database mapped after its recorded
+    # browser process exits. Wait for Windows to release this test's directory.
+    set deadline [expr {[clock milliseconds] + 5000}]
+    while {[catch {file delete -force -- $scratch} message options]} {
+        if {[lrange [dict get $options -errorcode] 0 1] ne {POSIX EACCES}
+                || [clock milliseconds] >= $deadline} {
+            return -options $options $message
+        }
+        after 50
+    }
+}

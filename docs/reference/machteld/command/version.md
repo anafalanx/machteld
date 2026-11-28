@@ -23,7 +23,7 @@ version shown in the host's help and Windows file properties.
 
 `version` returns the same value as `package require machteld` and
 `machteld.exe --version --api`, currently `30`.
-`version -product` and `machteld.exe --version` return `0.50`.
+`version -product` and `machteld.exe --version` return `0.51`.
 
 ## Errors
 

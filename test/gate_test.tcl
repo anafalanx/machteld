@@ -135,7 +135,7 @@ check {the release packaging group verifies standalone wrapping as well as legac
 set nvPlan [::gate::plan [settings {--group native-validation}]]
 check {the native-validation group compiles the process fixture, the telemetry probe and the trapped drivers} \
     [expr {[lrange [compiled $nvPlan] 0 2] eq {{fixture process_fixture.c} {fixture native_probe.c} {UB-trap canary}} &&
-        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 15 &&
+        [llength [lsearch -all [compiled $nvPlan] {trapped *: compile}]] == 16 &&
         {trapped PCM output lifetime} in [labels $nvPlan]}]
 check {the reference-generator group compiles nothing} \
     [expr {[compiled [::gate::plan $generator]] eq {}}]
@@ -163,7 +163,19 @@ set candidate [dict get $default runtime]
 set direct {alias decode diagnostics extern group interpolation iteration text}
 set packed {archive {binary64 -pack} {callable -pack} {examples -pack} {generics -pack} host {io -pack} {labels -pack} {lists -pack} {migration -pack} {operators -pack} {process -pack} {project -pack} {records -pack} reference {resources -pack} {result_match -pack} {schema -pack} {shared -pack} {sql -pack} {streams -pack} {temporal -pack} {transaction -pack} {widgets -pack} {workers -pack} {zone -pack}}
 check {fast runs in-process application compiler suites on the candidate} \
-    [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct map semantics}}]
+    [expr {[compilerSuites $releasePlan fast $candidate] eq {core decimal distinct integer_list map optimization record_admission semantics}}]
+foreach workload {run.tcl history.tcl checked-grid.tcl wire-batch.tcl sqlite-replay.tcl blob-archive.tcl temporal-rows.tcl document-selections.tcl calibrated-series.tcl numeric-order.tcl probe-window.tcl invoice-totals.tcl} {
+    set workloadRunner [file join $root test corpus compiler $workload]
+    set workloadModes {}
+    foreach step $releasePlan {
+        lassign [dict get $step argv] exe script
+        if {$script eq $workloadRunner && $exe eq $candidate} {
+            lappend workloadModes [list [dict get $step group] {*}[lrange [dict get $step argv] 2 end]]
+        }
+    }
+    check "the release checks checkout and embedded $workload without timing" \
+        [expr {$workloadModes eq {fast {packaging --embedded}}}]
+}
 check {integration alone runs the compiler's child-process and direct project, I/O, example and SQL tests} \
     [expr {[compilerSuites [::gate::plan [settings {--group integration}]] integration $candidate] eq
         [lsort [concat $direct {project io examples sql schema transaction migration temporal zone generics result_match labels resources process callable lists shared binary64 operators streams workers records widgets}]]}]
@@ -273,9 +285,9 @@ foreach step $nvPlan {
     lappend driven [lmap word [lrange [dict get $step argv] 0 1] {file tail $word}]
 }
 check {the trapped drivers run the native, branding, audio, filesystem, encoding and networking boundaries} \
-    [expr {$driven eq [list cmdline-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
+    [expr {$driven eq [list cmdline-trap.exe compiler-guard-trap.exe cmdline-allocation-trap.exe wintext-trap.exe \
         {identity-trap.exe identity_native_test.tcl} \
-        {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
+        {json-trap.exe --binary64-guard} {json-trap.exe json_test.tcl} {json-trap.exe native_adversarial_test.tcl} \
         native-boundary-trap.exe hash-boundary-trap.exe audio-output-trap.exe files-provider-trap.exe \
         {publish-recovery-trap.exe publish_recovery.tcl} \
         nts-crypto-trap.exe nts-lifetime-trap.exe udp-trap.exe network-trap.exe \
@@ -320,6 +332,7 @@ check {the window-opening lanes run only behind --interactive-gui, last} \
         "gui_widget_test.tcl" ni [scripts $releasePlan] &&
         "sqlite_lookup_gui_test.tcl" ni [scripts $releasePlan] &&
         "graphviz_test.tcl" in [scripts $releasePlan] &&
+        "intervals_test.tcl" in [scripts $releasePlan] &&
         "graphviz_tk_test.tcl" ni [scripts $releasePlan] && "graphviz_tk_test.tcl" in [scripts $guiPlan] &&
         "Tk app archive" ni $releaseLabels &&
         [lindex [dict get $archiveLane argv] end] eq "--tk" &&

@@ -6,9 +6,20 @@ API, the caller supplies a dictionary of
 logical module names and source strings, so source files can also come from
 a mounted application archive.
 
-When this file comes from an application archive, see
-[Editing a delivered application](#editing-a-delivered-application) to
-extract the development driver and the original project.
+Machteld and the compiler share a product release number. Run
+`machteld.exe --version` to identify the release. The Tcl package version
+is `0.1`, available from `package require application-compiler`. Projects
+declare their X language edition (`edition 1`) and minimum Machteld Tcl
+API (`minApi`) in the manifest.
+
+Agents using Machteld or X are encouraged to leave feedback in
+`agent-comments.md` at the root of the project they’re working on. If a
+compiler diagnostic or a manual example helped you solve a problem, or an
+interoperability detail took several attempts to discover, describe what
+you tried and what happened.
+
+See [Editing a delivered application](#editing-a-delivered-application)
+to recover the original project and build it again.
 
 ```tcl
 package require machteld
@@ -477,6 +488,18 @@ location. A problem carrying its own valid source position retains it.
 Run `machteld.exe test/application_compiler_extern_test.tcl` for boundary
 examples and failure cases. The declaration spelling is provisional.
 
+On a host providing `intervals gaps`, a module can find uncovered ranges
+with one call. The input and result use alternating inclusive starts and
+ends. Endpoints must fit a signed 64-bit integer on this command.
+
+```text
+extern fn .missing($low:int, $high:int, $covered:list<int>) -> list<int> = ['::machteld::intervals', 'gaps']
+```
+
+For coverage `[4, 7, 1, 2]` within 1 through 9 the result is
+`[3, 3, 8, 9]`. Use `machteld.exe --docs get "intervals gaps"` for the
+complete call contract and a SQLite example.
+
 ## Handling a typed result
 
 Match a `result<T,E>` when the caller can recover from an expected failure.
@@ -782,6 +805,14 @@ element propagates a failure with `?`, later elements are skipped.
 Each element must have the same type. A nested list can take its element
 type from a sibling, as in `[[], [7]]`.
 
+A Tcl call to an exported X function validates the complete list, including
+its last record even when the function returns after examining the first.
+When several queries use the same large list, give Tcl one export that takes
+the list and the query requests together. Inside that export, call the X
+query functions on the already checked records. A malformed record still
+produces an error before the first query runs. Valid records are checked
+once for the batch.
+
 ```text
 fn .empty_names() -> list<text> => []
 fn .lengths($word: text, $notes: list<text>) -> list<int> =>
@@ -843,11 +874,27 @@ Unary minus returns a `binary64` directly. Equality compares the stored
 values. A mixed operation needs an explicit conversion. A distinct
 binary64 type keeps its own identity across calls and generic functions.
 
+Generated applications select the host's checked binary64 operators when
+they load. These operators preserve the calling thread's floating-point
+settings and condition flags, including when an extension changes them
+between two X operations. On earlier runtimes, binary64 arithmetic uses
+Tcl and requires round-to-nearest-even, gradual underflow and masked
+floating-point exceptions. Tcl extensions and traces on those hosts must
+restore those settings before returning to X arithmetic.
+
 A Tcl parameter accepts finite decimal and scientific notation. NaN,
 infinities and hexadecimal input produce a typed argument error. A
 declared JSON field accepts a finite numeric value, including an exponent.
 JSON output and text interpolation use up to 17 significant digits to
 round-trip the value. SQLite parameters and result columns use REAL.
+
+When Tcl passes a double with no existing string spelling, the ordinary
+Machteld interpreter preserves its finite binary64 bits and normalizes
+both zeros to +0. If the object already has a spelling, that spelling
+controls admission. A restricted Tcl interpreter that hides both the
+native reader and Tcl's representation command can only use the string
+spelling. Pass an explicit round-trip decimal string to such a child
+when an exact bit pattern matters.
 
 Run the calibration example from the checkout. It converts a device reading
 to calibrated units and writes the exact decimal value of the resulting bits.
@@ -1111,6 +1158,14 @@ convert decimal text to a REAL, which the exact decoder rejects.
 Unsupported field and argument types are compiler diagnostics. At runtime,
 a read returns a typed problem with a stable code.
 
+SQLite expects the ordinary Windows floating-point environment when it
+stores or compares REAL values. A native extension can enable
+denormals-as-zero (DAZ) on its calling thread. In that mode SQLite can
+store a subnormal REAL as zero or match it to zero in an indexed query.
+If a native calculation needs DAZ, run the database work in a separate
+Machteld worker process with its default controls. A resident worker can
+serve repeated transactions. [Typed worker lifecycle](#typed-workers-and-window-handlers)
+
 | Code | Meaning |
 | --- | --- |
 | `SQL_OPEN` | The existing database file could not be opened in the requested mode. |
@@ -1246,6 +1301,15 @@ database filename and the development runtime on the command path. The
 file redirections pass each UTF-8 batch to the application byte for byte,
 including when running Windows PowerShell 5.1. The sample decodes each
 batch in memory and commits it as one unit.
+
+For a large feed, split the claims between complete JSON documents. Repeat
+the same `source` in each document and keep each claim's original `id`.
+Size each document by its encoded UTF-8 bytes, including the surrounding
+object and array. `decode_json` accepts up to 16 MiB (16,777,216 bytes) per
+document by default. The SQLite archive can grow across many documents.
+If one import fails, that document rolls back and earlier documents stay
+committed. After correcting the failing document, you can replay the feed
+from the beginning. Previously committed, identical claims add zero rows.
 
 ```powershell
 machteld.exe examples/typed-import/create_sample.tcl observations.db
@@ -1387,8 +1451,8 @@ and imported functions. They execute with the project's declared Tcl packages.
 
 The integrated host runs the driver directly as `machteld.exe project`.
 Use `--project` to select it explicitly in a directory that also contains
-a script named `project`. The checkout and editable archives retain their
-standalone driver for use on earlier hosts.
+a script named `project`. The checkout and archives carrying a compiler
+also provide its standalone driver for use on compatible hosts.
 
 To create a project using only the integrated host, save the following
 two files as UTF-8 in one directory. In `project.dict`, the module name
@@ -1478,7 +1542,7 @@ manifest, the typed modules and the selected entry, then stops before code
 generation. For a Tcl entry it checks UTF-8 and command completeness.
 Tcl commands and lazy package indexes are exercised by running
 the application. `project test` runs the typed examples and leaves the Tcl
-entry idle. `project pack` and `project rebuild` preserve the originals.
+entry idle. By default, `project pack` and `project rebuild` preserve the originals.
 The example in `examples/mixed-migration` compares an all-Tcl baseline,
 one migrated module and a relocated archive, including an entry adapter
 for programs that compare `argv0` with `info script`.
@@ -1521,8 +1585,30 @@ application entry idle, except for any explicit example calling that function.
 `pack` and `rebuild` require an archive-capable host with SQLite FTS5. A working archive
 is replaced only after the replacement has been built and checked.
 `project rebuild` reads the archived inputs and compiles them with the
-compiler in the running host. This also updates the compiler saved in the
-rebuilt archive.
+compiler in the running host. By default, both commands include the
+editable project and the compiler that built it. Two independent options
+control what goes into the output archive. Put them before the input path,
+in either order.
+
+| Options for `project pack` or `project rebuild` | Editable X sources and project manifest | Compiler copy |
+| --- | --- | --- |
+| Default | Included | Included |
+| `--without-compiler` | Included | Omitted |
+| `--without-source` | Omitted | Included |
+| `--without-source --without-compiler` | Omitted | Omitted |
+
+```text
+machteld.exe project pack --without-compiler examples/typed-text-length/project.dict sample-editable.machteld
+machteld.exe project rebuild --without-source --without-compiler sample.machteld sample-run.machteld
+```
+
+Every form runs the same generated Tcl and includes the assets, local Tcl
+packages, mixed-project Tcl entry (if declared) and offline application
+reference. Rebuild any archive that contains the editable project. With
+`--without-source`, keep the original project and use `project pack` from
+that directory for future builds. Options describe the new output each time.
+For example, rebuilding `sample-editable.machteld` with no options adds a
+copy of the host compiler. The signed 0.50 packer supports the default form.
 
 `check --json` writes one UTF-8 JSON document to standard output. After a
 syntax error the checker resumes at the next recognizable top-level
@@ -1563,11 +1649,12 @@ machteld.exe project locate examples/typed-text-length/project.dict textutil 1
 machteld.exe project locate sample.machteld textutil 1
 ```
 
-The archive contains the generated `main.tcl` with its source map, the
-compiler under `compiler/`, and the original manifest at
-`project/inputs/application.dict`. The declared source and asset files keep
-their relative paths and exact bytes under `project/inputs/`. The path
-`application.dict` in that directory is reserved for the manifest.
+The archive runs the generated `main.tcl`, which includes its source map.
+An editable archive stores the original manifest at `project/inputs/application.dict`.
+The declared source and asset files keep their relative paths and exact bytes
+under `project/inputs/`. The path `application.dict` in that directory is
+reserved for the manifest. To look up source lines for an archive packed
+with `--without-source`, pass the original project manifest to `project locate`.
 
 ### Reading the offline application reference
 
@@ -1594,51 +1681,59 @@ reference verifies the archive and reads its database without loading any of
 the application's Tcl or starting its examples. Rebuild an older archive
 with the current compiler to generate its reference.
 
-To rebuild with the exact compiler shipped by the application author, open
-PowerShell in the directory containing the executable and archive and run `.\machteld.exe`.
-Enter this Tcl at its prompt. It verifies the archive before loading the
-bundled compiler.
-
-```tcl
-set root [zipfs mount sample.machteld build]
-try {
-    ::machteld::ArchiveEntry $root
-    source -encoding utf-8 [file join $root compiler compiler.tcl]
-    ::appcompiler::project::pack [file join $root project inputs application.dict] rebuilt.machteld
-} finally {zipfs unmount $root}
-```
-
 ### Editing a delivered application
 
-In PowerShell, change to the directory containing `machteld.exe` and
-`sample.machteld`. Run `.\machteld.exe` and enter the following at its Tcl prompt. Use fresh names
-for the two destination directories. `working-source` receives the project
-manifest, sources, assets and local Tcl packages. `local-compiler` receives
-the compiler, its driver and this guide.
+Start with an archive that includes the editable project. In PowerShell,
+change to the directory containing `machteld.exe` and
+`sample.machteld`. Run `.\machteld.exe` and enter the following at its Tcl
+prompt. Use a fresh destination directory. `working-source` receives the
+manifest, editable X sources, assets and local Tcl packages.
 
 ```tcl
 set root [zipfs mount sample.machteld build]
 try {
     ::machteld::ArchiveEntry $root
     file copy [file join $root project inputs] working-source
+} finally {zipfs unmount $root}
+exit
+```
+
+Edit the files in `working-source`. From PowerShell, use the compiler
+inside `machteld.exe` to check, test and build the project.
+
+```powershell
+.\machteld.exe project check --json working-source/application.dict
+.\machteld.exe project test working-source/application.dict
+.\machteld.exe project run working-source/application.dict "Snow 雪"
+.\machteld.exe project pack working-source/application.dict revised.machteld
+.\machteld.exe project docs revised.machteld get fn/textutil/describe
+.\machteld.exe revised.machteld "Snow 雪"
+```
+
+### Rebuilding with the author's exact compiler
+
+By default, `compiler/` contains the author's compiler, its driver and
+this guide. To select that version, extract it next to the recovered
+`working-source` directory. Run `.\machteld.exe` and enter the following
+at its Tcl prompt, using a fresh `local-compiler` directory.
+
+```tcl
+set root [zipfs mount sample.machteld build]
+try {
+    ::machteld::ArchiveEntry $root
     file copy [file join $root compiler] local-compiler
 } finally {zipfs unmount $root}
 exit
 ```
 
-Edit the files in `working-source`. From a terminal, check the edits, run
-the source project and build a new archive. These commands use the extracted
-compiler and work after the original archive has been put away.
+Then run the extracted driver from PowerShell. These commands also work
+with a compiler recovered from an archive made by the signed 0.50 packer.
 
 ```powershell
 .\machteld.exe local-compiler/driver.tcl check --json working-source/application.dict
-.\machteld.exe local-compiler/driver.tcl test working-source/application.dict
-.\machteld.exe local-compiler/driver.tcl run working-source/application.dict "Snow 雪"
 .\machteld.exe local-compiler/driver.tcl pack working-source/application.dict revised.machteld
-.\machteld.exe local-compiler/driver.tcl docs revised.machteld get fn/textutil/describe
-.\machteld.exe revised.machteld "Snow 雪"
 ```
 
 Run `machteld.exe test/application_compiler_project_test.tcl` to check
 the file-backed driver. Add `-pack` on an archive-capable host to include
-relocation, source-free rebuild and the two-file terminal workflow.
+relocation, rebuild from archived sources and the two-file terminal workflow.

@@ -179,6 +179,30 @@
       "afterSha256": "2114ac3279db856178e8086077fecb4d91d4ccc35fa82745739748a25b9d6595"
     },
     {
+      "id": "tcl-functional-execute",
+      "appliesTo": "tcltk@9.0.4",
+      "kind": "machteld",
+      "reason": "Reuse an exclusively owned Tcl collection for an immediately following local assignment after evaluating the functional operands in order and avoid allocating an immediately indexed two-element list when both operands have been evaluated.",
+      "regression": "test/application_compiler_optimization_test.tcl",
+      "file": "patches/tcl-9.0.4-functional-execute.patch",
+      "sha256": "ffba44d2ac3cae025725189390366934566b5f1659b190f8211e205695e5ea18",
+      "target": "tcl9.0.4/generic/tclExecute.c",
+      "beforeSha256": "0c42699cdcf610813ce77e2a6fec505f12d82a87b110950c92824fdf30d3c42a",
+      "afterSha256": "14a9f6a5021509ff164d36379a0f5f3fde85e446827d5bfd2123adbc0bbbe89a"
+    },
+    {
+      "id": "tcl-functional-dict",
+      "appliesTo": "tcltk@9.0.4",
+      "kind": "machteld",
+      "reason": "Preserve dictionary iteration, key stringification, reference ownership and tracing while committing an eligible one-key replacement.",
+      "regression": "test/application_compiler_optimization_test.tcl",
+      "file": "patches/tcl-9.0.4-functional-dict.patch",
+      "sha256": "57f2b7796c8207067363123204a22ecf42cd15a64ef0418cf51472282db35575",
+      "target": "tcl9.0.4/generic/tclDictObj.c",
+      "beforeSha256": "7b9c1e3a88e956222dfb76d6642814ed08066556f72c02e0efa0eb541a77f33a",
+      "afterSha256": "77b1c10fbe21ee9366efd4e40d7e0393215849733bff5fb6401cc6307398e359"
+    },
+    {
       "id": "cffi-no-callbacks",
       "appliesTo": "cffi@2.0.3",
       "kind": "machteld",

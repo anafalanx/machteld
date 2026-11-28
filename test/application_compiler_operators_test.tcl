@@ -10,6 +10,7 @@ distinct .stamp = instant
 record .row { code: text }
 export fn .text($a: text, $b: text) -> list<bool>=>[$a < $b,$a <= $b,$a > $b,$a >= $b]
 export fn .ints($a: int, $b: int) -> list<bool> => [$a < $b,$a <= $b,$a > $b,$a >= $b]
+fn .int_equality($a: int, $b: int) -> list<bool> => [$a == $b, $a != $b]
 export fn .dec($a: decimal, $b: decimal) -> list<bool> => [$a < $b,$a <= $b,$a > $b,$a >= $b]
 export fn .mixed($a: decimal, $b: int) -> bool => $a >= $b && $b < $a
 export fn .codes($a: .code, $b: .code) -> bool => $a < $b
@@ -49,9 +50,21 @@ export fn .skip_fault($left: bool) -> bool => $left || .raise()
 export fn .lazy($first: bool, $second: bool) -> bool =>
     .log('A',$first) || .log('B',$second) && .log('C',true)
 export fn .once() -> bool => .tick(1) < .tick(2)
+export fn .integer_branches($x:int) -> int {
+    $index := 0
+    while .tick($index) < .tick(2) {
+        if .tick($x) == .tick($index) {return $index}
+        $index = $index+1
+    }
+    return -1
+}
 fn .fail() -> result<bool,problem> => err(problem('expected flag'))
 export fn .and_error($v: bool) -> result<bool,problem> => ok($v && .fail()?)
 export fn .or_error($v: bool) -> result<bool,problem> => ok($v || .fail()?)
+fn .branch($go: bool) -> int {
+    if $go && 'PAYLOAD' == 'PAYLOAD' && .log('branch', true) { return 1 }
+    else { return 2 }
+}
 export fn .hostile($go: bool) -> bool => $go && match ['PAYLOAD'] {
     [$v] => $v >= 'PAYLOAD'
     _ => false
@@ -89,6 +102,8 @@ proc ::orderedTest::direct {} {
     set larger 1[string repeat 0 140]
     set tiny 0.[string repeat 0 140]1
     set prefix [string repeat 0 140]
+    equal [string first {::@rt::equal} [info body ::ordered::entry::int_equality]] -1 \
+        "checked integer equality and inequality avoid general type dispatch"
     foreach {fn left right expected} [list \
         ints $huge $larger {1 1 0 0} ints -$huge -$larger {0 0 1 1} ints +00009 9 {0 1 0 1} \
         dec $huge.${prefix}1 $huge.${prefix}2 {1 1 0 0} dec -$tiny 0 {1 1 0 0} dec -1.10002 -1.10001 {1 1 0 0} \
@@ -126,6 +141,9 @@ proc ::orderedTest::direct {} {
     proc ::orderWitness {} {incr ::orderWitnessCalls}
     proc ::orderSeen {tag value} {lappend ::orderHistory $tag; return $value}
     proc ::orderTick {value} {lappend ::orderHistory $value; return $value}
+    set ::orderHistory {}
+    equal [::ordered::entry::integer_branches 1] 1 "matched integer branch"
+    equal $::orderHistory {0 2 1 0 1 2 1 1} "if and while read the reached operands once and in order"
     proc ::orderRaise {} {lappend ::orderHistory fault; error {observed failure}}
     foreach {a b answer history} {true false 1 A false false 0 {A B} false true 1 {A B C}} {
         set ::orderHistory {}
@@ -147,6 +165,12 @@ proc ::orderedTest::direct {} {
     }
     equal [::ordered::entry::hostile 1] 1 "unbalanced brace, bracket, backslash and newline are safe inside lazy branch"
     equal [::ordered::entry::hostile 0] 0 "hostile literal safe in skipped branch"
+    set ::orderHistory {}
+    equal [::ordered::entry::branch 0] 2 "a false if condition skips the right operand"
+    equal $::orderHistory {} "no calls on the untaken side of a condition"
+    equal [::ordered::entry::branch 1] 1 "a braced if condition preserves literal text"
+    equal $::orderHistory branch "a reached operand runs exactly once"
+    equal [string first "::if \{" [info body ::ordered::entry::branch]] 0 "Tcl can compile the if expression as a literal"
     equal $::orderWitnessCalls 0 "literal brackets never execute"
     equal [catch {::ordered::entry::lazy 2 true}] 1 "external boolean requires a valid bool"
     equal [catch {::ordered::entry::ints 1 0x10}] 1 "external ints use decimal input"

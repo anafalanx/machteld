@@ -44,6 +44,11 @@ export record .flag { enabled: bool }
 export record .price { price: decimal }
 export record .chunk { data: bytes }
 export record .string { value: text }
+export record .cells {
+    label: text
+    amount: int
+    payload: bytes
+}
 }
     set source {import model
 
@@ -88,6 +93,8 @@ fn .number($sql: text) -> result<int,problem> {
 example .number('SELECT 8 AS n; -- trailing comment') => 8
 example .number('SELECT 8 AS n WHERE 0') => error 'CARDINALITY'
 example .number('SELECT 8 AS n UNION ALL SELECT 9') => error 'CARDINALITY'
+example .number("SELECT 8 AS n UNION ALL SELECT 'invalid'") => error 'CARDINALITY'
+example .number("SELECT 'invalid' AS n UNION ALL SELECT 8") => error 'SQL_TYPE'
 example .number('SELECT 1 AS wrong WHERE 0') => error 'SQL_COLUMNS'
 example .number('SELECT 1 AS N WHERE 0') => error 'SQL_COLUMNS'
 example .number('SELECT 1 AS n, 2 AS n WHERE 0') => error 'SQL_COLUMNS'
@@ -187,6 +194,8 @@ fn .line($path: text, $key: text) -> result<text,problem> {
     return encode_json($row)
 }
 example .line('uncreated.db','007') => error 'SQL_OPEN'
+fn .cells($path: text, $sql: text) -> result<list<.model::cells>,problem> =>
+    sql_many<.model::cells>($path, $sql)
 fn .main($args: list<text>) -> result<unit,problem> {
     return match $args {
         [$path, $key] => write_stdout_utf8(.line($path, $key)?)
@@ -259,6 +268,21 @@ proc ::sqlTest::connectionLifetime {dir dbPath} {
         trace add execution ::sqlTest::loaded::app::mark enter ::sqlTest::recordArgument
         equal [loaded::app::evaluation_order $dbPath] {ok 21} "compiled call binds the values in their argument slots"
         equal $calls {1 2} "bound expressions evaluate once, left to right"
+        set first {SELECT X'410042' AS payload, 'A'||char(0)||'B' AS label, 42 AS amount}
+        set second {SELECT X'', '', -9223372036854775808}
+        lassign [loaded::app::cells $dbPath "$first UNION ALL $second"] status rows
+        equal $status ok "native SQLite text and blob cells can contain identical bytes"
+        equal [lmap row $rows {list [dict get $row label] [dict get $row amount] [binary encode hex [dict get $row payload]]}] \
+            [list [list "A\0B" 42 410042] [list {} -9223372036854775808 {}]] "all scalar cells retain their contents and order"
+        foreach {later message} {
+            {SELECT '', X'', '42'} {column label requires text, got SQLite blob}
+            {SELECT '', '', '42'}  {column amount requires int, got SQLite text}
+            {SELECT '', '', 42}    {column payload requires bytes, got SQLite text}
+        } {
+            lassign [loaded::app::cells $dbPath "$first UNION ALL $later"] status problem
+            equal [list $status [dict get $problem code] [dict get $problem message]] [list err SQL_TYPE $message] \
+                "first invalid field in declaration order in the second row"
+        }
         foreach id {7 007 7} {
             lassign [loaded::app::line $dbPath $id] outcome payload
             if {$id eq "7"} {
@@ -269,7 +293,53 @@ proc ::sqlTest::connectionLifetime {dir dbPath} {
             }
             equal [info commands ::sqlTest::loaded::@rt::sqlConnection*] {} "call released its SQLite connection"
         }
+        set previous [pwd]
+        set paths [file join $dir borrowed-paths]
+        file mkdir $paths
+        file copy -- $dbPath [file join $paths 17]
+        try {
+            cd $paths
+            foreach {spelling expected} {17 ok 18 err} {
+                set input [::machteld::json decode -typed $spelling]
+                lassign [loaded::app::line $input 007] status payload
+                equal $status $expected "SQL lookup using a borrowed filename"
+                if {$status eq "err"} {equal [dict get $payload code] SQL_OPEN "missing borrowed filename"}
+                equal [::machteld::json type $input] number "SQL open preserves the caller's handle"
+            }
+        } finally {cd $previous}
     } finally {namespace delete ::sqlTest::loaded}
+}
+
+proc ::sqlTest::readerLayouts {path} {
+    set columns {}
+    set fields {}
+    set row {}
+    for {set i 0} {$i < 17} {incr i} {
+        lappend fields "f$i: int"
+        lappend columns "$i AS f$i"
+        dict set row f$i $i
+    }
+    set source "record .wide {\n[join $fields \n]\n}\n"
+    append source {
+        record .first { flag: bool? }
+        record .second { flag: bool? }
+        export fn .wide_row($p:text,$sql:text) -> result<.wide,problem> => sql_one<.wide>($p,$sql)
+        export fn .first_row($p:text,$sql:text) -> result<.first,problem> => sql_one<.first>($p,$sql)
+        export fn .second_row($p:text,$sql:text) -> result<.second,problem> => sql_one<.second>($p,$sql)
+    }
+    namespace eval :: [dict get [::appcompiler::compile [dict create model $source] ::sqlTest::layouts] script]
+    try {
+        set readers [layouts::@rt::sqlReaders]
+        equal [dict exists $readers .model::wide] 0 "a wide record uses the general decoder"
+        equal [dict get $readers .model::first] [dict get $readers .model::second] "identical SQL layouts share one reader"
+        equal [layouts::model::wide_row $path "SELECT [join [lreverse $columns] ,]"] [list ok $row] \
+            "wide projections still return records in declared field order"
+        equal [layouts::model::first_row $path {SELECT NULL AS flag}] {ok {flag none}} "optional SQL NULL"
+        equal [layouts::model::second_row $path {SELECT 0 AS flag}] {ok {flag {some 0}}} "present false stays distinct from NULL"
+        set problem [lindex [layouts::model::first_row $path {SELECT 2 AS flag}] 1]
+        equal [list [dict get $problem code] [dict get $problem message]] \
+            {SQL_TYPE {column flag requires bool, got SQLite integer}} "specialized boolean failure retains its diagnostic"
+    } finally {namespace delete ::sqlTest::layouts}
 }
 
 proc ::sqlTest::exercise {exe driver work mode} {
@@ -285,6 +355,7 @@ proc ::sqlTest::exercise {exe driver work mode} {
     }
     set dbPath [file join $author records.db]
     database $dbPath
+    readerLayouts $dbPath
     connectionLifetime $author $dbPath
     set hash [::machteld::hash file sha256 $dbPath]
     set total [regexp -all -line {^example } $source]

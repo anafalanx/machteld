@@ -57,6 +57,22 @@ proc ::externTest::direct {sources host} {
         equal [invoke $app late value] {loaded value} "package registers its command at first invocation"
         equal [invoke $app late {}] [list loaded {}] "loaded command preserves an empty argument"
         equal [$app eval {set ::ExternFixture::loads}] 1 "package ifneeded initializer runs only once"
+        set large [string repeat 9 250]
+        equal [invoke $app admit +000$large] $large "extern int results retain arbitrary precision and use base ten"
+        set raw [$app eval {::machteld::json unwrap [::machteld::json decode -typed {"1\u0000tail"}]}]
+        equal [failure $app $sources admit ::ExternFixture::response $raw] {APPCOMPILER EXTERN RESULT} \
+            "extern int rejects a raw or encoded NUL and retains the prefix location"
+        set retained [$app eval {
+            set document [::machteld::json decode -typed {{"amount":41,"opaque":[true,null]}}]
+            set amount [::machteld::json get $document amount]
+            set opaque [::machteld::json get $document opaque]
+            set number [::externApp::bridge::admit $amount]
+            set echoed [::externApp::bridge::public $opaque]
+            list $number [::machteld::json type $amount] [::machteld::json type $echoed] \
+                [::machteld::json encode -- $echoed] [::machteld::json encode -- $document]
+        }]
+        equal $retained [list 41 number array {[true,null]} {{"amount":41,"opaque":[true,null]}}] \
+            "extern scalar results preserve caller-owned native objects"
         equal [invoke $app nominal +0009] 9 "nominal input and result use the integer representation"
         set before [$app eval {set ::ExternFixture::calls}]
         equal [catch {invoke $app nominal wrong}] 1 "bad native input is rejected"
@@ -249,6 +265,7 @@ package ifneeded ExternFixtureDeferred 1.0 {
 export record .row { id: .id
     marks: list<int?> }
 export extern fn .words($data: text, $nested: list<text>) -> list<text> = ['::ExternFixture::words', '', 'two words; [clock seconds] $env \path {braces}']
+export extern fn .admit($s: text) -> int = ['::ExternFixture::response', 'identity']
 export extern fn .characters($s: text) -> int = ['::string', 'length']
 extern fn .private($s: text) -> text = ['::ExternFixture::response', 'identity']
 export fn .public($s: text) -> text { return .private($s) }

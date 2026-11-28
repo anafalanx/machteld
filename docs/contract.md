@@ -10,8 +10,8 @@ tags: [machteld, contract, api, errors]
 This file states the cross-command rules. Command-specific vocabulary is in the
 [palette](palette.md); the live authority is `manifest`.
 
-This contract describes Machteld 0.50 and its Tcl package API `30`.
-The supported upgrade is from signed 0.21.
+This contract describes Machteld 0.51 and its Tcl package API `30`.
+Existing API-30 applications can move from signed 0.50 to this release.
 Consult the selected executable's embedded reference
 and artifact identity for the commands it actually provides. [Roadmap](roadmap.md)
 
@@ -22,7 +22,7 @@ Server 2025 (build 26100) or newer. Windows 10 and Server 2022/2019 are below
 the contracted floor, and ARM64 is not a target. These are the platform policy,
 not a claim of acceptance on every listed OS. The baseline was tested on the
 Windows 11 build PC and in hosted Windows Server 2025 CI. Record fresh
-acceptance results for the 0.50 candidate on both target families.
+acceptance results for the 0.51 candidate on both target families.
 The binary may start on older builds — ConPTY has existed since Windows 10
 1809 — but that API minimum does not widen the supported platform policy.
 

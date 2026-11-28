@@ -8,10 +8,12 @@
 #define MACHTELD_PAYLOAD_ASSOC "machteld::payload-root"
 extern int Cffi_Init(Tcl_Interp *interp);
 extern int Machteldgraphviz_Init(Tcl_Interp *interp);
+extern int Machteldintervals_Init(Tcl_Interp *interp);
 extern int Machteldfiles_Init(Tcl_Interp *interp);
 extern int Machteldnetwork_Init(Tcl_Interp *interp);
 extern int Machteldencoding_Init(Tcl_Interp *interp);
 extern int Machteldresource_Init(Tcl_Interp *interp);
+extern int MachteldCompilerGuard_Init(Tcl_Interp *interp);
 
 #ifdef MACHTELD_STATIC_SQLITE
 #include "sqlite3.h"
@@ -254,7 +256,8 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
             "cannot register the trusted payload accessor");
     }
 
-    if (Machteldresource_Init(interp) != TCL_OK ||
+    if (MachteldCompilerGuard_Init(interp) != TCL_OK ||
+            Machteldresource_Init(interp) != TCL_OK ||
             Tcl_CreateObjCommand(interp, "::machteld::WrapTemplate",
                 Machteld_WrapTemplate, payload_root, NULL) == NULL) return TCL_ERROR;
     Tcl_StaticLibrary(NULL, "Machteldfiles", Machteldfiles_Init, NULL);
@@ -352,6 +355,10 @@ Machteld_RegisterLibs(Tcl_Interp *interp)
         return TCL_ERROR;
     }
     Tcl_StaticLibrary(interp, "machteldgraphviz", Machteldgraphviz_Init, NULL);
+    if (Machteldintervals_Init(interp) != TCL_OK) {
+        return TCL_ERROR;
+    }
+    Tcl_StaticLibrary(interp, "machteldintervals", Machteldintervals_Init, NULL);
 
     if (Machtelddesktop_Init(interp) == TCL_ERROR) {
         return TCL_ERROR;
