@@ -113,10 +113,10 @@ IntervalsCmd(void *clientData, Tcl_Interp *interp, int objc, Tcl_Obj *const objv
     Tcl_Size count = 0;
     int sorted = 1;
     int status = TCL_OK;
-    for (Tcl_Size i = 0; i < length; i += 2) {
+    for (Tcl_Size i = 0; i < capacity; ++i) {
         Tcl_WideInt low, high;
-        if (Tcl_GetWideIntFromObj(interp, endpoints[i], &low) != TCL_OK ||
-            Tcl_GetWideIntFromObj(interp, endpoints[i + 1], &high) != TCL_OK) {
+        if (Tcl_GetWideIntFromObj(interp, endpoints[2 * i], &low) != TCL_OK ||
+            Tcl_GetWideIntFromObj(interp, endpoints[2 * i + 1], &high) != TCL_OK) {
             status = Fail(interp, "input", NULL);
             break;
         }
